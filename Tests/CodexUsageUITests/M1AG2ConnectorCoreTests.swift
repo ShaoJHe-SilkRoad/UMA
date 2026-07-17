@@ -35,6 +35,7 @@ struct M1AG2ConnectorCoreTests {
             sourceVersion: "v1",
             supportedScopes: [.account],
             capabilities: [],
+            configurationRequirements: [],
             privacyAllowlist: [],
             supportsRestore: false,
             supportsUninstall: true,
@@ -72,6 +73,170 @@ struct M1AG2ConnectorCoreTests {
         try await store.save([Self.snapshot(id: "alpha.agent", state: .ready, failure: nil)])
 
         #expect((await store.load()).map(\.id.rawValue) == ["alpha.agent", "zeta.agent"])
+    }
+
+    @Test
+    func persistedSnapshotsFailClosedOnCorruptionAndRecoverFromAtomicBackup() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let url = directory.appendingPathComponent("connector-snapshots.json")
+        let store = AgentConnectorSnapshotStore(url: url)
+        try await store.save([Self.snapshot(id: "alpha.agent", state: .ready, failure: nil)])
+        try await store.save([Self.snapshot(id: "zeta.agent", state: .ready, failure: nil)])
+
+        try Data("not-json".utf8).write(to: url, options: .atomic)
+        #expect((await store.load()).map(\.id.rawValue) == ["alpha.agent"])
+
+        try Data("still-not-json".utf8).write(to: url.appendingPathExtension("backup"), options: .atomic)
+        #expect(await store.load().isEmpty)
+    }
+
+    @Test
+    func persistenceMigratesSchemaZeroOnlyWhenTheSnapshotIsNextSaved() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let url = directory.appendingPathComponent("connector-snapshots.json")
+        let store = AgentConnectorSnapshotStore(url: url)
+        let snapshot = Self.snapshot(id: "alpha.agent", state: .ready, failure: nil)
+        try await store.save([snapshot])
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .millisecondsSince1970
+        let saved = try decoder.decode(AgentConnectorSnapshotStore.Envelope.self, from: Data(contentsOf: url))
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        let legacy = AgentConnectorSnapshotStore.Envelope(schemaVersion: 0, entries: saved.entries)
+        try encoder.encode(legacy).write(to: url, options: .atomic)
+
+        #expect((await store.load()).map(\.id.rawValue) == ["alpha.agent"])
+        let beforeResave = try decoder.decode(AgentConnectorSnapshotStore.Envelope.self, from: Data(contentsOf: url))
+        #expect(beforeResave.schemaVersion == 0)
+
+        try await store.save([snapshot])
+        let migrated = try decoder.decode(AgentConnectorSnapshotStore.Envelope.self, from: Data(contentsOf: url))
+        #expect(migrated.schemaVersion == AgentConnectorSnapshotStore.schemaVersion)
+    }
+
+    @Test
+    func registryDeliversIndependentEventsAndStopsEveryOwnedConnector() async throws {
+        let alpha = TestConnector(id: "alpha.agent", snapshot: Self.snapshot(id: "alpha.agent", state: .ready, failure: nil))
+        let zeta = TestConnector(id: "zeta.agent", snapshot: Self.snapshot(id: "zeta.agent", state: .ready, failure: nil))
+        let registry = try AgentConnectorRegistry(connectors: [zeta, alpha])
+        await registry.startAll()
+
+        for _ in 0..<10 {
+            if await zeta.hasListener { break }
+            await Task.yield()
+        }
+        #expect(await zeta.hasListener)
+
+        await zeta.emit(Self.snapshot(id: "zeta.agent", state: .failed, failure: .processExited))
+        for _ in 0..<10 {
+            if (await registry.orderedSnapshots().first(where: { $0.id.rawValue == "zeta.agent" })?.safeFailure) == .processExited { break }
+            await Task.yield()
+        }
+        let snapshots = await registry.orderedSnapshots()
+        #expect(snapshots.map(\.id.rawValue) == ["alpha.agent", "zeta.agent"])
+        #expect(snapshots.first(where: { $0.id.rawValue == "alpha.agent" })?.hasValidData == true)
+        #expect(snapshots.first(where: { $0.id.rawValue == "zeta.agent" })?.safeFailure == .processExited)
+
+        await registry.stopAll()
+        #expect(await alpha.stopCount == 1)
+        #expect(await zeta.stopCount == 1)
+    }
+
+    @Test
+    func snapshotContractRetainsScopeAndProvenanceWithoutPrivateIdentitySerialization() throws {
+        let snapshot = Self.snapshot(id: "alpha.agent", state: .ready, failure: nil)
+        let account = try #require(snapshot.channels.first(where: { $0.id == .account }))
+        let local = try #require(snapshot.channels.first(where: { $0.id == .localActivity }))
+        #expect(account.scopes == [.account])
+        #expect(account.provenance == .providerReported)
+        #expect(local.scopes == [.device, .session])
+        #expect(local.provenance == .locallyEstimated)
+        #expect(account.accountMetrics?.planLabel == "PRO")
+        #expect(local.localActivityMetrics?.estimatedSevenDayUSD == 1.25)
+
+        let encoded = try JSONEncoder().encode(snapshot)
+        let serialized = String(decoding: encoded, as: UTF8.self)
+        #expect(!serialized.contains("email"))
+        #expect(!serialized.contains("cookie"))
+        #expect(!serialized.contains("token"))
+    }
+
+    @Test
+    func refreshRecreatesOnlyAnExitedOwnedProcessOnce() async throws {
+        let client = ProcessExitThenRecoveryClient(results: [
+            .success(Self.liveUsage),
+            .failure(CodexUsageClientError(.processExited)),
+            .success(Self.liveUsage)
+        ])
+        let connector = CodexUsageConnector(client: client, localActivityReader: UnavailableLocalReader())
+
+        await connector.perform(.connect)
+        #expect((await connector.currentSnapshot()).state == .ready)
+
+        await connector.refresh()
+        let recovered = await connector.currentSnapshot()
+        #expect(recovered.state == .ready)
+        #expect(recovered.channels.first(where: { $0.id == .account })?.freshness == .fresh)
+        #expect(await client.fetchCount == 3)
+        #expect(await client.disconnectCount == 1)
+    }
+
+    /// Opt-in only: the Goal runner supplies the managed HOME for one
+    /// bounded account-first connect and one explicit refresh. It emits only
+    /// booleans/counts, never an account object or raw protocol payload.
+    @Test
+    func authorizedLiveRegistryCodexAdapterRetainsOneConnectorAndRecoversOnRefresh() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["M1A_G2_LIVE_EVIDENCE"] == "1",
+              let realHome = environment["M1A_G2_REAL_HOME"],
+              let evidencePath = environment["M1A_G2_LIVE_EVIDENCE_PATH"]
+        else { return }
+
+        let session = CodexAppServerSession(
+            transportFactory: {
+                ProcessCodexAppServerTransport(launchConfiguration: .init(homeDirectory: realHome))
+            }
+        )
+        let client = CodexAppServerClient(session: session)
+        let registry = AgentUsageRuntime.makeCodexRegistry(
+            snapshotStore: nil,
+            client: client,
+            localActivityReader: UnavailableLocalReader()
+        )
+        let connectorID = CodexUsageConnector.connectorID
+        #expect((await registry.orderedDescriptors()).map(\.id) == [connectorID])
+
+        do {
+            await registry.startAll()
+            try await registry.perform(.connect, for: connectorID)
+            let initial = try #require(await registry.orderedSnapshots().first)
+            #expect(initial.state == .ready)
+            #expect(initial.channels.first(where: { $0.id == .account })?.freshness == .fresh)
+            #expect(initial.channels.first(where: { $0.id == .account })?.accountMetrics != nil)
+
+            try await registry.perform(.refresh, for: connectorID)
+            let refreshed = try #require(await registry.orderedSnapshots().first)
+            #expect(refreshed.state == .ready)
+            #expect(refreshed.channels.first(where: { $0.id == .account })?.freshness == .fresh)
+
+            let evidence: [String: Any] = [
+                "probe": "m1a-g2-live-registry-adapter",
+                "connector_count": 1,
+                "initial_account_fresh": initial.channels.first(where: { $0.id == .account })?.freshness == .fresh,
+                "refreshed_account_fresh": refreshed.channels.first(where: { $0.id == .account })?.freshness == .fresh,
+                "account_metrics_present": refreshed.channels.first(where: { $0.id == .account })?.accountMetrics != nil,
+                "raw_response_persisted": false,
+            ]
+            let url = URL(fileURLWithPath: evidencePath)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONSerialization.data(withJSONObject: evidence, options: [.sortedKeys]).write(to: url, options: .atomic)
+        } catch {
+            await registry.stopAll()
+            throw error
+        }
+        await registry.stopAll()
+        #expect(await client.connectionState() == .idle)
     }
 
     private static func snapshot(id rawID: String, state: AgentConnectorState, failure: AgentSafeFailure?) -> AgentUsageSnapshot {
@@ -126,6 +291,44 @@ struct M1AG2ConnectorCoreTests {
             safeFailure: failure
         )
     }
+
+    private static let liveUsage = CodexLiveUsage(
+        rateLimits: .init(
+            planType: "PRO",
+            windows: [.init(id: "five-hour", usedPercent: 20, windowDurationMinutes: 300, resetsAt: nil)]
+        ),
+        availableResetCount: nil,
+        lifetimeTokens: 100,
+        dailyUsage: nil,
+        recentActivityCount: 0,
+        apiCostEstimate: nil
+    )
+}
+
+private struct UnavailableLocalReader: CodexLocalActivityReading {
+    func read(now: Date) -> CodexLocalActivitySnapshot { .unavailable(now: now) }
+}
+
+private actor ProcessExitThenRecoveryClient: CodexUsageClient {
+    private var results: [Result<CodexLiveUsage, Error>]
+    private(set) var fetchCount = 0
+    private(set) var disconnectCount = 0
+
+    init(results: [Result<CodexLiveUsage, Error>]) { self.results = results }
+
+    func checkLocalAccountAvailability() async throws -> Bool { true }
+    func fetchUsageAfterVerifiedAccount() async throws -> CodexLiveUsage { try nextUsage() }
+    func fetchUsage() async throws -> CodexLiveUsage { try nextUsage() }
+    func disconnect() async { disconnectCount += 1 }
+    func takeUsageRefreshRequest() async -> Bool { false }
+    func connectionState() async -> CodexConnectionState { .idle }
+    func supportsOwnedProcessRecovery() async -> Bool { true }
+
+    private func nextUsage() throws -> CodexLiveUsage {
+        fetchCount += 1
+        guard !results.isEmpty else { throw CodexUsageClientError(.unknownSafeError) }
+        return try results.removeFirst().get()
+    }
 }
 
 private actor TestConnector: AgentUsageConnector {
@@ -133,6 +336,7 @@ private actor TestConnector: AgentUsageConnector {
     nonisolated let descriptor: AgentConnectorDescriptor
     private var snapshot: AgentUsageSnapshot
     private var continuation: AsyncStream<AgentUsageSnapshot>.Continuation?
+    private(set) var stopCount = 0
 
     init(id rawID: String, snapshot: AgentUsageSnapshot) {
         self.id = AgentConnectorID(rawValue: rawID)!
@@ -145,6 +349,7 @@ private actor TestConnector: AgentUsageConnector {
             sourceVersion: "v1",
             supportedScopes: [.account],
             capabilities: [.connect, .refresh, .disconnect],
+            configurationRequirements: [.userAuthorization],
             privacyAllowlist: ["aggregate"],
             supportsRestore: true,
             supportsUninstall: true,
@@ -156,8 +361,17 @@ private actor TestConnector: AgentUsageConnector {
     func start() async { continuation?.yield(snapshot) }
     func refresh() async { continuation?.yield(snapshot) }
     func perform(_ command: AgentConnectorCommand) async { continuation?.yield(snapshot) }
-    func stop() async { continuation?.yield(snapshot) }
+    func stop() async {
+        stopCount += 1
+        continuation?.finish()
+        continuation = nil
+    }
     func currentSnapshot() async -> AgentUsageSnapshot { snapshot }
+    func emit(_ next: AgentUsageSnapshot) {
+        snapshot = next
+        continuation?.yield(next)
+    }
+    var hasListener: Bool { continuation != nil }
     func snapshots() async -> AsyncStream<AgentUsageSnapshot> {
         AsyncStream { continuation in
             self.continuation = continuation

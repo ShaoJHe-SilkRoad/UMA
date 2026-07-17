@@ -65,6 +65,15 @@ enum AgentConnectorCapability: String, Codable, CaseIterable, Hashable, Sendable
     case accountUsage
 }
 
+/// Declarative, privacy-safe prerequisites.  Deliberately no free-form
+/// credential, cookie, filesystem-path, or automation requirement exists.
+enum AgentConnectorConfigurationRequirement: String, Codable, CaseIterable, Hashable, Sendable {
+    case userAuthorization
+    case officialManagedSession
+    case privacySafeLocalMetadataAccess
+    case explicitlyAuthorizedReadOnlyRemoteAccess
+}
+
 enum AgentConnectorCommand: String, Codable, Sendable {
     case connect
     case reconnect
@@ -90,6 +99,7 @@ struct AgentConnectorDescriptor: Codable, Sendable, Equatable {
     let sourceVersion: String
     let supportedScopes: Set<AgentMetricScope>
     let capabilities: Set<AgentConnectorCapability>
+    let configurationRequirements: Set<AgentConnectorConfigurationRequirement>
     let privacyAllowlist: Set<String>
     let supportsRestore: Bool
     let supportsUninstall: Bool
@@ -103,6 +113,7 @@ struct AgentConnectorDescriptor: Codable, Sendable, Equatable {
         sourceVersion: String,
         supportedScopes: Set<AgentMetricScope>,
         capabilities: Set<AgentConnectorCapability>,
+        configurationRequirements: Set<AgentConnectorConfigurationRequirement>,
         privacyAllowlist: Set<String>,
         supportsRestore: Bool,
         supportsUninstall: Bool,
@@ -120,6 +131,7 @@ struct AgentConnectorDescriptor: Codable, Sendable, Equatable {
         self.sourceVersion = sourceVersion
         self.supportedScopes = supportedScopes
         self.capabilities = capabilities
+        self.configurationRequirements = configurationRequirements
         self.privacyAllowlist = privacyAllowlist
         self.supportsRestore = supportsRestore
         self.supportsUninstall = supportsUninstall

@@ -168,28 +168,13 @@ extension UsageSnapshot {
         let account = agentSnapshot.channels.first(where: { $0.id == .account })
         let local = agentSnapshot.channels.first(where: { $0.id == .localActivity })
         let windows = (account?.rateLimitWindows ?? []).sorted { $0.kind.rawValue < $1.kind.rawValue }
-        var periods = windows.enumerated().map { index, window in
+        let periods = windows.enumerated().map { index, window in
             UsagePeriod(
                 id: window.id,
-                title: language.quotaTitle(
-                    durationMinutes: window.kind == .fiveHour ? 300 : (window.kind == .sevenDay ? 10_080 : nil),
-                    index: index
-                ),
-                remainingPercent: max(0, min(100, Int((100 - (window.usedPercent ?? 0)).rounded()))),
+                title: language.quotaTitle(durationMinutes: window.kind == .fiveHour ? 300 : (window.kind == .sevenDay ? 10_080 : nil), index: index),
+                remainingPercent: window.isUnlimited ? 100 : max(0, min(100, Int((100 - (window.usedPercent ?? 0)).rounded()))),
                 isUnlimited: window.isUnlimited,
                 resetText: language.resetDescription(for: window.resetsAt, now: now)
-            )
-        }
-        if !windows.contains(where: { $0.kind == .fiveHour }), windows.contains(where: { $0.kind == .sevenDay }) {
-            periods.insert(
-                UsagePeriod(
-                    id: "normalized.unlimited-five-hour",
-                    title: language.quotaTitle(durationMinutes: 300, index: 0),
-                    remainingPercent: 100,
-                    isUnlimited: true,
-                    resetText: language.resetDescription(for: nil, now: now)
-                ),
-                at: 0
             )
         }
         let localMetrics = local?.localActivityMetrics
@@ -217,12 +202,7 @@ extension UsageSnapshot {
             recentTasks: derivedTasks,
             apiCostEstimate: localMetrics.flatMap { local in
                 guard let sevenDay = local.estimatedSevenDayUSD, let lifetime = local.estimatedLifetimeUSD else { return nil }
-                return APICostEstimateSnapshot(
-                    sevenDayUSD: sevenDay,
-                    lifetimeUSD: lifetime,
-                    coveragePercent: local.coveragePercent ?? 0,
-                    modelNames: []
-                )
+                return APICostEstimateSnapshot(sevenDayUSD: sevenDay, lifetimeUSD: lifetime, coveragePercent: local.coveragePercent ?? 0, modelNames: [])
             },
             availableResets: account?.accountMetrics?.availableResets,
             updatedAt: agentSnapshot.capturedAt,
@@ -269,13 +249,7 @@ extension UsageSnapshot {
         }
     }
 
-    private static func presentationScope(
-        for snapshot: AgentUsageSnapshot,
-        channel: AgentUsageChannel
-    ) -> String {
-        // Preserve the accepted Codex source wording while every other
-        // connector receives the normalized scope list rather than a
-        // provider-specific transport detail.
+    private static func presentationScope(for snapshot: AgentUsageSnapshot, channel: AgentUsageChannel) -> String {
         if snapshot.providerName == "Codex", channel.id == .account {
             return "account/read, account/rateLimits/read, account/usage/read"
         }

@@ -15,6 +15,9 @@ protocol CodexUsageClient: Sendable {
     func disconnect() async
     func takeUsageRefreshRequest() async -> Bool
     func connectionState() async -> CodexConnectionState
+    /// Only the production app-server client owns a retained child process.
+    /// Fixture and external-provider clients must opt in explicitly.
+    func supportsOwnedProcessRecovery() async -> Bool
 }
 
 extension CodexUsageClient {
@@ -31,6 +34,8 @@ extension CodexUsageClient {
     func fetchUsageAfterVerifiedAccount() async throws -> CodexLiveUsage {
         try await fetchUsage()
     }
+
+    func supportsOwnedProcessRecovery() async -> Bool { false }
 }
 
 /// Owns one retained local app-server process and enforces the account-first
@@ -53,6 +58,8 @@ actor CodexAppServerClient: CodexUsageClient {
     func connectionState() -> CodexConnectionState {
         return state
     }
+
+    func supportsOwnedProcessRecovery() -> Bool { true }
 
     func disconnect() async {
         await session.shutdown()

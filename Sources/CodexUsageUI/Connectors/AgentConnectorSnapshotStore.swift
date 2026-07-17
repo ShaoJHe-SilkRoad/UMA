@@ -104,7 +104,14 @@ actor AgentConnectorSnapshotStore {
         let envelope = Envelope(schemaVersion: Self.schemaVersion, entries: entries)
         let data = try JSONEncoder.safeSnapshotEncoder.encode(envelope)
         guard data.count <= Self.maximumEncodedBytes else { throw StoreError.oversized }
-        guard data != lastSavedData else { return }
+        // Suppress only a true duplicate of the file currently on disk.  A
+        // schema-zero envelope can represent the same snapshot data, but it
+        // must be rewritten during the next save so lazy migration completes.
+        if data == lastSavedData,
+           let current = try? Data(contentsOf: url),
+           current == data {
+            return
+        }
 
         try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         if let current = try? Data(contentsOf: url), (try? JSONDecoder.safeSnapshotDecoder.decode(Envelope.self, from: current)) != nil {

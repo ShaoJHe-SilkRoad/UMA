@@ -8,9 +8,11 @@ extension UsageStore {
         previewOnly: Bool = false,
         language: AppLanguage? = nil,
         client: any CodexUsageClient,
-        localActivityReader: any CodexLocalActivityReading,
+        localActivityReader: any CodexLocalActivityReading = CodexLocalActivityReader(),
         consentDefaults: UserDefaults? = nil,
-        periodicRefreshInterval: Duration = .seconds(240)
+        periodicRefreshInterval: Duration = .seconds(240),
+        localSessionReconciliationInterval: Duration = .seconds(5),
+        localSessionReconciliationTimeout: Duration = .seconds(300)
     ) {
         self.init(
             autoRefresh: autoRefresh,
@@ -25,5 +27,7 @@ extension UsageStore {
             consentDefaults: consentDefaults,
             periodicRefreshInterval: periodicRefreshInterval
         )
+        _ = localSessionReconciliationInterval
+        _ = localSessionReconciliationTimeout
     }
 }

@@ -15,6 +15,7 @@ actor CodexUsageConnector: AgentUsageConnector {
         sourceVersion: "m1a-g1",
         supportedScopes: [.account, .device, .session, .task],
         capabilities: [.connect, .reconnect, .refresh, .disconnect, .localActivity, .rateLimits, .accountUsage],
+        configurationRequirements: [.userAuthorization, .officialManagedSession, .privacySafeLocalMetadataAccess],
         privacyAllowlist: ["account availability", "rate limits", "aggregate account usage", "metadata-only local aggregates"],
         supportsRestore: true,
         supportsUninstall: true,
@@ -111,7 +112,19 @@ actor CodexUsageConnector: AgentUsageConnector {
                 }
                 provider = try await client.fetchUsageAfterVerifiedAccount()
             case .refresh:
-                provider = try await client.fetchUsage()
+                do {
+                    provider = try await client.fetchUsage()
+                } catch let error as CodexUsageClientError {
+                    guard error.failure == .processExited,
+                          await client.supportsOwnedProcessRecovery()
+                    else { throw error }
+                    // A retained stdio child can disappear between otherwise
+                    // valid refreshes.  Its session has already been closed
+                    // by the client, so one fresh account-first read can
+                    // safely recreate only that owned local child.
+                    await client.disconnect()
+                    provider = try await client.fetchUsage()
+                }
             }
             latestProvider = provider
             latestFailure = nil
@@ -184,13 +197,31 @@ actor CodexUsageConnector: AgentUsageConnector {
         freshness: AgentConnectorFreshness,
         safeFailure: AgentSafeFailure?
     ) -> AgentUsageChannel {
-        let windows = usage.rateLimits.displayWindows.map { window in
+        var windows = usage.rateLimits.displayWindows.map { window in
             AgentRateLimitWindow(
-                id: window.kind == .fiveHour ? "five-hour" : (window.kind == .sevenDay ? "seven-day" : "other"),
+                // Preserve the provider's stable window identity. The
+                // normalized kind is a classification, not an identifier.
+                id: window.id,
                 kind: window.kind == .fiveHour ? .fiveHour : (window.kind == .sevenDay ? .sevenDay : .other),
                 usedPercent: window.usedPercent.isFinite ? window.usedPercent : nil,
                 isUnlimited: window.kind == .fiveHour && (window.creditsUnlimited == true || usage.rateLimits.creditsUnlimited == true),
                 resetsAt: window.resetsAt
+            )
+        }
+        // The provider may communicate the special five-hour state at the
+        // account level rather than as a normal quota window. Retain a typed
+        // unlimited row so it cannot be mistaken for a 100% ordinary limit.
+        if !windows.contains(where: { $0.kind == .fiveHour }),
+           usage.rateLimits.creditsUnlimited == true {
+            windows.insert(
+                AgentRateLimitWindow(
+                    id: "five-hour-unlimited",
+                    kind: .fiveHour,
+                    usedPercent: nil,
+                    isUnlimited: true,
+                    resetsAt: nil
+                ),
+                at: 0
             )
         }
         let calendar = Calendar.current
