@@ -131,6 +131,9 @@ struct M1AG1DualSourceConnectorTests {
         )
         store.grantMonitorConsent()
         await store.refresh()
+        for _ in 0..<40 where store.snapshot.localSource?.isAvailable != true {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
 
         #expect(store.snapshot.providerSource?.isAvailable == false)
         #expect(store.snapshot.localSource?.isAvailable == true)
@@ -152,6 +155,9 @@ struct M1AG1DualSourceConnectorTests {
         store.grantMonitorConsent()
         await store.refresh()
         await store.refresh()
+        for _ in 0..<40 where store.snapshot.recentTasks.first?.tokenText != "20" {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
 
         #expect(store.snapshot.recentTasks.first?.tokenText == "20")
         #expect(store.snapshot.providerSource?.freshness == .stale)
@@ -169,6 +175,9 @@ struct M1AG1DualSourceConnectorTests {
         )
         store.grantMonitorConsent()
         await store.refresh()
+        for _ in 0..<40 where store.snapshot.localSource?.isAvailable != true {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
 
         let presentation = CodexConnectionPresentation.make(
             state: store.currentState,
@@ -182,7 +191,7 @@ struct M1AG1DualSourceConnectorTests {
     }
 
     @Test @MainActor
-    func disconnectDuringLocalReadCannotRestartTheProviderOrRetainLocalData() async {
+    func disconnectDuringLocalReadRetainsNoDataAfterTheIndependentProviderStarts() async {
         let localReader = BlockingLocalReader(snapshot: localSnapshot(tokenCount: 88))
         let client = RecordingProviderClient()
         let store = UsageStore(
@@ -200,14 +209,14 @@ struct M1AG1DualSourceConnectorTests {
         localReader.resume()
         await refresh.value
 
-        #expect(client.fetchUsageCallCount == 0)
+        #expect(client.fetchUsageCallCount == 1)
         #expect(client.disconnectCallCount == 1)
         #expect(store.hasPriorRealSnapshot == false)
         #expect(store.currentState == .notAuthorizedByMonitor)
     }
 
     @Test @MainActor
-    func disconnectDuringLocalReadCannotRestartTheAccountCheck() async {
+    func disconnectDuringLocalReadDoesNotRetainAnIndependentAccountCheck() async {
         let localReader = BlockingLocalReader(snapshot: localSnapshot(tokenCount: 89))
         let client = RecordingProviderClient()
         let store = UsageStore(
@@ -217,19 +226,162 @@ struct M1AG1DualSourceConnectorTests {
             localActivityReader: localReader,
             consentDefaults: UserDefaults(suiteName: "m1a-g1-cancel-account-\(UUID().uuidString)")
         )
-        store.grantMonitorConsent()
-
-        let connect = Task { @MainActor in await store.connectToLocalSession() }
+        store.handleLocalAccessDecision(true)
         await localReader.waitUntilReading()
         await store.disconnectAndForgetConsent()
         localReader.resume()
-        await connect.value
+        try? await Task.sleep(for: .milliseconds(20))
 
-        #expect(client.accountReadCallCount == 0)
-        #expect(client.fetchUsageCallCount == 0)
+        #expect(client.accountReadCallCount == 1)
+        #expect(client.fetchUsageCallCount == 1)
         #expect(client.disconnectCallCount == 1)
         #expect(store.hasPriorRealSnapshot == false)
         #expect(store.currentState == .notAuthorizedByMonitor)
+    }
+
+    @Test @MainActor
+    func rejectedLocalAccessDecisionRemainsDisconnectedWithoutAnAccountRead() async {
+        let client = RecordingProviderClient()
+        let store = UsageStore(
+            autoRefresh: false,
+            language: .english,
+            client: client,
+            localActivityReader: FixedLocalReader(snapshot: localSnapshot(tokenCount: 91)),
+            consentDefaults: UserDefaults(suiteName: "m1a-g1-declined-\(UUID().uuidString)")
+        )
+
+        store.handleLocalAccessDecision(false)
+        try? await Task.sleep(for: .milliseconds(20))
+
+        #expect(store.currentState == .notAuthorizedByMonitor)
+        #expect(store.monitorConsentGranted == false)
+        #expect(client.accountReadCallCount == 0)
+        #expect(client.fetchUsageCallCount == 0)
+    }
+
+    @Test @MainActor
+    func acceptedLocalAccessDecisionRetainsOneConnectionTaskAcrossThePanelBoundary() async {
+        let localReader = BlockingLocalReader(snapshot: localSnapshot(tokenCount: 92))
+        let client = RecordingProviderClient()
+        let store = UsageStore(
+            autoRefresh: false,
+            language: .english,
+            client: client,
+            localActivityReader: localReader,
+            consentDefaults: UserDefaults(suiteName: "m1a-g1-approved-\(UUID().uuidString)")
+        )
+
+        store.handleLocalAccessDecision(true)
+        await localReader.waitUntilReading()
+        // A second accepted callback while the first task is suspended must
+        // not create another account read or child session.
+        store.handleLocalAccessDecision(true)
+        localReader.resume()
+
+        for _ in 0..<40 where store.currentState != .ready {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+
+        #expect(store.monitorConsentGranted)
+        #expect(client.accountReadCallCount == 1)
+        #expect(client.fetchUsageCallCount == 1)
+        #expect(store.currentState == .ready)
+        #expect(store.allowsManualRefresh)
+    }
+
+    @Test @MainActor
+    func connectionStartsAccountReadBeforeSlowIndependentLocalMetadata() async {
+        let localReader = BlockingLocalReader(snapshot: localSnapshot(tokenCount: 93))
+        let client = RecordingProviderClient()
+        let store = UsageStore(
+            autoRefresh: false,
+            language: .english,
+            client: client,
+            localActivityReader: localReader,
+            consentDefaults: UserDefaults(suiteName: "m1a-g1-independent-local-\(UUID().uuidString)")
+        )
+
+        store.handleLocalAccessDecision(true)
+        await localReader.waitUntilReading()
+        for _ in 0..<40 where client.accountReadCallCount == 0 {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+
+        #expect(client.accountReadCallCount == 1)
+        #expect(client.fetchUsageCallCount == 1)
+        #expect(store.currentState == .ready)
+        #expect(store.allowsManualRefresh)
+
+        await store.disconnectAndForgetConsent()
+        localReader.resume()
+    }
+
+    @Test
+    func standardRateLimitPresentationKeepsTheMostRestrictiveWeeklyWindow() {
+        let usage = CodexLiveUsage(
+            rateLimits: .init(
+                planType: "pro",
+                windows: [
+                    .init(id: "weekly-unused", usedPercent: 0, windowDurationMinutes: 10_080, resetsAt: nil),
+                    .init(id: "weekly-active", usedPercent: 96, windowDurationMinutes: 10_080, resetsAt: nil),
+                    .init(id: "five-hour", usedPercent: 12, windowDurationMinutes: 300, resetsAt: nil)
+                ]
+            ),
+            availableResetCount: nil,
+            lifetimeTokens: nil,
+            dailyUsage: nil,
+            recentActivityCount: 0,
+            apiCostEstimate: nil
+        )
+
+        let snapshot = UsageSnapshot(live: usage, language: .english)
+        #expect(snapshot.periods.map(\.title) == ["5-Hour Limit", "7-Day Limit"])
+        #expect(snapshot.periods.map(\.remainingPercent) == [88, 4])
+    }
+
+    @Test
+    func unlimitedFiveHourWindowRetainsItsBarAndUsesTheExplicitUnlimitedStatus() {
+        let usage = CodexLiveUsage(
+            rateLimits: .init(
+                planType: "pro",
+                windows: [
+                    .init(id: "five-hour-special", creditsUnlimited: true, usedPercent: 33, windowDurationMinutes: 300, resetsAt: nil),
+                    .init(id: "weekly", usedPercent: 96, windowDurationMinutes: 10_080, resetsAt: nil)
+                ]
+            ),
+            availableResetCount: nil,
+            lifetimeTokens: nil,
+            dailyUsage: nil,
+            recentActivityCount: 0,
+            apiCostEstimate: nil
+        )
+
+        let snapshot = UsageSnapshot(live: usage, language: .english)
+        #expect(snapshot.periods.map(\.title) == ["5-Hour Limit", "7-Day Limit"])
+        #expect(snapshot.periods.first?.remainingPercent == 67)
+        #expect(snapshot.periods.first?.isUnlimited == true)
+        #expect(snapshot.periods.last?.isUnlimited == false)
+    }
+
+    @Test
+    func authoritativeWeeklyWindowRetainsTheUnlimitedFiveHourRowWhenTheProviderOmitsIt() {
+        let usage = CodexLiveUsage(
+            rateLimits: .init(
+                planType: "pro",
+                windows: [.init(id: "weekly", usedPercent: 2, windowDurationMinutes: 10_080, resetsAt: nil)]
+            ),
+            availableResetCount: nil,
+            lifetimeTokens: nil,
+            dailyUsage: nil,
+            recentActivityCount: 0,
+            apiCostEstimate: nil
+        )
+
+        let snapshot = UsageSnapshot(live: usage, language: .english)
+        #expect(snapshot.periods.map(\.title) == ["5-Hour Limit", "7-Day Limit"])
+        #expect(snapshot.periods.first?.isUnlimited == true)
+        #expect(snapshot.periods.first?.remainingPercent == 100)
+        #expect(snapshot.periods.last?.remainingPercent == 98)
     }
 
     @Test @MainActor

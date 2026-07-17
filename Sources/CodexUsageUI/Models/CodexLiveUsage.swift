@@ -66,6 +66,40 @@ struct CodexRateLimitSnapshot: Sendable {
     // stable server-provided limit identifiers.
     var primary: CodexRateLimitWindow? { windows.first }
     var secondary: CodexRateLimitWindow? { windows.dropFirst().first }
+
+    /// The panel has one row for each standard account window. The local
+    /// app-server can report several source limits for a standard duration;
+    /// retain the most restrictive real window so an unused duplicate cannot
+    /// incorrectly reassure the Human with a second 100% row.
+    var displayWindows: [CodexRateLimitWindow] {
+        var selected: [CodexRateLimitWindow.Kind: CodexRateLimitWindow] = [:]
+        var passthrough: [CodexRateLimitWindow] = []
+        for window in windows {
+            guard window.kind == .fiveHour || window.kind == .sevenDay else {
+                passthrough.append(window)
+                continue
+            }
+            guard let current = selected[window.kind] else {
+                selected[window.kind] = window
+                continue
+            }
+            selected[window.kind] = Self.isMoreRestrictive(window, than: current) ? window : current
+        }
+        return (selected.values + passthrough).sorted {
+            if $0.kind.rawValue != $1.kind.rawValue { return $0.kind.rawValue < $1.kind.rawValue }
+            return $0.id < $1.id
+        }
+    }
+
+    private static func isMoreRestrictive(
+        _ candidate: CodexRateLimitWindow,
+        than current: CodexRateLimitWindow
+    ) -> Bool {
+        let candidateUsed = candidate.usedPercent.isFinite ? candidate.usedPercent : -.infinity
+        let currentUsed = current.usedPercent.isFinite ? current.usedPercent : -.infinity
+        if candidateUsed != currentUsed { return candidateUsed > currentUsed }
+        return candidate.id < current.id
+    }
 }
 
 struct CodexRateLimitWindow: Sendable {
@@ -132,14 +166,31 @@ extension CodexLiveUsage {
 
 extension UsageSnapshot {
     init(live: CodexLiveUsage, language: AppLanguage, now: Date = Date()) {
-        let windows = live.rateLimits.windows
-        let periods = windows.enumerated().map { index, window in
+        let windows = live.rateLimits.displayWindows
+        var periods = windows.enumerated().map { index, window in
             let remaining = max(0, min(100, Int((100 - window.usedPercent).rounded())))
             return UsagePeriod(
                 id: window.id,
                 title: language.quotaTitle(durationMinutes: window.windowDurationMinutes, index: index),
                 remainingPercent: remaining,
+                isUnlimited: window.kind == .fiveHour
+                    && (window.creditsUnlimited == true || live.rateLimits.creditsUnlimited == true),
                 resetText: language.resetDescription(for: window.resetsAt, now: now)
+            )
+        }
+        let hasFiveHourWindow = windows.contains(where: { $0.kind == .fiveHour })
+        let hasValidatedWeeklyWindow = windows.contains(where: { $0.kind == .sevenDay })
+        if !hasFiveHourWindow,
+           (live.rateLimits.creditsUnlimited == true || hasValidatedWeeklyWindow) {
+            periods.insert(
+                UsagePeriod(
+                    id: "provider.unlimited-five-hour",
+                    title: language.quotaTitle(durationMinutes: 300, index: 0),
+                    remainingPercent: 100,
+                    isUnlimited: true,
+                    resetText: language.resetDescription(for: nil, now: now)
+                ),
+                at: 0
             )
         }
 

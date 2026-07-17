@@ -4,6 +4,9 @@ struct UsagePeriod: Identifiable, Codable, Sendable {
     let id: String
     let title: String
     var remainingPercent: Int
+    /// A special provider-granted five-hour credit window. The bar remains
+    /// visible, but the numeric status must not imply an ordinary quota.
+    var isUnlimited = false
     let resetText: String
 }
 

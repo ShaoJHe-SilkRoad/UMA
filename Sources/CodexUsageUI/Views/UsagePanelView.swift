@@ -149,12 +149,7 @@ public struct UsagePanelView: View {
     private func perform(_ action: CodexConnectionAction) async {
         switch action {
         case .connect:
-            guard localAccessConfirmationAction?.request() == true else {
-                await store.declineMonitorConsent()
-                return
-            }
-            store.grantMonitorConsent()
-            await store.connectToLocalSession()
+            store.handleLocalAccessDecision(localAccessConfirmationAction?.request() == true)
         case .notNow:
             await store.declineMonitorConsent()
         case .checkLocalSession:
@@ -164,7 +159,7 @@ public struct UsagePanelView: View {
         case .retry:
             await store.refresh()
         case .reconnect:
-            await store.reconnectMonitor()
+            store.requestReconnect()
         case .disconnect:
             await store.disconnectAndForgetConsent()
         case .openCodex, .updateCodex, .dismiss:
@@ -400,7 +395,7 @@ private struct QuotaRow: View {
                 Text(period.title)
                     .font(UsageDesign.font(16, weight: .bold, language: language))
                 Spacer()
-                Text("\(period.remainingPercent)%")
+                Text(period.isUnlimited ? "♾️" : "\(period.remainingPercent)%")
                     .font(UsageDesign.font(20, weight: .bold, language: language))
                     .foregroundStyle(UsageDesign.blue)
                     .monospacedDigit()
@@ -412,7 +407,7 @@ private struct QuotaRow: View {
                         .fill(Color.secondary.opacity(0.14))
                     Capsule()
                         .fill(UsageDesign.blue)
-                        .frame(width: proxy.size.width * CGFloat(period.remainingPercent) / 100)
+                        .frame(width: proxy.size.width * CGFloat(period.isUnlimited ? 100 : period.remainingPercent) / 100)
                 }
             }
             .frame(height: 10)

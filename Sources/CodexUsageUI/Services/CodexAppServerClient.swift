@@ -267,7 +267,7 @@ private struct RateLimitsResult: Decodable {
                         id: "\(sourceID).primary",
                         sourceLimitID: sourceID,
                         serverLimitID: snapshot.limitID,
-                        creditsUnlimited: snapshot.credits?.unlimited,
+                        creditsUnlimited: snapshot.credits?.unlimited ?? rateLimits.credits?.unlimited,
                         usedPercent: $0.usedPercent,
                         windowDurationMinutes: $0.windowDurationMinutes,
                         resetsAt: $0.resetsAt.map(Date.init(timeIntervalSince1970:))
@@ -278,7 +278,7 @@ private struct RateLimitsResult: Decodable {
                         id: "\(sourceID).secondary",
                         sourceLimitID: sourceID,
                         serverLimitID: snapshot.limitID,
-                        creditsUnlimited: snapshot.credits?.unlimited,
+                        creditsUnlimited: snapshot.credits?.unlimited ?? rateLimits.credits?.unlimited,
                         usedPercent: $0.usedPercent,
                         windowDurationMinutes: $0.windowDurationMinutes,
                         resetsAt: $0.resetsAt.map(Date.init(timeIntervalSince1970:))

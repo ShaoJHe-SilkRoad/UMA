@@ -25,6 +25,12 @@ public final class UsageStore: ObservableObject {
     private var lastRefreshError: CodexUsageClientError?
     private var stateEpoch = 0
     private var activeOperationEpoch: Int?
+    // The panel can be dismissed while its native access confirmation is
+    // handling the Allow click. Retaining this task in the store, rather
+    // than in the transient SwiftUI action, preserves the approved connect
+    // continuation across that panel transition.
+    private var localSessionTask: Task<Void, Never>?
+    private var localActivityReadTask: Task<Void, Never>?
     private var connectionProgressTask: Task<Void, Never>?
     private var periodicRefreshTask: Task<Void, Never>?
 
@@ -164,12 +170,74 @@ public final class UsageStore: ObservableObject {
         lastRefreshError = nil
     }
 
+    /// Consumes the product-owned confirmation result. An accepted decision
+    /// starts exactly one store-owned connection task, so the subsequent
+    /// native-alert click cannot strand the UI at the reconnect affordance
+    /// after consent has already been persisted.
+    public func handleLocalAccessDecision(_ accepted: Bool) {
+        guard accepted else {
+            DispatchQueue.main.async { [weak self] in
+                Task { @MainActor in
+                    await self?.declineMonitorConsent()
+                }
+            }
+            return
+        }
+        grantMonitorConsent()
+        // The native alert's Allow click closes the panel. The SwiftUI button
+        // task may then be cancelled immediately, so escape its task context
+        // before creating the store-owned connection task.
+        DispatchQueue.main.async { [weak self] in
+            self?.beginLocalSessionConnection()
+        }
+    }
+
+    private func beginLocalSessionConnection() {
+        guard !previewOnly, monitorConsentGranted, localSessionTask == nil else { return }
+        localSessionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.connectToLocalSession()
+            self.localSessionTask = nil
+        }
+    }
+
+    /// Starts an explicit reconnect outside the transient SwiftUI button task.
+    /// A state update can redraw or dismiss the panel while that task is
+    /// suspended, so the owned task performs the disconnect/start boundary.
+    public func requestReconnect() {
+        guard !previewOnly, monitorConsentGranted, localSessionTask == nil else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.beginLocalSessionReconnection()
+        }
+    }
+
+    private func beginLocalSessionReconnection() {
+        guard !previewOnly, monitorConsentGranted, localSessionTask == nil else { return }
+        localSessionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.reconnectLocalSession()
+            self.localSessionTask = nil
+        }
+    }
+
+    private func cancelLocalSessionTask() {
+        localSessionTask?.cancel()
+        localSessionTask = nil
+    }
+
+    private func cancelLocalActivityRead() {
+        localActivityReadTask?.cancel()
+        localActivityReadTask = nil
+    }
+
     public func revokeMonitorConsent() async {
         await clearMonitorConsent(decision: .unknown)
     }
 
     private func clearMonitorConsent(decision: CodexMonitorConsentDecision) async {
         guard !previewOnly else { return }
+        cancelLocalSessionTask()
+        cancelLocalActivityRead()
         cancelConnectionProgressObservation()
         cancelPeriodicRefresh()
         stopLocalSessionReconciliation()
@@ -227,25 +295,15 @@ public final class UsageStore: ObservableObject {
 
         let epoch = beginOperation()
         defer { finishOperation(epoch) }
-        let localActivity = await readLocalActivity()
-        guard isCurrentOperation(epoch), monitorConsentGranted else { return }
-        lastLocalActivity = localActivity
+        beginLocalActivityRead(for: epoch)
         connectionState = lastLiveUsage == nil ? .resolvingExecutable : .refreshingWithPreviousRealData
         observeConnectionProgress(for: epoch)
         do {
             let providerUsage = try await client.fetchUsage()
-            let liveUsage = providerUsage.replacingLocalActivity(localActivity)
             guard isCurrentOperation(epoch) else { return }
             let refreshRequired = await client.takeUsageRefreshRequest()
             guard isCurrentOperation(epoch), monitorConsentGranted else { return }
-            lastLiveUsage = liveUsage
-            snapshot = UsageSnapshot(live: liveUsage, language: language)
-            connectionState = .ready
-            freshness = refreshRequired ? .refreshRequired : .fresh
-            lastRefreshError = nil
-            lastFailure = nil
-            lastError = nil
-            updatePeriodicRefreshSchedule()
+            acceptLiveUsage(providerUsage, refreshRequired: refreshRequired)
         } catch {
             guard isCurrentOperation(epoch) else { return }
             let safeError = Self.safeError(from: error)
@@ -259,18 +317,7 @@ public final class UsageStore: ObservableObject {
             lastError = safeError.description(language: language)
             connectionState = reportedConnectionState
             if let priorUsage {
-                let preserved = priorUsage.replacingLocalActivity(localActivity)
-                lastLiveUsage = preserved
-                snapshot = UsageSnapshot(live: preserved, language: language)
-                snapshot.providerSource = UsageSourceStatus(
-                    label: "Codex account",
-                    scope: "account/read, account/rateLimits/read, account/usage/read",
-                    capturedAt: priorUsage.providerCapturedAt,
-                    isAvailable: true,
-                    freshness: .stale
-                )
-            } else if localActivity.availability == .available {
-                snapshot = UsageSnapshot(localActivity: localActivity, language: language)
+                preservePriorProviderUsage(priorUsage, localActivity: lastLocalActivity)
             }
             freshness = lastLiveUsage == nil ? .noRealData : .stale
             updatePeriodicRefreshSchedule()
@@ -295,6 +342,8 @@ public final class UsageStore: ObservableObject {
     /// calls account/logout or otherwise affects the official app session.
     public func cancelLocalSessionReconciliation() async {
         guard !previewOnly else { return }
+        cancelLocalSessionTask()
+        cancelLocalActivityRead()
         stopLocalSessionReconciliation()
         let epoch = invalidateOperations()
         await client.disconnect()
@@ -310,6 +359,8 @@ public final class UsageStore: ObservableObject {
     public func disconnectMonitor() async {
         guard !previewOnly else { return }
         stopLocalSessionReconciliation()
+        cancelLocalSessionTask()
+        cancelLocalActivityRead()
         let epoch = invalidateOperations()
         await client.disconnect()
         guard stateEpoch == epoch else { return }
@@ -330,6 +381,13 @@ public final class UsageStore: ObservableObject {
     /// account-first refresh.  It never retries autonomously.
     public func reconnectMonitor() async {
         guard !previewOnly else { return }
+        stopLocalSessionReconciliation()
+        cancelLocalSessionTask()
+        cancelLocalActivityRead()
+        await reconnectLocalSession()
+    }
+
+    private func reconnectLocalSession() async {
         stopLocalSessionReconciliation()
         let epoch = invalidateOperations()
         await client.disconnect()
@@ -371,9 +429,7 @@ public final class UsageStore: ObservableObject {
 
         let epoch = beginOperation()
         defer { finishOperation(epoch) }
-        let localActivity = await readLocalActivity()
-        guard isCurrentOperation(epoch), monitorConsentGranted else { return }
-        lastLocalActivity = localActivity
+        beginLocalActivityRead(for: epoch)
         connectionState = .resolvingExecutable
         observeConnectionProgress(for: epoch)
         do {
@@ -385,9 +441,7 @@ public final class UsageStore: ObservableObject {
                 lastFailure = nil
                 lastError = nil
                 if let priorUsage = lastLiveUsage {
-                    preservePriorProviderUsage(priorUsage, localActivity: localActivity)
-                } else if localActivity.availability == .available {
-                    snapshot = UsageSnapshot(localActivity: localActivity, language: language)
+                    preservePriorProviderUsage(priorUsage, localActivity: lastLocalActivity)
                 }
                 // A usage-only monitor never retries sign-in automatically.
                 // The Human completes official CLI sign-in outside this app,
@@ -396,12 +450,11 @@ public final class UsageStore: ObservableObject {
                 return
             }
             let providerUsage = try await client.fetchUsageAfterVerifiedAccount()
-            let liveUsage = providerUsage.replacingLocalActivity(localActivity)
             guard isCurrentOperation(epoch) else { return }
             let refreshRequired = await client.takeUsageRefreshRequest()
             guard isCurrentOperation(epoch), monitorConsentGranted else { return }
             stopLocalSessionReconciliation()
-            acceptLiveUsage(liveUsage, refreshRequired: refreshRequired)
+            acceptLiveUsage(providerUsage, refreshRequired: refreshRequired)
         } catch {
             guard isCurrentOperation(epoch) else { return }
             let safeError = Self.safeError(from: error)
@@ -412,9 +465,7 @@ public final class UsageStore: ObservableObject {
             lastError = safeError.description(language: language)
             connectionState = providerState
             if let priorUsage = lastLiveUsage {
-                preservePriorProviderUsage(priorUsage, localActivity: localActivity)
-            } else if localActivity.availability == .available {
-                snapshot = UsageSnapshot(localActivity: localActivity, language: language)
+                preservePriorProviderUsage(priorUsage, localActivity: lastLocalActivity)
             }
             if safeError.failure == .accountAuthorizationRequired {
                 connectionState = .officialCodexSignInRequired
@@ -430,9 +481,9 @@ public final class UsageStore: ObservableObject {
     /// never substitutes local totals for provider values.
     private func preservePriorProviderUsage(
         _ priorUsage: CodexLiveUsage,
-        localActivity: CodexLocalActivitySnapshot
+        localActivity: CodexLocalActivitySnapshot?
     ) {
-        let preserved = priorUsage.replacingLocalActivity(localActivity)
+        let preserved = localActivity.map(priorUsage.replacingLocalActivity) ?? priorUsage
         lastLiveUsage = preserved
         snapshot = UsageSnapshot(live: preserved, language: language)
         snapshot.providerSource = UsageSourceStatus(
@@ -449,12 +500,7 @@ public final class UsageStore: ObservableObject {
         _ liveUsage: CodexLiveUsage,
         refreshRequired: Bool
     ) {
-        let mergedUsage: CodexLiveUsage
-        if let localActivity = lastLocalActivity, liveUsage.localActivity == nil {
-            mergedUsage = liveUsage.replacingLocalActivity(localActivity)
-        } else {
-            mergedUsage = liveUsage
-        }
+        let mergedUsage = lastLocalActivity.map(liveUsage.replacingLocalActivity) ?? liveUsage
         lastLiveUsage = mergedUsage
         snapshot = UsageSnapshot(live: mergedUsage, language: language)
         connectionState = .ready
@@ -463,6 +509,45 @@ public final class UsageStore: ObservableObject {
         lastFailure = nil
         lastError = nil
         updatePeriodicRefreshSchedule()
+    }
+
+    private func beginLocalActivityRead(for epoch: Int) {
+        localActivityReadTask?.cancel()
+        let reader = localActivityReader
+        let now = Date()
+        localActivityReadTask = Task { @MainActor [weak self] in
+            let activity = await Task.detached(priority: .utility) {
+                reader.read(now: now)
+            }.value
+            guard let self,
+                  !Task.isCancelled,
+                  self.stateEpoch == epoch,
+                  self.monitorConsentGranted
+            else { return }
+            self.lastLocalActivity = activity
+            if let liveUsage = self.lastLiveUsage {
+                let mergedUsage = liveUsage.replacingLocalActivity(activity)
+                self.lastLiveUsage = mergedUsage
+                self.snapshot = UsageSnapshot(live: mergedUsage, language: self.language)
+                if self.lastRefreshError != nil {
+                    self.snapshot.providerSource = UsageSourceStatus(
+                        label: "Codex account",
+                        scope: "account/read, account/rateLimits/read, account/usage/read",
+                        capturedAt: liveUsage.providerCapturedAt,
+                        isAvailable: true,
+                        freshness: .stale
+                    )
+                }
+            } else if activity.availability == .available {
+                self.snapshot = UsageSnapshot(localActivity: activity, language: self.language)
+                self.snapshot.providerSource = UsageSourceStatus(
+                    label: "Codex account",
+                    scope: "account/read, account/rateLimits/read, account/usage/read",
+                    capturedAt: nil,
+                    isAvailable: false
+                )
+            }
+        }
     }
 
     private func readLocalActivity() async -> CodexLocalActivitySnapshot {
@@ -571,6 +656,8 @@ public final class UsageStore: ObservableObject {
     }
 
     deinit {
+        localSessionTask?.cancel()
+        localActivityReadTask?.cancel()
         connectionProgressTask?.cancel()
         periodicRefreshTask?.cancel()
     }
