@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 public final class UsageStore: ObservableObject {
     @Published private(set) var snapshot: UsageSnapshot
+    @Published private(set) var providerSnapshots: [AgentUsageSnapshot] = []
     @Published private(set) var isRefreshing = false
     @Published public private(set) var lastError: String?
     @Published public private(set) var lastFailure: CodexUsageClientFailure?
@@ -14,58 +15,35 @@ public final class UsageStore: ObservableObject {
     @Published public private(set) var freshness: UsageFreshness
     @Published public private(set) var isPanelVisible = false
 
-    private let client: any CodexUsageClient
-    private let localActivityReader: any CodexLocalActivityReading
+    private let registry: AgentConnectorRegistry?
+    private let primaryConnectorID: AgentConnectorID?
     private let previewOnly: Bool
     private let previewDisplaysFixtureData: Bool
     private let consentDefaults: UserDefaults?
     private let periodicRefreshInterval: Duration
-    private var lastLiveUsage: CodexLiveUsage?
-    private var lastLocalActivity: CodexLocalActivitySnapshot?
-    private var lastRefreshError: CodexUsageClientError?
-    private var stateEpoch = 0
-    private var activeOperationEpoch: Int?
-    // The panel can be dismissed while its native access confirmation is
-    // handling the Allow click. Retaining this task in the store, rather
-    // than in the transient SwiftUI action, preserves the approved connect
-    // continuation across that panel transition.
-    private var localSessionTask: Task<Void, Never>?
-    private var localActivityReadTask: Task<Void, Never>?
-    private var connectionProgressTask: Task<Void, Never>?
+    private var registrySubscription: Task<Void, Never>?
+    private var connectionTask: Task<Void, Never>?
     private var periodicRefreshTask: Task<Void, Never>?
 
-    public convenience init(
-        autoRefresh: Bool = true,
-        language: AppLanguage? = nil
-    ) {
+    public convenience init(autoRefresh: Bool = true, language: AppLanguage? = nil) {
         self.init(
             autoRefresh: autoRefresh,
             previewOnly: false,
             language: language,
-            client: CodexAppServerClient(),
-            localActivityReader: CodexLocalActivityReader(),
-            consentDefaults: .standard,
-            periodicRefreshInterval: .seconds(240),
-            localSessionReconciliationInterval: .seconds(5),
-            localSessionReconciliationTimeout: .seconds(300)
+            registry: AgentUsageRuntime.makeCodexRegistry(),
+            primaryConnectorID: CodexUsageConnector.connectorID,
+            consentDefaults: .standard
         )
     }
 
-    public convenience init(
-        autoRefresh: Bool = true,
-        previewOnly: Bool,
-        language: AppLanguage? = nil
-    ) {
+    public convenience init(autoRefresh: Bool = true, previewOnly: Bool, language: AppLanguage? = nil) {
         self.init(
             autoRefresh: autoRefresh,
             previewOnly: previewOnly,
             language: language,
-            client: CodexAppServerClient(),
-            localActivityReader: CodexLocalActivityReader(),
-            consentDefaults: previewOnly ? nil : .standard,
-            periodicRefreshInterval: .seconds(240),
-            localSessionReconciliationInterval: .seconds(5),
-            localSessionReconciliationTimeout: .seconds(300)
+            registry: previewOnly ? nil : AgentUsageRuntime.makeCodexRegistry(),
+            primaryConnectorID: previewOnly ? nil : CodexUsageConnector.connectorID,
+            consentDefaults: previewOnly ? nil : .standard
         )
     }
 
@@ -77,13 +55,10 @@ public final class UsageStore: ObservableObject {
             autoRefresh: false,
             previewOnly: true,
             language: language,
-            client: CodexAppServerClient(),
-            localActivityReader: CodexLocalActivityReader(),
+            registry: nil,
+            primaryConnectorID: nil,
             consentDefaults: nil,
-            previewScenario: scenario,
-            periodicRefreshInterval: .seconds(60),
-            localSessionReconciliationInterval: .seconds(5),
-            localSessionReconciliationTimeout: .seconds(300)
+            previewScenario: scenario
         )
     }
 
@@ -91,310 +66,117 @@ public final class UsageStore: ObservableObject {
         autoRefresh: Bool = true,
         previewOnly: Bool = false,
         language: AppLanguage? = nil,
-        client: any CodexUsageClient,
-        localActivityReader: any CodexLocalActivityReading = CodexLocalActivityReader(),
+        registry: AgentConnectorRegistry?,
+        primaryConnectorID: AgentConnectorID?,
         consentDefaults: UserDefaults? = nil,
         previewScenario: CodexPreviewScenario = .ready,
-        periodicRefreshInterval: Duration = .seconds(240),
-        localSessionReconciliationInterval: Duration = .seconds(5),
-        localSessionReconciliationTimeout: Duration = .seconds(300)
+        periodicRefreshInterval: Duration = .seconds(240)
     ) {
         let selectedLanguage = language ?? AppLanguage.resolveAndPersist()
-        self.client = client
-        self.localActivityReader = localActivityReader
+        self.registry = registry
+        self.primaryConnectorID = primaryConnectorID
         self.previewOnly = previewOnly
         self.previewDisplaysFixtureData = previewOnly && previewScenario.displaysFixtureData
         self.consentDefaults = consentDefaults
         self.periodicRefreshInterval = periodicRefreshInterval
-        _ = localSessionReconciliationInterval
-        _ = localSessionReconciliationTimeout
         self.language = selectedLanguage
-        self.snapshot = previewOnly && previewScenario.displaysFixtureData
-            ? .preview(language: selectedLanguage)
-            : .empty(language: selectedLanguage)
+        self.snapshot = previewOnly && previewScenario.displaysFixtureData ? .preview(language: selectedLanguage) : .empty(language: selectedLanguage)
         self.connectionState = previewOnly ? previewScenario.connectionState : .notAuthorizedByMonitor
         self.isRefreshing = previewOnly && previewScenario == .refreshing
         let decision = previewOnly ? .granted : CodexMonitorConsentDecision.load(from: consentDefaults)
         self.monitorConsentDecision = decision
         self.monitorConsentGranted = decision == .granted
-        if !previewOnly, decision == .granted {
-            self.connectionState = .idle
-        }
+        if !previewOnly, decision == .granted { self.connectionState = .idle }
         self.freshness = previewOnly ? .fixture : .noRealData
-        self.lastFailure = nil
-
-        // `autoRefresh` remains part of the preview/test API for compatibility,
-        // but production starts with in-memory consent denied.  It cannot cause
-        // any app-server or account request before a future consent UI opts in.
         _ = autoRefresh
+        beginRegistryObservation()
     }
 
-    /// `nil` means that no real quota window has been read.  It is distinct
-    /// from a real 0% remaining value and prevents the menu bar from claiming
-    /// an invented empty quota during first load or a first-load failure.
-    public var menuPercent: Int? {
-        snapshot.periods.first?.remainingPercent
-    }
+    /// `nil` remains distinct from an actual 0% quota.
+    public var menuPercent: Int? { snapshot.periods.first?.remainingPercent }
 
     public var statusText: String {
-        if previewOnly, connectionState == .ready {
-            return language.demoStatus
-        }
+        if previewOnly, connectionState == .ready { return language.demoStatus }
         return connectionState.statusText(language: language)
     }
 
-    /// Public, credential-free state intended for the future consent bridge.
     public var currentState: CodexConnectionState { connectionState }
 
-    /// A boolean rather than the previous snapshot itself prevents this API
-    /// from exposing user usage, thread, or cost details.
     public var hasPriorRealSnapshot: Bool {
-        lastLiveUsage != nil
-            || lastLocalActivity?.availability == .available
-            || previewDisplaysFixtureData
+        providerSnapshots.contains(where: \.hasValidData) || previewDisplaysFixtureData
     }
 
-    /// This is an in-memory gate only.  M1-G2 supplies the user-facing
-    /// explanation and control; no preference, credential, or account data is
-    /// persisted by this method.
+    public var allowsManualRefresh: Bool {
+        let hasVisibleProviderData = snapshot.providerSource?.isAvailable == true
+        guard monitorConsentGranted, hasPriorRealSnapshot || hasVisibleProviderData else { return false }
+        return connectionState == .ready || connectionState.isFailure
+    }
+
     public func grantMonitorConsent() {
-        guard !previewOnly else { return }
-        guard monitorConsentDecision != .granted else { return }
+        guard !previewOnly, monitorConsentDecision != .granted else { return }
         monitorConsentDecision = .granted
         monitorConsentDecision.persist(to: consentDefaults)
         monitorConsentGranted = true
         connectionState = .idle
-        freshness = lastLiveUsage == nil ? .noRealData : .stale
+        freshness = hasPriorRealSnapshot ? .stale : .noRealData
         lastError = nil
         lastFailure = nil
-        lastRefreshError = nil
     }
 
-    /// Consumes the product-owned confirmation result. An accepted decision
-    /// starts exactly one store-owned connection task, so the subsequent
-    /// native-alert click cannot strand the UI at the reconnect affordance
-    /// after consent has already been persisted.
+    public func declineMonitorConsent() async {
+        await disconnectPrimary(clearConsent: true, decision: .declined)
+    }
+
     public func handleLocalAccessDecision(_ accepted: Bool) {
         guard accepted else {
-            DispatchQueue.main.async { [weak self] in
-                Task { @MainActor in
-                    await self?.declineMonitorConsent()
-                }
-            }
+            Task { @MainActor in await declineMonitorConsent() }
             return
         }
+        let wasGranted = monitorConsentGranted
         grantMonitorConsent()
-        // The native alert's Allow click closes the panel. The SwiftUI button
-        // task may then be cancelled immediately, so escape its task context
-        // before creating the store-owned connection task.
-        DispatchQueue.main.async { [weak self] in
-            self?.beginLocalSessionConnection()
-        }
+        if !wasGranted { beginConnection(.connect) }
     }
 
-    private func beginLocalSessionConnection() {
-        guard !previewOnly, monitorConsentGranted, localSessionTask == nil else { return }
-        localSessionTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.connectToLocalSession()
-            self.localSessionTask = nil
-        }
-    }
-
-    /// Starts an explicit reconnect outside the transient SwiftUI button task.
-    /// A state update can redraw or dismiss the panel while that task is
-    /// suspended, so the owned task performs the disconnect/start boundary.
-    public func requestReconnect() {
-        guard !previewOnly, monitorConsentGranted, localSessionTask == nil else { return }
-        DispatchQueue.main.async { [weak self] in
-            self?.beginLocalSessionReconnection()
-        }
-    }
-
-    private func beginLocalSessionReconnection() {
-        guard !previewOnly, monitorConsentGranted, localSessionTask == nil else { return }
-        localSessionTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.reconnectLocalSession()
-            self.localSessionTask = nil
-        }
-    }
-
-    private func cancelLocalSessionTask() {
-        localSessionTask?.cancel()
-        localSessionTask = nil
-    }
-
-    private func cancelLocalActivityRead() {
-        localActivityReadTask?.cancel()
-        localActivityReadTask = nil
-    }
-
-    public func revokeMonitorConsent() async {
-        await clearMonitorConsent(decision: .unknown)
-    }
-
-    private func clearMonitorConsent(decision: CodexMonitorConsentDecision) async {
-        guard !previewOnly else { return }
-        cancelLocalSessionTask()
-        cancelLocalActivityRead()
-        cancelConnectionProgressObservation()
-        cancelPeriodicRefresh()
-        stopLocalSessionReconciliation()
-        let epoch = invalidateOperations()
-        monitorConsentGranted = false
-        monitorConsentDecision = decision
-        monitorConsentDecision.persist(to: consentDefaults)
-        lastLiveUsage = nil
-        lastLocalActivity = nil
-        snapshot = .empty(language: language)
-        connectionState = .notAuthorizedByMonitor
-        freshness = .noRealData
-        lastError = nil
-        lastFailure = nil
-        lastRefreshError = nil
-        await client.disconnect()
-        guard stateEpoch == epoch else { return }
-    }
-
-    /// UI-facing M1-G1 handoff name. This forwards only to the existing
-    /// in-memory consent revocation path; it does not inspect or revoke Codex
-    /// authorization itself.
-    public func declineMonitorConsent() async {
-        await clearMonitorConsent(decision: .declined)
-    }
-
-    public func setLanguage(_ newLanguage: AppLanguage) {
-        guard newLanguage != language else { return }
-        language = newLanguage
-        UserDefaults.standard.set(newLanguage.rawValue, forKey: AppLanguage.storageKey)
-        if let lastLiveUsage {
-            snapshot = UsageSnapshot(live: lastLiveUsage, language: newLanguage)
-        } else if let lastLocalActivity {
-            snapshot = UsageSnapshot(localActivity: lastLocalActivity, language: newLanguage)
-        } else if previewDisplaysFixtureData {
-            snapshot = .preview(language: newLanguage)
-        } else {
-            snapshot = .empty(language: newLanguage)
-        }
-        if let lastRefreshError {
-            lastError = lastRefreshError.description(language: newLanguage)
-        }
-    }
+    public func requestReconnect() { beginConnection(.reconnect) }
 
     public func refresh() async {
-        guard !previewOnly, activeOperationEpoch == nil else { return }
-        guard monitorConsentGranted else {
-            connectionState = .notAuthorizedByMonitor
-            freshness = lastLiveUsage == nil ? .noRealData : .stale
-            lastRefreshError = CodexUsageClientError(.monitorConsentMissing)
-            lastFailure = .monitorConsentMissing
-            lastError = lastRefreshError?.description(language: language)
+        guard !previewOnly, monitorConsentGranted, let registry, let id = primaryConnectorID else {
+            if !previewOnly { setConsentMissingFailure() }
             return
         }
-
-        let epoch = beginOperation()
-        defer { finishOperation(epoch) }
-        beginLocalActivityRead(for: epoch)
-        connectionState = lastLiveUsage == nil ? .resolvingExecutable : .refreshingWithPreviousRealData
-        observeConnectionProgress(for: epoch)
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        connectionState = hasPriorRealSnapshot ? .refreshingWithPreviousRealData : .resolvingExecutable
         do {
-            let providerUsage = try await client.fetchUsage()
-            guard isCurrentOperation(epoch) else { return }
-            let refreshRequired = await client.takeUsageRefreshRequest()
-            guard isCurrentOperation(epoch), monitorConsentGranted else { return }
-            acceptLiveUsage(providerUsage, refreshRequired: refreshRequired)
-        } catch {
-            guard isCurrentOperation(epoch) else { return }
-            let safeError = Self.safeError(from: error)
-            let priorUsage = lastLiveUsage
-            let reportedConnectionState = priorUsage == nil
-                ? await client.connectionState()
-                : .staleWithPreviousRealData(safeError.failure)
-            guard isCurrentOperation(epoch), monitorConsentGranted else { return }
-            lastRefreshError = safeError
-            lastFailure = safeError.failure
-            lastError = safeError.description(language: language)
-            connectionState = reportedConnectionState
-            if let priorUsage {
-                preservePriorProviderUsage(priorUsage, localActivity: lastLocalActivity)
-            }
-            freshness = lastLiveUsage == nil ? .noRealData : .stale
-            updatePeriodicRefreshSchedule()
+            try await registry.perform(.refresh, for: id)
+            receive(await registry.orderedSnapshots())
         }
+        catch { applyRegistryFailure(.unknown) }
     }
 
-    /// Starts the production dual-source refresh after monitor consent. The
-    /// provider client performs exactly account/read before rate/usage reads;
-    /// local metadata is refreshed independently and remains visible if that
-    /// account channel is unavailable.
-    public func connectToLocalSession() async {
-        await checkLocalSession()
-    }
+    public func connectToLocalSession() async { await performPrimary(.connect) }
+    public func checkLocalSessionAgain() async { await performPrimary(.connect) }
 
-    /// Exposes one explicit account/read retry after official CLI sign-in was
-    /// completed outside this monitor.
-    public func checkLocalSessionAgain() async {
-        await checkLocalSession()
-    }
-
-    /// Stops only the monitor's reconciliation and local app-server. It never
-    /// calls account/logout or otherwise affects the official app session.
     public func cancelLocalSessionReconciliation() async {
-        guard !previewOnly else { return }
-        cancelLocalSessionTask()
-        cancelLocalActivityRead()
-        stopLocalSessionReconciliation()
-        let epoch = invalidateOperations()
-        await client.disconnect()
-        guard stateEpoch == epoch else { return }
-        connectionState = monitorConsentGranted ? .idle : .notAuthorizedByMonitor
-        lastError = nil
-        lastFailure = nil
-        lastRefreshError = nil
+        await disconnectPrimary(clearConsent: false)
     }
 
-    /// Stops the retained local process without revoking Codex authorization.
-    /// Existing real usage remains internal and is marked stale until refreshed.
     public func disconnectMonitor() async {
-        guard !previewOnly else { return }
-        stopLocalSessionReconciliation()
-        cancelLocalSessionTask()
-        cancelLocalActivityRead()
-        let epoch = invalidateOperations()
-        await client.disconnect()
-        guard stateEpoch == epoch else { return }
-        connectionState = monitorConsentGranted ? .idle : .notAuthorizedByMonitor
-        if lastLiveUsage != nil {
-            freshness = .stale
-        }
-        updatePeriodicRefreshSchedule()
+        await disconnectPrimary(clearConsent: false)
     }
 
-    /// Stops only this monitor connection, clears its local consent decision
-    /// and displayed data, and never signs the user out of Codex.
     public func disconnectAndForgetConsent() async {
-        await clearMonitorConsent(decision: .unknown)
+        await disconnectPrimary(clearConsent: true)
     }
 
-    /// Creates an explicit shutdown/start boundary before one normal
-    /// account-first refresh.  It never retries autonomously.
-    public func reconnectMonitor() async {
-        guard !previewOnly else { return }
-        stopLocalSessionReconciliation()
-        cancelLocalSessionTask()
-        cancelLocalActivityRead()
-        await reconnectLocalSession()
-    }
+    public func reconnectMonitor() async { await performPrimary(.reconnect) }
 
-    private func reconnectLocalSession() async {
-        stopLocalSessionReconciliation()
-        let epoch = invalidateOperations()
-        await client.disconnect()
-        guard stateEpoch == epoch else { return }
-        connectionState = monitorConsentGranted ? .idle : .notAuthorizedByMonitor
-        guard monitorConsentGranted else { return }
-        await connectToLocalSession()
+    /// Called by the application lifecycle, not by a single provider view.
+    public func stopAllConnectors() async {
+        guard !previewOnly, let registry else { return }
+        connectionTask?.cancel()
+        periodicRefreshTask?.cancel()
+        await registry.stopAll()
     }
 
     public func setPanelVisible(_ isVisible: Bool) {
@@ -403,217 +185,114 @@ public final class UsageStore: ObservableObject {
         updatePeriodicRefreshSchedule()
     }
 
-    public var allowsManualRefresh: Bool {
-        guard monitorConsentGranted, hasPriorRealSnapshot else { return false }
-        return switch connectionState {
-        case .ready, .staleWithPreviousRealData:
-            true
-        default:
-            false
+    public func setLanguage(_ newLanguage: AppLanguage) {
+        guard newLanguage != language else { return }
+        language = newLanguage
+        UserDefaults.standard.set(newLanguage.rawValue, forKey: AppLanguage.storageKey)
+        if let primary = primarySnapshot {
+            snapshot = UsageSnapshot(agentSnapshot: primary, language: newLanguage)
+        } else if previewDisplaysFixtureData {
+            snapshot = .preview(language: newLanguage)
+        } else {
+            snapshot = .empty(language: newLanguage)
         }
     }
 
-    private static func safeError(from error: Error) -> CodexUsageClientError {
-        (error as? CodexUsageClientError) ?? CodexUsageClientError(.unknownSafeError)
-    }
-
-    /// This helper is the only path that turns an absent account into the
-    /// official-app state. It deliberately asks the client for account status
-    /// before any rate-limit or usage request.
-    private func checkLocalSession() async {
-        guard !previewOnly, activeOperationEpoch == nil else { return }
-        guard monitorConsentGranted else {
-            connectionState = .notAuthorizedByMonitor
-            return
-        }
-
-        let epoch = beginOperation()
-        defer { finishOperation(epoch) }
-        beginLocalActivityRead(for: epoch)
-        connectionState = .resolvingExecutable
-        observeConnectionProgress(for: epoch)
-        do {
-            let accountAvailable = try await client.checkLocalAccountAvailability()
-            guard isCurrentOperation(epoch) else { return }
-            guard accountAvailable else {
-                connectionState = .officialCodexSignInRequired
-                lastRefreshError = nil
-                lastFailure = nil
-                lastError = nil
-                if let priorUsage = lastLiveUsage {
-                    preservePriorProviderUsage(priorUsage, localActivity: lastLocalActivity)
-                }
-                // A usage-only monitor never retries sign-in automatically.
-                // The Human completes official CLI sign-in outside this app,
-                // then explicitly chooses Check Again.
-                stopLocalSessionReconciliation()
-                return
-            }
-            let providerUsage = try await client.fetchUsageAfterVerifiedAccount()
-            guard isCurrentOperation(epoch) else { return }
-            let refreshRequired = await client.takeUsageRefreshRequest()
-            guard isCurrentOperation(epoch), monitorConsentGranted else { return }
-            stopLocalSessionReconciliation()
-            acceptLiveUsage(providerUsage, refreshRequired: refreshRequired)
-        } catch {
-            guard isCurrentOperation(epoch) else { return }
-            let safeError = Self.safeError(from: error)
-            let providerState = await client.connectionState()
-            guard isCurrentOperation(epoch), monitorConsentGranted else { return }
-            lastRefreshError = safeError
-            lastFailure = safeError.failure
-            lastError = safeError.description(language: language)
-            connectionState = providerState
-            if let priorUsage = lastLiveUsage {
-                preservePriorProviderUsage(priorUsage, localActivity: lastLocalActivity)
-            }
-            if safeError.failure == .accountAuthorizationRequired {
-                connectionState = .officialCodexSignInRequired
-                stopLocalSessionReconciliation()
-            } else if safeError.failure == .processExited {
-                stopLocalSessionReconciliation()
+    private func beginRegistryObservation() {
+        guard let registry else { return }
+        registrySubscription = Task { [weak self] in
+            await registry.restorePersistedSnapshots()
+            let stream = await registry.snapshots()
+            for await snapshots in stream {
+                guard !Task.isCancelled else { return }
+                self?.receive(snapshots)
             }
         }
     }
 
-    /// Keeps an independently valid local channel current while making a
-    /// failed or unavailable provider channel visibly stale.  This method
-    /// never substitutes local totals for provider values.
-    private func preservePriorProviderUsage(
-        _ priorUsage: CodexLiveUsage,
-        localActivity: CodexLocalActivitySnapshot?
-    ) {
-        let preserved = localActivity.map(priorUsage.replacingLocalActivity) ?? priorUsage
-        lastLiveUsage = preserved
-        snapshot = UsageSnapshot(live: preserved, language: language)
-        snapshot.providerSource = UsageSourceStatus(
-            label: "Codex account",
-            scope: "account/read, account/rateLimits/read, account/usage/read",
-            capturedAt: priorUsage.providerCapturedAt,
-            isAvailable: true,
-            freshness: .stale
-        )
-        freshness = .stale
-    }
-
-    private func acceptLiveUsage(
-        _ liveUsage: CodexLiveUsage,
-        refreshRequired: Bool
-    ) {
-        let mergedUsage = lastLocalActivity.map(liveUsage.replacingLocalActivity) ?? liveUsage
-        lastLiveUsage = mergedUsage
-        snapshot = UsageSnapshot(live: mergedUsage, language: language)
-        connectionState = .ready
-        freshness = refreshRequired ? .refreshRequired : .fresh
-        lastRefreshError = nil
-        lastFailure = nil
-        lastError = nil
+    private func receive(_ snapshots: [AgentUsageSnapshot]) {
+        guard !previewOnly, monitorConsentGranted else { return }
+        providerSnapshots = snapshots
+        guard let primary = primarySnapshot else { return }
+        snapshot = UsageSnapshot(agentSnapshot: primary, language: language)
+        connectionState = Self.presentationState(primary.state, failure: primary.safeFailure)
+        freshness = Self.presentationFreshness(primary.freshness)
+        lastFailure = primary.safeFailure.map(Self.codexFailure)
+        lastError = codexFailureDescription(lastFailure)
+        if primary.state == .ready || primary.state == .stale || primary.state == .authenticationRequired || primary.state == .failed {
+            isRefreshing = false
+        }
         updatePeriodicRefreshSchedule()
     }
 
-    private func beginLocalActivityRead(for epoch: Int) {
-        localActivityReadTask?.cancel()
-        let reader = localActivityReader
-        let now = Date()
-        localActivityReadTask = Task { @MainActor [weak self] in
-            let activity = await Task.detached(priority: .utility) {
-                reader.read(now: now)
-            }.value
-            guard let self,
-                  !Task.isCancelled,
-                  self.stateEpoch == epoch,
-                  self.monitorConsentGranted
-            else { return }
-            self.lastLocalActivity = activity
-            if let liveUsage = self.lastLiveUsage {
-                let mergedUsage = liveUsage.replacingLocalActivity(activity)
-                self.lastLiveUsage = mergedUsage
-                self.snapshot = UsageSnapshot(live: mergedUsage, language: self.language)
-                if self.lastRefreshError != nil {
-                    self.snapshot.providerSource = UsageSourceStatus(
-                        label: "Codex account",
-                        scope: "account/read, account/rateLimits/read, account/usage/read",
-                        capturedAt: liveUsage.providerCapturedAt,
-                        isAvailable: true,
-                        freshness: .stale
-                    )
-                }
-            } else if activity.availability == .available {
-                self.snapshot = UsageSnapshot(localActivity: activity, language: self.language)
-                self.snapshot.providerSource = UsageSourceStatus(
-                    label: "Codex account",
-                    scope: "account/read, account/rateLimits/read, account/usage/read",
-                    capturedAt: nil,
-                    isAvailable: false
-                )
-            }
+    private var primarySnapshot: AgentUsageSnapshot? {
+        guard let primaryConnectorID else { return nil }
+        return providerSnapshots.first(where: { $0.id == primaryConnectorID })
+    }
+
+    private func beginConnection(_ command: AgentConnectorCommand) {
+        guard !previewOnly, monitorConsentGranted, connectionTask == nil else { return }
+        connectionTask = Task { @MainActor [weak self] in
+            defer { self?.connectionTask = nil }
+            await self?.performPrimary(command)
         }
     }
 
-    private func readLocalActivity() async -> CodexLocalActivitySnapshot {
-        let reader = localActivityReader
-        let now = Date()
-        let activity = await Task.detached(priority: .utility) {
-            reader.read(now: now)
-        }.value
-        return activity
-    }
-
-    private func stopLocalSessionReconciliation() {
-        // There is no automatic sign-in reconciliation. This no-op keeps the
-        // disconnect path explicit while preserving its call sites.
-    }
-
-    private func beginOperation() -> Int {
-        stateEpoch &+= 1
-        activeOperationEpoch = stateEpoch
+    private func performPrimary(_ command: AgentConnectorCommand) async {
+        guard !previewOnly, monitorConsentGranted, let registry, let id = primaryConnectorID else {
+            if !previewOnly { setConsentMissingFailure() }
+            return
+        }
         isRefreshing = true
-        return stateEpoch
+        connectionState = .resolvingExecutable
+        do {
+            try await registry.perform(command, for: id)
+            receive(await registry.orderedSnapshots())
+        }
+        catch { applyRegistryFailure(.unknown) }
     }
 
-    private func finishOperation(_ epoch: Int) {
-        guard activeOperationEpoch == epoch else { return }
-        activeOperationEpoch = nil
+    private func disconnectPrimary(
+        clearConsent: Bool,
+        decision: CodexMonitorConsentDecision = .unknown
+    ) async {
+        guard !previewOnly else { return }
+        connectionTask?.cancel()
+        connectionTask = nil
         isRefreshing = false
-        cancelConnectionProgressObservation()
-    }
-
-    private func isCurrentOperation(_ epoch: Int) -> Bool {
-        stateEpoch == epoch && activeOperationEpoch == epoch
-    }
-
-    private func observeConnectionProgress(for epoch: Int) {
-        connectionProgressTask?.cancel()
-        let client = self.client
-        connectionProgressTask = Task { @MainActor [weak self, client] in
-            while !Task.isCancelled {
-                do {
-                    try await Task.sleep(for: .milliseconds(50))
-                } catch {
-                    return
-                }
-                guard let self, self.isCurrentOperation(epoch), self.lastLiveUsage == nil else { return }
-                let state = await client.connectionState()
-                guard self.isCurrentOperation(epoch), Self.isFirstLoadProgressState(state) else { continue }
-                self.connectionState = state
-            }
+        if let registry, let id = primaryConnectorID {
+            try? await registry.perform(.disconnect, for: id)
         }
-    }
-
-    private func cancelConnectionProgressObservation() {
-        connectionProgressTask?.cancel()
-        connectionProgressTask = nil
-    }
-
-    private static func isFirstLoadProgressState(_ state: CodexConnectionState) -> Bool {
-        switch state {
-        case .resolvingExecutable, .startingServer, .initializing, .checkingAccount,
-             .accountAvailable, .authorizationRequired, .loadingRateLimits, .loadingUsage,
-             .loadingOptionalActivity:
-            true
-        default:
-            false
+        if clearConsent {
+            monitorConsentGranted = false
+            monitorConsentDecision = decision
+            monitorConsentDecision.persist(to: consentDefaults)
+            providerSnapshots = []
+            snapshot = .empty(language: language)
+            freshness = .noRealData
+            connectionState = .notAuthorizedByMonitor
+        } else {
+            connectionState = monitorConsentGranted ? .idle : .notAuthorizedByMonitor
+            freshness = hasPriorRealSnapshot ? .stale : .noRealData
         }
+        lastError = nil
+        lastFailure = nil
+        updatePeriodicRefreshSchedule()
+    }
+
+    private func setConsentMissingFailure() {
+        connectionState = .notAuthorizedByMonitor
+        freshness = hasPriorRealSnapshot ? .stale : .noRealData
+        lastFailure = .monitorConsentMissing
+        lastError = codexFailureDescription(lastFailure)
+    }
+
+    private func applyRegistryFailure(_ failure: AgentSafeFailure) {
+        isRefreshing = false
+        lastFailure = Self.codexFailure(failure)
+        lastError = codexFailureDescription(lastFailure)
+        connectionState = hasPriorRealSnapshot ? .staleWithPreviousRealData(lastFailure!) : .recoverableFailure(lastFailure!)
+        freshness = hasPriorRealSnapshot ? .stale : .noRealData
     }
 
     private var allowsPeriodicRefresh: Bool {
@@ -622,7 +301,8 @@ public final class UsageStore: ObservableObject {
 
     private func updatePeriodicRefreshSchedule() {
         guard allowsPeriodicRefresh else {
-            cancelPeriodicRefresh()
+            periodicRefreshTask?.cancel()
+            periodicRefreshTask = nil
             return
         }
         guard periodicRefreshTask == nil else { return }
@@ -630,35 +310,52 @@ public final class UsageStore: ObservableObject {
         periodicRefreshTask = Task { @MainActor [weak self] in
             defer { self?.periodicRefreshTask = nil }
             while !Task.isCancelled {
-                do {
-                    try await Task.sleep(for: interval)
-                } catch {
-                    return
-                }
+                try? await Task.sleep(for: interval)
                 guard let self, self.allowsPeriodicRefresh else { return }
                 await self.refresh()
-                guard self.connectionState == .ready else { return }
             }
         }
     }
 
-    private func cancelPeriodicRefresh() {
-        periodicRefreshTask?.cancel()
-        periodicRefreshTask = nil
+    private static func presentationState(_ state: AgentConnectorState, failure: AgentSafeFailure?) -> CodexConnectionState {
+        switch state {
+        case .inactive: .idle
+        case .authenticationRequired: .officialCodexSignInRequired
+        case .waitingForFirstResponse: .checkingAccount
+        case .ready: .ready
+        case .stale: .staleWithPreviousRealData(codexFailure(failure ?? .unknown))
+        case .unsupported: .blockedFailure(.protocolIncompatible)
+        case .failed: .recoverableFailure(codexFailure(failure ?? .unknown))
+        }
     }
 
-    @discardableResult
-    private func invalidateOperations() -> Int {
-        stateEpoch &+= 1
-        activeOperationEpoch = nil
-        isRefreshing = false
-        return stateEpoch
+    private static func presentationFreshness(_ freshness: AgentConnectorFreshness) -> UsageFreshness {
+        switch freshness {
+        case .fresh: .fresh
+        case .stale: .stale
+        case .unavailable: .noRealData
+        }
+    }
+
+    private static func codexFailure(_ failure: AgentSafeFailure) -> CodexUsageClientFailure {
+        switch failure {
+        case .authorizationRequired: .accountAuthorizationRequired
+        case .unavailable: .codexApplicationNotFound
+        case .timedOut: .requestTimedOut(method: "connector")
+        case .unsupported: .protocolIncompatible
+        case .malformedResponse: .malformedResponse(method: "connector")
+        case .processExited: .processExited
+        case .unknown: .unknownSafeError
+        }
+    }
+
+    private func codexFailureDescription(_ failure: CodexUsageClientFailure?) -> String? {
+        failure.map { CodexUsageClientError($0).description(language: language) }
     }
 
     deinit {
-        localSessionTask?.cancel()
-        localActivityReadTask?.cancel()
-        connectionProgressTask?.cancel()
+        registrySubscription?.cancel()
+        connectionTask?.cancel()
         periodicRefreshTask?.cancel()
     }
 }

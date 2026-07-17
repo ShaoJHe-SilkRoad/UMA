@@ -160,3 +160,125 @@ struct UsageSnapshot: Codable, Sendable {
         )
     }
 }
+
+extension UsageSnapshot {
+    /// Presentation projection only. The connector core supplies normalized
+    /// aggregates; this view model adds localized labels and no transport data.
+    init(agentSnapshot: AgentUsageSnapshot, language: AppLanguage, now: Date = Date()) {
+        let account = agentSnapshot.channels.first(where: { $0.id == .account })
+        let local = agentSnapshot.channels.first(where: { $0.id == .localActivity })
+        let windows = (account?.rateLimitWindows ?? []).sorted { $0.kind.rawValue < $1.kind.rawValue }
+        var periods = windows.enumerated().map { index, window in
+            UsagePeriod(
+                id: window.id,
+                title: language.quotaTitle(
+                    durationMinutes: window.kind == .fiveHour ? 300 : (window.kind == .sevenDay ? 10_080 : nil),
+                    index: index
+                ),
+                remainingPercent: max(0, min(100, Int((100 - (window.usedPercent ?? 0)).rounded()))),
+                isUnlimited: window.isUnlimited,
+                resetText: language.resetDescription(for: window.resetsAt, now: now)
+            )
+        }
+        if !windows.contains(where: { $0.kind == .fiveHour }), windows.contains(where: { $0.kind == .sevenDay }) {
+            periods.insert(
+                UsagePeriod(
+                    id: "normalized.unlimited-five-hour",
+                    title: language.quotaTitle(durationMinutes: 300, index: 0),
+                    remainingPercent: 100,
+                    isUnlimited: true,
+                    resetText: language.resetDescription(for: nil, now: now)
+                ),
+                at: 0
+            )
+        }
+        let localMetrics = local?.localActivityMetrics
+        let derivedTasks = (0..<min(3, localMetrics?.recentTaskCount ?? 0)).map { index in
+            RecentTask(
+                id: "normalized-local-\(index + 1)",
+                title: language.localMetadataTaskTitle,
+                time: localMetrics?.recentTaskCapturedAt.indices.contains(index) == true
+                    ? language.localCaptureDescription(for: localMetrics!.recentTaskCapturedAt[index], now: now)
+                    : "—",
+                tokenText: localMetrics?.recentTaskTokens.indices.contains(index) == true
+                    ? Self.formatNormalizedTokens(localMetrics!.recentTaskTokens[index])
+                    : "—",
+                progress: 0
+            )
+        }
+        self.init(
+            planLabel: Self.normalizedPlanLabel(account?.accountMetrics?.planLabel),
+            periods: periods,
+            metrics: [
+                UsageMetric(id: "current", value: "—", label: language.metricCurrent),
+                UsageMetric(id: "week", value: Self.formatNormalizedTokens(account?.accountMetrics?.sevenDayTokens), label: language.metricSevenDays),
+                UsageMetric(id: "total", value: Self.formatNormalizedTokens(account?.accountMetrics?.lifetimeTokens), label: language.metricLifetime)
+            ],
+            recentTasks: derivedTasks,
+            apiCostEstimate: localMetrics.flatMap { local in
+                guard let sevenDay = local.estimatedSevenDayUSD, let lifetime = local.estimatedLifetimeUSD else { return nil }
+                return APICostEstimateSnapshot(
+                    sevenDayUSD: sevenDay,
+                    lifetimeUSD: lifetime,
+                    coveragePercent: local.coveragePercent ?? 0,
+                    modelNames: []
+                )
+            },
+            availableResets: account?.accountMetrics?.availableResets,
+            updatedAt: agentSnapshot.capturedAt,
+            providerSource: account.map {
+                UsageSourceStatus(
+                    label: "\(agentSnapshot.providerName) account",
+                    scope: Self.presentationScope(for: agentSnapshot, channel: $0),
+                    capturedAt: $0.capturedAt,
+                    isAvailable: $0.freshness != .unavailable,
+                    freshness: Self.presentationFreshness($0.freshness)
+                )
+            },
+            localSource: local.map {
+                UsageSourceStatus(
+                    label: "\(agentSnapshot.providerName) local activity",
+                    scope: $0.scopes.map(\.rawValue).sorted().joined(separator: ", "),
+                    capturedAt: $0.capturedAt,
+                    isAvailable: $0.freshness != .unavailable,
+                    coverage: $0.localActivityMetrics?.coveragePercent,
+                    freshness: Self.presentationFreshness($0.freshness)
+                )
+            }
+        )
+    }
+
+    private static func normalizedPlanLabel(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "—" }
+        return value.uppercased()
+    }
+
+    private static func formatNormalizedTokens(_ value: Int64?) -> String {
+        guard let value else { return "—" }
+        if value >= 1_000_000_000 { return String(format: "%.2fB", Double(value) / 1_000_000_000) }
+        if value >= 1_000_000 { return String(format: "%.2fM", Double(value) / 1_000_000) }
+        if value >= 1_000 { return String(format: "%.1fK", Double(value) / 1_000) }
+        return "\(value)"
+    }
+
+    private static func presentationFreshness(_ freshness: AgentConnectorFreshness) -> UsageSourceStatus.Freshness {
+        switch freshness {
+        case .fresh: .fresh
+        case .stale: .stale
+        case .unavailable: .unavailable
+        }
+    }
+
+    private static func presentationScope(
+        for snapshot: AgentUsageSnapshot,
+        channel: AgentUsageChannel
+    ) -> String {
+        // Preserve the accepted Codex source wording while every other
+        // connector receives the normalized scope list rather than a
+        // provider-specific transport detail.
+        if snapshot.providerName == "Codex", channel.id == .account {
+            return "account/read, account/rateLimits/read, account/usage/read"
+        }
+        return channel.scopes.map(\.rawValue).sorted().joined(separator: ", ")
+    }
+}

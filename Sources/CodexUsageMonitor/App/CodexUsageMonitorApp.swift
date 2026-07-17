@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !isDisconnectingForTermination else { return .terminateCancel }
         isDisconnectingForTermination = true
         Task { @MainActor [store] in
-            await store.disconnectMonitor()
+            await store.stopAllConnectors()
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
