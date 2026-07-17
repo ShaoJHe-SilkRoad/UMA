@@ -208,11 +208,12 @@ actor CodexUsageConnector: AgentUsageConnector {
                 resetsAt: window.resetsAt
             )
         }
-        // The provider may communicate the special five-hour state at the
-        // account level rather than as a normal quota window. Retain a typed
-        // unlimited row so it cannot be mistaken for a 100% ordinary limit.
+        // Preserve the accepted G1 account contract: an authoritative weekly
+        // window without a five-hour window represents the special unlimited
+        // five-hour state.  The account-level credits grant is an additional
+        // explicit source of that same state.
         if !windows.contains(where: { $0.kind == .fiveHour }),
-           usage.rateLimits.creditsUnlimited == true {
+           (usage.rateLimits.creditsUnlimited == true || windows.contains(where: { $0.kind == .sevenDay })) {
             windows.insert(
                 AgentRateLimitWindow(
                     id: "five-hour-unlimited",

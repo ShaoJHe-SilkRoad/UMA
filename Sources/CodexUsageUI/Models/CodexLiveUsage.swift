@@ -95,6 +95,13 @@ struct CodexRateLimitSnapshot: Sendable {
         _ candidate: CodexRateLimitWindow,
         than current: CodexRateLimitWindow
     ) -> Bool {
+        // `credits.unlimited` is an authoritative provider grant, not an
+        // optimistic percentage.  Prefer it over a duplicate ordinary window
+        // so a zero-percent fallback cannot erase the special five-hour
+        // state during normalized selection.
+        if candidate.creditsUnlimited != current.creditsUnlimited {
+            return candidate.creditsUnlimited == true
+        }
         let candidateUsed = candidate.usedPercent.isFinite ? candidate.usedPercent : -.infinity
         let currentUsed = current.usedPercent.isFinite ? current.usedPercent : -.infinity
         if candidateUsed != currentUsed { return candidateUsed > currentUsed }

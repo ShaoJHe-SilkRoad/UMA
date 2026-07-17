@@ -364,6 +364,30 @@ struct M1AG1DualSourceConnectorTests {
     }
 
     @Test
+    func authoritativeUnlimitedFiveHourWinsOverDuplicateOrdinaryWindow() {
+        let usage = CodexLiveUsage(
+            rateLimits: .init(
+                planType: "pro",
+                windows: [
+                    .init(id: "ordinary-five-hour", usedPercent: 0, windowDurationMinutes: 300, resetsAt: nil),
+                    .init(id: "special-five-hour", creditsUnlimited: true, usedPercent: 0, windowDurationMinutes: 300, resetsAt: nil),
+                    .init(id: "weekly", usedPercent: 96, windowDurationMinutes: 10_080, resetsAt: nil)
+                ]
+            ),
+            availableResetCount: nil,
+            lifetimeTokens: nil,
+            dailyUsage: nil,
+            recentActivityCount: 0,
+            apiCostEstimate: nil
+        )
+
+        let snapshot = UsageSnapshot(live: usage, language: .english)
+        #expect(snapshot.periods.map(\.title) == ["5-Hour Limit", "7-Day Limit"])
+        #expect(snapshot.periods.first?.isUnlimited == true)
+        #expect(snapshot.periods.first?.remainingPercent == 100)
+    }
+
+    @Test
     func authoritativeWeeklyWindowRetainsTheUnlimitedFiveHourRowWhenTheProviderOmitsIt() {
         let usage = CodexLiveUsage(
             rateLimits: .init(

@@ -182,6 +182,29 @@ struct M1AG2ConnectorCoreTests {
         #expect(await client.disconnectCount == 1)
     }
 
+    @Test
+    func adapterPreservesG1UnlimitedFiveHourWhenOnlyWeeklyWindowIsReported() async throws {
+        let weeklyOnly = CodexLiveUsage(
+            rateLimits: .init(
+                planType: "PRO",
+                windows: [.init(id: "weekly", usedPercent: 24, windowDurationMinutes: 10_080, resetsAt: nil)]
+            ),
+            availableResetCount: nil,
+            lifetimeTokens: nil,
+            dailyUsage: nil,
+            recentActivityCount: 0,
+            apiCostEstimate: nil
+        )
+        let client = ProcessExitThenRecoveryClient(results: [.success(weeklyOnly)])
+        let connector = CodexUsageConnector(client: client, localActivityReader: UnavailableLocalReader())
+
+        await connector.perform(.connect)
+        let account = try #require((await connector.currentSnapshot()).channels.first(where: { $0.id == .account }))
+        #expect(account.rateLimitWindows.map(\.kind) == [.fiveHour, .sevenDay])
+        #expect(account.rateLimitWindows.first?.isUnlimited == true)
+        #expect(account.rateLimitWindows.first?.usedPercent == nil)
+    }
+
     /// Opt-in only: the Goal runner supplies the managed HOME for one
     /// bounded account-first connect and one explicit refresh. It emits only
     /// booleans/counts, never an account object or raw protocol payload.
