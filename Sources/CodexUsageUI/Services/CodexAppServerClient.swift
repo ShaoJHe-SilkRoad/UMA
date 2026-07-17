@@ -1,238 +1,342 @@
 import Foundation
 
-struct CodexAppServerClient: Sendable {
-    func fetchUsage() async throws -> CodexLiveUsage {
-        try await Task.detached(priority: .userInitiated) {
-            try Self.fetchUsageSynchronously()
-        }.value
+/// Minimal surface required by the store.  It is deliberately injectable so
+/// tests never need an installed Codex app or an account.
+protocol CodexUsageClient: Sendable {
+    /// Performs only the local service setup and credential-free
+    /// `account/read` presence check. A false result must not read limits,
+    /// usage, threads, or cost data.
+    func checkLocalAccountAvailability() async throws -> Bool
+    func fetchUsage() async throws -> CodexLiveUsage
+    /// Uses the positive, same-session `account/read` result produced by
+    /// `checkLocalAccountAvailability()` and must not issue a second account
+    /// read. This keeps the provider sequence bounded to one account check.
+    func fetchUsageAfterVerifiedAccount() async throws -> CodexLiveUsage
+    func disconnect() async
+    func takeUsageRefreshRequest() async -> Bool
+    func connectionState() async -> CodexConnectionState
+}
+
+extension CodexUsageClient {
+    /// Compatibility default for legacy test doubles. Production supplies the
+    /// account-only implementation above. This default deliberately performs
+    /// no usage request, so a legacy double cannot consume or expose an extra
+    /// usage result before the store's required post-account read. Focused
+    /// reconciliation tests provide their own account result and never rely
+    /// on this path.
+    func checkLocalAccountAvailability() async throws -> Bool {
+        return true
     }
 
-    private static func fetchUsageSynchronously() throws -> CodexLiveUsage {
-        let executable = try resolveCodexExecutable()
-        let process = Process()
-        let inputPipe = Pipe()
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-
-        process.executableURL = executable
-        process.arguments = ["app-server", "--stdio"]
-        process.standardInput = inputPipe
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
-
-        do {
-            try process.run()
-        } catch {
-            throw CodexUsageClientError.launchFailed
-        }
-
-        let messages: [[String: Any]] = [
-            [
-                "id": 1,
-                "method": "initialize",
-                "params": [
-                    "clientInfo": [
-                        "name": "codex-usage-monitor",
-                        "title": "Codex Usage Monitor",
-                        "version": "1.0.0"
-                    ],
-                    "capabilities": [
-                        "experimentalApi": true,
-                        "requestAttestation": false
-                    ]
-                ]
-            ],
-            ["method": "initialized"],
-            ["id": 2, "method": "account/rateLimits/read"],
-            ["id": 3, "method": "account/usage/read"],
-            [
-                "id": 4,
-                "method": "thread/list",
-                "params": [
-                    "limit": 3,
-                    "sortKey": "updated_at",
-                    "sortDirection": "desc",
-                    "useStateDbOnly": true
-                ]
-            ]
-        ]
-
-        let inputData = try messages.reduce(into: Data()) { data, message in
-            data.append(try JSONSerialization.data(withJSONObject: message))
-            data.append(0x0A)
-        }
-        inputPipe.fileHandleForWriting.write(inputData)
-
-        var rateLimits: RateLimitsResult?
-        var accountUsage: AccountUsageResult?
-        var threadList: ThreadListResult?
-        let decoder = JSONDecoder()
-
-        while rateLimits == nil || accountUsage == nil || threadList == nil {
-            guard let line = readLine(from: outputPipe.fileHandleForReading) else { break }
-            guard
-                let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
-                let id = (object["id"] as? NSNumber)?.intValue
-            else { continue }
-
-            switch id {
-            case 2:
-                let envelope = try decoder.decode(RPCEnvelope<RateLimitsResult>.self, from: line)
-                try envelope.throwIfNeeded()
-                rateLimits = envelope.result
-            case 3:
-                let envelope = try decoder.decode(RPCEnvelope<AccountUsageResult>.self, from: line)
-                try envelope.throwIfNeeded()
-                accountUsage = envelope.result
-            case 4:
-                let envelope = try decoder.decode(RPCEnvelope<ThreadListResult>.self, from: line)
-                try envelope.throwIfNeeded()
-                threadList = envelope.result
-            default:
-                continue
-            }
-        }
-
-        try? inputPipe.fileHandleForWriting.close()
-        if process.isRunning {
-            process.terminate()
-        }
-        process.waitUntilExit()
-        let errors = errorPipe.fileHandleForReading.readDataToEndOfFile()
-
-        guard let rateLimits else {
-            let detail = String(data: errors, encoding: .utf8) ?? ""
-            throw CodexUsageClientError.missingRateLimits(detail)
-        }
-        guard let accountUsage else {
-            throw CodexUsageClientError.missingAccountUsage
-        }
-
-        let threads = (threadList?.data ?? []).map { thread in
-            CodexThreadUsage(
-                id: thread.id,
-                title: thread.displayTitle,
-                updatedAt: Date(timeIntervalSince1970: thread.updatedAt),
-                totalTokens: SessionTokenReader.latestTotalTokens(at: thread.path)
-            )
-        }
-        let apiCostEstimate = SessionAPICostEstimator.estimate()
-
-        return CodexLiveUsage(
-            rateLimits: CodexRateLimitSnapshot(
-                planType: rateLimits.rateLimits.planType,
-                primary: rateLimits.rateLimits.primary?.liveValue,
-                secondary: rateLimits.rateLimits.secondary?.liveValue
-            ),
-            availableResetCount: rateLimits.rateLimitResetCredits?.availableCount ?? 0,
-            lifetimeTokens: accountUsage.summary.lifetimeTokens,
-            dailyUsage: (accountUsage.dailyUsageBuckets ?? []).map {
-                CodexDailyUsage(startDate: $0.startDate, tokens: $0.tokens)
-            },
-            recentThreads: threads,
-            apiCostEstimate: apiCostEstimate
-        )
-    }
-
-    private static func resolveCodexExecutable() throws -> URL {
-        let candidates = [
-            "/Applications/Codex.app/Contents/Resources/codex",
-            "/opt/homebrew/bin/codex",
-            "/usr/local/bin/codex"
-        ]
-        if let path = candidates.first(where: FileManager.default.isExecutableFile(atPath:)) {
-            return URL(fileURLWithPath: path)
-        }
-        throw CodexUsageClientError.executableNotFound
-    }
-
-    private static func readLine(from handle: FileHandle) -> Data? {
-        var line = Data()
-        while true {
-            let byte = handle.readData(ofLength: 1)
-            if byte.isEmpty {
-                return line.isEmpty ? nil : line
-            }
-            if byte[byte.startIndex] == 0x0A {
-                return line
-            }
-            line.append(byte)
-        }
+    func fetchUsageAfterVerifiedAccount() async throws -> CodexLiveUsage {
+        try await fetchUsage()
     }
 }
 
-enum CodexUsageClientError: LocalizedError {
-    case executableNotFound
-    case launchFailed
-    case server(String)
-    case missingRateLimits(String)
-    case missingAccountUsage
+/// Owns one retained local app-server process and enforces the account-first
+/// sequence. It never reads auth files or returns account identity data.
+actor CodexAppServerClient: CodexUsageClient {
+    private let resolver: any CodexExecutableResolving
+    private let session: CodexAppServerSession
+    private var executableURL: URL?
+    private var hasVerifiedAccountInCurrentSession = false
+    private var state: CodexConnectionState = .idle
+
+    init(
+        resolver: any CodexExecutableResolving = CodexExecutableResolver(),
+        session: CodexAppServerSession = CodexAppServerSession()
+    ) {
+        self.resolver = resolver
+        self.session = session
+    }
+
+    func connectionState() -> CodexConnectionState {
+        return state
+    }
+
+    func disconnect() async {
+        await session.shutdown()
+        executableURL = nil
+        hasVerifiedAccountInCurrentSession = false
+        state = .idle
+    }
+
+    func takeUsageRefreshRequest() async -> Bool {
+        await session.takeUsageRefreshRequest()
+    }
+
+    func checkLocalAccountAvailability() async throws -> Bool {
+        do {
+            try await prepareSession()
+            let available = try await readAccountAvailability()
+            hasVerifiedAccountInCurrentSession = available
+            return available
+        } catch {
+            throw record(error)
+        }
+    }
+
+    func fetchUsage() async throws -> CodexLiveUsage {
+        try await fetchUsage(requiresFreshAccountRead: true)
+    }
+
+    func fetchUsageAfterVerifiedAccount() async throws -> CodexLiveUsage {
+        try await fetchUsage(requiresFreshAccountRead: false)
+    }
+
+    private func fetchUsage(requiresFreshAccountRead: Bool) async throws -> CodexLiveUsage {
+        do {
+            try await prepareSession()
+            if requiresFreshAccountRead {
+                guard try await readAccountAvailability() else {
+                    hasVerifiedAccountInCurrentSession = false
+                    throw CodexUsageClientError(.accountAuthorizationRequired)
+                }
+                hasVerifiedAccountInCurrentSession = true
+            } else if !hasVerifiedAccountInCurrentSession {
+                throw CodexUsageClientError(.accountAuthorizationRequired)
+            }
+
+            state = .loadingRateLimits
+            let rateLimitResponse: RateLimitsResult = try await session.requestWithExplicitNullParameters(
+                method: "account/rateLimits/read"
+            )
+            let rateLimits = rateLimitResponse.snapshot
+
+            state = .loadingUsage
+            let accountUsage: AccountUsageResult = try await session.requestWithExplicitNullParameters(
+                method: "account/usage/read"
+            )
+            let usage = CodexLiveUsage(
+                rateLimits: rateLimits,
+                availableResetCount: rateLimitResponse.rateLimitResetCredits?.availableCount,
+                lifetimeTokens: accountUsage.summary.lifetimeTokens,
+                dailyUsage: accountUsage.dailyUsageBuckets,
+                recentActivityCount: 0,
+                apiCostEstimate: nil
+            )
+            state = .ready
+            hasVerifiedAccountInCurrentSession = true
+            return usage
+        } catch {
+            hasVerifiedAccountInCurrentSession = false
+            throw record(error)
+        }
+    }
+
+    private func prepareSession() async throws {
+        if executableURL == nil {
+            state = .resolvingExecutable
+            executableURL = try resolver.resolve()
+        }
+        guard let executableURL else {
+            throw CodexUsageClientError(.codexExecutableNotFound)
+        }
+        state = .startingServer
+        try await session.start(executableURL: executableURL)
+        state = .initializing
+        try await session.initializeIfNeeded()
+    }
+
+    /// Retains only an authorization decision.  `AccountReadResult` decodes an
+    /// otherwise empty presence marker, so account names, emails, and IDs are
+    /// never retained by this client.
+    private func readAccountAvailability() async throws -> Bool {
+        state = .checkingAccount
+        let result: AccountReadResult
+        do {
+            result = try await session.request(
+                method: "account/read",
+                params: EmptyParameters(),
+                timeout: 10,
+                timeoutFailure: .accountCheckTimedOut
+            )
+        } catch let error as CodexUsageClientError where error.failure == .requestTimedOut(method: "account/read") {
+            throw CodexUsageClientError(.accountCheckTimedOut)
+        }
+
+        guard result.isAccountAvailable else {
+            state = .authorizationRequired
+            return false
+        }
+        state = .accountAvailable
+        return true
+    }
+
+    private func record(_ error: Error) -> CodexUsageClientError {
+        let safeError = (error as? CodexUsageClientError) ?? CodexUsageClientError(.unknownSafeError)
+        switch safeError.failure {
+        case .accountAuthorizationRequired:
+            state = .authorizationRequired
+        case .accountAuthorizationCanceled, .accountAuthorizationFailed:
+            state = .authorizationRequired
+        default:
+            state = safeError.failure.blocksConnection
+                ? .blockedFailure(safeError.failure)
+                : .recoverableFailure(safeError.failure)
+        }
+        return safeError
+    }
+}
+
+struct CodexUsageClientError: LocalizedError, Sendable, Equatable {
+    let failure: CodexUsageClientFailure
+    /// Present only for a decoded JSON-RPC error.  This record contains no
+    /// upstream message text or response payload; it is safe for the core to
+    /// use when selecting a future UI action.
+    let safeJSONRPCError: CodexSafeJSONRPCError?
+
+    init(_ failure: CodexUsageClientFailure, safeJSONRPCError: CodexSafeJSONRPCError? = nil) {
+        self.failure = failure
+        self.safeJSONRPCError = safeJSONRPCError
+    }
 
     var errorDescription: String? {
         description(language: .systemMatch())
     }
 
     func description(language: AppLanguage) -> String {
-        switch self {
-        case .executableNotFound:
-            language == .simplifiedChinese ? "未找到 Codex 应用" : "Codex app not found"
-        case .launchFailed:
-            language == .simplifiedChinese
-                ? "无法启动 Codex 用量服务"
-                : "Unable to start the Codex usage service"
-        case .server(let message):
-            language == .simplifiedChinese
-                ? "Codex 返回错误：\(message)"
-                : "Codex returned an error: \(message)"
-        case .missingRateLimits:
-            language == .simplifiedChinese
-                ? "未读取到 Codex 限额"
-                : "Codex usage limits were not returned"
-        case .missingAccountUsage:
-            language == .simplifiedChinese
-                ? "未读取到账户 token 用量"
-                : "Account token usage was not returned"
+        switch failure {
+        case .monitorConsentMissing:
+            return language == .simplifiedChinese ? "请先允许应用连接本机 Codex" : "Allow the app to connect to local Codex first"
+        case .codexApplicationNotFound, .codexExecutableNotFound:
+            return language == .simplifiedChinese ? "未找到本机 Codex 应用" : "Local Codex app was not found"
+        case .codexExecutableNotExecutable:
+            return language == .simplifiedChinese ? "本机 Codex 无法运行" : "Local Codex executable cannot run"
+        case .accountAuthorizationRequired:
+            return language == .simplifiedChinese ? "需要 Codex 授权" : "Codex authorization is required"
+        case .accountAuthorizationCanceled:
+            return language == .simplifiedChinese ? "Codex 授权已取消" : "Codex authorization was canceled"
+        case .accountAuthorizationFailed:
+            return language == .simplifiedChinese ? "Codex 授权未完成" : "Codex authorization did not complete"
+        case .initializationTimedOut, .accountCheckTimedOut, .requestTimedOut:
+            return language == .simplifiedChinese ? "本机 Codex 响应超时" : "Local Codex did not respond in time"
+        case .serverOverloaded:
+            return language == .simplifiedChinese ? "本机 Codex 当前繁忙" : "Local Codex is currently busy"
+        case .requiredDataMissing:
+            return language == .simplifiedChinese ? "Codex 未返回所需用量数据" : "Codex did not return required usage data"
+        case .optionalDataUnavailable:
+            return language == .simplifiedChinese ? "可选活动数据暂不可用" : "Optional activity data is unavailable"
+        default:
+            return language == .simplifiedChinese ? "无法连接本机 Codex" : "Unable to connect to local Codex"
         }
     }
 }
 
-private struct RPCEnvelope<Result: Decodable>: Decodable {
-    let result: Result?
-    let error: RPCError?
+private struct EmptyParameters: Encodable {}
 
-    func throwIfNeeded() throws {
-        if let error {
-            throw CodexUsageClientError.server(error.message)
-        }
+/// Decodes arbitrary response JSON while retaining none of it.  It is used by
+/// login operations precisely to avoid leaking login IDs or authorization URLs
+/// into the public model.
+private struct AccountReadResult: Decodable {
+    private let account: AccountPresence?
+    private let requiresOpenaiAuth: Bool
+
+    var isAccountAvailable: Bool {
+        // The installed app-server reports requiresOpenaiAuth=true for an
+        // authenticated ChatGPT account because the service itself requires
+        // OpenAI authentication. Account presence, not that capability flag,
+        // is the authorization result. The type is deliberately not exposed
+        // beyond this private presence check.
+        _ = requiresOpenaiAuth
+        return account != nil
     }
 }
 
-private struct RPCError: Decodable {
-    let message: String
+private struct AccountPresence: Decodable {
+    let type: String
 }
 
 private struct RateLimitsResult: Decodable {
     let rateLimits: RateLimitSnapshotResponse
+    let rateLimitsByLimitId: [String: RateLimitSnapshotResponse]?
     let rateLimitResetCredits: ResetCreditsResponse?
+
+    var snapshot: CodexRateLimitSnapshot {
+        let identifiedSnapshots: [(String, RateLimitSnapshotResponse)]
+        if let rateLimitsByLimitId, !rateLimitsByLimitId.isEmpty {
+            identifiedSnapshots = rateLimitsByLimitId.map { ($0.key, $0.value) }
+        } else {
+            identifiedSnapshots = [(rateLimits.limitID ?? "default", rateLimits)]
+        }
+
+        let windows = identifiedSnapshots.flatMap { sourceID, snapshot in
+            [
+                snapshot.primary.map {
+                    CodexRateLimitWindow(
+                        id: "\(sourceID).primary",
+                        sourceLimitID: sourceID,
+                        serverLimitID: snapshot.limitID,
+                        creditsUnlimited: snapshot.credits?.unlimited,
+                        usedPercent: $0.usedPercent,
+                        windowDurationMinutes: $0.windowDurationMinutes,
+                        resetsAt: $0.resetsAt.map(Date.init(timeIntervalSince1970:))
+                    )
+                },
+                snapshot.secondary.map {
+                    CodexRateLimitWindow(
+                        id: "\(sourceID).secondary",
+                        sourceLimitID: sourceID,
+                        serverLimitID: snapshot.limitID,
+                        creditsUnlimited: snapshot.credits?.unlimited,
+                        usedPercent: $0.usedPercent,
+                        windowDurationMinutes: $0.windowDurationMinutes,
+                        resetsAt: $0.resetsAt.map(Date.init(timeIntervalSince1970:))
+                    )
+                }
+            ].compactMap { $0 }
+        }.sorted {
+            if $0.kind.rawValue != $1.kind.rawValue { return $0.kind.rawValue < $1.kind.rawValue }
+            return $0.id < $1.id
+        }
+        return CodexRateLimitSnapshot(
+            planType: rateLimits.planType,
+            windows: windows,
+            sourceLimitIDs: identifiedSnapshots.map(\.0).sorted(),
+            serverLimitID: rateLimits.limitID,
+            creditsUnlimited: rateLimits.credits?.unlimited
+        )
+    }
 }
 
 private struct RateLimitSnapshotResponse: Decodable {
     let primary: RateLimitWindowResponse?
     let secondary: RateLimitWindowResponse?
     let planType: String?
+    let limitID: String?
+    let credits: CreditsSnapshot?
+
+    private enum CodingKeys: String, CodingKey {
+        case primary
+        case secondary
+        case planType
+        case limitID = "limitId"
+        case credits
+    }
+}
+
+private struct CreditsSnapshot: Decodable {
+    let unlimited: Bool
 }
 
 private struct RateLimitWindowResponse: Decodable {
     let usedPercent: Double
-    let windowDurationMins: Int?
+    let windowDurationMinutes: Int?
     let resetsAt: TimeInterval?
 
-    var liveValue: CodexRateLimitWindow {
-        CodexRateLimitWindow(
-            usedPercent: usedPercent,
-            windowDurationMinutes: windowDurationMins,
-            resetsAt: resetsAt.map(Date.init(timeIntervalSince1970:))
-        )
+    private enum CodingKeys: String, CodingKey {
+        case usedPercent
+        case windowDurationMins
+        case windowDurationMinutes
+        case resetsAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        usedPercent = try container.decode(Double.self, forKey: .usedPercent)
+        windowDurationMinutes = try container.decodeIfPresent(Int.self, forKey: .windowDurationMinutes)
+            ?? container.decodeIfPresent(Int.self, forKey: .windowDurationMins)
+        resetsAt = try container.decodeIfPresent(TimeInterval.self, forKey: .resetsAt)
     }
 }
 
@@ -242,64 +346,9 @@ private struct ResetCreditsResponse: Decodable {
 
 private struct AccountUsageResult: Decodable {
     let summary: AccountUsageSummaryResponse
-    let dailyUsageBuckets: [DailyUsageResponse]?
+    let dailyUsageBuckets: [CodexDailyUsage]?
 }
 
 private struct AccountUsageSummaryResponse: Decodable {
     let lifetimeTokens: Int64?
-}
-
-private struct DailyUsageResponse: Decodable {
-    let startDate: String
-    let tokens: Int64
-}
-
-private struct ThreadListResult: Decodable {
-    let data: [ThreadResponse]
-}
-
-private struct ThreadResponse: Decodable {
-    let id: String
-    let preview: String
-    let updatedAt: TimeInterval
-    let path: String?
-    let name: String?
-
-    var displayTitle: String {
-        let candidate = name?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let fallback = preview.trimmingCharacters(in: .whitespacesAndNewlines)
-        let value = (candidate?.isEmpty == false ? candidate : nil) ?? fallback
-        if value.count <= 24 { return value }
-        return String(value.prefix(23)) + "…"
-    }
-}
-
-private enum SessionTokenReader {
-    static func latestTotalTokens(at path: String?) -> Int64? {
-        guard let path, let handle = FileHandle(forReadingAtPath: path) else { return nil }
-        defer { try? handle.close() }
-
-        do {
-            let end = try handle.seekToEnd()
-            let bytesToRead = min(end, 2_000_000)
-            try handle.seek(toOffset: end - bytesToRead)
-            let data = try handle.readToEnd() ?? Data()
-            for rawLine in data.split(separator: 0x0A).reversed() {
-                guard
-                    let object = try? JSONSerialization.jsonObject(with: Data(rawLine)) as? [String: Any],
-                    let type = object["type"] as? String,
-                    type == "event_msg",
-                    let payload = object["payload"] as? [String: Any],
-                    payload["type"] as? String == "token_count",
-                    let info = payload["info"] as? [String: Any],
-                    let total = info["total_token_usage"] as? [String: Any],
-                    let tokens = total["total_tokens"] as? NSNumber
-                else { continue }
-                return tokens.int64Value
-            }
-        } catch {
-            return nil
-        }
-        return nil
-    }
 }

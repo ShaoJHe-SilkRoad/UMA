@@ -28,14 +28,71 @@ struct APICostEstimateSnapshot: Codable, Sendable {
     let modelNames: [String]
 }
 
+/// Public presentation metadata for the two independent channels.  It contains
+/// no account identity, session names, paths, prompt text, or raw payload.
+struct UsageSourceStatus: Codable, Sendable {
+    enum Freshness: String, Codable, Sendable {
+        case fresh
+        case stale
+        case unavailable
+    }
+
+    let label: String
+    let scope: String
+    let capturedAt: Date?
+    let isAvailable: Bool
+    let coverage: Int?
+    let freshness: Freshness
+
+    init(
+        label: String,
+        scope: String,
+        capturedAt: Date?,
+        isAvailable: Bool,
+        coverage: Int? = nil,
+        freshness: Freshness? = nil
+    ) {
+        self.label = label
+        self.scope = scope
+        self.capturedAt = capturedAt
+        self.isAvailable = isAvailable
+        self.coverage = coverage
+        self.freshness = freshness ?? (isAvailable ? .fresh : .unavailable)
+    }
+}
+
 struct UsageSnapshot: Codable, Sendable {
     var planLabel: String
     var periods: [UsagePeriod]
     var metrics: [UsageMetric]
     var recentTasks: [RecentTask]
     var apiCostEstimate: APICostEstimateSnapshot?
-    var availableResets: Int
+    /// `nil` means the provider did not supply reset-credit information. It
+    /// must remain unavailable rather than being rendered as a fabricated 0.
+    var availableResets: Int?
     var updatedAt: Date
+    var providerSource: UsageSourceStatus?
+    var localSource: UsageSourceStatus?
+
+    /// The only production first-load value.  Preview data remains available
+    /// exclusively to the explicit preview renderer path.
+    static func empty(language: AppLanguage, now: Date = Date()) -> UsageSnapshot {
+        UsageSnapshot(
+            planLabel: "—",
+            periods: [],
+            metrics: [
+                UsageMetric(id: "current", value: "—", label: language.metricCurrent),
+                UsageMetric(id: "week", value: "—", label: language.metricSevenDays),
+                UsageMetric(id: "total", value: "—", label: language.metricLifetime)
+            ],
+            recentTasks: [],
+            apiCostEstimate: nil,
+            availableResets: nil,
+            updatedAt: now,
+            providerSource: nil,
+            localSource: nil
+        )
+    }
 
     static func preview(language: AppLanguage) -> UsageSnapshot {
         let taskCopy = language.previewTasks
@@ -94,7 +151,9 @@ struct UsageSnapshot: Codable, Sendable {
                 modelNames: ["GPT-5.5", "GPT-5.6 Sol"]
             ),
             availableResets: 2,
-            updatedAt: Date()
+            updatedAt: Date(),
+            providerSource: UsageSourceStatus(label: "Preview fixture", scope: "preview only", capturedAt: Date(), isAvailable: true),
+            localSource: UsageSourceStatus(label: "Preview fixture", scope: "preview only", capturedAt: Date(), isAvailable: true, coverage: 100)
         )
     }
 }

@@ -10,7 +10,14 @@ struct APIModelPrice: Codable, Equatable, Sendable {
     // Standard API prices active when this app version was released.
     // When a price changes, keep the old version in existing ledger records and
     // return a new version here. Never edit persisted records in place.
-    static func price(for rawModel: String) -> APIModelPrice? {
+    /// Returns the catalog entry that was known to apply at `observedAt`.
+    ///
+    /// The catalog deliberately has a bounded historical start rather than
+    /// silently applying today's price to an older local session. Ledger
+    /// records encode the selected price in full, so later catalog changes do
+    /// not alter an already-recorded delta.
+    static func price(for rawModel: String, observedAt: Date?) -> APIModelPrice? {
+        guard let observedAt, observedAt >= catalogEffectiveDate else { return nil }
         let model = rawModel.lowercased()
         if model == "gpt-5.6-sol" || model.hasPrefix("gpt-5.6-sol-") {
             return APIModelPrice(
@@ -59,6 +66,22 @@ struct APIModelPrice: Codable, Equatable, Sendable {
         }
         return nil
     }
+
+    /// Convenience for callers that are calculating a prospective estimate
+    /// rather than replaying a timestamped session event.
+    static func price(for rawModel: String) -> APIModelPrice? {
+        price(for: rawModel, observedAt: Date())
+    }
+
+    private static let catalogEffectiveDate: Date = {
+        var components = DateComponents()
+        components.calendar = Calendar(identifier: .gregorian)
+        components.timeZone = TimeZone(secondsFromGMT: 0)
+        components.year = 2026
+        components.month = 7
+        components.day = 13
+        return components.date ?? .distantFuture
+    }()
 }
 
 struct SessionTokenSummary: Sendable {
@@ -67,6 +90,54 @@ struct SessionTokenSummary: Sendable {
     let cachedInputTokens: Int64
     let outputTokens: Int64
     let totalTokens: Int64
+    /// Metadata-only values used in memory for a conservative fork baseline.
+    /// They are never written to the durable ledger, which keeps only opaque
+    /// local IDs, token counters, and price snapshots.
+    let sessionIdentifier: String?
+    let parentSessionIdentifier: String?
+    let forkedAt: Date?
+    let observedAt: Date?
+    let tokenCheckpoints: [TokenCountCheckpoint]
+
+    init(
+        model: String,
+        inputTokens: Int64,
+        cachedInputTokens: Int64,
+        outputTokens: Int64,
+        totalTokens: Int64,
+        sessionIdentifier: String? = nil,
+        parentSessionIdentifier: String? = nil,
+        forkedAt: Date? = nil,
+        observedAt: Date? = nil,
+        tokenCheckpoints: [TokenCountCheckpoint] = []
+    ) {
+        self.model = model
+        self.inputTokens = inputTokens
+        self.cachedInputTokens = cachedInputTokens
+        self.outputTokens = outputTokens
+        self.totalTokens = totalTokens
+        self.sessionIdentifier = sessionIdentifier
+        self.parentSessionIdentifier = parentSessionIdentifier
+        self.forkedAt = forkedAt
+        self.observedAt = observedAt
+        self.tokenCheckpoints = tokenCheckpoints
+    }
+
+    func inheritedBaseline() -> TokenCounts? {
+        guard let forkedAt else { return nil }
+        return tokenCheckpoints
+            .filter { $0.capturedAt <= forkedAt }
+            .max { $0.capturedAt < $1.capturedAt }?
+            .counts
+    }
+}
+
+/// A timestamped, metadata-only token checkpoint used transiently while a
+/// child session establishes its inherited baseline. It is never Codable and
+/// is not persisted by `APICostLedger`.
+struct TokenCountCheckpoint: Sendable {
+    let capturedAt: Date
+    let counts: TokenCounts
 }
 
 struct APICostLedger: Codable, Sendable {
@@ -88,19 +159,68 @@ struct APICostLedger: Codable, Sendable {
         summary: SessionTokenSummary,
         initialUsageDay: String,
         incrementalUsageDay: String,
-        price: APIModelPrice?
+        price: APIModelPrice?,
+        inheritedBaseline: TokenCounts? = nil,
+        requiresInheritedBaseline: Bool = false
     ) -> Bool {
-        let current = TokenCounts(summary: summary)
-        let previous = checkpoints[sessionID]?.counts
-        checkpoints[sessionID] = Checkpoint(model: summary.model, counts: current)
+        observeDetailed(
+            sessionID: sessionID,
+            summary: summary,
+            initialUsageDay: initialUsageDay,
+            incrementalUsageDay: incrementalUsageDay,
+            price: price,
+            inheritedBaseline: inheritedBaseline,
+            requiresInheritedBaseline: requiresInheritedBaseline
+        )?.didChange ?? false
+    }
+
+    /// Returns the safe, baseline-adjusted current total even when there is no
+    /// new delta. This lets the local channel render a child task without
+    /// counting parent context as child work. `nil` is intentionally
+    /// conservative: the baseline was missing, malformed, or lower than an
+    /// established checkpoint.
+    mutating func observeDetailed(
+        sessionID: String,
+        summary: SessionTokenSummary,
+        initialUsageDay: String,
+        incrementalUsageDay: String,
+        price: APIModelPrice?,
+        inheritedBaseline: TokenCounts?,
+        requiresInheritedBaseline: Bool
+    ) -> Observation? {
+        let rawCurrent = TokenCounts(summary: summary)
+        let existing = checkpoints[sessionID]
+        let baseline: TokenCounts?
+        if let existing {
+            baseline = existing.inheritedBaseline
+        } else {
+            guard !requiresInheritedBaseline || inheritedBaseline != nil else {
+                return nil
+            }
+            baseline = inheritedBaseline
+        }
+
+        let current: TokenCounts
+        if let baseline {
+            guard let adjusted = rawCurrent.delta(since: baseline) else {
+                return nil
+            }
+            current = adjusted
+        } else {
+            current = rawCurrent
+        }
+
+        let previous = existing?.counts
 
         let delta: TokenCounts
         let usageDay: String
         if let previous {
             guard let incremental = current.delta(since: previous) else {
                 // A rewritten or truncated log must not subtract or reprice
-                // costs that were already frozen in the ledger.
-                return true
+                // costs that were already frozen in the ledger. Crucially, do
+                // not lower the checkpoint: a later healthy file must be
+                // compared with the last accepted high-water mark.
+                return nil
             }
             delta = incremental
             usageDay = incrementalUsageDay
@@ -109,7 +229,17 @@ struct APICostLedger: Codable, Sendable {
             usageDay = initialUsageDay
         }
 
-        guard delta.totalTokens > 0 else { return previous == nil }
+        guard delta.totalTokens > 0 else {
+            if previous == nil {
+                checkpoints[sessionID] = Checkpoint(
+                    model: summary.model,
+                    counts: current,
+                    inheritedBaseline: baseline
+                )
+                return Observation(current: current, didChange: true)
+            }
+            return Observation(current: current, didChange: false)
+        }
         let usd = price.map {
             SessionAPICostEstimator.estimatedUSD(price: $0, counts: delta)
         } ?? 0
@@ -131,7 +261,12 @@ struct APICostLedger: Codable, Sendable {
                 usd: usd
             ))
         }
-        return true
+        checkpoints[sessionID] = Checkpoint(
+            model: summary.model,
+            counts: current,
+            inheritedBaseline: baseline
+        )
+        return Observation(current: current, didChange: true)
     }
 
     func estimate(sevenDayKeys: Set<String>) -> CodexAPICostEstimate? {
@@ -171,6 +306,21 @@ extension APICostLedger {
     struct Checkpoint: Codable, Sendable {
         let model: String
         let counts: TokenCounts
+        /// Persisted counters only; this is deliberately not a parent ID or
+        /// session path. It freezes a previously reconstructed baseline so a
+        /// later parent-tail eviction cannot reintroduce inherited context.
+        let inheritedBaseline: TokenCounts?
+
+        init(model: String, counts: TokenCounts, inheritedBaseline: TokenCounts? = nil) {
+            self.model = model
+            self.counts = counts
+            self.inheritedBaseline = inheritedBaseline
+        }
+    }
+
+    struct Observation: Sendable {
+        let current: TokenCounts
+        let didChange: Bool
     }
 
     struct Record: Codable, Sendable {
@@ -269,6 +419,14 @@ struct APICostLedgerStore: Sendable {
         let backupURL = backupURL
         if let data = try? Data(contentsOf: backupURL),
            let ledger = try? decoder.decode(APICostLedger.self, from: data) {
+            // A valid backup is the last known good state. Restore it
+            // atomically so the next launch does not repeatedly parse the
+            // corrupted primary file or silently restart lifetime accounting.
+            try? fileManager.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try? data.write(to: url, options: .atomic)
             return ledger
         }
         throw StoreError.corruptedLedger

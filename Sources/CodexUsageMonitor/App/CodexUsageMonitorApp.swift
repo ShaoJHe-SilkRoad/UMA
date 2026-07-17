@@ -5,10 +5,21 @@ import CodexUsageUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = UsageStore()
     private var statusBarController: StatusBarController?
+    private var isDisconnectingForTermination = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         statusBarController = StatusBarController(store: store)
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !isDisconnectingForTermination else { return .terminateCancel }
+        isDisconnectingForTermination = true
+        Task { @MainActor [store] in
+            await store.disconnectMonitor()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     func applicationWillTerminate(_ notification: Notification) {

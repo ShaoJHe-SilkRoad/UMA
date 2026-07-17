@@ -104,8 +104,8 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
             "\(minutes / 60) 小时额度"
         case (.english, .some(let minutes)) where minutes % 60 == 0:
             "\(minutes / 60)-Hour Limit"
-        case (.simplifiedChinese, _): index == 0 ? "短期限额" : "长期限额"
-        case (.english, _): index == 0 ? "Short-Term Limit" : "Long-Term Limit"
+        case (.simplifiedChinese, _): "额度（时段未知）"
+        case (.english, _): "Usage Limit (Window Unknown)"
         }
     }
 
@@ -189,6 +189,13 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    func derivedActivityTitle(index: Int) -> String {
+        switch self {
+        case .simplifiedChinese: "最近本机活动 \(index + 1)"
+        case .english: "Recent local activity \(index + 1)"
+        }
+    }
+
     var threadTotalTokens: String {
         switch self {
         case .simplifiedChinese: "线程累计 token"
@@ -207,6 +214,92 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .simplifiedChinese: "API 标准价"
         case .english: "Standard API rates"
+        }
+    }
+
+    var localMetadataTaskTitle: String {
+        switch self {
+        case .simplifiedChinese: "本机 Codex 会话"
+        case .english: "Local Codex session"
+        }
+    }
+
+    func localCaptureDescription(for date: Date, now: Date) -> String {
+        let minutes = max(0, Int(now.timeIntervalSince(date) / 60))
+        return switch self {
+        case .simplifiedChinese: minutes == 0 ? "刚刚捕获" : "\(minutes) 分钟前捕获"
+        case .english: minutes == 0 ? "Captured just now" : "Captured \(minutes)m ago"
+        }
+    }
+
+    var providerChannel: String {
+        switch self {
+        case .simplifiedChinese: "账户来源"
+        case .english: "Account source"
+        }
+    }
+
+    var localChannel: String {
+        switch self {
+        case .simplifiedChinese: "本机来源"
+        case .english: "This Mac source"
+        }
+    }
+
+    var sourceAvailable: String {
+        switch self {
+        case .simplifiedChinese: "可用"
+        case .english: "available"
+        }
+    }
+
+    var sourceUnavailable: String {
+        switch self {
+        case .simplifiedChinese: "不可用"
+        case .english: "unavailable"
+        }
+    }
+
+    var sourceNotCaptured: String {
+        switch self {
+        case .simplifiedChinese: "尚未捕获"
+        case .english: "not captured"
+        }
+    }
+
+    func sourceCaptured(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = self == .simplifiedChinese ? Locale(identifier: "zh_CN") : Locale(identifier: "en_US_POSIX")
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        switch self {
+        case .simplifiedChinese: return "捕获 \(formatter.string(from: date))"
+        case .english: return "captured \(formatter.string(from: date))"
+        }
+    }
+
+    func sourceCoverage(_ percent: Int) -> String {
+        switch self {
+        case .simplifiedChinese: return "覆盖 \(percent)%"
+        case .english: return "coverage \(percent)%"
+        }
+    }
+
+    func sourceFreshness(_ freshness: UsageSourceStatus.Freshness) -> String {
+        switch (self, freshness) {
+        case (.simplifiedChinese, .fresh): "新鲜"
+        case (.simplifiedChinese, .stale): "较早"
+        case (.simplifiedChinese, .unavailable): "未提供"
+        case (.english, .fresh): "fresh"
+        case (.english, .stale): "stale"
+        case (.english, .unavailable): "not provided"
+        }
+    }
+
+    func sourceScope(_ scope: String) -> String {
+        switch self {
+        case .simplifiedChinese: "范围：\(scope)"
+        case .english: "Scope: \(scope)"
         }
     }
 
@@ -256,6 +349,13 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .simplifiedChinese: "可用重置 \(count) 次"
         case .english: "\(count) resets available"
+        }
+    }
+
+    var resetAvailabilityUnavailable: String {
+        switch self {
+        case .simplifiedChinese: "重置额度未提供"
+        case .english: "Reset availability unavailable"
         }
     }
 

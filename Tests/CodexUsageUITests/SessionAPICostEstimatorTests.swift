@@ -201,4 +201,85 @@ struct SessionAPICostEstimatorTests {
         #expect(json.contains("persisted-price"))
         #expect(json.contains("inputPerMillion"))
     }
+
+    @Test
+    func subtractsParentBaselineAndSkipsAnUnreconstructableChildBaseline() throws {
+        let price = APIModelPrice(
+            version: "fork-test-price",
+            displayName: "Fork Test",
+            inputPerMillion: 1,
+            cachedInputPerMillion: 0.1,
+            outputPerMillion: 6
+        )
+        let forkTime = Date(timeIntervalSince1970: 1_784_332_800)
+        let parentBaseline = TokenCounts(
+            inputTokens: 80,
+            cachedInputTokens: 20,
+            outputTokens: 20,
+            totalTokens: 100
+        )
+        let firstChild = SessionTokenSummary(
+            model: "fork-test-model",
+            inputTokens: 120,
+            cachedInputTokens: 30,
+            outputTokens: 30,
+            totalTokens: 150,
+            sessionIdentifier: "child",
+            parentSessionIdentifier: "parent",
+            forkedAt: forkTime
+        )
+        let laterChild = SessionTokenSummary(
+            model: "fork-test-model",
+            inputTokens: 132,
+            cachedInputTokens: 32,
+            outputTokens: 36,
+            totalTokens: 168,
+            sessionIdentifier: "child",
+            parentSessionIdentifier: "parent",
+            forkedAt: forkTime
+        )
+
+        var ledger = APICostLedger()
+        let firstResult = ledger.observeDetailed(
+            sessionID: "child.jsonl",
+            summary: firstChild,
+            initialUsageDay: "2026-07-16",
+            incrementalUsageDay: "2026-07-16",
+            price: price,
+            inheritedBaseline: parentBaseline,
+            requiresInheritedBaseline: true
+        )
+        let first = try #require(firstResult)
+        #expect(first.current.totalTokens == 50)
+
+        // The first accepted checkpoint preserves the reconstructed baseline.
+        // A later parent-tail eviction therefore cannot reintroduce inherited
+        // context or erase the already-proven child total.
+        let secondResult = ledger.observeDetailed(
+            sessionID: "child.jsonl",
+            summary: laterChild,
+            initialUsageDay: "2026-07-16",
+            incrementalUsageDay: "2026-07-16",
+            price: price,
+            inheritedBaseline: nil,
+            requiresInheritedBaseline: true
+        )
+        let second = try #require(secondResult)
+        #expect(second.current.totalTokens == 68)
+        #expect(ledger.records.first?.counts.totalTokens == 68)
+
+        var missingBaselineLedger = APICostLedger()
+        let missing = missingBaselineLedger.observeDetailed(
+            sessionID: "unknown-child.jsonl",
+            summary: firstChild,
+            initialUsageDay: "2026-07-16",
+            incrementalUsageDay: "2026-07-16",
+            price: price,
+            inheritedBaseline: nil,
+            requiresInheritedBaseline: true
+        )
+        #expect(missing == nil)
+        #expect(missingBaselineLedger.records.isEmpty)
+        #expect(missingBaselineLedger.checkpoints.isEmpty)
+    }
 }

@@ -11,18 +11,21 @@ public struct UsagePanelView: View {
     let tuning: GlassTuning
     private let preferencesEnabled: Bool
     private let onHeightChange: ((CGFloat) -> Void)?
+    private let localAccessConfirmationAction: CodexLocalAccessConfirmationAction?
 
     public init(
         store: UsageStore,
         tuning: GlassTuning,
         preferencesEnabled: Bool = true,
         settingsInitiallyPresented: Bool = false,
-        onHeightChange: ((CGFloat) -> Void)? = nil
+        onHeightChange: ((CGFloat) -> Void)? = nil,
+        localAccessConfirmationAction: CodexLocalAccessConfirmationAction? = nil
     ) {
         self.store = store
         self.tuning = tuning
         self.preferencesEnabled = preferencesEnabled
         self.onHeightChange = onHeightChange
+        self.localAccessConfirmationAction = localAccessConfirmationAction
         _isShowingSettings = State(initialValue: settingsInitiallyPresented)
     }
 
@@ -38,8 +41,18 @@ public struct UsagePanelView: View {
         preferencesEnabled ? storedShowAPICost : true
     }
 
+    private var presentation: CodexConnectionPresentation {
+        .make(
+            state: store.currentState,
+            decision: store.monitorConsentDecision,
+            hasPriorRealSnapshot: store.hasPriorRealSnapshot,
+            language: store.language
+        )
+    }
+
     private var preferredHeight: CGFloat {
-        UsagePanelMetrics.preferredHeight(
+        guard presentation.showsRealData else { return 330 }
+        return UsagePanelMetrics.preferredHeight(
             showUsageSummary: showUsageSummary,
             showRecentTasks: showRecentTasks,
             showAPICost: showAPICost
@@ -54,21 +67,29 @@ public struct UsagePanelView: View {
 
     public var body: some View {
         VStack(spacing: 12) {
-            HeaderView(store: store, tuning: tuning, isShowingSettings: $isShowingSettings)
-            if showUsageSummary {
-                UsageSummaryCard(snapshot: store.snapshot, language: store.language, tuning: tuning)
-            }
-            if showRecentTasks {
-                RecentTasksCard(tasks: store.snapshot.recentTasks, language: store.language, tuning: tuning)
-            }
-            if showAPICost {
-                APICostEstimateCard(
-                    estimate: store.snapshot.apiCostEstimate,
+            if presentation.showsRealData {
+                HeaderView(store: store, tuning: tuning, isShowingSettings: $isShowingSettings)
+                if showUsageSummary {
+                    UsageSummaryCard(snapshot: store.snapshot, language: store.language, tuning: tuning)
+                }
+                if showRecentTasks {
+                    RecentTasksCard(tasks: store.snapshot.recentTasks, language: store.language, tuning: tuning)
+                }
+                if showAPICost {
+                    APICostEstimateCard(
+                        estimate: store.snapshot.apiCostEstimate,
+                        language: store.language,
+                        tuning: tuning
+                    )
+                }
+                FooterView(snapshot: store.snapshot, language: store.language)
+            } else {
+                CodexConnectionBridgeView(
+                    presentation: presentation,
                     language: store.language,
-                    tuning: tuning
+                    perform: perform
                 )
             }
-            FooterView(snapshot: store.snapshot, language: store.language)
         }
         .padding(.horizontal, 16)
         .padding(.top, 14)
@@ -122,12 +143,32 @@ public struct UsagePanelView: View {
         .onChange(of: displayedHeight) { _, newHeight in
             onHeightChange?(newHeight)
         }
-        .task {
-            await store.refresh()
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(60))
-                await store.refresh()
+    }
+
+    @MainActor
+    private func perform(_ action: CodexConnectionAction) async {
+        switch action {
+        case .connect:
+            guard localAccessConfirmationAction?.request() == true else {
+                await store.declineMonitorConsent()
+                return
             }
+            store.grantMonitorConsent()
+            await store.connectToLocalSession()
+        case .notNow:
+            await store.declineMonitorConsent()
+        case .checkLocalSession:
+            await store.checkLocalSessionAgain()
+        case .cancelLocalSessionReconciliation:
+            await store.cancelLocalSessionReconciliation()
+        case .retry:
+            await store.refresh()
+        case .reconnect:
+            await store.reconnectMonitor()
+        case .disconnect:
+            await store.disconnectAndForgetConsent()
+        case .openCodex, .updateCodex, .dismiss:
+            break
         }
     }
 }
@@ -474,7 +515,10 @@ private struct FooterView: View {
 
     var body: some View {
         HStack {
-            Label(language.availableResets(snapshot.availableResets), systemImage: "clock.arrow.circlepath")
+            Label(
+                snapshot.availableResets.map(language.availableResets) ?? language.resetAvailabilityUnavailable,
+                systemImage: "clock.arrow.circlepath"
+            )
             Spacer()
             Text(language.updatedAt(updatedTime))
         }

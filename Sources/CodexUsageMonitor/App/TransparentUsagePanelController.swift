@@ -97,7 +97,8 @@ final class TransparentUsagePanelController {
                 tuning: tuning,
                 onHeightChange: { [weak self] height in
                     self?.resizePanel(to: height)
-                }
+                },
+                localAccessConfirmationAction: NativeLocalCodexAccessConfirmation.action(for: store)
             )
         )
         hostingView.frame = NSRect(x: 0, y: 0, width: Layout.width, height: Layout.height)

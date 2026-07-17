@@ -19,6 +19,7 @@ final class StatusBarController: NSObject {
             statusItem: statusItem,
             visibilityDidChange: { [weak self] isVisible in
                 self?.statusItem.button?.highlight(isVisible)
+                self?.store.setPanelVisible(isVisible)
             }
         )
         configureStatusButton()
@@ -57,10 +58,10 @@ final class StatusBarController: NSObject {
     }
 
     private func updateStatusButton() {
-        statusItem.button?.title = " \(store.menuPercent)%"
+        statusItem.button?.title = store.menuPercent.map { " " + String($0) + "%" } ?? " —"
         statusItem.button?.toolTip = store.language.appTitle
         statusItem.button?.setAccessibilityLabel(
-            store.language.remainingAccessibilityLabel(percent: store.menuPercent)
+            store.menuPercent.map { store.language.remainingAccessibilityLabel(percent: $0) } ?? store.language.appTitle
         )
     }
 
@@ -81,6 +82,7 @@ final class StatusBarController: NSObject {
             keyEquivalent: "r"
         )
         refresh.target = self
+        refresh.isEnabled = store.allowsManualRefresh
         menu.addItem(refresh)
         menu.addItem(.separator())
         let quit = NSMenuItem(
@@ -97,6 +99,7 @@ final class StatusBarController: NSObject {
 
     @objc
     private func refreshUsage() {
+        guard store.allowsManualRefresh else { return }
         Task { await store.refresh() }
     }
 
