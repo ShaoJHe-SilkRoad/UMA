@@ -32,6 +32,15 @@ actor CodexUsageConnector: AgentUsageConnector {
     private var state: AgentConnectorState = .inactive
     private var activeCommand = false
     private var localReadGeneration = 0
+    /// Exactly one observer is retained for the built-in local metadata
+    /// reader. It emits only debounced invalidations; it cannot initiate an
+    /// account or app-server request.
+    private var localActivityObserver: CodexLocalActivityObserver?
+    private var localActivityRefreshTask: Task<Void, Never>?
+    /// The connector owns the one consumer of the client's sanitized
+    /// notification stream. A provider event is an invalidation only; it
+    /// routes through the same serialized refresh path as every other cause.
+    private var providerEventTask: Task<Void, Never>?
 
     init(
         client: any CodexUsageClient = CodexAppServerClient(),
@@ -47,22 +56,33 @@ actor CodexUsageConnector: AgentUsageConnector {
         return AgentConnectorProbe(state: state, safeFailure: latestFailure)
     }
 
-    func start() async { publish() }
+    func start() async {
+        startLocalActivityObservationIfNeeded()
+        startProviderEventObservationIfNeeded()
+        publish()
+    }
 
-    func refresh() async { await run(kind: .refresh) }
+    func refresh() async { await run(kind: .refresh(trigger: .manual)) }
+
+    func refresh(trigger: CodexRefreshTrigger) async {
+        await run(kind: .refresh(trigger: trigger))
+    }
 
     func perform(_ command: AgentConnectorCommand) async {
         switch command {
-        case .connect: await run(kind: .connect)
+        case .connect: await run(kind: .connect(trigger: .reconnect))
         case .reconnect:
+            stopProviderEventObservation()
             await client.disconnect()
-            await run(kind: .connect)
-        case .refresh: await run(kind: .refresh)
+            await run(kind: .connect(trigger: .reconnect))
+        case .refresh: await run(kind: .refresh(trigger: .manual))
         case .disconnect: await stop()
         }
     }
 
     func stop() async {
+        stopLocalActivityObservation()
+        stopProviderEventObservation()
         await client.disconnect()
         state = .inactive
         latestFailure = nil
@@ -81,12 +101,17 @@ actor CodexUsageConnector: AgentUsageConnector {
 
     func currentSnapshot() async -> AgentUsageSnapshot { makeSnapshot() }
 
-    private enum RunKind { case connect, refresh }
+    private enum RunKind {
+        case connect(trigger: CodexRefreshTrigger)
+        case refresh(trigger: CodexRefreshTrigger)
+    }
 
     private func run(kind: RunKind) async {
         guard !activeCommand else { return }
         activeCommand = true
         defer { activeCommand = false }
+        startLocalActivityObservationIfNeeded()
+        startProviderEventObservationIfNeeded()
         state = .waitingForFirstResponse
         publish()
 
@@ -111,9 +136,9 @@ actor CodexUsageConnector: AgentUsageConnector {
                     return
                 }
                 provider = try await client.fetchUsageAfterVerifiedAccount()
-            case .refresh:
+            case .refresh(let trigger):
                 do {
-                    provider = try await client.fetchUsage()
+                    provider = try await client.fetchUsage(trigger: trigger)
                 } catch let error as CodexUsageClientError {
                     guard error.failure == .processExited,
                           await client.supportsOwnedProcessRecovery()
@@ -123,7 +148,7 @@ actor CodexUsageConnector: AgentUsageConnector {
                     // by the client, so one fresh account-first read can
                     // safely recreate only that owned local child.
                     await client.disconnect()
-                    provider = try await client.fetchUsage()
+                    provider = try await client.fetchUsage(trigger: .reconnect)
                 }
             }
             latestProvider = provider
@@ -145,6 +170,81 @@ actor CodexUsageConnector: AgentUsageConnector {
     }
 
     private func acceptLocalActivity(_ activity: CodexLocalActivitySnapshot, generation: Int) {
+        guard generation == localReadGeneration else { return }
+        latestLocal = activity
+        publish()
+    }
+
+    private func startLocalActivityObservationIfNeeded() {
+        guard localActivityObserver == nil,
+              let provider = localActivityReader as? any CodexLocalActivityObservationProviding
+        else { return }
+        let observer = provider.makeLocalActivityObserver { [weak self] in
+            Task { await self?.scheduleObservedLocalActivityRefresh() }
+        }
+        localActivityObserver = observer
+        observer.start()
+    }
+
+    private func stopLocalActivityObservation() {
+        localReadGeneration &+= 1
+        localActivityRefreshTask?.cancel()
+        localActivityRefreshTask = nil
+        localActivityObserver?.stop()
+        localActivityObserver = nil
+    }
+
+    private func startProviderEventObservationIfNeeded() {
+        guard providerEventTask == nil else { return }
+        let client = client
+        providerEventTask = Task { [weak self] in
+            let stream = await client.eventStream()
+            for await _ in stream {
+                guard !Task.isCancelled else { return }
+                await self?.receiveProviderInvalidation()
+            }
+            await self?.clearProviderEventObservation()
+        }
+    }
+
+    private func stopProviderEventObservation() {
+        providerEventTask?.cancel()
+        providerEventTask = nil
+    }
+
+    private func clearProviderEventObservation() {
+        providerEventTask = nil
+    }
+
+    private func receiveProviderInvalidation() async {
+        // `run` intentionally collapses an event arriving during a current
+        // provider read. The current read remains the one owned request, so
+        // notification bursts cannot create duplicate children or a retry
+        // loop. The client coordinator applies the same rule to direct calls.
+        await run(kind: .refresh(trigger: .providerEvent))
+    }
+
+    /// A filesystem event refreshes the local aggregate only. The one task is
+    /// deliberately coalesced across a debounced event burst, never touches
+    /// the provider client, and is invalidated on connector stop.
+    private func scheduleObservedLocalActivityRefresh() {
+        guard localActivityRefreshTask == nil else { return }
+        localReadGeneration &+= 1
+        let generation = localReadGeneration
+        let reader = localActivityReader
+        localActivityRefreshTask = Task { [weak self] in
+            let activity = await Task.detached(priority: .utility) {
+                reader.read(now: Date())
+            }.value
+            await self?.acceptObservedLocalActivity(activity, generation: generation)
+        }
+    }
+
+    private func acceptObservedLocalActivity(
+        _ activity: CodexLocalActivitySnapshot,
+        generation: Int
+    ) {
+        localActivityRefreshTask = nil
         guard generation == localReadGeneration else { return }
         latestLocal = activity
         publish()

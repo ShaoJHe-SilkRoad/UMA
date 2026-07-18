@@ -25,7 +25,11 @@ extension UsageStore {
             ),
             primaryConnectorID: CodexUsageConnector.connectorID,
             consentDefaults: consentDefaults,
-            periodicRefreshInterval: periodicRefreshInterval
+            visibleRefreshInterval: periodicRefreshInterval,
+            // Preserve the pre-Task-B focused tests' visible-only cadence.
+            // New Task-B coverage supplies an explicit short background
+            // interval when it needs to prove the adaptive fallback.
+            backgroundRefreshInterval: .seconds(900)
         )
         _ = localSessionReconciliationInterval
         _ = localSessionReconciliationTimeout

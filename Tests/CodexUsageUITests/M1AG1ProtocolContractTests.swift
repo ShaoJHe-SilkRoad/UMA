@@ -65,6 +65,110 @@ struct M1AG1ProtocolContractTests {
     }
 
     @Test
+    func idleSchemaNotificationsPublishOnlySanitizedTypedEvents() async throws {
+        let transport = ProtocolTransport(messages: [initializeResponse()])
+        let session = CodexAppServerSession(transportFactory: { transport })
+        try await session.start(executableURL: URL(fileURLWithPath: "/synthetic/codex"))
+        try await session.initializeIfNeeded()
+
+        let stream = await session.eventStream()
+        var iterator = stream.makeAsyncIterator()
+        transport.sendInbound(notification("account/updated"))
+        #expect(await iterator.next() == .accountUpdated)
+        #expect(await session.takeUsageRefreshRequest())
+
+        transport.sendInbound(notification("account/rateLimits/updated"))
+        #expect(await iterator.next() == .rateLimitsUpdated)
+        #expect(await session.takeUsageRefreshRequest())
+        await session.shutdown()
+    }
+
+    @Test
+    func unknownIdleNotificationIsDiscardedBeforeTheNextSerializedResponse() async throws {
+        let transport = ProtocolTransport(messages: [
+            initializeResponse(),
+            response(2, result: [:])
+        ])
+        let session = CodexAppServerSession(transportFactory: { transport })
+        try await session.start(executableURL: URL(fileURLWithPath: "/synthetic/codex"))
+        try await session.initializeIfNeeded()
+
+        // Future provider notifications may carry arbitrary fields. The
+        // monitor must discard an unsupported method without retaining its
+        // payload or scheduling an account read.
+        transport.sendInbound(notification("account/futureUpdated"))
+        let _: EmptyResult = try await session.request(method: "account/read", params: EmptyParameters())
+        #expect(await session.takeUsageRefreshRequest() == false)
+        await session.shutdown()
+    }
+
+    @Test
+    func exitedTransportIsReplacedAndReinitializedByTheLivenessRepair() async throws {
+        let first = ProtocolTransport(messages: [
+            response(1, result: [
+                "codexHome": "/synthetic/.codex",
+                "platformFamily": "unix",
+                "platformOs": "macos",
+                "userAgent": "protocol-test"
+            ])
+        ])
+        let second = ProtocolTransport(messages: [
+            response(1, result: [
+                "codexHome": "/synthetic/.codex",
+                "platformFamily": "unix",
+                "platformOs": "macos",
+                "userAgent": "protocol-test"
+            ])
+        ])
+        let factory = TransportQueue([first, second])
+        let session = CodexAppServerSession(transportFactory: { factory.next() })
+
+        try await session.start(executableURL: URL(fileURLWithPath: "/synthetic/codex"))
+        try await session.initializeIfNeeded()
+        first.markExited()
+
+        try await session.repairExitedTransportIfNeeded()
+
+        #expect(factory.startCount == 2)
+        #expect(try first.sentObjects().map { $0["method"] as? String } == ["initialize", "initialized"])
+        #expect(try second.sentObjects().map { $0["method"] as? String } == ["initialize", "initialized"])
+        await session.shutdown()
+    }
+
+    @Test
+    func ownedChildReplacementImmediatelyUsesTheReconnectRefreshLane() async throws {
+        let first = ProtocolTransport(messages: providerReadSequence())
+        let second = ProtocolTransport(messages: providerReadSequence())
+        let factory = TransportQueue([first, second])
+        let session = CodexAppServerSession(transportFactory: { factory.next() })
+        let client = CodexAppServerClient(
+            resolver: FixedResolver(),
+            session: session,
+            ownedProcessMonitorInterval: .milliseconds(5)
+        )
+
+        _ = try await client.fetchUsage()
+        first.markExited()
+
+        for _ in 0..<200 where factory.startCount < 2 {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        for _ in 0..<200 where (try second.sentObjects()).count < 5 {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+
+        #expect(factory.startCount == 2)
+        #expect(try second.sentObjects().map { $0["method"] as? String } == [
+            "initialize",
+            "initialized",
+            "account/read",
+            "account/rateLimits/read",
+            "account/usage/read"
+        ])
+        await client.disconnect()
+    }
+
+    @Test
     func missingSchemaRequiredUsageSummaryIsRejected() async throws {
         let transport = ProtocolTransport(messages: [
             response(1, result: [
@@ -114,6 +218,22 @@ struct M1AG1ProtocolContractTests {
             Issue.record("A serialized session cannot retain a response for another request.")
         } catch let error as CodexUsageClientError {
             #expect(error.failure == .malformedResponse(method: "account/read"))
+        }
+    }
+
+    @Test
+    func cleanEOFRejectsTheNextRequestAsAProcessExit() async throws {
+        let transport = ProtocolTransport(messages: [initializeResponse()])
+        let session = CodexAppServerSession(transportFactory: { transport })
+        try await session.start(executableURL: URL(fileURLWithPath: "/synthetic/codex"))
+        try await session.initializeIfNeeded()
+        transport.finishReading()
+
+        do {
+            let _: EmptyResult = try await session.request(method: "account/read", params: EmptyParameters())
+            Issue.record("A clean app-server EOF must not leave a usable request lane.")
+        } catch let error as CodexUsageClientError {
+            #expect(error.failure == .processExited)
         }
     }
 
@@ -244,33 +364,88 @@ private func sanitizedLiveStoreEvidence(from store: UsageStore, stage: String) -
 
 private final class ProtocolTransport: CodexAppServerTransport, @unchecked Sendable {
     private let lock = NSLock()
-    private var messages: [Data]
+    private var plannedMessages: [Data]
+    private var availableMessages: [Data] = []
     private var writes: [Data] = []
+    private var running = true
+    private var readingFinished = false
+    private var waitingReader: CheckedContinuation<Data?, Error>?
 
     init(messages: [Data]) {
-        self.messages = messages
+        self.plannedMessages = messages
     }
 
     func start(executableURL: URL) throws {}
 
+    var isRunning: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return running
+    }
+
     func write(_ data: Data) throws {
         lock.lock()
         writes.append(data)
+        let isRequest = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["id"] != nil
+        if isRequest {
+            releaseMessagesThroughNextResponseLocked()
+        }
+        let waitingReader = dequeueReaderIfPossibleLocked()
         lock.unlock()
+        if let waitingReader {
+            waitingReader.continuation.resume(returning: waitingReader.message)
+        }
     }
 
     func readLine() async throws -> Data? { try await readMessage() }
 
-    func readMessage() async throws -> Data? { takeMessage() }
-
-    private func takeMessage() -> Data? {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !messages.isEmpty else { return nil }
-        return messages.removeFirst()
+    func readMessage() async throws -> Data? {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            if !availableMessages.isEmpty {
+                let message = availableMessages.removeFirst()
+                lock.unlock()
+                continuation.resume(returning: message)
+            } else if readingFinished {
+                lock.unlock()
+                continuation.resume(returning: nil)
+            } else {
+                waitingReader = continuation
+                lock.unlock()
+            }
+        }
     }
 
-    func stop() {}
+    func stop() { finishReading() }
+
+    func markExited() {
+        finishReading()
+    }
+
+    func finishReading() {
+        lock.lock()
+        running = false
+        readingFinished = true
+        let waitingReader = dequeueReaderIfPossibleLocked()
+        lock.unlock()
+        if let waitingReader {
+            waitingReader.continuation.resume(returning: waitingReader.message)
+        }
+    }
+
+    func sendInbound(_ message: Data) {
+        lock.lock()
+        guard !readingFinished else {
+            lock.unlock()
+            return
+        }
+        availableMessages.append(message)
+        let waitingReader = dequeueReaderIfPossibleLocked()
+        lock.unlock()
+        if let waitingReader {
+            waitingReader.continuation.resume(returning: waitingReader.message)
+        }
+    }
 
     func sentObjects() throws -> [[String: Any]] {
         lock.lock()
@@ -280,10 +455,78 @@ private final class ProtocolTransport: CodexAppServerTransport, @unchecked Senda
             try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         }
     }
+
+    private func releaseMessagesThroughNextResponseLocked() {
+        while !plannedMessages.isEmpty {
+            let message = plannedMessages.removeFirst()
+            availableMessages.append(message)
+            let object = try? JSONSerialization.jsonObject(with: message) as? [String: Any]
+            if object?["id"] != nil { return }
+        }
+    }
+
+    private func dequeueReaderIfPossibleLocked() -> (continuation: CheckedContinuation<Data?, Error>, message: Data?)? {
+        guard let waitingReader else { return nil }
+        if !availableMessages.isEmpty {
+            self.waitingReader = nil
+            return (waitingReader, availableMessages.removeFirst())
+        }
+        if readingFinished {
+            self.waitingReader = nil
+            return (waitingReader, nil)
+        }
+        return nil
+    }
+}
+
+private final class TransportQueue: @unchecked Sendable {
+    private let lock = NSLock()
+    private var transports: [ProtocolTransport]
+    private(set) var startCount = 0
+
+    init(_ transports: [ProtocolTransport]) {
+        self.transports = transports
+    }
+
+    func next() -> any CodexAppServerTransport {
+        lock.lock()
+        defer { lock.unlock() }
+        startCount += 1
+        return transports.removeFirst()
+    }
 }
 
 private func response(_ id: Int, result: [String: Any]) -> Data {
     try! JSONSerialization.data(withJSONObject: ["id": id, "result": result])
+}
+
+private func initializeResponse() -> Data {
+    response(1, result: [
+        "codexHome": "/synthetic/.codex",
+        "platformFamily": "unix",
+        "platformOs": "macos",
+        "userAgent": "protocol-test"
+    ])
+}
+
+private func providerReadSequence() -> [Data] {
+    [
+        initializeResponse(),
+        response(2, result: [
+            "account": ["type": "chatgpt"],
+            "requiresOpenaiAuth": true
+        ]),
+        response(3, result: [
+            "rateLimits": [
+                "planType": "PRO",
+                "primary": ["usedPercent": 20, "windowDurationMins": 300]
+            ]
+        ]),
+        response(4, result: [
+            "summary": ["lifetimeTokens": 100],
+            "dailyUsageBuckets": []
+        ])
+    ]
 }
 
 private func notification(_ method: String) -> Data {

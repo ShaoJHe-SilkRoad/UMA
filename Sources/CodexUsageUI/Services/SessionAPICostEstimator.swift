@@ -44,11 +44,20 @@ protocol CodexLocalActivityReading: Sendable {
     func read(now: Date) -> CodexLocalActivitySnapshot
 }
 
+/// Optional capability for the built-in local metadata reader. Consumers that
+/// need near-real-time local estimates can subscribe without teaching the
+/// account connector anything about session files or their contents.
+protocol CodexLocalActivityObservationProviding: CodexLocalActivityReading {
+    func makeLocalActivityObserver(
+        onChange: @escaping @Sendable () -> Void
+    ) -> CodexLocalActivityObserver
+}
+
 /// Reads only the local Codex session metadata required to count tokens.  It
 /// never reads account files, credentials, prompts, tool input/output, or
 /// arbitrary JSON values.  Files outside the two declared roots, symlinks,
 /// non-regular files, and oversized frames are excluded before opening.
-struct CodexLocalActivityReader: CodexLocalActivityReading, @unchecked Sendable {
+struct CodexLocalActivityReader: CodexLocalActivityObservationProviding, @unchecked Sendable {
     let sessionRoots: [URL]
     let ledgerURL: URL
     private let fileManager: FileManager
@@ -164,6 +173,21 @@ struct CodexLocalActivityReader: CodexLocalActivityReading, @unchecked Sendable 
             excludedFileCount: scan.excludedFileCount,
             tasks: Array(recentTasks),
             apiEquivalentCost: recording?.estimate
+        )
+    }
+
+    /// The observer shares only transient path/signature invalidations with
+    /// this reader. It never forwards a JSONL frame or any unallowlisted
+    /// content to its callback.
+    func makeLocalActivityObserver(
+        onChange: @escaping @Sendable () -> Void
+    ) -> CodexLocalActivityObserver {
+        CodexLocalActivityObserver(
+            sessionRoots: sessionRoots,
+            onFilesystemChange: { [discoveryCache] change in
+                discoveryCache.recordFilesystemChange(change)
+            },
+            onChange: onChange
         )
     }
 }
@@ -296,7 +320,7 @@ private struct ParentSummaryIndex {
     }
 }
 
-private struct SessionMetadataFile {
+struct SessionMetadataFile {
     let url: URL
     let stableID: String
     let size: Int
@@ -305,19 +329,19 @@ private struct SessionMetadataFile {
     let signature: SessionFileSignature
 }
 
-private struct SessionFileSignature: Equatable, Sendable {
+struct SessionFileSignature: Equatable, Sendable {
     let size: Int
     let modifiedAt: Date
 }
 
-private struct SessionMetadataScan {
+struct SessionMetadataScan {
     let rootsExist: Bool
     let discoveredFileCount: Int
     let excludedFileCount: Int
     let files: [SessionMetadataFile]
 }
 
-private enum SessionMetadataScanner {
+enum SessionMetadataScanner {
     private static let tailBytes = 1_048_576
 
     static func scan(roots: [URL], fileManager: FileManager) -> SessionMetadataScan {
@@ -375,7 +399,13 @@ private enum SessionMetadataScanner {
         return SessionMetadataScan(rootsExist: rootsExist, discoveredFileCount: discovered, excludedFileCount: excluded, files: files)
     }
 
-    private static func stableID(
+    /// Returns only allowlisted regular JSONL paths. This is used solely to
+    /// attach filesystem watches; it neither opens files nor decodes content.
+    static func watchableFileURLs(roots: [URL], fileManager: FileManager) -> [URL] {
+        scan(roots: roots, fileManager: fileManager).files.map(\.url)
+    }
+
+    static func stableID(
         for file: URL,
         beneath root: URL,
         rootCategory: SessionRootCategory
@@ -459,7 +489,7 @@ private enum SessionMetadataScanner {
     }
 }
 
-private struct SessionRootCategory {
+struct SessionRootCategory {
     let value: String
 
     init(root: URL, ordinal: Int) {
@@ -479,16 +509,40 @@ private final class SessionMetadataDiscoveryCache: @unchecked Sendable {
     private let lock = NSLock()
     private var rootSignatures: [SessionRootSignature]?
     private var cachedScan: SessionMetadataScan?
+    private var pendingFilesystemChanges = Set<URL>()
+    private var rootsNeedRescan = false
 
     func scan(roots: [URL], fileManager: FileManager) -> SessionMetadataScan {
         let signatures = roots.map { SessionRootSignature.make(for: $0, fileManager: fileManager) }
         lock.lock()
         let priorSignatures = rootSignatures
         let priorScan = cachedScan
+        let pendingChanges = pendingFilesystemChanges
+        let needsRescan = rootsNeedRescan
+        pendingFilesystemChanges.removeAll()
+        rootsNeedRescan = false
         lock.unlock()
+
+        if !needsRescan,
+           priorSignatures == signatures,
+           let priorScan,
+           !pendingChanges.isEmpty,
+           let refreshed = refreshingOnlyChangedFiles(
+               priorScan,
+               changedPaths: pendingChanges,
+               roots: roots,
+               fileManager: fileManager
+           ) {
+            lock.lock()
+            rootSignatures = signatures
+            cachedScan = refreshed
+            lock.unlock()
+            return refreshed
+        }
 
         if priorSignatures == signatures,
            let priorScan,
+           pendingChanges.isEmpty,
            manifestIsCurrent(priorScan, fileManager: fileManager) {
             return priorScan
         }
@@ -499,6 +553,69 @@ private final class SessionMetadataDiscoveryCache: @unchecked Sendable {
         cachedScan = fresh
         lock.unlock()
         return fresh
+    }
+
+    func recordFilesystemChange(_ change: CodexLocalActivityFilesystemChange) {
+        lock.lock()
+        switch change {
+        case .file(let url):
+            pendingFilesystemChanges.insert(url.standardizedFileURL)
+        case .roots:
+            rootsNeedRescan = true
+        }
+        lock.unlock()
+    }
+
+    /// Updates metadata for a file that a direct file watch identified. New,
+    /// renamed, or deleted paths are deliberately escalated to a root rescan;
+    /// ordinary appends and rewrites do not walk unchanged history.
+    private func refreshingOnlyChangedFiles(
+        _ scan: SessionMetadataScan,
+        changedPaths: Set<URL>,
+        roots: [URL],
+        fileManager: FileManager
+    ) -> SessionMetadataScan? {
+        var filesByID = Dictionary(uniqueKeysWithValues: scan.files.map { ($0.stableID, $0) })
+        for changed in changedPaths {
+            guard changed.pathExtension.lowercased() == "jsonl",
+                  let rootIndex = roots.firstIndex(where: { changed.path.hasPrefix($0.standardizedFileURL.path + "/") })
+            else { return nil }
+            let root = roots[rootIndex].standardizedFileURL
+            let rootCategory = SessionRootCategory(root: root, ordinal: rootIndex)
+            let stableID = SessionMetadataScanner.stableID(
+                for: changed,
+                beneath: root,
+                rootCategory: rootCategory
+            )
+            guard let oldFile = filesByID[stableID],
+                  fileManager.fileExists(atPath: changed.path),
+                  let values = try? changed.resourceValues(forKeys: [
+                    .isRegularFileKey,
+                    .isSymbolicLinkKey,
+                    .fileSizeKey,
+                    .contentModificationDateKey,
+                    .creationDateKey
+                  ]),
+                  values.isRegularFile == true,
+                  values.isSymbolicLink != true,
+                  let size = values.fileSize,
+                  let modifiedAt = values.contentModificationDate
+            else { return nil }
+            filesByID[stableID] = SessionMetadataFile(
+                url: changed,
+                stableID: stableID,
+                size: size,
+                modifiedAt: modifiedAt,
+                createdAt: values.creationDate ?? oldFile.createdAt,
+                signature: SessionFileSignature(size: size, modifiedAt: modifiedAt)
+            )
+        }
+        return SessionMetadataScan(
+            rootsExist: scan.rootsExist,
+            discoveredFileCount: scan.discoveredFileCount,
+            excludedFileCount: scan.excludedFileCount,
+            files: Array(filesByID.values)
+        )
     }
 
     private func manifestIsCurrent(

@@ -20,10 +20,20 @@ public final class UsageStore: ObservableObject {
     private let previewOnly: Bool
     private let previewDisplaysFixtureData: Bool
     private let consentDefaults: UserDefaults?
-    private let periodicRefreshInterval: Duration
+    private let autoRefreshEnabled: Bool
+    private let visibleRefreshInterval: Duration
+    private let backgroundRefreshInterval: Duration
+    private let resumesPersistedAuthorizedConnection: Bool
     private var registrySubscription: Task<Void, Never>?
     private var connectionTask: Task<Void, Never>?
     private var periodicRefreshTask: Task<Void, Never>?
+    private var periodicRefreshGeneration: UInt64 = 0
+    private var periodicRefreshUsesVisibleInterval: Bool?
+    /// Store callers join this task before reaching the registry. It keeps a
+    /// menu action, lifecycle wake, timer, and provider event from creating
+    /// parallel connector commands above the client-level coordinator.
+    private var activeRefreshTask: Task<Void, Never>?
+    private var activeRefreshGeneration: UInt64 = 0
 
     public convenience init(autoRefresh: Bool = true, language: AppLanguage? = nil) {
         self.init(
@@ -70,7 +80,8 @@ public final class UsageStore: ObservableObject {
         primaryConnectorID: AgentConnectorID?,
         consentDefaults: UserDefaults? = nil,
         previewScenario: CodexPreviewScenario = .ready,
-        periodicRefreshInterval: Duration = .seconds(240)
+        visibleRefreshInterval: Duration = .seconds(120),
+        backgroundRefreshInterval: Duration = .seconds(900)
     ) {
         let selectedLanguage = language ?? AppLanguage.resolveAndPersist()
         self.registry = registry
@@ -78,22 +89,28 @@ public final class UsageStore: ObservableObject {
         self.previewOnly = previewOnly
         self.previewDisplaysFixtureData = previewOnly && previewScenario.displaysFixtureData
         self.consentDefaults = consentDefaults
-        self.periodicRefreshInterval = periodicRefreshInterval
+        self.autoRefreshEnabled = autoRefresh
+        self.visibleRefreshInterval = visibleRefreshInterval
+        self.backgroundRefreshInterval = backgroundRefreshInterval
         self.language = selectedLanguage
         self.snapshot = previewOnly && previewScenario.displaysFixtureData ? .preview(language: selectedLanguage) : .empty(language: selectedLanguage)
         self.connectionState = previewOnly ? previewScenario.connectionState : .notAuthorizedByMonitor
         self.isRefreshing = previewOnly && previewScenario == .refreshing
         let decision = previewOnly ? .granted : CodexMonitorConsentDecision.load(from: consentDefaults)
+        self.resumesPersistedAuthorizedConnection = !previewOnly && decision == .granted
         self.monitorConsentDecision = decision
         self.monitorConsentGranted = decision == .granted
         if !previewOnly, decision == .granted { self.connectionState = .idle }
         self.freshness = previewOnly ? .fixture : .noRealData
-        _ = autoRefresh
         beginRegistryObservation()
     }
 
-    /// `nil` remains distinct from an actual 0% quota.
-    public var menuPercent: Int? { snapshot.periods.first?.remainingPercent }
+    /// `nil` remains distinct from an actual 0% quota. An authoritative
+    /// unlimited five-hour grant is rendered as ∞ in the panel, so it must
+    /// not make the compact status item claim a misleading ordinary 100%.
+    public var menuPercent: Int? {
+        snapshot.periods.first(where: { !$0.isUnlimited })?.remainingPercent
+    }
 
     public var statusText: String {
         if previewOnly, connectionState == .ready { return language.demoStatus }
@@ -139,19 +156,47 @@ public final class UsageStore: ObservableObject {
 
     public func requestReconnect() { beginConnection(.reconnect) }
 
-    public func refresh() async {
+    public func refresh() async { await refresh(trigger: .manual) }
+
+    /// Every account-refresh cause enters the one registry/client refresh
+    /// lane. Local display-age changes deliberately never call this method.
+    public func refresh(trigger: CodexRefreshTrigger) async {
         guard !previewOnly, monitorConsentGranted, let registry, let id = primaryConnectorID else {
             if !previewOnly { setConsentMissingFailure() }
             return
         }
-        guard !isRefreshing else { return }
+        if let activeRefreshTask {
+            await activeRefreshTask.value
+            return
+        }
+        activeRefreshGeneration &+= 1
+        let generation = activeRefreshGeneration
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performRefresh(trigger: trigger, registry: registry, id: id)
+        }
+        activeRefreshTask = task
+        await task.value
+        guard activeRefreshGeneration == generation else { return }
+        activeRefreshTask = nil
+    }
+
+    private func performRefresh(
+        trigger: CodexRefreshTrigger,
+        registry: AgentConnectorRegistry,
+        id: AgentConnectorID
+    ) async {
         isRefreshing = true
         connectionState = hasPriorRealSnapshot ? .refreshingWithPreviousRealData : .resolvingExecutable
         do {
-            try await registry.perform(.refresh, for: id)
+            try await registry.refresh(id, trigger: trigger)
+            guard !Task.isCancelled else { return }
             receive(await registry.orderedSnapshots())
         }
-        catch { applyRegistryFailure(.unknown) }
+        catch {
+            guard !Task.isCancelled else { return }
+            applyRegistryFailure(.unknown)
+        }
     }
 
     public func connectToLocalSession() async { await performPrimary(.connect) }
@@ -171,16 +216,25 @@ public final class UsageStore: ObservableObject {
 
     public func reconnectMonitor() async { await performPrimary(.reconnect) }
 
+    /// Lifecycle code invokes this once after a system wake. It joins any
+    /// existing provider read rather than starting another connector or child.
+    public func handleApplicationWake() async { await refresh(trigger: .wake) }
+
     /// Called by the application lifecycle, not by a single provider view.
     public func stopAllConnectors() async {
         guard !previewOnly, let registry else { return }
         connectionTask?.cancel()
+        cancelActiveRefresh()
+        periodicRefreshGeneration &+= 1
         periodicRefreshTask?.cancel()
+        periodicRefreshTask = nil
+        periodicRefreshUsesVisibleInterval = nil
         await registry.stopAll()
     }
 
     public func setPanelVisible(_ isVisible: Bool) {
         guard !previewOnly else { return }
+        guard isPanelVisible != isVisible else { return }
         isPanelVisible = isVisible
         updatePeriodicRefreshSchedule()
     }
@@ -203,6 +257,7 @@ public final class UsageStore: ObservableObject {
         registrySubscription = Task { [weak self] in
             await registry.restorePersistedSnapshots()
             let stream = await registry.snapshots()
+            self?.resumePersistedAuthorizedConnection()
             for await snapshots in stream {
                 guard !Task.isCancelled else { return }
                 self?.receive(snapshots)
@@ -210,8 +265,22 @@ public final class UsageStore: ObservableObject {
         }
     }
 
+    /// A persisted monitor authorization is enough to resume the one owned
+    /// Codex session after a restart.  The registry stream yields its stale
+    /// snapshot first; the reconnect then replaces it with a fresh provider
+    /// snapshot without requiring another Connect/Allow interaction.
+    private func resumePersistedAuthorizedConnection() {
+        guard resumesPersistedAuthorizedConnection, monitorConsentGranted else { return }
+        beginConnection(.connect)
+    }
+
     private func receive(_ snapshots: [AgentUsageSnapshot]) {
         guard !previewOnly, monitorConsentGranted else { return }
+        // The registry stream is installed asynchronously. Its initial empty
+        // yield can race a completed direct refresh; it must not erase the
+        // newly verified primary snapshot or turn live values into an
+        // apparent no-data state.
+        guard !snapshots.isEmpty || providerSnapshots.isEmpty else { return }
         providerSnapshots = snapshots
         guard let primary = primarySnapshot else { return }
         snapshot = UsageSnapshot(agentSnapshot: primary, language: language)
@@ -259,6 +328,7 @@ public final class UsageStore: ObservableObject {
         guard !previewOnly else { return }
         connectionTask?.cancel()
         connectionTask = nil
+        cancelActiveRefresh()
         isRefreshing = false
         if let registry, let id = primaryConnectorID {
             try? await registry.perform(.disconnect, for: id)
@@ -295,24 +365,48 @@ public final class UsageStore: ObservableObject {
         freshness = hasPriorRealSnapshot ? .stale : .noRealData
     }
 
+    private func cancelActiveRefresh() {
+        activeRefreshGeneration &+= 1
+        activeRefreshTask?.cancel()
+        activeRefreshTask = nil
+    }
+
     private var allowsPeriodicRefresh: Bool {
-        isPanelVisible && monitorConsentGranted && hasPriorRealSnapshot && connectionState == .ready
+        autoRefreshEnabled && monitorConsentGranted && hasPriorRealSnapshot && connectionState == .ready
     }
 
     private func updatePeriodicRefreshSchedule() {
         guard allowsPeriodicRefresh else {
+            periodicRefreshGeneration &+= 1
             periodicRefreshTask?.cancel()
             periodicRefreshTask = nil
+            periodicRefreshUsesVisibleInterval = nil
             return
         }
-        guard periodicRefreshTask == nil else { return }
-        let interval = periodicRefreshInterval
+        let usesVisibleInterval = isPanelVisible
+        if periodicRefreshTask != nil,
+           periodicRefreshUsesVisibleInterval == usesVisibleInterval {
+            return
+        }
+        periodicRefreshGeneration &+= 1
+        periodicRefreshTask?.cancel()
+        let generation = periodicRefreshGeneration
+        periodicRefreshUsesVisibleInterval = usesVisibleInterval
+        let interval = usesVisibleInterval ? visibleRefreshInterval : backgroundRefreshInterval
         periodicRefreshTask = Task { @MainActor [weak self] in
-            defer { self?.periodicRefreshTask = nil }
+            defer {
+                if let self, self.periodicRefreshGeneration == generation {
+                    self.periodicRefreshTask = nil
+                    self.periodicRefreshUsesVisibleInterval = nil
+                }
+            }
             while !Task.isCancelled {
                 try? await Task.sleep(for: interval)
-                guard let self, self.allowsPeriodicRefresh else { return }
-                await self.refresh()
+                guard let self,
+                      self.periodicRefreshGeneration == generation,
+                      self.allowsPeriodicRefresh
+                else { return }
+                await self.refresh(trigger: .timer)
             }
         }
     }

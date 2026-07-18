@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import CodexUsageUI
@@ -205,6 +206,147 @@ struct M1AG2ConnectorCoreTests {
         #expect(account.rateLimitWindows.first?.usedPercent == nil)
     }
 
+    @Test @MainActor
+    func compactMenuPercentSkipsAnAuthoritativeUnlimitedFiveHourWindow() async throws {
+        let usage = CodexLiveUsage(
+            rateLimits: .init(
+                planType: "PRO",
+                windows: [
+                    .init(
+                        id: "five-hour-unlimited",
+                        creditsUnlimited: true,
+                        usedPercent: 0,
+                        windowDurationMinutes: 300,
+                        resetsAt: nil
+                    ),
+                    .init(
+                        id: "seven-day",
+                        usedPercent: 27,
+                        windowDurationMinutes: 10_080,
+                        resetsAt: nil
+                    )
+                ],
+                creditsUnlimited: true
+            ),
+            availableResetCount: nil,
+            lifetimeTokens: 100,
+            dailyUsage: nil,
+            recentActivityCount: 0,
+            apiCostEstimate: nil
+        )
+        let client = EventRecordingClient(usage: usage)
+        let store = UsageStore(
+            autoRefresh: false,
+            previewOnly: false,
+            language: .english,
+            registry: AgentUsageRuntime.makeCodexRegistry(
+                snapshotStore: nil,
+                client: client,
+                localActivityReader: UnavailableLocalReader()
+            ),
+            primaryConnectorID: CodexUsageConnector.connectorID,
+            consentDefaults: UserDefaults(suiteName: "m1a-g2-dbg-b-menu-\(UUID().uuidString)")
+        )
+
+        store.grantMonitorConsent()
+        await store.connectToLocalSession()
+
+        #expect(store.snapshot.periods.first?.isUnlimited == true)
+        #expect(store.menuPercent == 73)
+        await store.stopAllConnectors()
+    }
+
+    @Test
+    func providerNotificationUsesTheSingleCoalescedProviderEventLane() async throws {
+        let client = EventRecordingClient(usage: Self.liveUsage)
+        let connector = CodexUsageConnector(client: client, localActivityReader: UnavailableLocalReader())
+
+        await connector.start()
+        for _ in 0..<30 where !(await client.hasEventListener) {
+            await Task.yield()
+        }
+        #expect(await client.hasEventListener)
+
+        await connector.perform(.connect)
+        #expect(await client.verifiedFetchCount == 1)
+
+        await client.emit(.rateLimitsUpdated)
+        for _ in 0..<30 where !(await client.triggers.contains(.providerEvent)) {
+            await Task.yield()
+        }
+        #expect(await client.triggers == [.providerEvent])
+        #expect((await connector.currentSnapshot()).state == .ready)
+
+        await connector.stop()
+        #expect(await client.disconnectCount == 1)
+    }
+
+    @Test @MainActor
+    func adaptiveRefreshUsesVisibleCadenceThenAConservativeBackgroundFallback() async throws {
+        let client = EventRecordingClient(usage: Self.liveUsage)
+        let registry = AgentUsageRuntime.makeCodexRegistry(
+            snapshotStore: nil,
+            client: client,
+            localActivityReader: UnavailableLocalReader()
+        )
+        let store = UsageStore(
+            autoRefresh: true,
+            previewOnly: false,
+            language: .english,
+            registry: registry,
+            primaryConnectorID: CodexUsageConnector.connectorID,
+            consentDefaults: UserDefaults(suiteName: "m1a-g2-dbg-b-cadence-\(UUID().uuidString)"),
+            visibleRefreshInterval: .milliseconds(10),
+            backgroundRefreshInterval: .milliseconds(70)
+        )
+        store.grantMonitorConsent()
+        await store.refresh()
+        store.setPanelVisible(true)
+
+        for _ in 0..<50 where !(await client.triggers.contains(.timer)) {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(await client.triggers.contains(.timer))
+
+        store.setPanelVisible(false)
+        let timerCountAtBackgroundTransition = await client.timerTriggerCount
+        try? await Task.sleep(for: .milliseconds(25))
+        #expect(await client.timerTriggerCount == timerCountAtBackgroundTransition)
+
+        for _ in 0..<30 where (await client.timerTriggerCount) == timerCountAtBackgroundTransition {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(await client.timerTriggerCount > timerCountAtBackgroundTransition)
+        await store.stopAllConnectors()
+    }
+
+    @Test @MainActor
+    func workspaceWakeUsesTheExistingWakeRefreshLane() async throws {
+        let client = EventRecordingClient(usage: Self.liveUsage)
+        let store = UsageStore(
+            autoRefresh: false,
+            previewOnly: false,
+            language: .english,
+            registry: AgentUsageRuntime.makeCodexRegistry(
+                snapshotStore: nil,
+                client: client,
+                localActivityReader: UnavailableLocalReader()
+            ),
+            primaryConnectorID: CodexUsageConnector.connectorID,
+            consentDefaults: UserDefaults(suiteName: "m1a-g2-dbg-b-wake-\(UUID().uuidString)")
+        )
+        store.grantMonitorConsent()
+        let wakeObserver = CodexWakeRefreshObserver(store: store)
+        NotificationCenter.default.post(name: NSWorkspace.didWakeNotification, object: nil)
+
+        for _ in 0..<30 where !(await client.triggers.contains(.wake)) {
+            await Task.yield()
+        }
+        #expect(await client.triggers == [.wake])
+        wakeObserver.invalidate()
+        await store.stopAllConnectors()
+    }
+
     /// Opt-in only: the Goal runner supplies the managed HOME for one
     /// bounded account-first connect and one explicit refresh. It emits only
     /// booleans/counts, never an account object or raw protocol payload.
@@ -351,6 +493,59 @@ private actor ProcessExitThenRecoveryClient: CodexUsageClient {
         fetchCount += 1
         guard !results.isEmpty else { throw CodexUsageClientError(.unknownSafeError) }
         return try results.removeFirst().get()
+    }
+}
+
+private actor EventRecordingClient: CodexUsageClient {
+    private let usage: CodexLiveUsage
+    private var eventContinuation: AsyncStream<CodexAppServerEvent>.Continuation?
+    private(set) var verifiedFetchCount = 0
+    private(set) var disconnectCount = 0
+    private(set) var triggers: [CodexRefreshTrigger] = []
+
+    init(usage: CodexLiveUsage) {
+        self.usage = usage
+    }
+
+    var hasEventListener: Bool { eventContinuation != nil }
+    var timerTriggerCount: Int { triggers.filter { $0 == .timer }.count }
+
+    func checkLocalAccountAvailability() async throws -> Bool { true }
+
+    func fetchUsageAfterVerifiedAccount() async throws -> CodexLiveUsage {
+        verifiedFetchCount += 1
+        return usage
+    }
+
+    func fetchUsage() async throws -> CodexLiveUsage {
+        triggers.append(.manual)
+        return usage
+    }
+
+    func fetchUsage(trigger: CodexRefreshTrigger) async throws -> CodexLiveUsage {
+        triggers.append(trigger)
+        return usage
+    }
+
+    func disconnect() async {
+        disconnectCount += 1
+        eventContinuation?.finish()
+        eventContinuation = nil
+    }
+
+    func takeUsageRefreshRequest() async -> Bool { false }
+
+    func eventStream() async -> AsyncStream<CodexAppServerEvent> {
+        AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            self.eventContinuation?.finish()
+            self.eventContinuation = continuation
+        }
+    }
+
+    func connectionState() async -> CodexConnectionState { .idle }
+
+    func emit(_ event: CodexAppServerEvent) {
+        eventContinuation?.yield(event)
     }
 }
 

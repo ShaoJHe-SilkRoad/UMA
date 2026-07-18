@@ -5,11 +5,13 @@ import CodexUsageUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = UsageStore()
     private var statusBarController: StatusBarController?
+    private var wakeRefreshObserver: CodexWakeRefreshObserver?
     private var isDisconnectingForTermination = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         statusBarController = StatusBarController(store: store)
+        wakeRefreshObserver = CodexWakeRefreshObserver(store: store)
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -23,6 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        wakeRefreshObserver?.invalidate()
+        wakeRefreshObserver = nil
         statusBarController?.tearDown()
     }
 }

@@ -75,21 +75,13 @@ final class TransparentUsagePanelController {
         panel.isMovable = false
         panel.isReleasedWhenClosed = false
 
-        let rootView = NSView(frame: NSRect(x: 0, y: 0, width: Layout.width, height: Layout.height))
-        rootView.wantsLayer = true
-        rootView.layer?.backgroundColor = NSColor.clear.cgColor
-        rootView.layer?.cornerRadius = Layout.cornerRadius
-        rootView.layer?.cornerCurve = .continuous
-        rootView.layer?.masksToBounds = true
-
-        let blurView = NSVisualEffectView(frame: rootView.bounds)
-        blurView.autoresizingMask = [.width, .height]
-        blurView.material = .underWindowBackground
-        blurView.blendingMode = .behindWindow
-        blurView.state = .active
-        blurView.isEmphasized = false
-        blurView.alphaValue = tuning.backgroundBlurPercent / 100
-        rootView.addSubview(blurView)
+        let rootView = AdaptivePanelMaterialHostView(
+            frame: NSRect(x: 0, y: 0, width: Layout.width, height: Layout.height),
+            cornerRadius: Layout.cornerRadius,
+            // Keep the exact established macOS 14–25 material intensity
+            // without coupling the frozen panel geometry to M1-G3 tuning WIP.
+            fallbackMaterialOpacity: 0.44
+        )
 
         let hostingView = NSHostingView(
             rootView: UsagePanelView(
@@ -105,7 +97,7 @@ final class TransparentUsagePanelController {
         hostingView.autoresizingMask = [.width, .height]
         hostingView.wantsLayer = true
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
-        rootView.addSubview(hostingView)
+        rootView.installContentView(hostingView)
         panel.contentView = rootView
     }
 
@@ -118,7 +110,11 @@ final class TransparentUsagePanelController {
             frame.origin.y += frame.height - height
         }
         frame.size.height = height
-        panel.setFrame(frame, display: panel.isVisible, animate: panel.isVisible)
+        panel.setFrame(
+            frame,
+            display: panel.isVisible,
+            animate: panel.isVisible && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        )
         panel.invalidateShadow()
     }
 

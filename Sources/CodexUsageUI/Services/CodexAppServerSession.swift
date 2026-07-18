@@ -4,6 +4,12 @@
 /// the production transport only starts the local executable and never reads
 /// authentication material or exposes stderr.
 protocol CodexAppServerTransport: AnyObject, Sendable {
+    /// True while this transport still owns a usable local child process.
+    /// Fixture transports default to true so older protocol tests retain their
+    /// deterministic behavior without modelling an OS process.
+    var isRunning: Bool { get }
+    var needsInitialization: Bool { get }
+    func markInitialized()
     func start(executableURL: URL) throws
     func write(_ data: Data) throws
     /// Legacy fixture seam retained for frozen M1 test doubles.
@@ -16,12 +22,23 @@ protocol CodexAppServerTransport: AnyObject, Sendable {
 }
 
 extension CodexAppServerTransport {
+    var isRunning: Bool { true }
+    var needsInitialization: Bool { false }
+    func markInitialized() {}
     func readMessage() async throws -> Data? { try await readLine() }
 }
 
 private enum CodexAppServerTransportError: Error {
     case notRunning
     case launchFailed
+}
+
+/// A schema-defined provider invalidation.  The session intentionally exposes
+/// no notification payload: callers need only know which account-scoped read
+/// should be coalesced by their refresh coordinator.
+enum CodexAppServerEvent: Sendable, Equatable {
+    case accountUpdated
+    case rateLimitsUpdated
 }
 
 /// The retained local app-server receives only the stable GUI environment it
@@ -51,6 +68,10 @@ final class ProcessCodexAppServerTransport: CodexAppServerTransport, @unchecked 
     private var process: Process?
     private var input: FileHandle?
     private var output: FileHandle?
+    private var retainedExecutableURL: URL?
+    private var retainsOwnedProcess = false
+    private var restartedProcessNeedsInitialization = false
+    private var lastLaunchAt = Date.distantPast
 
     init(launchConfiguration: CodexAppServerProcessLaunchConfiguration = .production()) {
         self.launchConfiguration = launchConfiguration
@@ -59,8 +80,33 @@ final class ProcessCodexAppServerTransport: CodexAppServerTransport, @unchecked 
     func start(executableURL: URL) throws {
         lock.lock()
         defer { lock.unlock() }
-        guard process == nil else { return }
+        if process?.isRunning == true { return }
+        closeHandlesLocked()
+        process = nil
+        retainedExecutableURL = executableURL
+        retainsOwnedProcess = true
+        try launchLocked(executableURL: executableURL)
+    }
 
+    var isRunning: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return process?.isRunning == true
+    }
+
+    var needsInitialization: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return restartedProcessNeedsInitialization
+    }
+
+    func markInitialized() {
+        lock.lock()
+        restartedProcessNeedsInitialization = false
+        lock.unlock()
+    }
+
+    private func launchLocked(executableURL: URL) throws {
         let process = Process()
         let inputPipe = Pipe()
         let outputPipe = Pipe()
@@ -80,9 +126,14 @@ final class ProcessCodexAppServerTransport: CodexAppServerTransport, @unchecked 
             throw CodexAppServerTransportError.launchFailed
         }
 
+        process.terminationHandler = { [weak self, weak process] _ in
+            guard let process else { return }
+            self?.restartAfterUnexpectedExit(of: process)
+        }
         self.process = process
         input = inputPipe.fileHandleForWriting
         output = outputPipe.fileHandleForReading
+        lastLaunchAt = Date()
     }
 
     func write(_ data: Data) throws {
@@ -107,6 +158,9 @@ final class ProcessCodexAppServerTransport: CodexAppServerTransport, @unchecked 
 
     func stop() {
         lock.lock()
+        retainsOwnedProcess = false
+        retainedExecutableURL = nil
+        restartedProcessNeedsInitialization = false
         let input = self.input
         let output = self.output
         let process = self.process
@@ -121,6 +175,33 @@ final class ProcessCodexAppServerTransport: CodexAppServerTransport, @unchecked 
         }
         // Closing stdout unblocks any pending bounded read task.  We never
         // wait indefinitely for a child process during shutdown.
+        try? output?.close()
+    }
+
+    private func restartAfterUnexpectedExit(of terminatedProcess: Process) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard retainsOwnedProcess,
+              process === terminatedProcess,
+              let retainedExecutableURL,
+              Date().timeIntervalSince(lastLaunchAt) >= 1
+        else { return }
+        closeHandlesLocked()
+        process = nil
+        do {
+            try launchLocked(executableURL: retainedExecutableURL)
+            restartedProcessNeedsInitialization = true
+        } catch {
+            restartedProcessNeedsInitialization = false
+        }
+    }
+
+    private func closeHandlesLocked() {
+        let input = self.input
+        let output = self.output
+        self.input = nil
+        self.output = nil
+        try? input?.close()
         try? output?.close()
     }
 
@@ -174,6 +255,19 @@ actor CodexAppServerSession {
     private var usageRefreshRequested = false
     private var requestInFlight = false
     private var requestWaiters: [RequestWaiter] = []
+    /// At most one request can be outstanding, but keeping the continuation
+    /// keyed by its normalized JSON-RPC ID makes the ownership rule explicit
+    /// and prevents us from buffering any unsolicited response payload.
+    private var pendingResponses: [JSONRPCID: PendingResponse] = [:]
+    /// One persistent reader owns the stdio receive direction for a session.
+    /// It remains active while idle so documented provider notifications are
+    /// observed without adding another child, poller, or listener.
+    private var receiveTask: Task<Void, Never>?
+    private var receiveGeneration: UInt64 = 0
+    private var receiverReachedEOF = false
+    private var eventContinuation: AsyncStream<CodexAppServerEvent>.Continuation?
+    private var eventContinuationID: UUID?
+    private var executableURL: URL?
 
     init(
         transportFactory: @escaping TransportFactory = { ProcessCodexAppServerTransport() },
@@ -186,7 +280,10 @@ actor CodexAppServerSession {
     }
 
     func start(executableURL: URL) throws {
-        guard transport == nil else { return }
+        if let transport {
+            if transport.isRunning { return }
+            shutdown()
+        }
         let transport = transportFactory()
         do {
             try transport.start(executableURL: executableURL)
@@ -194,10 +291,20 @@ actor CodexAppServerSession {
             throw CodexUsageClientError(.processLaunchFailed)
         }
         self.transport = transport
+        self.executableURL = executableURL
+        receiverReachedEOF = false
+        receiveGeneration &+= 1
     }
 
     func initializeIfNeeded() async throws {
-        guard !isInitialized else { return }
+        guard !isInitialized || transport?.needsInitialization == true else { return }
+        if transport?.needsInitialization == true {
+            // The process transport may retain itself across an owned-child
+            // replacement.  Its old stdout reached EOF, so the replacement
+            // requires a new, still-single receive loop before initialize.
+            resetReceiveLoopForReplacement()
+        }
+        isInitialized = false
 
         struct InitializeParameters: Encodable {
             let clientInfo: ClientInfo
@@ -226,6 +333,7 @@ actor CodexAppServerSession {
             }
             try sendNotification(method: "initialized")
             isInitialized = true
+            transport?.markInitialized()
         } catch let error as CodexUsageClientError {
             shutdown()
             if error.failure == .initializationTimedOut {
@@ -306,11 +414,14 @@ actor CodexAppServerSession {
         let expectedID = JSONRPCID.integer(id)
 
         do {
+            guard transport?.isRunning == true, !receiverReachedEOF else {
+                throw CodexUsageClientError(.processExited)
+            }
             let data = try encode(id)
-            try writeLine(data)
-            let responseData = try await response(
+            let responseData = try await sendAndAwaitResponse(
                 for: expectedID,
                 method: method,
+                requestData: data,
                 timeout: timeout ?? requestTimeout,
                 timeoutFailure: timeoutFailure ?? .requestTimedOut(method: method)
             )
@@ -344,15 +455,71 @@ actor CodexAppServerSession {
         return usageRefreshRequested
     }
 
+    /// A single typed, privacy-safe invalidation stream for the client or its
+    /// refresh coordinator.  Replacing an abandoned consumer cannot create a
+    /// second transport listener; the session always has exactly one reader.
+    func eventStream() -> AsyncStream<CodexAppServerEvent> {
+        let continuationID = UUID()
+        return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            self.eventContinuation?.finish()
+            self.eventContinuation = continuation
+            self.eventContinuationID = continuationID
+            continuation.onTermination = { [weak self] _ in
+                Task { await self?.clearEventContinuation(id: continuationID) }
+            }
+        }
+    }
+
     func shutdown() {
+        receiveGeneration &+= 1
+        receiveTask?.cancel()
+        receiveTask = nil
         transport?.stop()
         transport = nil
+        executableURL = nil
         isInitialized = false
+        nextRequestID = 1
         usageRefreshRequested = false
+        receiverReachedEOF = false
+        let pendingResponses = self.pendingResponses.values
+        self.pendingResponses.removeAll()
+        pendingResponses.forEach { pending in
+            pending.timeoutTask?.cancel()
+            pending.continuation.resume(throwing: CancellationError())
+        }
         requestInFlight = false
         let waiters = requestWaiters
         requestWaiters.removeAll()
         waiters.forEach { $0.continuation.resume(throwing: CancellationError()) }
+    }
+
+    /// Restores an owned transport after an unexpected exit and reports
+    /// whether that restoration created a new initialized session.  The
+    /// caller uses that fact to request one immediate account health refresh;
+    /// a replacement must never wait for the slower fallback timer.
+    @discardableResult
+    func maintainTransportIfNeeded() async throws -> Bool {
+        guard let transport else { return false }
+        if transport.isRunning, transport.needsInitialization {
+            try await initializeIfNeeded()
+            return true
+        }
+        guard !transport.isRunning, let executableURL else { return false }
+        // A new child is a new JSON-RPC session. Reset request sequencing and
+        // any pending session state before its initialization handshake.
+        shutdown()
+        do {
+            try start(executableURL: executableURL)
+            try await initializeIfNeeded()
+            return true
+        } catch {
+            shutdown()
+            throw error
+        }
+    }
+
+    func repairExitedTransportIfNeeded() async throws {
+        try await maintainTransportIfNeeded()
     }
 
     private func sendNotification(method: String) throws {
@@ -371,81 +538,152 @@ actor CodexAppServerSession {
         }
     }
 
-    private func response(
+    private func sendAndAwaitResponse(
         for expectedID: JSONRPCID,
         method: String,
+        requestData: Data,
         timeout: TimeInterval,
         timeoutFailure: CodexUsageClientFailure
     ) async throws -> Data {
-        while true {
-            guard let line = try await nextMessage(timeout: timeout, timeoutFailure: timeoutFailure) else {
-                throw CodexUsageClientError(.processExited)
-            }
-            let header: JSONRPCInboundHeader
-            do {
-                header = try JSONDecoder().decode(JSONRPCInboundHeader.self, from: line)
-            } catch {
-                throw CodexUsageClientError(.malformedResponse(method: method))
-            }
-
-            if let notificationMethod = header.method {
-                routeNotification(method: notificationMethod)
-                continue
-            }
-            guard let responseID = header.id else {
-                throw CodexUsageClientError(.malformedResponse(method: method))
-            }
-            if responseID.normalized == expectedID.normalized {
-                return line
-            }
-            // Requests are serialized. A second response ID cannot belong to
-            // another active request, so do not retain raw payload bytes.
-            throw CodexUsageClientError(.malformedResponse(method: method))
-        }
-    }
-
-    private func nextMessage(timeout: TimeInterval, timeoutFailure: CodexUsageClientFailure) async throws -> Data? {
-        guard let transport else { throw CodexUsageClientError(.processExited) }
         let nanoseconds = UInt64(max(0.001, timeout) * 1_000_000_000)
-        // Do not race a blocking FileHandle read in a task group: task-group
-        // scope waits for cancelled children, which would turn a timeout back
-        // into an unbounded hang.  The timeout closes the transport first,
-        // unblocking the reader, and resumes the continuation independently.
         return try await withTaskCancellationHandler(operation: {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data?, Error>) in
-                let gate = ContinuationGate<Data?>()
-                let deadline = TimeoutTaskCancellation()
-                let reader = Task {
-                    do {
-                        let line = try await transport.readMessage()
-                        if gate.resume(continuation, returning: line) {
-                            deadline.cancelAfterResponse()
-                        }
-                    } catch {
-                        if gate.resume(continuation, throwing: CodexUsageClientError(.processExited)) {
-                            deadline.cancelAfterResponse()
-                        }
-                    }
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+                let key = expectedID.normalized
+                guard pendingResponses[key] == nil else {
+                    continuation.resume(throwing: CodexUsageClientError(.malformedResponse(method: method)))
+                    return
                 }
+                pendingResponses[key] = PendingResponse(method: method, continuation: continuation)
                 let timeoutTask = Task {
                     do {
                         try await Task.sleep(nanoseconds: nanoseconds)
                     } catch {
                         return
                     }
-                    if gate.resume(continuation, throwing: CodexUsageClientError(timeoutFailure)) {
-                        transport.stop()
-                        reader.cancel()
-                    }
+                    self.timeoutPendingResponse(for: key, failure: timeoutFailure)
                 }
-                // An immediate response may win before the timeout task has
-                // been installed.  The holder cancels either ordering, so a
-                // successful request never leaves a sleeper until deadline.
-                deadline.install(timeoutTask)
+                pendingResponses[key]?.timeoutTask = timeoutTask
+                do {
+                    try writeLine(requestData)
+                    startReceiveLoopIfNeeded()
+                } catch {
+                    timeoutTask.cancel()
+                    pendingResponses.removeValue(forKey: key)
+                    continuation.resume(throwing: error)
+                }
             }
         }, onCancel: {
-            transport.stop()
+            Task { await self.cancelPendingResponse(for: expectedID.normalized) }
         })
+    }
+
+    private func startReceiveLoopIfNeeded() {
+        guard receiveTask == nil, !receiverReachedEOF, let transport else { return }
+        let generation = receiveGeneration
+        receiveTask = Task { [weak self, transport] in
+            await self?.receiveMessages(from: transport, generation: generation)
+        }
+    }
+
+    private func receiveMessages(
+        from transport: any CodexAppServerTransport,
+        generation: UInt64
+    ) async {
+        while !Task.isCancelled {
+            do {
+                guard let data = try await transport.readMessage() else {
+                    receiveLoopEnded(generation: generation)
+                    return
+                }
+                routeInboundMessage(data, generation: generation)
+            } catch {
+                receiveLoopEnded(generation: generation)
+                return
+            }
+        }
+    }
+
+    private func routeInboundMessage(_ data: Data, generation: UInt64) {
+        guard generation == receiveGeneration else { return }
+        let header: JSONRPCInboundHeader
+        do {
+            header = try JSONDecoder().decode(JSONRPCInboundHeader.self, from: data)
+        } catch {
+            rejectSerializedResponseAsMalformed()
+            return
+        }
+
+        if let notificationMethod = header.method {
+            routeNotification(method: notificationMethod)
+            return
+        }
+        guard let responseID = header.id else {
+            rejectSerializedResponseAsMalformed()
+            return
+        }
+        let key = responseID.normalized
+        guard let pending = pendingResponses.removeValue(forKey: key) else {
+            // Idle, uncorrelated responses cannot belong to a monitor request.
+            // With serialized requests they are discarded rather than retained.
+            rejectSerializedResponseAsMalformed()
+            return
+        }
+        pending.timeoutTask?.cancel()
+        pending.continuation.resume(returning: data)
+    }
+
+    private func rejectSerializedResponseAsMalformed() {
+        guard let (key, pending) = pendingResponses.first else { return }
+        pendingResponses.removeValue(forKey: key)
+        pending.timeoutTask?.cancel()
+        pending.continuation.resume(
+            throwing: CodexUsageClientError(.malformedResponse(method: pending.method))
+        )
+        // A response for a different serialized ID is a protocol fault. Close
+        // the transport now so no subsequent inbound payload is retained.
+        transport?.stop()
+    }
+
+    private func timeoutPendingResponse(
+        for key: JSONRPCID,
+        failure: CodexUsageClientFailure
+    ) {
+        guard let pending = pendingResponses.removeValue(forKey: key) else { return }
+        pending.timeoutTask?.cancel()
+        transport?.stop()
+        pending.continuation.resume(throwing: CodexUsageClientError(failure))
+    }
+
+    private func cancelPendingResponse(for key: JSONRPCID) {
+        guard let pending = pendingResponses.removeValue(forKey: key) else { return }
+        pending.timeoutTask?.cancel()
+        transport?.stop()
+        pending.continuation.resume(throwing: CancellationError())
+    }
+
+    private func receiveLoopEnded(generation: UInt64) {
+        guard generation == receiveGeneration else { return }
+        receiveTask = nil
+        receiverReachedEOF = true
+        let pendingResponses = self.pendingResponses.values
+        self.pendingResponses.removeAll()
+        pendingResponses.forEach { pending in
+            pending.timeoutTask?.cancel()
+            pending.continuation.resume(throwing: CodexUsageClientError(.processExited))
+        }
+    }
+
+    private func resetReceiveLoopForReplacement() {
+        receiveGeneration &+= 1
+        receiveTask?.cancel()
+        receiveTask = nil
+        receiverReachedEOF = false
+    }
+
+    private func clearEventContinuation(id: UUID) {
+        guard eventContinuationID == id else { return }
+        eventContinuation = nil
+        eventContinuationID = nil
     }
 
     private func acquireRequestSlot() async throws {
@@ -489,9 +727,18 @@ actor CodexAppServerSession {
             // The next explicit store action performs one normal account-first
             // refresh.  No notification can create an unbounded polling loop.
             usageRefreshRequested = true
+            eventContinuation?.yield(
+                method == "account/updated" ? .accountUpdated : .rateLimitsUpdated
+            )
         default:
             break
         }
+    }
+
+    private struct PendingResponse {
+        let method: String
+        let continuation: CheckedContinuation<Data, Error>
+        var timeoutTask: Task<Void, Never>?
     }
 
     private struct RequestWaiter {

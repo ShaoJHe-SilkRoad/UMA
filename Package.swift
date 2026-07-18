@@ -28,7 +28,7 @@ let package = Package(
         ),
         .testTarget(
             name: "CodexUsageUITests",
-            dependencies: ["CodexUsageUI"],
+            dependencies: ["CodexUsageUI", "CodexUsageMonitor"],
             path: "Tests/CodexUsageUITests"
         )
     ]

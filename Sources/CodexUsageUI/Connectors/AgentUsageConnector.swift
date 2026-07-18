@@ -222,8 +222,17 @@ protocol AgentUsageConnector: Sendable {
     func probe() async -> AgentConnectorProbe
     func start() async
     func refresh() async
+    func refresh(trigger: CodexRefreshTrigger) async
     func perform(_ command: AgentConnectorCommand) async
     func stop() async
     func currentSnapshot() async -> AgentUsageSnapshot
     func snapshots() async -> AsyncStream<AgentUsageSnapshot>
+}
+
+extension AgentUsageConnector {
+    /// Existing adapters retain their one refresh implementation until they
+    /// opt into source-aware trigger attribution.
+    func refresh(trigger: CodexRefreshTrigger) async {
+        await refresh()
+    }
 }

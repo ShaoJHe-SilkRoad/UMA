@@ -8,12 +8,19 @@ protocol CodexUsageClient: Sendable {
     /// usage, threads, or cost data.
     func checkLocalAccountAvailability() async throws -> Bool
     func fetchUsage() async throws -> CodexLiveUsage
+    /// Routes every provider read through the one serialized refresh lane.
+    /// Callers identify the trigger for diagnostics and priority accounting;
+    /// the coordinator never persists provider data or retries by itself.
+    func fetchUsage(trigger: CodexRefreshTrigger) async throws -> CodexLiveUsage
     /// Uses the positive, same-session `account/read` result produced by
     /// `checkLocalAccountAvailability()` and must not issue a second account
     /// read. This keeps the provider sequence bounded to one account check.
     func fetchUsageAfterVerifiedAccount() async throws -> CodexLiveUsage
     func disconnect() async
     func takeUsageRefreshRequest() async -> Bool
+    /// Emits only schema-defined account invalidations. The stream never
+    /// contains provider payloads, account identity, or raw JSON-RPC data.
+    func eventStream() async -> AsyncStream<CodexAppServerEvent>
     func connectionState() async -> CodexConnectionState
     /// Only the production app-server client owns a retained child process.
     /// Fixture and external-provider clients must opt in explicitly.
@@ -35,7 +42,15 @@ extension CodexUsageClient {
         try await fetchUsage()
     }
 
+    func fetchUsage(trigger: CodexRefreshTrigger) async throws -> CodexLiveUsage {
+        try await fetchUsage()
+    }
+
     func supportsOwnedProcessRecovery() async -> Bool { false }
+
+    func eventStream() async -> AsyncStream<CodexAppServerEvent> {
+        AsyncStream { $0.finish() }
+    }
 }
 
 /// Owns one retained local app-server process and enforces the account-first
@@ -46,13 +61,21 @@ actor CodexAppServerClient: CodexUsageClient {
     private var executableURL: URL?
     private var hasVerifiedAccountInCurrentSession = false
     private var state: CodexConnectionState = .idle
+    private var ownedProcessMonitor: Task<Void, Never>?
+    private let refreshCoordinator = CodexRefreshCoordinator<CodexLiveUsage>()
+    private let ownedProcessMonitorInterval: Duration
+    /// Invalidates an asynchronous provider read when disconnect changes the
+    /// session ownership.  It is intentionally separate from JSON-RPC IDs.
+    private var lifecycleGeneration: UInt64 = 0
 
     init(
         resolver: any CodexExecutableResolving = CodexExecutableResolver(),
-        session: CodexAppServerSession = CodexAppServerSession()
+        session: CodexAppServerSession = CodexAppServerSession(),
+        ownedProcessMonitorInterval: Duration = .seconds(1)
     ) {
         self.resolver = resolver
         self.session = session
+        self.ownedProcessMonitorInterval = ownedProcessMonitorInterval
     }
 
     func connectionState() -> CodexConnectionState {
@@ -62,6 +85,10 @@ actor CodexAppServerClient: CodexUsageClient {
     func supportsOwnedProcessRecovery() -> Bool { true }
 
     func disconnect() async {
+        lifecycleGeneration &+= 1
+        await refreshCoordinator.cancelOutstandingRefresh()
+        ownedProcessMonitor?.cancel()
+        ownedProcessMonitor = nil
         await session.shutdown()
         executableURL = nil
         hasVerifiedAccountInCurrentSession = false
@@ -70,6 +97,10 @@ actor CodexAppServerClient: CodexUsageClient {
 
     func takeUsageRefreshRequest() async -> Bool {
         await session.takeUsageRefreshRequest()
+    }
+
+    func eventStream() async -> AsyncStream<CodexAppServerEvent> {
+        await session.eventStream()
     }
 
     func checkLocalAccountAvailability() async throws -> Bool {
@@ -84,21 +115,52 @@ actor CodexAppServerClient: CodexUsageClient {
     }
 
     func fetchUsage() async throws -> CodexLiveUsage {
-        try await fetchUsage(requiresFreshAccountRead: true)
+        try await fetchUsage(trigger: .manual)
+    }
+
+    func fetchUsage(trigger: CodexRefreshTrigger) async throws -> CodexLiveUsage {
+        try await coordinatedUsageFetch(trigger: trigger, requiresFreshAccountRead: true)
     }
 
     func fetchUsageAfterVerifiedAccount() async throws -> CodexLiveUsage {
-        try await fetchUsage(requiresFreshAccountRead: false)
+        try await coordinatedUsageFetch(trigger: .reconnect, requiresFreshAccountRead: false)
     }
 
-    private func fetchUsage(requiresFreshAccountRead: Bool) async throws -> CodexLiveUsage {
+    private func coordinatedUsageFetch(
+        trigger: CodexRefreshTrigger,
+        requiresFreshAccountRead: Bool
+    ) async throws -> CodexLiveUsage {
+        let lifecycleGeneration = lifecycleGeneration
+        do {
+            return try await refreshCoordinator.refresh(trigger: trigger) { [weak self] in
+                guard let self else { throw CancellationError() }
+                return try await self.fetchUsage(
+                    requiresFreshAccountRead: requiresFreshAccountRead,
+                    lifecycleGeneration: lifecycleGeneration
+                )
+            }
+        } catch {
+            guard lifecycleGeneration == self.lifecycleGeneration else {
+                throw CancellationError()
+            }
+            throw error
+        }
+    }
+
+    private func fetchUsage(
+        requiresFreshAccountRead: Bool,
+        lifecycleGeneration: UInt64
+    ) async throws -> CodexLiveUsage {
         do {
             try await prepareSession()
+            try ensureCurrentLifecycle(lifecycleGeneration)
             if requiresFreshAccountRead {
                 guard try await readAccountAvailability() else {
+                    try ensureCurrentLifecycle(lifecycleGeneration)
                     hasVerifiedAccountInCurrentSession = false
                     throw CodexUsageClientError(.accountAuthorizationRequired)
                 }
+                try ensureCurrentLifecycle(lifecycleGeneration)
                 hasVerifiedAccountInCurrentSession = true
             } else if !hasVerifiedAccountInCurrentSession {
                 throw CodexUsageClientError(.accountAuthorizationRequired)
@@ -108,12 +170,14 @@ actor CodexAppServerClient: CodexUsageClient {
             let rateLimitResponse: RateLimitsResult = try await session.requestWithExplicitNullParameters(
                 method: "account/rateLimits/read"
             )
+            try ensureCurrentLifecycle(lifecycleGeneration)
             let rateLimits = rateLimitResponse.snapshot
 
             state = .loadingUsage
             let accountUsage: AccountUsageResult = try await session.requestWithExplicitNullParameters(
                 method: "account/usage/read"
             )
+            try ensureCurrentLifecycle(lifecycleGeneration)
             let usage = CodexLiveUsage(
                 rateLimits: rateLimits,
                 availableResetCount: rateLimitResponse.rateLimitResetCredits?.availableCount,
@@ -126,9 +190,16 @@ actor CodexAppServerClient: CodexUsageClient {
             hasVerifiedAccountInCurrentSession = true
             return usage
         } catch {
+            guard lifecycleGeneration == self.lifecycleGeneration else {
+                throw CancellationError()
+            }
             hasVerifiedAccountInCurrentSession = false
             throw record(error)
         }
+    }
+
+    private func ensureCurrentLifecycle(_ generation: UInt64) throws {
+        guard generation == lifecycleGeneration else { throw CancellationError() }
     }
 
     private func prepareSession() async throws {
@@ -143,6 +214,36 @@ actor CodexAppServerClient: CodexUsageClient {
         try await session.start(executableURL: executableURL)
         state = .initializing
         try await session.initializeIfNeeded()
+        beginOwnedProcessMonitoring()
+    }
+
+    /// Retains exactly one initialized local child while the client is
+    /// connected. This path makes no account, rate-limit, or usage request;
+    /// it only restores an exited stdio transport and its initialization
+    /// handshake.
+    private func beginOwnedProcessMonitoring() {
+        guard ownedProcessMonitor == nil else { return }
+        let interval = ownedProcessMonitorInterval
+        ownedProcessMonitor = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard !Task.isCancelled else { return }
+                guard let self else { return }
+                do {
+                    let replaced = try await self.session.maintainTransportIfNeeded()
+                    guard replaced, !Task.isCancelled else { continue }
+                    // Transport repair is not itself a provider read.  Once a
+                    // new owned child is initialized, one account-first read
+                    // immediately validates its health through the same
+                    // coalesced lane used by reconnect, wake, and manual UI.
+                    _ = try await self.fetchUsage(trigger: .reconnect)
+                } catch {
+                    // The next bounded monitor tick may repair a transient
+                    // local child failure. No autonomous request loop is
+                    // created; only an actual replacement triggers a read.
+                }
+            }
+        }
     }
 
     /// Retains only an authorization decision.  `AccountReadResult` decodes an

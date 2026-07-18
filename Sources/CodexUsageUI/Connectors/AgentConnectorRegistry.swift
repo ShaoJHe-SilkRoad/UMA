@@ -73,10 +73,13 @@ actor AgentConnectorRegistry {
         }
     }
 
-    func refresh(_ id: AgentConnectorID) async throws {
+    func refresh(
+        _ id: AgentConnectorID,
+        trigger: CodexRefreshTrigger = .manual
+    ) async throws {
         guard let connector = connectors[id] else { throw AgentConnectorRegistryError.unknownConnector(id) }
         listen(to: connector)
-        await connector.refresh()
+        await connector.refresh(trigger: trigger)
         await receive(await connector.currentSnapshot())
     }
 
