@@ -3,10 +3,8 @@ import SwiftUI
 
 public struct UsagePanelView: View {
     @ObservedObject var store: UsageStore
-    @AppStorage("display.showUsageSummaryCard") private var storedShowUsageSummary = true
-    @AppStorage("display.showRecentTasksCard") private var storedShowRecentTasks = true
-    @AppStorage("display.showAPICostCard") private var storedShowAPICost = true
     @State private var isShowingSettings: Bool
+    @State private var isShowingMoreInfo = false
 
     let tuning: GlassTuning
     private let preferencesEnabled: Bool
@@ -18,6 +16,7 @@ public struct UsagePanelView: View {
         tuning: GlassTuning,
         preferencesEnabled: Bool = true,
         settingsInitiallyPresented: Bool = false,
+        moreInfoInitiallyPresented: Bool = false,
         onHeightChange: ((CGFloat) -> Void)? = nil,
         localAccessConfirmationAction: CodexLocalAccessConfirmationAction? = nil
     ) {
@@ -27,18 +26,7 @@ public struct UsagePanelView: View {
         self.onHeightChange = onHeightChange
         self.localAccessConfirmationAction = localAccessConfirmationAction
         _isShowingSettings = State(initialValue: settingsInitiallyPresented)
-    }
-
-    private var showUsageSummary: Bool {
-        preferencesEnabled ? storedShowUsageSummary : true
-    }
-
-    private var showRecentTasks: Bool {
-        preferencesEnabled ? storedShowRecentTasks : true
-    }
-
-    private var showAPICost: Bool {
-        preferencesEnabled ? storedShowAPICost : true
+        _isShowingMoreInfo = State(initialValue: moreInfoInitiallyPresented)
     }
 
     private var presentation: CodexConnectionPresentation {
@@ -58,22 +46,23 @@ public struct UsagePanelView: View {
     }
 
     private var preferredHeight: CGFloat {
-        guard presentation.showsRealData else { return 330 }
-        return UsagePanelMetrics.preferredHeight(
-            showUsageSummary: showUsageSummary,
-            showRecentTasks: showRecentTasks,
-            showAPICost: showAPICost
+        UsagePanelMetrics.targetHeight(
+            showsRealData: presentation.showsRealData,
+            moreInfoExpanded: isShowingMoreInfo,
+            settingsPresented: false
         )
     }
 
     private var displayedHeight: CGFloat {
-        isShowingSettings
-            ? max(preferredHeight, UsagePanelMetrics.settingsMinimumHeight)
-            : preferredHeight
+        UsagePanelMetrics.targetHeight(
+            showsRealData: presentation.showsRealData,
+            moreInfoExpanded: isShowingMoreInfo,
+            settingsPresented: isShowingSettings
+        )
     }
 
     public var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             if presentation.showsRealData {
                 HeaderView(
                     store: store,
@@ -82,20 +71,19 @@ public struct UsagePanelView: View {
                     isShowingSettings: $isShowingSettings,
                     perform: perform
                 )
-                if showUsageSummary {
-                    UsageSummaryCard(snapshot: store.snapshot, language: store.language, tuning: tuning)
-                }
-                if showRecentTasks {
+                UsageSummaryCard(snapshot: store.snapshot, language: store.language, tuning: tuning)
+                MoreInfoDisclosure(
+                    language: store.language,
+                    isExpanded: $isShowingMoreInfo
+                )
+                if isShowingMoreInfo {
                     RecentTasksCard(tasks: store.snapshot.recentTasks, language: store.language, tuning: tuning)
-                }
-                if showAPICost {
                     APICostEstimateCard(
                         estimate: store.snapshot.apiCostEstimate,
                         language: store.language,
                         tuning: tuning
                     )
                 }
-                FooterView(snapshot: store.snapshot, language: store.language)
             } else {
                 CodexConnectionBridgeView(
                     presentation: presentation,
@@ -105,36 +93,12 @@ public struct UsagePanelView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
         .frame(width: UsagePanelMetrics.width, height: displayedHeight)
-        .background {
-            BalancedPanelTint(tuning: tuning)
-                .ignoresSafeArea()
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .stroke(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.38),
-                            Color.white.opacity(0.08),
-                            Color.black.opacity(0.12)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 0.8
-                )
-                .padding(0.4)
-                .allowsHitTesting(false)
-        }
         .overlay(alignment: .topTrailing) {
             if isShowingSettings {
                 UsageSettingsCard(
-                    showUsageSummary: $storedShowUsageSummary,
-                    showRecentTasks: $storedShowRecentTasks,
-                    showAPICost: $storedShowAPICost,
                     language: Binding(
                         get: { store.language },
                         set: { store.setLanguage($0) }
@@ -144,12 +108,9 @@ public struct UsagePanelView: View {
                 )
                 .padding(.top, 96)
                 .padding(.trailing, 16)
-                .transition(.move(edge: .top).combined(with: .opacity))
                 .zIndex(10)
             }
         }
-        .animation(.easeInOut(duration: 0.18), value: isShowingSettings)
-        .animation(.easeInOut(duration: 0.18), value: preferredHeight)
         .onAppear {
             onHeightChange?(displayedHeight)
         }
@@ -178,6 +139,35 @@ public struct UsagePanelView: View {
         case .openCodex, .updateCodex, .dismiss:
             break
         }
+    }
+}
+
+private struct MoreInfoDisclosure: View {
+    let language: AppLanguage
+    @Binding var isExpanded: Bool
+
+    var body: some View {
+        Button {
+            isExpanded.toggle()
+        } label: {
+            HStack(spacing: 7) {
+                Text(language.moreInfo)
+                    .font(UsageDesign.font(12.5, weight: .semibold, language: language))
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .frame(height: 30)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(language.moreInfo))
+        .accessibilityValue(
+            isExpanded ? language.enabledAccessibilityValue : language.disabledAccessibilityValue
+        )
     }
 }
 
@@ -308,9 +298,9 @@ private struct HeaderView: View {
 
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(recovery == nil && store.lastError == nil ? UsageDesign.green : Color.orange)
+                        .fill(syncIsCurrent ? UsageDesign.green : Color.red)
                         .frame(width: 8, height: 8)
-                    Text(recovery?.statusText ?? store.statusText)
+                    Text(syncStatus)
                         .font(UsageDesign.font(13, language: store.language))
                         .foregroundStyle(.secondary)
                         .lineLimit(recovery == nil ? 1 : 2)
@@ -326,9 +316,14 @@ private struct HeaderView: View {
                         RecoveryActionButton(action: primaryAction, perform: perform)
                     }
                     if let secondaryAction = recovery.secondaryAction {
-                        RecoveryActionButton(action: secondaryAction, perform: perform)
+                        RecoveryActionButton(
+                            action: secondaryAction,
+                            isCompact: true,
+                            perform: perform
+                        )
                     }
                 }
+                .layoutPriority(2)
             } else {
                 HStack(spacing: 4) {
                     Button {
@@ -350,7 +345,7 @@ private struct HeaderView: View {
                     }
                     .buttonStyle(.plain)
                     .help(store.language.refreshUsage)
-                    .accessibilityLabel(store.language.refreshUsage)
+                    .accessibilityLabel(Text(store.language.refreshUsage))
                     .accessibilityHint(store.lastError ?? store.language.refreshFromAccountHint)
 
                     Button {
@@ -367,32 +362,71 @@ private struct HeaderView: View {
                     }
                     .buttonStyle(.plain)
                     .help(store.language.showSettings)
-                    .accessibilityLabel(store.language.showSettings)
+                    .accessibilityLabel(Text(store.language.showSettings))
                 }
             }
         }
         .padding(.horizontal, 14)
-        .frame(height: 70)
+        .frame(height: 64)
         .background(GlassCardBackground(tuning: tuning))
+    }
+
+    private var syncIsCurrent: Bool {
+        syncEligibleState
+            && store.lastError == nil
+            && store.snapshot.providerSource?.freshness == .fresh
+            && store.snapshot.providerSource?.capturedAt != nil
+    }
+
+    private var syncStatus: String {
+        if case .refreshingWithPreviousRealData = store.currentState {
+            return store.language.connectionRefreshingTitle
+        }
+        if case .staleWithPreviousRealData = store.currentState {
+            return store.language.outdated
+        }
+        if syncIsCurrent, let capturedAt = store.snapshot.providerSource?.capturedAt {
+            return store.language.syncedAt(capturedAt)
+        }
+        if let recovery { return recovery.statusText }
+        return store.language.outdated
+    }
+
+    private var syncEligibleState: Bool {
+        switch store.currentState {
+        case .ready, .refreshingWithPreviousRealData:
+            true
+        default:
+            false
+        }
     }
 }
 
 private struct RecoveryActionButton: View {
     let action: CodexPresentedAction
+    var isCompact = false
     let perform: @MainActor (CodexConnectionAction) async -> Void
 
     var body: some View {
-        Button(action.title) {
+        Button {
             Task { await perform(action.action) }
+        } label: {
+            if isCompact {
+                Image(systemName: action.action == .disconnect ? "bolt.slash" : "ellipsis")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 30, height: 30)
+            } else {
+                Text(action.title)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.horizontal, 7)
+                    .frame(minHeight: 30)
+            }
         }
         .buttonStyle(.plain)
-        .font(.system(size: 10.5, weight: .semibold))
-        .lineLimit(1)
-        .minimumScaleFactor(0.7)
-        .padding(.horizontal, 7)
-        .frame(maxWidth: 82, minHeight: 30)
         .background(Capsule().fill(Color.orange.opacity(0.16)))
         .accessibilityLabel(action.title)
+        .help(action.title)
     }
 }
 
@@ -405,7 +439,11 @@ private struct UsageSummaryCard: View {
         VStack(spacing: 0) {
             VStack(spacing: 0) {
                 ForEach(Array(snapshot.periods.enumerated()), id: \.element.id) { index, period in
-                    QuotaRow(period: period, language: language)
+                    QuotaRow(
+                        period: period,
+                        planLabel: snapshot.planLabel,
+                        language: language
+                    )
                     if index < snapshot.periods.count - 1 {
                         Divider()
                             .opacity(0.32)
@@ -421,7 +459,7 @@ private struct UsageSummaryCard: View {
                 ForEach(snapshot.metrics) { metric in
                     VStack(spacing: 4) {
                         Text(metric.value)
-                            .font(UsageDesign.font(19, weight: .bold, language: language))
+                            .font(UsageDesign.font(18, weight: .bold, language: language))
                             .monospacedDigit()
                         Text(metric.label)
                             .font(UsageDesign.font(12, weight: .medium, language: language))
@@ -430,7 +468,7 @@ private struct UsageSummaryCard: View {
                     .frame(maxWidth: .infinity)
                 }
             }
-            .frame(height: 79)
+            .frame(height: 68)
         }
         .background(GlassCardBackground(tuning: tuning))
     }
@@ -438,30 +476,47 @@ private struct UsageSummaryCard: View {
 
 private struct QuotaRow: View {
     let period: UsagePeriod
+    let planLabel: String
     let language: AppLanguage
 
+    private var bar: QuotaBarModel {
+        QuotaBarModel(
+            remainingPercent: period.remainingPercent,
+            planLabel: planLabel,
+            isUnlimited: period.isUnlimited
+        )
+    }
+
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Text(period.title)
                     .font(UsageDesign.font(16, weight: .bold, language: language))
                 Spacer()
-                Text(period.isUnlimited ? "♾️" : "\(period.remainingPercent)%")
-                    .font(UsageDesign.font(20, weight: .bold, language: language))
-                    .foregroundStyle(UsageDesign.blue)
+                Text(period.isUnlimited ? "∞" : "\(period.remainingPercent)%")
+                    .font(UsageDesign.font(period.isUnlimited ? 16 : 24, weight: .semibold, language: language))
+                    .foregroundStyle(period.isUnlimited ? Color.secondary : bar.tone == .low ? Color.red : UsageDesign.blue)
                     .monospacedDigit()
             }
 
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.secondary.opacity(0.14))
-                    Capsule()
-                        .fill(UsageDesign.blue)
-                        .frame(width: proxy.size.width * CGFloat(period.isUnlimited ? 100 : period.remainingPercent) / 100)
+            if !period.isUnlimited {
+                ProgressView(value: Double(period.remainingPercent), total: 100) {
+                    Text(period.title)
                 }
+                .progressViewStyle(MacroQuotaProgressStyle(bar: bar))
+                .accessibilityLabel(
+                    Text(
+                        language.quotaAccessibilityLabel(
+                            title: period.title,
+                            remainingPercent: period.remainingPercent
+                        )
+                    )
+                )
+                .accessibilityValue(
+                    Text(language.remainingAccessibilityValue(period.remainingPercent))
+                )
+                .frame(height: 8)
             }
-            .frame(height: 10)
 
             HStack {
                 Text(language.remaining)
@@ -472,7 +527,34 @@ private struct QuotaRow: View {
             .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 13)
+        .padding(.vertical, period.isUnlimited ? 8 : 10)
+    }
+}
+
+private struct MacroQuotaProgressStyle: ProgressViewStyle {
+    let bar: QuotaBarModel
+
+    func makeBody(configuration: Configuration) -> some View {
+        GeometryReader { proxy in
+            HStack(spacing: 4) {
+                ForEach(Array(bar.segments.enumerated()), id: \.offset) { _, segment in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.secondary.opacity(0.13))
+                        Capsule()
+                            .fill(bar.tone == .low ? Color.red : UsageDesign.blue)
+                            .frame(
+                                width: max(
+                                    0,
+                                    (proxy.size.width - 16)
+                                        * CGFloat(segment.relativeWidth)
+                                        * CGFloat(segment.fillFraction)
+                                )
+                            )
+                    }
+                    .frame(width: (proxy.size.width - 16) * CGFloat(segment.relativeWidth))
+                }
+            }
+        }
     }
 }
 
@@ -494,8 +576,8 @@ private struct RecentTasksCard: View {
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 14)
-            .padding(.top, 13)
-            .padding(.bottom, 9)
+            .padding(.top, 10)
+            .padding(.bottom, 7)
 
             ForEach(Array(tasks.enumerated()), id: \.element.id) { index, task in
                 RecentTaskRow(task: task, language: language)
@@ -515,7 +597,7 @@ private struct RecentTaskRow: View {
     let language: AppLanguage
 
     var body: some View {
-        VStack(spacing: 7) {
+        VStack(spacing: 5) {
             HStack(alignment: .center, spacing: 10) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(task.title)
@@ -546,36 +628,6 @@ private struct RecentTaskRow: View {
             .frame(height: 2.5)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-    }
-}
-
-private struct FooterView: View {
-    let snapshot: UsageSnapshot
-    let language: AppLanguage
-
-    private var updatedTime: String {
-        let components = Calendar.current.dateComponents([.hour, .minute], from: snapshot.updatedAt)
-        return String(format: "%02d:%02d", components.hour ?? 0, components.minute ?? 0)
-    }
-
-    var body: some View {
-        HStack {
-            Label(
-                snapshot.availableResets.map(language.availableResets) ?? language.resetAvailabilityUnavailable,
-                systemImage: "clock.arrow.circlepath"
-            )
-            Spacer()
-            Text(language.updatedAt(updatedTime))
-        }
-        .font(UsageDesign.font(11.5, weight: .medium, language: language))
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 4)
-        .frame(height: 24)
-        .contextMenu {
-            Button(language.quitApplication) {
-                NSApplication.shared.terminate(nil)
-            }
-        }
+        .padding(.vertical, 6)
     }
 }

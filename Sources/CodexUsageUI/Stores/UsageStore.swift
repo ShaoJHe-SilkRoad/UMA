@@ -3,6 +3,10 @@ import Foundation
 
 @MainActor
 public final class UsageStore: ObservableObject {
+    static let productionVisibleRefreshInterval: Duration = .seconds(15)
+    static let productionBackgroundRefreshInterval: Duration = .seconds(30)
+    static let productionPanelOpenRefreshMinimumAge: TimeInterval = 15
+
     @Published private(set) var snapshot: UsageSnapshot
     @Published private(set) var providerSnapshots: [AgentUsageSnapshot] = []
     @Published private(set) var isRefreshing = false
@@ -23,15 +27,18 @@ public final class UsageStore: ObservableObject {
     private let autoRefreshEnabled: Bool
     private let visibleRefreshInterval: Duration
     private let backgroundRefreshInterval: Duration
+    private let panelOpenRefreshMinimumAge: TimeInterval
+    private let now: () -> Date
     private let resumesPersistedAuthorizedConnection: Bool
     private var registrySubscription: Task<Void, Never>?
     private var connectionTask: Task<Void, Never>?
     private var periodicRefreshTask: Task<Void, Never>?
     private var periodicRefreshGeneration: UInt64 = 0
     private var periodicRefreshUsesVisibleInterval: Bool?
-    /// Store callers join this task before reaching the registry. It keeps a
-    /// menu action, lifecycle wake, timer, and provider event from creating
-    /// parallel connector commands above the client-level coordinator.
+    /// Store callers join this task before reaching the registry. It keeps
+    /// menu actions, lifecycle wake, timer, panel-open, and reconnect requests
+    /// from creating parallel connector commands above the client-level
+    /// coordinator.
     private var activeRefreshTask: Task<Void, Never>?
     private var activeRefreshGeneration: UInt64 = 0
 
@@ -80,8 +87,10 @@ public final class UsageStore: ObservableObject {
         primaryConnectorID: AgentConnectorID?,
         consentDefaults: UserDefaults? = nil,
         previewScenario: CodexPreviewScenario = .ready,
-        visibleRefreshInterval: Duration = .seconds(120),
-        backgroundRefreshInterval: Duration = .seconds(900)
+        visibleRefreshInterval: Duration = UsageStore.productionVisibleRefreshInterval,
+        backgroundRefreshInterval: Duration = UsageStore.productionBackgroundRefreshInterval,
+        panelOpenRefreshMinimumAge: TimeInterval = UsageStore.productionPanelOpenRefreshMinimumAge,
+        now: @escaping () -> Date = { Date() }
     ) {
         let selectedLanguage = language ?? AppLanguage.resolveAndPersist()
         self.registry = registry
@@ -92,6 +101,8 @@ public final class UsageStore: ObservableObject {
         self.autoRefreshEnabled = autoRefresh
         self.visibleRefreshInterval = visibleRefreshInterval
         self.backgroundRefreshInterval = backgroundRefreshInterval
+        self.panelOpenRefreshMinimumAge = max(0, panelOpenRefreshMinimumAge)
+        self.now = now
         self.language = selectedLanguage
         self.snapshot = previewOnly && previewScenario.displaysFixtureData ? .preview(language: selectedLanguage) : .empty(language: selectedLanguage)
         self.connectionState = previewOnly ? previewScenario.connectionState : .notAuthorizedByMonitor
@@ -154,7 +165,11 @@ public final class UsageStore: ObservableObject {
         if !wasGranted { beginConnection(.connect) }
     }
 
-    public func requestReconnect() { beginConnection(.reconnect) }
+    public func requestReconnect() {
+        Task { @MainActor [weak self] in
+            await self?.reconnectMonitor()
+        }
+    }
 
     public func refresh() async { await refresh(trigger: .manual) }
 
@@ -165,16 +180,22 @@ public final class UsageStore: ObservableObject {
             if !previewOnly { setConsentMissingFailure() }
             return
         }
+        await runCoordinatedRefresh { [weak self] in
+            guard let self else { return }
+            await self.performRefresh(trigger: trigger, registry: registry, id: id)
+        }
+    }
+
+    private func runCoordinatedRefresh(
+        _ operation: @escaping @MainActor () async -> Void
+    ) async {
         if let activeRefreshTask {
             await activeRefreshTask.value
             return
         }
         activeRefreshGeneration &+= 1
         let generation = activeRefreshGeneration
-        let task = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.performRefresh(trigger: trigger, registry: registry, id: id)
-        }
+        let task = Task { @MainActor in await operation() }
         activeRefreshTask = task
         await task.value
         guard activeRefreshGeneration == generation else { return }
@@ -214,7 +235,15 @@ public final class UsageStore: ObservableObject {
         await disconnectPrimary(clearConsent: true)
     }
 
-    public func reconnectMonitor() async { await performPrimary(.reconnect) }
+    public func reconnectMonitor() async {
+        guard !previewOnly, monitorConsentGranted, let registry, let id = primaryConnectorID else {
+            if !previewOnly { setConsentMissingFailure() }
+            return
+        }
+        await runCoordinatedRefresh { [weak self] in
+            await self?.performPrimary(.reconnect, registry: registry, id: id)
+        }
+    }
 
     /// Lifecycle code invokes this once after a system wake. It joins any
     /// existing provider read rather than starting another connector or child.
@@ -237,6 +266,19 @@ public final class UsageStore: ObservableObject {
         guard isPanelVisible != isVisible else { return }
         isPanelVisible = isVisible
         updatePeriodicRefreshSchedule()
+        guard isVisible, shouldRefreshOnPanelOpen else { return }
+        Task { @MainActor [weak self] in
+            await self?.refresh(trigger: .timer)
+        }
+    }
+
+    static func shouldRefreshOnPanelOpen(
+        lastSuccessfulAt: Date?,
+        now: Date,
+        minimumAge: TimeInterval
+    ) -> Bool {
+        guard let lastSuccessfulAt else { return false }
+        return now.timeIntervalSince(lastSuccessfulAt) >= max(0, minimumAge)
     }
 
     public func setLanguage(_ newLanguage: AppLanguage) {
@@ -284,7 +326,21 @@ public final class UsageStore: ObservableObject {
         providerSnapshots = snapshots
         guard let primary = primarySnapshot else { return }
         snapshot = UsageSnapshot(agentSnapshot: primary, language: language)
-        connectionState = Self.presentationState(primary.state, failure: primary.safeFailure)
+        let nextConnectionState = Self.presentationState(
+            primary.state,
+            failure: primary.safeFailure
+        )
+        // The production connector publishes a waiting snapshot before every
+        // read and while replacing an exited owned child. That snapshot
+        // deliberately retains the last valid channels, so both coordinated
+        // refreshes and transport recovery must keep presenting them instead
+        // of briefly replacing the panel with the first-connection bridge.
+        if primary.hasValidData,
+           (primary.state == .waitingForFirstResponse || (isRefreshing && primary.state == .inactive)) {
+            connectionState = .refreshingWithPreviousRealData
+        } else {
+            connectionState = nextConnectionState
+        }
         freshness = Self.presentationFreshness(primary.freshness)
         lastFailure = primary.safeFailure.map(Self.codexFailure)
         lastError = codexFailureDescription(lastFailure)
@@ -312,6 +368,14 @@ public final class UsageStore: ObservableObject {
             if !previewOnly { setConsentMissingFailure() }
             return
         }
+        await performPrimary(command, registry: registry, id: id)
+    }
+
+    private func performPrimary(
+        _ command: AgentConnectorCommand,
+        registry: AgentConnectorRegistry,
+        id: AgentConnectorID
+    ) async {
         isRefreshing = true
         connectionState = .resolvingExecutable
         do {
@@ -373,6 +437,15 @@ public final class UsageStore: ObservableObject {
 
     private var allowsPeriodicRefresh: Bool {
         autoRefreshEnabled && monitorConsentGranted && hasPriorRealSnapshot && connectionState == .ready
+    }
+
+    private var shouldRefreshOnPanelOpen: Bool {
+        guard allowsManualRefresh else { return false }
+        return Self.shouldRefreshOnPanelOpen(
+            lastSuccessfulAt: primarySnapshot?.lastSuccessfulAt,
+            now: now(),
+            minimumAge: panelOpenRefreshMinimumAge
+        )
     }
 
     private func updatePeriodicRefreshSchedule() {

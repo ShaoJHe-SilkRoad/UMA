@@ -3,24 +3,30 @@ import SwiftUI
 public enum UsagePanelMetrics {
     public static let width: CGFloat = 370
     public static let height: CGFloat = 776
+    public static let collapsedHeight: CGFloat = 402
     public static let settingsMinimumHeight: CGFloat = 430
+
+    public static func targetHeight(
+        showsRealData: Bool,
+        moreInfoExpanded: Bool,
+        settingsPresented: Bool
+    ) -> CGFloat {
+        let contentHeight: CGFloat
+        if !showsRealData {
+            contentHeight = 330
+        } else {
+            contentHeight = moreInfoExpanded ? height : collapsedHeight
+        }
+        return settingsPresented ? max(contentHeight, settingsMinimumHeight) : contentHeight
+    }
 
     public static func preferredHeight(
         showUsageSummary: Bool,
         showRecentTasks: Bool,
         showAPICost: Bool
     ) -> CGFloat {
-        var result: CGFloat = 135
-        if showUsageSummary {
-            result += 271
-        }
-        if showRecentTasks {
-            result += 223
-        }
-        if showAPICost {
-            result += 147
-        }
-        return result
+        guard showRecentTasks || showAPICost else { return collapsedHeight }
+        return height
     }
 }
 
@@ -33,13 +39,7 @@ enum UsageDesign {
         weight: Font.Weight = .regular,
         language: AppLanguage = .simplifiedChinese
     ) -> Font {
-        if language == .english {
-            return .system(size: size, weight: .regular, design: .rounded)
-        }
-        let fontName = weight == .regular
-            ? "STHeitiSC-Light"
-            : "STHeitiSC-Medium"
-        return .custom(fontName, size: size)
+        .system(size: size, weight: weight, design: .default)
     }
 }
 
@@ -50,12 +50,12 @@ struct GlassCardBackground: View {
     var body: some View {
         RoundedRectangle(cornerRadius: 20, style: .continuous)
             .fill(.ultraThinMaterial)
-            .opacity(tuning.cardMaterialPercent / 100)
+            .opacity(0.72)
             .overlay {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(
                         Color.white.opacity(
-                            tuning.cardWhiteLayerPercent / 100 * (colorScheme == .dark ? 0.43 : 1)
+                            colorScheme == .dark ? 0.035 : 0.085
                         )
                     )
             }
@@ -65,13 +65,11 @@ struct GlassCardBackground: View {
                         LinearGradient(
                             colors: [
                                 Color.white.opacity(
-                                    (colorScheme == .dark ? 0.18 : 0.32)
-                                        * tuning.cardBorderPercent / 100
+                                    colorScheme == .dark ? 0.12 : 0.20
                                 ),
-                                Color.white.opacity(0.05 * tuning.cardBorderPercent / 100),
+                                Color.white.opacity(0.03),
                                 Color.black.opacity(
-                                    (colorScheme == .dark ? 0.16 : 0.07)
-                                        * tuning.cardBorderPercent / 100
+                                    colorScheme == .dark ? 0.10 : 0.045
                                 )
                             ],
                             startPoint: .topLeading,
@@ -80,32 +78,6 @@ struct GlassCardBackground: View {
                         lineWidth: 0.7
                     )
             }
-            .shadow(color: Color.black.opacity(0.07), radius: 5, y: 2)
-    }
-}
-
-struct BalancedPanelTint: View {
-    @Environment(\.colorScheme) private var colorScheme
-    let tuning: GlassTuning
-
-    var body: some View {
-        ZStack {
-            (colorScheme == .dark ? Color.black : Color.white)
-                .opacity(
-                    tuning.panelTintPercent / 100 * (colorScheme == .dark ? 1.5 : 1)
-                )
-            LinearGradient(
-                colors: [
-                    UsageDesign.blue.opacity(0.03 * tuning.panelGradientPercent / 100),
-                    Color.clear,
-                    Color.black.opacity(
-                        (colorScheme == .dark ? 0.07 : 0.04)
-                            * tuning.panelGradientPercent / 100
-                    )
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
+            .shadow(color: Color.black.opacity(0.045), radius: 4, y: 1)
     }
 }

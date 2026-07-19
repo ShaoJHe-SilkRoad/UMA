@@ -85,10 +85,27 @@ struct CodexRateLimitSnapshot: Sendable {
             }
             selected[window.kind] = Self.isMoreRestrictive(window, than: current) ? window : current
         }
+        let promotesWeeklyQuota = selected[.sevenDay] != nil
+            && selected[.fiveHour].map {
+                $0.creditsUnlimited == true || creditsUnlimited == true
+            } == true
         return (selected.values + passthrough).sorted {
-            if $0.kind.rawValue != $1.kind.rawValue { return $0.kind.rawValue < $1.kind.rawValue }
+            let lhsRank = displayRank(for: $0, promotesWeeklyQuota: promotesWeeklyQuota)
+            let rhsRank = displayRank(for: $1, promotesWeeklyQuota: promotesWeeklyQuota)
+            if lhsRank != rhsRank { return lhsRank < rhsRank }
             return $0.id < $1.id
         }
+    }
+
+    private func displayRank(
+        for window: CodexRateLimitWindow,
+        promotesWeeklyQuota: Bool
+    ) -> Int {
+        if promotesWeeklyQuota {
+            if window.kind == .sevenDay { return 0 }
+            if window.kind == .fiveHour { return 1 }
+        }
+        return window.kind.rawValue
     }
 
     private static func isMoreRestrictive(
@@ -189,15 +206,14 @@ extension UsageSnapshot {
         let hasValidatedWeeklyWindow = windows.contains(where: { $0.kind == .sevenDay })
         if !hasFiveHourWindow,
            (live.rateLimits.creditsUnlimited == true || hasValidatedWeeklyWindow) {
-            periods.insert(
+            periods.append(
                 UsagePeriod(
                     id: "provider.unlimited-five-hour",
-                    title: language.quotaTitle(durationMinutes: 300, index: 0),
+                    title: language.quotaTitle(durationMinutes: 300, index: periods.count),
                     remainingPercent: 100,
                     isUnlimited: true,
                     resetText: language.resetDescription(for: nil, now: now)
-                ),
-                at: 0
+                )
             )
         }
 

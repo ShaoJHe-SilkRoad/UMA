@@ -182,6 +182,17 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    func remainingAccessibilityValue(_ percent: Int) -> String {
+        switch self {
+        case .simplifiedChinese: "剩余 \(percent)%"
+        case .english: "\(percent)% remaining"
+        }
+    }
+
+    func quotaAccessibilityLabel(title: String, remainingPercent: Int) -> String {
+        "\(title), \(remainingAccessibilityValue(remainingPercent))"
+    }
+
     var recentTasks: String {
         switch self {
         case .simplifiedChinese: "最近任务"
@@ -342,6 +353,30 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .simplifiedChinese: "显示设置"
         case .english: "Show Settings"
+        }
+    }
+
+    var moreInfo: String {
+        switch self {
+        case .simplifiedChinese: "更多信息"
+        case .english: "More info"
+        }
+    }
+
+    func syncedAt(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "HH:mm"
+        return switch self {
+        case .simplifiedChinese: "已同步 \(formatter.string(from: date))"
+        case .english: "Synced \(formatter.string(from: date))"
+        }
+    }
+
+    var outdated: String {
+        switch self {
+        case .simplifiedChinese: "已过期"
+        case .english: "Outdated"
         }
     }
 

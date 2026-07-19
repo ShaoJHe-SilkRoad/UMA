@@ -8,6 +8,11 @@ struct UsagePeriod: Identifiable, Codable, Sendable {
     /// visible, but the numeric status must not imply an ordinary quota.
     var isUnlimited = false
     let resetText: String
+
+    /// Unlimited entitlement is supporting context for the finite quota, not
+    /// another measurable quota bar.
+    var isSecondary: Bool { isUnlimited }
+    var showsBar: Bool { !isUnlimited }
 }
 
 struct UsageMetric: Identifiable, Codable, Sendable {
@@ -167,7 +172,18 @@ extension UsageSnapshot {
     init(agentSnapshot: AgentUsageSnapshot, language: AppLanguage, now: Date = Date()) {
         let account = agentSnapshot.channels.first(where: { $0.id == .account })
         let local = agentSnapshot.channels.first(where: { $0.id == .localActivity })
-        let windows = (account?.rateLimitWindows ?? []).sorted { $0.kind.rawValue < $1.kind.rawValue }
+        let unsortedWindows = account?.rateLimitWindows ?? []
+        let promotesWeeklyQuota = unsortedWindows.contains {
+            $0.kind == .fiveHour && $0.isUnlimited
+        } && unsortedWindows.contains {
+            $0.kind == .sevenDay
+        }
+        let windows = unsortedWindows.sorted { lhs, rhs in
+            let lhsRank = Self.quotaDisplayRank(for: lhs, promotesWeeklyQuota: promotesWeeklyQuota)
+            let rhsRank = Self.quotaDisplayRank(for: rhs, promotesWeeklyQuota: promotesWeeklyQuota)
+            if lhsRank != rhsRank { return lhsRank < rhsRank }
+            return lhs.id < rhs.id
+        }
         let periods = windows.enumerated().map { index, window in
             UsagePeriod(
                 id: window.id,
@@ -231,6 +247,21 @@ extension UsageSnapshot {
     private static func normalizedPlanLabel(_ value: String?) -> String {
         guard let value, !value.isEmpty else { return "—" }
         return value.uppercased()
+    }
+
+    private static func quotaDisplayRank(
+        for window: AgentRateLimitWindow,
+        promotesWeeklyQuota: Bool
+    ) -> Int {
+        if promotesWeeklyQuota {
+            if window.kind == .sevenDay { return 0 }
+            if window.kind == .fiveHour { return 1 }
+        }
+        switch window.kind {
+        case .fiveHour: return 0
+        case .sevenDay: return 1
+        case .other: return 2
+        }
     }
 
     private static func formatNormalizedTokens(_ value: Int64?) -> String {

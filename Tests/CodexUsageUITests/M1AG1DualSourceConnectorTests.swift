@@ -340,7 +340,7 @@ struct M1AG1DualSourceConnectorTests {
     }
 
     @Test
-    func unlimitedFiveHourWindowRetainsItsBarAndUsesTheExplicitUnlimitedStatus() {
+    func unlimitedFiveHourWindowBecomesSecondaryAfterTheEffectiveWeeklyQuota() {
         let usage = CodexLiveUsage(
             rateLimits: .init(
                 planType: "pro",
@@ -357,10 +357,11 @@ struct M1AG1DualSourceConnectorTests {
         )
 
         let snapshot = UsageSnapshot(live: usage, language: .english)
-        #expect(snapshot.periods.map(\.title) == ["5-Hour Limit", "7-Day Limit"])
-        #expect(snapshot.periods.first?.remainingPercent == 67)
-        #expect(snapshot.periods.first?.isUnlimited == true)
-        #expect(snapshot.periods.last?.isUnlimited == false)
+        #expect(snapshot.periods.map(\.title) == ["7-Day Limit", "5-Hour Limit"])
+        #expect(snapshot.periods.first?.remainingPercent == 4)
+        #expect(snapshot.periods.first?.isUnlimited == false)
+        #expect(snapshot.periods.last?.isUnlimited == true)
+        #expect(snapshot.periods.last?.showsBar == false)
     }
 
     @Test
@@ -382,9 +383,9 @@ struct M1AG1DualSourceConnectorTests {
         )
 
         let snapshot = UsageSnapshot(live: usage, language: .english)
-        #expect(snapshot.periods.map(\.title) == ["5-Hour Limit", "7-Day Limit"])
-        #expect(snapshot.periods.first?.isUnlimited == true)
-        #expect(snapshot.periods.first?.remainingPercent == 100)
+        #expect(snapshot.periods.map(\.title) == ["7-Day Limit", "5-Hour Limit"])
+        #expect(snapshot.periods.last?.isUnlimited == true)
+        #expect(snapshot.periods.last?.remainingPercent == 100)
     }
 
     @Test
@@ -402,10 +403,11 @@ struct M1AG1DualSourceConnectorTests {
         )
 
         let snapshot = UsageSnapshot(live: usage, language: .english)
-        #expect(snapshot.periods.map(\.title) == ["5-Hour Limit", "7-Day Limit"])
-        #expect(snapshot.periods.first?.isUnlimited == true)
-        #expect(snapshot.periods.first?.remainingPercent == 100)
-        #expect(snapshot.periods.last?.remainingPercent == 98)
+        #expect(snapshot.periods.map(\.title) == ["7-Day Limit", "5-Hour Limit"])
+        #expect(snapshot.periods.first?.isUnlimited == false)
+        #expect(snapshot.periods.first?.remainingPercent == 98)
+        #expect(snapshot.periods.last?.isUnlimited == true)
+        #expect(snapshot.periods.last?.remainingPercent == 100)
     }
 
     @Test @MainActor

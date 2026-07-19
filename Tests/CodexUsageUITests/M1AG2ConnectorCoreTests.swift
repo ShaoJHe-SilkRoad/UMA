@@ -251,7 +251,7 @@ struct M1AG2ConnectorCoreTests {
         store.grantMonitorConsent()
         await store.connectToLocalSession()
 
-        #expect(store.snapshot.periods.first?.isUnlimited == true)
+        #expect(store.snapshot.periods.last?.isUnlimited == true)
         #expect(store.menuPercent == 73)
         await store.stopAllConnectors()
     }

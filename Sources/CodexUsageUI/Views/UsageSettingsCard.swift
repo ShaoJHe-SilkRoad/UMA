@@ -1,9 +1,6 @@
 import SwiftUI
 
 struct UsageSettingsCard: View {
-    @Binding var showUsageSummary: Bool
-    @Binding var showRecentTasks: Bool
-    @Binding var showAPICost: Bool
     @Binding var language: AppLanguage
     let tuning: GlassTuning
     let close: () -> Void
@@ -19,15 +16,6 @@ struct UsageSettingsCard: View {
                 Text(language.settingsTitle)
                     .font(UsageDesign.font(15, weight: .bold, language: language))
                 Spacer()
-                Button(language.showAll) {
-                    showUsageSummary = true
-                    showRecentTasks = true
-                    showAPICost = true
-                }
-                .buttonStyle(.plain)
-                .font(UsageDesign.font(10.5, weight: .medium, language: language))
-                .foregroundStyle(UsageDesign.blue)
-
                 Button(action: close) {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .bold))
@@ -38,34 +26,6 @@ struct UsageSettingsCard: View {
                 .help(language.closeSettings)
                 .accessibilityLabel(language.closeSettings)
             }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text(language.cardsSection)
-                    .font(UsageDesign.font(10.5, weight: .medium, language: language))
-                    .foregroundStyle(.secondary)
-
-                SettingsToggleRow(
-                    title: language.usageSummaryCard,
-                    systemImage: "gauge.with.dots.needle.67percent",
-                    language: language,
-                    isOn: $showUsageSummary
-                )
-                SettingsToggleRow(
-                    title: language.recentTasks,
-                    systemImage: "list.bullet.rectangle",
-                    language: language,
-                    isOn: $showRecentTasks
-                )
-                SettingsToggleRow(
-                    title: language.costCard,
-                    systemImage: "dollarsign.circle",
-                    language: language,
-                    isOn: $showAPICost
-                )
-            }
-
-            Divider()
-                .opacity(0.35)
 
             VStack(alignment: .leading, spacing: 7) {
                 Text(language.generalSection)
@@ -105,6 +65,7 @@ struct UsageSettingsCard: View {
         }
         .padding(14)
         .frame(width: 306)
+        .frame(minHeight: 150)
         .background {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(.regularMaterial)

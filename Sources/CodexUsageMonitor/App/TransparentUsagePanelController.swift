@@ -7,6 +7,28 @@ private final class TransparentUsagePanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+enum UsagePanelFrameGeometry {
+    static func clampedHeight(_ proposedHeight: CGFloat) -> CGFloat {
+        min(
+            UsagePanelMetrics.height,
+            max(UsagePanelMetrics.collapsedHeight, proposedHeight.rounded())
+        )
+    }
+
+    static func targetFrame(
+        from currentFrame: NSRect,
+        height: CGFloat,
+        visibleTopEdge: CGFloat?
+    ) -> NSRect {
+        var frame = currentFrame
+        frame.size.height = clampedHeight(height)
+        if let visibleTopEdge {
+            frame.origin.y = visibleTopEdge - frame.height
+        }
+        return frame
+    }
+}
+
 @MainActor
 final class TransparentUsagePanelController {
     private enum Layout {
@@ -23,6 +45,10 @@ final class TransparentUsagePanelController {
     private let visibilityDidChange: (Bool) -> Void
     private var globalEventMonitor: Any?
     private var localEventMonitor: Any?
+    private var frameAnimationGeneration: UInt = 0
+    private var visibleTopEdge: CGFloat?
+    private var pendingResizeHeight: CGFloat?
+    private var resizeIsScheduled = false
 
     init(
         store: UsageStore,
@@ -47,6 +73,8 @@ final class TransparentUsagePanelController {
     }
 
     func tearDown() {
+        pendingResizeHeight = nil
+        resizeIsScheduled = false
         close()
         removeEventMonitors()
     }
@@ -102,24 +130,79 @@ final class TransparentUsagePanelController {
     }
 
     private func resizePanel(to height: CGFloat) {
-        let height = min(UsagePanelMetrics.height, max(135, height.rounded()))
-        guard abs(panel.frame.height - height) > 0.5 else { return }
-
-        var frame = panel.frame
-        if panel.isVisible {
-            frame.origin.y += frame.height - height
+        pendingResizeHeight = height
+        guard !resizeIsScheduled else { return }
+        resizeIsScheduled = true
+        // SwiftUI reports its first semantic height while NSHostingView may
+        // still be inside a layout pass. Defer and coalesce frame work onto
+        // the next main-loop turn so AppKit never lays the host out reentrantly.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.resizeIsScheduled = false
+            guard let height = self.pendingResizeHeight else { return }
+            self.pendingResizeHeight = nil
+            self.applyResizePanel(to: height)
         }
-        frame.size.height = height
-        panel.setFrame(
-            frame,
-            display: panel.isVisible,
-            animate: panel.isVisible && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    private func applyResizePanel(to height: CGFloat) {
+        let targetFrame = UsagePanelFrameGeometry.targetFrame(
+            from: panel.frame,
+            height: height,
+            visibleTopEdge: panel.isVisible ? visibleTopEdge ?? panel.frame.maxY : nil
         )
-        panel.invalidateShadow()
+        guard
+            abs(panel.frame.height - targetFrame.height) > 0.5
+                || abs(panel.frame.minY - targetFrame.minY) > 0.5
+        else { return }
+
+        if panel.isVisible, visibleTopEdge == nil {
+            visibleTopEdge = panel.frame.maxY
+        }
+        replaceFrameAnimation(with: targetFrame)
+    }
+
+    private func replaceFrameAnimation(with targetFrame: NSRect) {
+        frameAnimationGeneration &+= 1
+        let generation = frameAnimationGeneration
+        let shouldAnimate = panel.isVisible
+            && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+
+        guard shouldAnimate else {
+            // A zero-duration animator assignment replaces any in-flight frame
+            // animation and applies the final geometry immediately.
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0
+                panel.animator().setFrame(targetFrame, display: panel.isVisible)
+            } completionHandler: { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.frameAnimationGeneration == generation else { return }
+                    self.panel.invalidateShadow()
+                }
+            }
+            return
+        }
+
+        // NSAnimatablePropertyContainer replaces the existing frame animation
+        // from its current presentation value when the same property receives
+        // a new target. The generation prevents an obsolete completion from
+        // finalizing geometry or invalidating the shadow.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().setFrame(targetFrame, display: true)
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.frameAnimationGeneration == generation else { return }
+                self.panel.setFrame(targetFrame, display: true)
+                self.panel.invalidateShadow()
+            }
+        }
     }
 
     private func show() {
         positionPanel()
+        visibleTopEdge = panel.frame.maxY
         panel.makeKeyAndOrderFront(nil)
         panel.invalidateShadow()
         visibilityDidChange(true)
@@ -130,6 +213,12 @@ final class TransparentUsagePanelController {
     }
 
     private func close() {
+        frameAnimationGeneration &+= 1
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            panel.animator().setFrame(panel.frame, display: false)
+        }
+        visibleTopEdge = nil
         if panel.isVisible {
             panel.orderOut(nil)
             visibilityDidChange(false)

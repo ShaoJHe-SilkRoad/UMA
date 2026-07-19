@@ -13,8 +13,18 @@ struct PreviewRendererTool {
         let outputPath = arguments.first(where: { !$0.hasPrefix("--") })
             ?? "work/codex-usage-panel-preview.png"
         let showsSettings = arguments.contains("--settings")
+        let showsMoreInfo = arguments.contains("--expanded")
+        let usesDarkAppearance = arguments.contains("--dark")
         let language: AppLanguage = arguments.contains("--english") ? .english : .simplifiedChinese
-        let store = UsageStore(autoRefresh: false, previewOnly: true, language: language)
+        let scenario = arguments
+            .compactMap { argument -> CodexPreviewScenario? in
+                guard argument.hasPrefix("--scenario=") else { return nil }
+                return CodexPreviewScenario(
+                    rawValue: String(argument.dropFirst("--scenario=".count))
+                )
+            }
+            .first ?? .ready
+        let store = UsageStore.preview(scenario: scenario, language: language)
         let tuning = GlassTuning.final
         let content = ZStack {
             LinearGradient(
@@ -29,10 +39,17 @@ struct PreviewRendererTool {
                 store: store,
                 tuning: tuning,
                 preferencesEnabled: false,
-                settingsInitiallyPresented: showsSettings
+                settingsInitiallyPresented: showsSettings,
+                moreInfoInitiallyPresented: showsMoreInfo
             )
         }
-        .frame(width: UsagePanelMetrics.width, height: UsagePanelMetrics.height)
+        .environment(\.colorScheme, usesDarkAppearance ? .dark : .light)
+        .frame(
+            width: UsagePanelMetrics.width,
+            height: showsMoreInfo
+                ? UsagePanelMetrics.height
+                : (showsSettings ? UsagePanelMetrics.settingsMinimumHeight : UsagePanelMetrics.collapsedHeight)
+        )
         let renderer = ImageRenderer(content: content)
         renderer.scale = 2
 
