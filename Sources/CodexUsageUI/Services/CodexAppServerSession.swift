@@ -39,6 +39,10 @@ private enum CodexAppServerTransportError: Error {
 enum CodexAppServerEvent: Sendable, Equatable {
     case accountUpdated
     case rateLimitsUpdated
+    /// The session replaced its one owned child and completed the new
+    /// initialization handshake. This carries no provider payload; the
+    /// connector uses it only to schedule one normal account-first refresh.
+    case transportRecovered
 }
 
 /// The retained local app-server receives only the stable GUI environment it
@@ -502,6 +506,7 @@ actor CodexAppServerSession {
         guard let transport else { return false }
         if transport.isRunning, transport.needsInitialization {
             try await initializeIfNeeded()
+            publishTransportRecovered()
             return true
         }
         guard !transport.isRunning, let executableURL else { return false }
@@ -511,6 +516,7 @@ actor CodexAppServerSession {
         do {
             try start(executableURL: executableURL)
             try await initializeIfNeeded()
+            publishTransportRecovered()
             return true
         } catch {
             shutdown()
@@ -733,6 +739,10 @@ actor CodexAppServerSession {
         default:
             break
         }
+    }
+
+    private func publishTransportRecovered() {
+        eventContinuation?.yield(.transportRecovered)
     }
 
     private struct PendingResponse {

@@ -41,6 +41,10 @@ actor CodexUsageConnector: AgentUsageConnector {
     /// notification stream. A provider event is an invalidation only; it
     /// routes through the same serialized refresh path as every other cause.
     private var providerEventTask: Task<Void, Never>?
+    /// Identifies the retained provider-event consumer. An older cancelled
+    /// consumer can finish after reconnect has installed its replacement, so
+    /// its cleanup must not clear the replacement task.
+    private var providerEventObservationGeneration: UInt64 = 0
 
     init(
         client: any CodexUsageClient = CodexAppServerClient(),
@@ -197,22 +201,26 @@ actor CodexUsageConnector: AgentUsageConnector {
     private func startProviderEventObservationIfNeeded() {
         guard providerEventTask == nil else { return }
         let client = client
+        providerEventObservationGeneration &+= 1
+        let generation = providerEventObservationGeneration
         providerEventTask = Task { [weak self] in
             let stream = await client.eventStream()
             for await _ in stream {
                 guard !Task.isCancelled else { return }
                 await self?.receiveProviderInvalidation()
             }
-            await self?.clearProviderEventObservation()
+            await self?.clearProviderEventObservation(generation: generation)
         }
     }
 
     private func stopProviderEventObservation() {
+        providerEventObservationGeneration &+= 1
         providerEventTask?.cancel()
         providerEventTask = nil
     }
 
-    private func clearProviderEventObservation() {
+    private func clearProviderEventObservation(generation: UInt64) {
+        guard generation == providerEventObservationGeneration else { return }
         providerEventTask = nil
     }
 
@@ -274,8 +282,20 @@ actor CodexUsageConnector: AgentUsageConnector {
         if let activity = latestLocal {
             channels.append(Self.localChannel(from: activity, freshness: .fresh))
         }
-        let overallFreshness: AgentConnectorFreshness = channels.contains(where: { $0.freshness == .fresh }) ? .fresh
-            : (channels.contains(where: { $0.freshness == .stale }) ? .stale : .unavailable)
+        // Account data is authoritative for the monitor's overall freshness.
+        // A current local aggregate can remain useful while the last account
+        // read is stale, but it must not make the account-backed monitor look
+        // freshly verified.
+        let overallFreshness: AgentConnectorFreshness
+        if let account = channels.first(where: { $0.id == .account }) {
+            overallFreshness = account.freshness
+        } else if channels.contains(where: { $0.freshness == .fresh }) {
+            overallFreshness = .fresh
+        } else if channels.contains(where: { $0.freshness == .stale }) {
+            overallFreshness = .stale
+        } else {
+            overallFreshness = .unavailable
+        }
         return AgentUsageSnapshot(
             id: id,
             providerName: descriptor.providerName,

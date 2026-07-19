@@ -232,11 +232,11 @@ actor CodexAppServerClient: CodexUsageClient {
                 do {
                     let replaced = try await self.session.maintainTransportIfNeeded()
                     guard replaced, !Task.isCancelled else { continue }
-                    // Transport repair is not itself a provider read.  Once a
-                    // new owned child is initialized, one account-first read
-                    // immediately validates its health through the same
-                    // coalesced lane used by reconnect, wake, and manual UI.
-                    _ = try await self.fetchUsage(trigger: .reconnect)
+                    // The session emits one typed, payload-free replacement
+                    // event after its child is initialized. The connector
+                    // consumes that event through its single refresh lane and
+                    // publishes the resulting account snapshot; this client
+                    // must not perform and discard a competing provider read.
                 } catch {
                     // The next bounded monitor tick may repair a transient
                     // local child failure. No autonomous request loop is

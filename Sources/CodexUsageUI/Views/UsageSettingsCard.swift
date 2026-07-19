@@ -36,6 +36,7 @@ struct UsageSettingsCard: View {
                 }
                 .buttonStyle(.plain)
                 .help(language.closeSettings)
+                .accessibilityLabel(language.closeSettings)
             }
 
             VStack(alignment: .leading, spacing: 8) {

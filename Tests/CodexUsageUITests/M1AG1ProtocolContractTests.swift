@@ -136,7 +136,7 @@ struct M1AG1ProtocolContractTests {
     }
 
     @Test
-    func ownedChildReplacementImmediatelyUsesTheReconnectRefreshLane() async throws {
+    func ownedChildReplacementPublishesOneSanitizedRecoveryInvalidation() async throws {
         let first = ProtocolTransport(messages: providerReadSequence())
         let second = ProtocolTransport(messages: providerReadSequence())
         let factory = TransportQueue([first, second])
@@ -147,23 +147,19 @@ struct M1AG1ProtocolContractTests {
             ownedProcessMonitorInterval: .milliseconds(5)
         )
 
+        let stream = await client.eventStream()
+        var iterator = stream.makeAsyncIterator()
         _ = try await client.fetchUsage()
         first.markExited()
 
         for _ in 0..<200 where factory.startCount < 2 {
             try await Task.sleep(for: .milliseconds(5))
         }
-        for _ in 0..<200 where (try second.sentObjects()).count < 5 {
-            try await Task.sleep(for: .milliseconds(5))
-        }
-
         #expect(factory.startCount == 2)
+        #expect(await iterator.next() == .transportRecovered)
         #expect(try second.sentObjects().map { $0["method"] as? String } == [
             "initialize",
-            "initialized",
-            "account/read",
-            "account/rateLimits/read",
-            "account/usage/read"
+            "initialized"
         ])
         await client.disconnect()
     }

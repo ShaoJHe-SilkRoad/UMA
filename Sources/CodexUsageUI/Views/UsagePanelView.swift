@@ -50,6 +50,13 @@ public struct UsagePanelView: View {
         )
     }
 
+    private var retainedSnapshotRecovery: RetainedSnapshotRecoveryPresentation? {
+        RetainedSnapshotRecoveryPresentation(
+            presentation: presentation,
+            language: store.language
+        )
+    }
+
     private var preferredHeight: CGFloat {
         guard presentation.showsRealData else { return 330 }
         return UsagePanelMetrics.preferredHeight(
@@ -68,7 +75,13 @@ public struct UsagePanelView: View {
     public var body: some View {
         VStack(spacing: 12) {
             if presentation.showsRealData {
-                HeaderView(store: store, tuning: tuning, isShowingSettings: $isShowingSettings)
+                HeaderView(
+                    store: store,
+                    recovery: retainedSnapshotRecovery,
+                    tuning: tuning,
+                    isShowingSettings: $isShowingSettings,
+                    perform: perform
+                )
                 if showUsageSummary {
                     UsageSummaryCard(snapshot: store.snapshot, language: store.language, tuning: tuning)
                 }
@@ -261,8 +274,10 @@ private struct APICostEstimateCard: View {
 
 private struct HeaderView: View {
     @ObservedObject var store: UsageStore
+    let recovery: RetainedSnapshotRecoveryPresentation?
     let tuning: GlassTuning
     @Binding var isShowingSettings: Bool
+    let perform: @MainActor (CodexConnectionAction) async -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -280,68 +295,104 @@ private struct HeaderView: View {
                     Text(store.language.appTitle)
                         .font(UsageDesign.font(20, weight: .bold, language: store.language))
                         .lineLimit(1)
-                    Text(store.snapshot.planLabel)
-                        .font(UsageDesign.font(11, weight: .bold, language: store.language))
-                        .tracking(1.0)
-                        .foregroundStyle(.secondary)
+                        .minimumScaleFactor(UsagePanelHeaderLayout.titleMinimumScaleFactor)
+                        .layoutPriority(UsagePanelHeaderLayout.titleLayoutPriority)
+                    if recovery == nil {
+                        Text(store.snapshot.planLabel)
+                            .font(UsageDesign.font(11, weight: .bold, language: store.language))
+                            .tracking(1.0)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
                 }
 
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(store.lastError == nil ? UsageDesign.green : Color.orange)
+                        .fill(recovery == nil && store.lastError == nil ? UsageDesign.green : Color.orange)
                         .frame(width: 8, height: 8)
-                    Text(store.statusText)
+                    Text(recovery?.statusText ?? store.statusText)
                         .font(UsageDesign.font(13, language: store.language))
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(recovery == nil ? 1 : 2)
                         .minimumScaleFactor(0.78)
                 }
             }
 
             Spacer(minLength: 8)
 
-            HStack(spacing: 4) {
-                Button {
-                    Task { await store.refresh() }
-                } label: {
-                    ZStack {
-                        Circle()
-                            .fill(Color.white.opacity(0.14))
-                            .frame(width: 34, height: 34)
-                        if store.isRefreshing {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundStyle(.secondary)
+            if let recovery {
+                HStack(spacing: 4) {
+                    if let primaryAction = recovery.primaryAction {
+                        RecoveryActionButton(action: primaryAction, perform: perform)
+                    }
+                    if let secondaryAction = recovery.secondaryAction {
+                        RecoveryActionButton(action: secondaryAction, perform: perform)
+                    }
+                }
+            } else {
+                HStack(spacing: 4) {
+                    Button {
+                        Task { await store.refresh() }
+                    } label: {
+                        ZStack {
+                            Circle()
+                                .fill(Color.white.opacity(0.14))
+                                .frame(width: 34, height: 34)
+                            if store.isRefreshing {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
-                }
-                .buttonStyle(.plain)
-                .help(store.language.refreshUsage)
-                .accessibilityHint(store.lastError ?? store.language.refreshFromAccountHint)
+                    .buttonStyle(.plain)
+                    .help(store.language.refreshUsage)
+                    .accessibilityLabel(store.language.refreshUsage)
+                    .accessibilityHint(store.lastError ?? store.language.refreshFromAccountHint)
 
-                Button {
-                    isShowingSettings.toggle()
-                } label: {
-                    ZStack {
-                        Circle()
-                            .fill(Color.white.opacity(isShowingSettings ? 0.25 : 0.14))
-                            .frame(width: 30, height: 30)
-                        Image(systemName: isShowingSettings ? "gearshape.fill" : "gearshape")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(isShowingSettings ? UsageDesign.blue : Color.secondary)
+                    Button {
+                        isShowingSettings.toggle()
+                    } label: {
+                        ZStack {
+                            Circle()
+                                .fill(Color.white.opacity(isShowingSettings ? 0.25 : 0.14))
+                                .frame(width: 30, height: 30)
+                            Image(systemName: isShowingSettings ? "gearshape.fill" : "gearshape")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(isShowingSettings ? UsageDesign.blue : Color.secondary)
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .help(store.language.showSettings)
+                    .accessibilityLabel(store.language.showSettings)
                 }
-                .buttonStyle(.plain)
-                .help(store.language.showSettings)
-                .accessibilityLabel(store.language.showSettings)
             }
         }
         .padding(.horizontal, 14)
         .frame(height: 70)
         .background(GlassCardBackground(tuning: tuning))
+    }
+}
+
+private struct RecoveryActionButton: View {
+    let action: CodexPresentedAction
+    let perform: @MainActor (CodexConnectionAction) async -> Void
+
+    var body: some View {
+        Button(action.title) {
+            Task { await perform(action.action) }
+        }
+        .buttonStyle(.plain)
+        .font(.system(size: 10.5, weight: .semibold))
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
+        .padding(.horizontal, 7)
+        .frame(maxWidth: 82, minHeight: 30)
+        .background(Capsule().fill(Color.orange.opacity(0.16)))
+        .accessibilityLabel(action.title)
     }
 }
 
