@@ -2,5 +2,5 @@
 dist/
 work/
 .DS_Store
-outputs/CodexUsageMonitor.app/
+outputs/UMA.app/
 outputs/* 2.*

@@ -81,7 +81,7 @@ struct UMAFinalVisualCorrectionTests {
             language: .simplifiedChinese
         )
         let attributed = NSAttributedString(
-            string: "Codex 用量 79%",
+            string: "UMA 用量 79%",
             attributes: [.font: font]
         )
         let line = CTLineCreateWithAttributedString(attributed)
@@ -115,6 +115,7 @@ struct UMAFinalVisualCorrectionTests {
                         tuning: .final,
                         preferencesEnabled: false,
                         appKitAccessibilityEnabled: false,
+                        scrollingEnabled: false,
                         moreInfoInitiallyPresented: expanded
                     )
                     .frame(width: UsagePanelMetrics.width, height: height)

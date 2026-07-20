@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Atomically replace the local P2 review candidate and Finder launcher.
+# Atomically replace the local UMA 0.9 review candidate and Finder launcher.
 set -euo pipefail
 
-readonly PRODUCT="CodexUsageMonitor"
+readonly APP_NAME="UMA"
 readonly REVIEW_ROOT="/Users/juliushe/Desktop/UMA0.9_Review"
-readonly REVIEW_APP="$REVIEW_ROOT/$PRODUCT.app"
+readonly REVIEW_APP="$REVIEW_ROOT/$APP_NAME.app"
 readonly LAUNCHER_APP="/Users/juliushe/Desktop/UMA0.9_Enter.app"
 
-usage() { printf '%s\n' "Usage: $0 --candidate </private/tmp/.../CodexUsageMonitor.app> --commit <40-hex-sha>"; }
+usage() { printf '%s\n' "Usage: $0 --candidate </private/tmp/uma-development-preview-package/.../UMA.app> --commit <40-hex-sha>"; }
 candidate=""
 commit=""
 while [[ $# -gt 0 ]]; do
@@ -18,7 +18,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-[[ "$candidate" = /private/tmp/codexusage-m1a-g2-dbg-c-p2-package/*/"$PRODUCT".app ]] || { usage >&2; exit 2; }
+[[ "$candidate" = /private/tmp/uma-development-preview-package/*/"$APP_NAME".app ]] || { usage >&2; exit 2; }
 [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { usage >&2; exit 2; }
 /usr/bin/xattr -cr "$candidate"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$candidate"
@@ -26,7 +26,7 @@ done
 
 staging="$(/usr/bin/mktemp -d /private/tmp/uma-p2-install.XXXXXX)"
 trap '/bin/rm -rf "$staging"' EXIT
-/usr/bin/ditto "$candidate" "$staging/$PRODUCT.app"
+/usr/bin/ditto "$candidate" "$staging/$APP_NAME.app"
 mkdir -p "$staging/UMA0.9_Enter.app/Contents/MacOS"
 {
     printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>'
@@ -37,8 +37,8 @@ mkdir -p "$staging/UMA0.9_Enter.app/Contents/MacOS"
     printf '%s\n' '<key>CFBundleIdentifier</key><string>com.kevinchen.CodexUsageMonitor.uma0.9.enter.p2</string>'
     printf '%s\n' '<key>CFBundleName</key><string>UMA0.9_Enter</string>'
     printf '%s\n' '<key>CFBundlePackageType</key><string>APPL</string>'
-    printf '%s\n' '<key>CFBundleShortVersionString</key><string>0.9-p2</string>'
-    printf '%s\n' '<key>CFBundleVersion</key><string>2</string>'
+    printf '%s\n' '<key>CFBundleShortVersionString</key><string>0.9-development-preview</string>'
+    printf '%s\n' '<key>CFBundleVersion</key><string>3</string>'
     printf '%s\n' '<key>LSUIElement</key><true/>'
     printf '%s\n' '</dict></plist>'
 } > "$staging/UMA0.9_Enter.app/Contents/Info.plist"
@@ -52,7 +52,7 @@ launcher_source="$staging/UMA0.9_Enter.swift"
     printf '%s\n' '    @MainActor'
     printf '%s\n' '    static func main() {'
     printf '%s\n' '        let application = NSApplication.shared'
-    printf '%s\n' '        let candidate = URL(fileURLWithPath: "/Users/juliushe/Desktop/UMA0.9_Review/CodexUsageMonitor.app")'
+    printf '%s\n' '        let candidate = URL(fileURLWithPath: "/Users/juliushe/Desktop/UMA0.9_Review/UMA.app")'
     printf '%s\n' '        let metadataCleaner = Process()'
     printf '%s\n' '        metadataCleaner.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")'
     printf '%s\n' '        metadataCleaner.arguments = ["-d", "com.apple.FinderInfo", candidate.path]'
@@ -84,10 +84,10 @@ mkdir -p "$staging/module-cache"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$staging/UMA0.9_Enter.app"
 
 mkdir -p "$REVIEW_ROOT"
-/bin/rm -rf "$REVIEW_APP.p2-old" "$LAUNCHER_APP.p2-old"
-if [[ -e "$REVIEW_APP" || -L "$REVIEW_APP" ]]; then /bin/mv "$REVIEW_APP" "$REVIEW_APP.p2-old"; fi
-if [[ -e "$LAUNCHER_APP" || -L "$LAUNCHER_APP" ]]; then /bin/mv "$LAUNCHER_APP" "$LAUNCHER_APP.p2-old"; fi
-/bin/mv "$staging/$PRODUCT.app" "$REVIEW_APP"
+/bin/rm -rf "$REVIEW_APP.old" "$LAUNCHER_APP.old"
+if [[ -e "$REVIEW_APP" || -L "$REVIEW_APP" ]]; then /bin/mv "$REVIEW_APP" "$REVIEW_APP.old"; fi
+if [[ -e "$LAUNCHER_APP" || -L "$LAUNCHER_APP" ]]; then /bin/mv "$LAUNCHER_APP" "$LAUNCHER_APP.old"; fi
+/bin/mv "$staging/$APP_NAME.app" "$REVIEW_APP"
 /bin/mv "$staging/UMA0.9_Enter.app" "$LAUNCHER_APP"
-/bin/rm -rf "$REVIEW_APP.p2-old" "$LAUNCHER_APP.p2-old"
+/bin/rm -rf "$REVIEW_APP.old" "$LAUNCHER_APP.old"
 printf 'INSTALLED review_app=%s launcher=%s commit=%s\n' "$REVIEW_APP" "$LAUNCHER_APP" "$commit"

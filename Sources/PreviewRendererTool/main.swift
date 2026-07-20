@@ -48,8 +48,14 @@ struct PreviewRendererTool {
                 tuning: tuning,
                 preferencesEnabled: false,
                 appKitAccessibilityEnabled: false,
+                scrollingEnabled: false,
                 settingsInitiallyPresented: showsSettings,
                 moreInfoInitiallyPresented: showsMoreInfo
+            )
+            .frame(
+                width: UsagePanelMetrics.width,
+                height: previewHeight,
+                alignment: .top
             )
         }
         .environment(\.colorScheme, usesDarkAppearance ? .dark : .light)

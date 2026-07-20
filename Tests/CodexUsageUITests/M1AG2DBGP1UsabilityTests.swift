@@ -7,8 +7,8 @@ struct M1AG2DBGP1UsabilityTests {
         #expect(UsagePanelMetrics.width == 370)
         #expect(UsagePanelHeaderLayout.titleMinimumScaleFactor == 0.72)
         #expect(UsagePanelHeaderLayout.titleLayoutPriority == 1)
-        #expect(AppLanguage.english.appTitle == "Codex Usage")
-        #expect(AppLanguage.simplifiedChinese.appTitle == "Codex 用量")
+        #expect(AppLanguage.english.appTitle == "UMA")
+        #expect(AppLanguage.simplifiedChinese.appTitle == "UMA")
     }
 
     @Test

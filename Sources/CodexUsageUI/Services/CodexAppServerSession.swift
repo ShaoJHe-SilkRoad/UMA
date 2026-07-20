@@ -325,7 +325,7 @@ actor CodexAppServerSession {
                 params: InitializeParameters(
                     clientInfo: ClientInfo(
                         name: "codex-usage-monitor",
-                        title: "Codex Usage Monitor",
+                        title: "UMA",
                         version: "1.0.0"
                     )
                 ),

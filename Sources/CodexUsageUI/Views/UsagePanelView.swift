@@ -9,6 +9,7 @@ public struct UsagePanelView: View {
     let tuning: GlassTuning
     private let preferencesEnabled: Bool
     private let appKitAccessibilityEnabled: Bool
+    private let scrollingEnabled: Bool
     private let onHeightChange: ((CGFloat) -> Void)?
     private let localAccessConfirmationAction: CodexLocalAccessConfirmationAction?
 
@@ -17,6 +18,7 @@ public struct UsagePanelView: View {
         tuning: GlassTuning,
         preferencesEnabled: Bool = true,
         appKitAccessibilityEnabled: Bool = true,
+        scrollingEnabled: Bool = true,
         settingsInitiallyPresented: Bool = false,
         moreInfoInitiallyPresented: Bool = false,
         onHeightChange: ((CGFloat) -> Void)? = nil,
@@ -26,6 +28,7 @@ public struct UsagePanelView: View {
         self.tuning = tuning
         self.preferencesEnabled = preferencesEnabled
         self.appKitAccessibilityEnabled = appKitAccessibilityEnabled
+        self.scrollingEnabled = scrollingEnabled
         self.onHeightChange = onHeightChange
         self.localAccessConfirmationAction = localAccessConfirmationAction
         _isShowingSettings = State(initialValue: settingsInitiallyPresented)
@@ -67,16 +70,25 @@ public struct UsagePanelView: View {
     }
 
     public var body: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            panelContent
-        }
-        .scrollBounceBehavior(.basedOnSize)
+        viewportContent
         .frame(width: UsagePanelMetrics.width)
         .onAppear {
             onHeightChange?(displayedHeight)
         }
         .onChange(of: displayedHeight) { _, newHeight in
             onHeightChange?(newHeight)
+        }
+    }
+
+    @ViewBuilder
+    private var viewportContent: some View {
+        if scrollingEnabled {
+            ScrollView(.vertical, showsIndicators: false) {
+                panelContent
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        } else {
+            panelContent
         }
     }
 
