@@ -1,10 +1,19 @@
 import AppKit
 
+enum UsagePanelExteriorContract {
+    static func windowShadowEnabled(
+        materialOwnsExteriorContour: Bool
+    ) -> Bool {
+        !materialOwnsExteriorContour
+    }
+}
+
 /// Hosts exactly one adaptive panel material: native glass on macOS 26 and the
 /// established visual-effect fallback on supported earlier releases.
 final class AdaptivePanelMaterialHostView: NSView {
     private let cornerRadius: CGFloat
     private let fallbackMaterialOpacity: CGFloat
+    private(set) var ownsExteriorContour = false
 
     init(frame frameRect: NSRect, cornerRadius: CGFloat, fallbackMaterialOpacity: Double) {
         self.cornerRadius = cornerRadius
@@ -15,12 +24,10 @@ final class AdaptivePanelMaterialHostView: NSView {
         layer?.backgroundColor = NSColor.clear.cgColor
         layer?.cornerRadius = cornerRadius
         layer?.cornerCurve = .continuous
-        if #available(macOS 26.0, *) {
-            // NSGlassEffectView owns the native glass contour on macOS 26.
-            layer?.masksToBounds = false
-        } else {
-            layer?.masksToBounds = true
-        }
+        // The host is the sole exterior boundary. Clipping the native glass
+        // removes its out-of-bounds halo, which otherwise reads as a second
+        // perimeter in Light appearance.
+        layer?.masksToBounds = true
     }
 
     @available(*, unavailable)
@@ -36,16 +43,16 @@ final class AdaptivePanelMaterialHostView: NSView {
             return
         }
         if #available(macOS 26.0, *) {
+            ownsExteriorContour = true
             installNativeGlass(clippedContentView)
         } else {
             installFallbackMaterial(clippedContentView)
         }
     }
 
-    /// macOS 26 glass owns the visible rounded rim and must remain unmasked so
-    /// its native contour and the panel shadow are not clipped. The hosted
-    /// SwiftUI plane is the only full-frame rectangle, so it is isolated in
-    /// this clear, continuous clipper before it reaches the glass content.
+    /// The hosted SwiftUI plane is the only full-frame rectangle, so it is
+    /// isolated in this clear, continuous clipper before it reaches the glass
+    /// content.
     private func makeRoundedContentClipper(containing contentView: NSView) -> NSView {
         let clipper = NSView(frame: bounds)
         clipper.autoresizingMask = [.width, .height]

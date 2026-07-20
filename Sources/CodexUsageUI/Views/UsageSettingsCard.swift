@@ -14,7 +14,7 @@ struct UsageSettingsCard: View {
                 Image(systemName: "gearshape.fill")
                     .foregroundStyle(UsageDesign.blue)
                 Text(language.settingsTitle)
-                    .font(UsageDesign.font(15, weight: .bold, language: language))
+                    .font(UsageDesign.font(.sectionTitle, language: language))
                 Spacer()
                 Button(action: close) {
                     Image(systemName: "xmark")
@@ -29,7 +29,7 @@ struct UsageSettingsCard: View {
 
             VStack(alignment: .leading, spacing: 7) {
                 Text(language.generalSection)
-                    .font(UsageDesign.font(10.5, weight: .medium, language: language))
+                    .font(UsageDesign.font(.secondaryBody, language: language))
                     .foregroundStyle(.secondary)
 
                 LanguageSettingRow(language: $language)
@@ -51,13 +51,13 @@ struct UsageSettingsCard: View {
                         .buttonStyle(.plain)
                         .foregroundStyle(UsageDesign.blue)
                     }
-                    .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                    .font(UsageDesign.font(.errorStatus, language: language))
                     .foregroundStyle(.secondary)
                 }
 
                 if let launchAtLoginError {
                     Text(launchAtLoginError)
-                        .font(UsageDesign.font(9.5, language: language))
+                        .font(UsageDesign.font(.errorStatus, language: language))
                         .foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -109,7 +109,7 @@ private struct SettingsToggleRow: View {
         } label: {
             HStack(spacing: 8) {
                 Label(title, systemImage: systemImage)
-                    .font(UsageDesign.font(12.5, weight: .medium, language: language))
+                    .font(UsageDesign.font(.settingsLabel, language: language))
                 Spacer()
                 ZStack {
                     Capsule()
@@ -139,7 +139,7 @@ private struct LanguageSettingRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Label(language.languageSetting, systemImage: "globe")
-                .font(UsageDesign.font(12.5, weight: .medium, language: language))
+                .font(UsageDesign.font(.settingsLabel, language: language))
             Spacer(minLength: 6)
             HStack(spacing: 3) {
                 ForEach(AppLanguage.allCases) { option in
@@ -147,7 +147,13 @@ private struct LanguageSettingRow: View {
                         language = option
                     } label: {
                         Text(option.displayName)
-                            .font(UsageDesign.font(9.5, weight: .medium, language: option))
+                            .font(
+                                UsageDesign.font(
+                                    .settingsLabel,
+                                    language: option,
+                                    sizeOverride: 9.5
+                                )
+                            )
                             .foregroundStyle(language == option ? Color.white : Color.secondary)
                             .padding(.horizontal, 7)
                             .frame(height: 22)

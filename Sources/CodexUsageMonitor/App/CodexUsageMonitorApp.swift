@@ -35,6 +35,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 enum CodexUsageMonitorApp {
     @MainActor
     static func main() {
+        do {
+            try UsageTypography.registerBundledFonts()
+        } catch {
+            fatalError("Roboto registration failed: \(error)")
+        }
         let application = NSApplication.shared
         let delegate = AppDelegate()
         application.delegate = delegate

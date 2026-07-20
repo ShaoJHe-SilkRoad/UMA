@@ -363,6 +363,31 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    var lessInfo: String {
+        switch self {
+        case .simplifiedChinese: "收起信息"
+        case .english: "Less info"
+        }
+    }
+
+    func disclosureLabel(isExpanded: Bool) -> String {
+        isExpanded ? lessInfo : moreInfo
+    }
+
+    var expandedAccessibilityValue: String {
+        switch self {
+        case .simplifiedChinese: "已展开"
+        case .english: "Expanded"
+        }
+    }
+
+    var collapsedAccessibilityValue: String {
+        switch self {
+        case .simplifiedChinese: "已折叠"
+        case .english: "Collapsed"
+        }
+    }
+
     func syncedAt(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

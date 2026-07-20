@@ -8,6 +8,7 @@ import SwiftUI
 struct PreviewRendererTool {
     static func main() async throws {
         _ = NSApplication.shared
+        try UsageTypography.registerBundledFonts()
 
         let arguments = Array(CommandLine.arguments.dropFirst())
         let outputPath = arguments.first(where: { !$0.hasPrefix("--") })
@@ -26,6 +27,13 @@ struct PreviewRendererTool {
             .first ?? .ready
         let store = UsageStore.preview(scenario: scenario, language: language)
         let tuning = GlassTuning.final
+        let previewHeight = UsagePanelMetrics.presentedHeight(
+            showsRealData: true,
+            moreInfoExpanded: showsMoreInfo,
+            recentTaskCount: store.presentedRecentTaskCount,
+            meteredPeriodCount: store.presentedMeteredPeriodCount,
+            settingsPresented: showsSettings
+        )
         let content = ZStack {
             LinearGradient(
                 colors: [
@@ -39,6 +47,7 @@ struct PreviewRendererTool {
                 store: store,
                 tuning: tuning,
                 preferencesEnabled: false,
+                appKitAccessibilityEnabled: false,
                 settingsInitiallyPresented: showsSettings,
                 moreInfoInitiallyPresented: showsMoreInfo
             )
@@ -46,9 +55,7 @@ struct PreviewRendererTool {
         .environment(\.colorScheme, usesDarkAppearance ? .dark : .light)
         .frame(
             width: UsagePanelMetrics.width,
-            height: showsMoreInfo
-                ? UsagePanelMetrics.height
-                : (showsSettings ? UsagePanelMetrics.settingsMinimumHeight : UsagePanelMetrics.collapsedHeight)
+            height: previewHeight
         )
         let renderer = ImageRenderer(content: content)
         renderer.scale = 2

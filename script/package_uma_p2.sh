@@ -55,9 +55,13 @@ popd >/dev/null
 [[ -x "$binary_path" ]] || { printf '%s\n' "Expected product was not built." >&2; exit 1; }
 
 contents="$output/Contents"
-mkdir -p "$contents/MacOS" "$contents/Resources"
+font_resources="$source_root/Sources/CodexUsageUI/Resources/Fonts/Roboto"
+mkdir -p "$contents/MacOS" "$contents/Resources/Fonts/Roboto"
 install -m 755 "$binary_path" "$contents/MacOS/$PRODUCT"
 install -m 644 "$source_root/Assets/AppIcon.icns" "$contents/Resources/AppIcon.icns"
+for resource in Roboto-Regular.ttf Roboto-Medium.ttf Roboto-Bold.ttf OFL.txt PROVENANCE.md; do
+    install -m 644 "$font_resources/$resource" "$contents/Resources/Fonts/Roboto/$resource"
+done
 {
     printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>'
     printf '%s\n' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'

@@ -1,4 +1,5 @@
 import AppKit
+import CodexUsageUI
 import Testing
 
 #if canImport(CodexUsageAppShell)
@@ -17,7 +18,7 @@ struct M1AG2DBGNativeGlassContractTests {
             x: 0,
             y: 0,
             width: 370,
-            height: 776
+            height: UsagePanelMetrics.height
         )
         let host = AdaptivePanelMaterialHostView(
             frame: expectedFrame,
@@ -48,7 +49,10 @@ struct M1AG2DBGNativeGlassContractTests {
         } else if #available(macOS 26.0, *) {
             let glass = try #require(host.subviews.first as? NSGlassEffectView)
             #expect(host.subviews.count == 1)
-            #expect(host.layer?.masksToBounds == false)
+            // The host is the sole exterior boundary; clipping suppresses the
+            // native glass halo that otherwise reads as a second Light-mode
+            // perimeter.
+            #expect(host.layer?.masksToBounds == true)
             #expect(glass.frame == host.bounds)
             #expect(glass.cornerRadius == 28)
             #expect(glass.style == .regular)

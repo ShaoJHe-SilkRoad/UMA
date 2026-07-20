@@ -38,6 +38,12 @@ BUILD_BINARY="$("$SWIFT_BIN" build --disable-sandbox --scratch-path "$BUILD_DIR"
 mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 install -m 755 "$BUILD_BINARY" "$APP_BINARY"
 install -m 644 "$APP_ICON_SOURCE" "$APP_RESOURCES/AppIcon.icns"
+mkdir -p "$APP_RESOURCES/Fonts/Roboto"
+for resource in Roboto-Regular.ttf Roboto-Medium.ttf Roboto-Bold.ttf OFL.txt PROVENANCE.md; do
+  install -m 644 \
+    "$ROOT_DIR/Sources/CodexUsageUI/Resources/Fonts/Roboto/$resource" \
+    "$APP_RESOURCES/Fonts/Roboto/$resource"
+done
 
 cat >"$INFO_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

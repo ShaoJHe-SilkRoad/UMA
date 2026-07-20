@@ -42,7 +42,10 @@ final class StatusBarController: NSObject {
         image?.isTemplate = true
         button.image = image
         button.imagePosition = .imageLeading
-        button.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+        button.font = UsageTypography.appKitFont(
+            .syncStatus,
+            language: store.language
+        )
         button.target = self
         button.action = #selector(handleStatusItemAction)
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -58,6 +61,10 @@ final class StatusBarController: NSObject {
     }
 
     private func updateStatusButton() {
+        statusItem.button?.font = UsageTypography.appKitFont(
+            .syncStatus,
+            language: store.language
+        )
         statusItem.button?.title = store.menuPercent.map { " " + String($0) + "%" } ?? " —"
         statusItem.button?.toolTip = store.language.appTitle
         statusItem.button?.setAccessibilityLabel(

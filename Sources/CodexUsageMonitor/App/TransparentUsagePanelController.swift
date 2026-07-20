@@ -11,19 +11,29 @@ enum UsagePanelFrameGeometry {
     static func clampedHeight(_ proposedHeight: CGFloat) -> CGFloat {
         min(
             UsagePanelMetrics.height,
-            max(UsagePanelMetrics.collapsedHeight, proposedHeight.rounded())
+            max(UsagePanelMetrics.minimumHeight, proposedHeight.rounded())
         )
     }
 
     static func targetFrame(
         from currentFrame: NSRect,
         height: CGFloat,
-        visibleTopEdge: CGFloat?
+        visibleTopEdge: CGFloat?,
+        visibleFrame: NSRect? = nil,
+        screenMargin: CGFloat = 0
     ) -> NSRect {
         var frame = currentFrame
         frame.size.height = clampedHeight(height)
         if let visibleTopEdge {
             frame.origin.y = visibleTopEdge - frame.height
+        }
+        if let visibleFrame {
+            let boundedFrame = visibleFrame.insetBy(dx: screenMargin, dy: screenMargin)
+            frame.size.height = min(frame.height, boundedFrame.height)
+            frame.origin.y = min(
+                boundedFrame.maxY - frame.height,
+                max(boundedFrame.minY, frame.origin.y)
+            )
         }
         return frame
     }
@@ -94,7 +104,10 @@ final class TransparentUsagePanelController {
         panel.level = .popUpMenu
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        // The macOS 26 glass host owns the exterior rim. AppKit's panel
+        // shadow would create a second perimeter and can briefly retain stale
+        // geometry while the disclosure animation resizes the window.
+        panel.hasShadow = false
         panel.hidesOnDeactivate = false
         panel.isFloatingPanel = true
         panel.becomesKeyOnlyIfNeeded = true
@@ -126,6 +139,9 @@ final class TransparentUsagePanelController {
         hostingView.wantsLayer = true
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
         rootView.installContentView(hostingView)
+        panel.hasShadow = UsagePanelExteriorContract.windowShadowEnabled(
+            materialOwnsExteriorContour: rootView.ownsExteriorContour
+        )
         panel.contentView = rootView
     }
 
@@ -149,7 +165,9 @@ final class TransparentUsagePanelController {
         let targetFrame = UsagePanelFrameGeometry.targetFrame(
             from: panel.frame,
             height: height,
-            visibleTopEdge: panel.isVisible ? visibleTopEdge ?? panel.frame.maxY : nil
+            visibleTopEdge: panel.isVisible ? visibleTopEdge ?? panel.frame.maxY : nil,
+            visibleFrame: panel.isVisible ? panel.screen?.visibleFrame : nil,
+            screenMargin: Layout.screenMargin
         )
         guard
             abs(panel.frame.height - targetFrame.height) > 0.5

@@ -31,7 +31,64 @@ struct M1AG2DBGP2VisualInformationContractTests {
 
     @Test
     func collapsedCoreCannotFallBelowItsSafePanelHeight() {
-        #expect(UsagePanelMetrics.collapsedHeight == 402)
+        #expect(UsagePanelMetrics.outerInset == 16)
+        #expect(UsagePanelMetrics.minimumHeight == 330)
+        #expect(UsagePanelMetrics.collapsedHeight == 360)
+        #expect(UsagePanelMetrics.height == 740)
+        #expect(
+            UsagePanelMetrics.presentedHeight(
+                showsRealData: false,
+                moreInfoExpanded: false,
+                recentTaskCount: 0,
+                meteredPeriodCount: 0,
+                settingsPresented: false
+            ) == UsagePanelMetrics.minimumHeight
+        )
+        #expect(
+            UsagePanelMetrics.presentedHeight(
+                showsRealData: true,
+                moreInfoExpanded: false,
+                recentTaskCount: 0,
+                meteredPeriodCount: 1,
+                settingsPresented: false
+            ) == 360
+        )
+        #expect(
+            UsagePanelMetrics.presentedHeight(
+                showsRealData: true,
+                moreInfoExpanded: true,
+                recentTaskCount: 0,
+                meteredPeriodCount: 1,
+                settingsPresented: false
+            ) == 560
+        )
+        #expect(
+            UsagePanelMetrics.presentedHeight(
+                showsRealData: true,
+                moreInfoExpanded: true,
+                recentTaskCount: 3,
+                meteredPeriodCount: 1,
+                settingsPresented: false
+            ) == 710
+        )
+        #expect(
+            UsagePanelMetrics.presentedHeight(
+                showsRealData: true,
+                moreInfoExpanded: true,
+                recentTaskCount: 3,
+                meteredPeriodCount: 2,
+                settingsPresented: false
+            ) == 740
+        )
+        #expect(
+            UsagePanelMetrics.presentedHeight(
+                showsRealData: true,
+                moreInfoExpanded: false,
+                recentTaskCount: 3,
+                meteredPeriodCount: 2,
+                settingsPresented: false
+            ) == 390
+        )
         #expect(
             UsagePanelMetrics.preferredHeight(
                 showUsageSummary: false,
@@ -46,7 +103,9 @@ struct M1AG2DBGP2VisualInformationContractTests {
     func disclosureAndSyncCopyAreConciseAndLocalized() {
         let time = Date(timeIntervalSince1970: 1_784_332_800)
         #expect(AppLanguage.english.moreInfo == "More info")
+        #expect(AppLanguage.english.lessInfo == "Less info")
         #expect(AppLanguage.simplifiedChinese.moreInfo == "更多信息")
+        #expect(AppLanguage.simplifiedChinese.lessInfo == "收起信息")
         #expect(AppLanguage.english.syncedAt(time).hasPrefix("Synced "))
         #expect(AppLanguage.english.outdated == "Outdated")
         #expect(AppLanguage.english.connectionRefreshingTitle == "Refreshing")
@@ -71,16 +130,24 @@ struct M1AG2DBGP2VisualInformationContractTests {
     @Test @MainActor
     func collapsedExpandedAndSettingsFixturesRenderWithoutAStateMigration() {
         let store = UsageStore.preview(language: .english)
-        for (expanded, settings, expectedHeight) in [
-            (false, false, UsagePanelMetrics.collapsedHeight),
-            (true, false, UsagePanelMetrics.height),
-            (false, true, UsagePanelMetrics.settingsMinimumHeight)
+        for (expanded, settings) in [
+            (false, false),
+            (true, false),
+            (false, true)
         ] {
+            let expectedHeight = UsagePanelMetrics.presentedHeight(
+                showsRealData: true,
+                moreInfoExpanded: expanded,
+                recentTaskCount: store.presentedRecentTaskCount,
+                meteredPeriodCount: store.presentedMeteredPeriodCount,
+                settingsPresented: settings
+            )
             let renderer = ImageRenderer(
                 content: UsagePanelView(
                     store: store,
                     tuning: .final,
                     preferencesEnabled: false,
+                    appKitAccessibilityEnabled: false,
                     settingsInitiallyPresented: settings,
                     moreInfoInitiallyPresented: expanded
                 )
@@ -90,17 +157,40 @@ struct M1AG2DBGP2VisualInformationContractTests {
         }
     }
 
+    @Test @MainActor
+    func shortScreenViewportKeepsExpandedContentScrollableInsteadOfClippingIt() {
+        let store = UsageStore.preview(language: .english)
+        let renderer = ImageRenderer(
+            content: UsagePanelView(
+                store: store,
+                tuning: .final,
+                preferencesEnabled: false,
+                appKitAccessibilityEnabled: false,
+                moreInfoInitiallyPresented: true
+            )
+            .frame(
+                width: UsagePanelMetrics.width,
+                height: 680,
+                alignment: .top
+            )
+        )
+
+        #expect(renderer.nsImage?.size.height == 680)
+    }
+
     @Test
     func disclosureSettingsLanguageAndRelaunchStressKeepDeterministicGeometry() {
         var expanded = false
         for _ in 0..<100 {
             expanded.toggle()
             #expect(
-                UsagePanelMetrics.targetHeight(
+                UsagePanelMetrics.presentedHeight(
                     showsRealData: true,
                     moreInfoExpanded: expanded,
+                    recentTaskCount: 3,
+                    meteredPeriodCount: 1,
                     settingsPresented: false
-                ) == (expanded ? UsagePanelMetrics.height : UsagePanelMetrics.collapsedHeight)
+                ) == (expanded ? 710 : UsagePanelMetrics.collapsedHeight)
             )
         }
         #expect(expanded == false)
@@ -108,9 +198,11 @@ struct M1AG2DBGP2VisualInformationContractTests {
         var settings = false
         for _ in 0..<50 {
             settings.toggle()
-            let height = UsagePanelMetrics.targetHeight(
+            let height = UsagePanelMetrics.presentedHeight(
                 showsRealData: true,
                 moreInfoExpanded: false,
+                recentTaskCount: 3,
+                meteredPeriodCount: 1,
                 settingsPresented: settings
             )
             #expect(height >= UsagePanelMetrics.collapsedHeight)
@@ -128,9 +220,11 @@ struct M1AG2DBGP2VisualInformationContractTests {
             // Disclosure and settings are intentionally session-local. A new
             // panel lifecycle therefore always restores the safe core state.
             #expect(
-                UsagePanelMetrics.targetHeight(
+                UsagePanelMetrics.presentedHeight(
                     showsRealData: true,
                     moreInfoExpanded: false,
+                    recentTaskCount: 3,
+                    meteredPeriodCount: 1,
                     settingsPresented: false
                 ) == UsagePanelMetrics.collapsedHeight
             )

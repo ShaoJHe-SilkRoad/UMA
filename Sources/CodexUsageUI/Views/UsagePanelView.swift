@@ -8,6 +8,7 @@ public struct UsagePanelView: View {
 
     let tuning: GlassTuning
     private let preferencesEnabled: Bool
+    private let appKitAccessibilityEnabled: Bool
     private let onHeightChange: ((CGFloat) -> Void)?
     private let localAccessConfirmationAction: CodexLocalAccessConfirmationAction?
 
@@ -15,6 +16,7 @@ public struct UsagePanelView: View {
         store: UsageStore,
         tuning: GlassTuning,
         preferencesEnabled: Bool = true,
+        appKitAccessibilityEnabled: Bool = true,
         settingsInitiallyPresented: Bool = false,
         moreInfoInitiallyPresented: Bool = false,
         onHeightChange: ((CGFloat) -> Void)? = nil,
@@ -23,6 +25,7 @@ public struct UsagePanelView: View {
         self.store = store
         self.tuning = tuning
         self.preferencesEnabled = preferencesEnabled
+        self.appKitAccessibilityEnabled = appKitAccessibilityEnabled
         self.onHeightChange = onHeightChange
         self.localAccessConfirmationAction = localAccessConfirmationAction
         _isShowingSettings = State(initialValue: settingsInitiallyPresented)
@@ -54,14 +57,30 @@ public struct UsagePanelView: View {
     }
 
     private var displayedHeight: CGFloat {
-        UsagePanelMetrics.targetHeight(
+        UsagePanelMetrics.presentedHeight(
             showsRealData: presentation.showsRealData,
             moreInfoExpanded: isShowingMoreInfo,
+            recentTaskCount: store.snapshot.recentTasks.count,
+            meteredPeriodCount: store.snapshot.periods.filter { !$0.isUnlimited }.count,
             settingsPresented: isShowingSettings
         )
     }
 
     public var body: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            panelContent
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(width: UsagePanelMetrics.width)
+        .onAppear {
+            onHeightChange?(displayedHeight)
+        }
+        .onChange(of: displayedHeight) { _, newHeight in
+            onHeightChange?(newHeight)
+        }
+    }
+
+    private var panelContent: some View {
         VStack(spacing: 10) {
             if presentation.showsRealData {
                 HeaderView(
@@ -74,6 +93,7 @@ public struct UsagePanelView: View {
                 UsageSummaryCard(snapshot: store.snapshot, language: store.language, tuning: tuning)
                 MoreInfoDisclosure(
                     language: store.language,
+                    appKitAccessibilityEnabled: appKitAccessibilityEnabled,
                     isExpanded: $isShowingMoreInfo
                 )
                 if isShowingMoreInfo {
@@ -92,10 +112,12 @@ public struct UsagePanelView: View {
                 )
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
-        .padding(.bottom, 10)
-        .frame(width: UsagePanelMetrics.width, height: displayedHeight)
+        .padding(UsagePanelMetrics.outerInset)
+        .frame(
+            width: UsagePanelMetrics.width,
+            height: displayedHeight,
+            alignment: .top
+        )
         .overlay(alignment: .topTrailing) {
             if isShowingSettings {
                 UsageSettingsCard(
@@ -110,12 +132,6 @@ public struct UsagePanelView: View {
                 .padding(.trailing, 16)
                 .zIndex(10)
             }
-        }
-        .onAppear {
-            onHeightChange?(displayedHeight)
-        }
-        .onChange(of: displayedHeight) { _, newHeight in
-            onHeightChange?(newHeight)
         }
     }
 
@@ -144,30 +160,88 @@ public struct UsagePanelView: View {
 
 private struct MoreInfoDisclosure: View {
     let language: AppLanguage
+    let appKitAccessibilityEnabled: Bool
     @Binding var isExpanded: Bool
 
+    private var label: String {
+        language.disclosureLabel(isExpanded: isExpanded)
+    }
+
     var body: some View {
-        Button {
-            isExpanded.toggle()
-        } label: {
-            HStack(spacing: 7) {
-                Text(language.moreInfo)
-                    .font(UsageDesign.font(12.5, weight: .semibold, language: language))
-                Spacer()
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 11, weight: .semibold))
-                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
-            }
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 12)
-            .frame(height: 30)
-            .contentShape(Rectangle())
+        HStack(spacing: 7) {
+            Text(label)
+                .font(UsageDesign.font(.disclosure, language: language))
+            Spacer()
+            Image(systemName: "chevron.down")
+                .font(.system(size: 11, weight: .semibold))
+                .rotationEffect(.degrees(isExpanded ? 180 : 0))
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(Text(language.moreInfo))
-        .accessibilityValue(
-            isExpanded ? language.enabledAccessibilityValue : language.disabledAccessibilityValue
-        )
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .frame(height: 30)
+        .contentShape(Rectangle())
+        .accessibilityHidden(appKitAccessibilityEnabled)
+        .overlay {
+            if appKitAccessibilityEnabled {
+                DisclosureAccessibilityButton(
+                    label: label,
+                    value: isExpanded
+                        ? language.expandedAccessibilityValue
+                        : language.collapsedAccessibilityValue,
+                    isExpanded: $isExpanded
+                )
+            }
+        }
+    }
+}
+
+private struct DisclosureAccessibilityButton: NSViewRepresentable {
+    let label: String
+    let value: String
+    @Binding var isExpanded: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(isExpanded: $isExpanded)
+    }
+
+    func makeNSView(context: Context) -> NSButton {
+        let button = NSButton(frame: .zero)
+        button.title = ""
+        button.isBordered = false
+        button.isTransparent = true
+        button.focusRingType = .none
+        button.image = nil
+        button.imagePosition = .noImage
+        button.wantsLayer = true
+        button.layer?.backgroundColor = NSColor.clear.cgColor
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.toggle)
+        configure(button)
+        return button
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) {
+        context.coordinator.isExpanded = $isExpanded
+        configure(button)
+    }
+
+    private func configure(_ button: NSButton) {
+        button.setAccessibilityLabel(label)
+        button.setAccessibilityValue(value)
+        button.setAccessibilityIdentifier("usage.moreInfoDisclosure")
+    }
+
+    final class Coordinator: NSObject {
+        var isExpanded: Binding<Bool>
+
+        init(isExpanded: Binding<Bool>) {
+            self.isExpanded = isExpanded
+        }
+
+        @objc
+        func toggle() {
+            isExpanded.wrappedValue.toggle()
+        }
     }
 }
 
@@ -197,30 +271,30 @@ private struct APICostEstimateCard: View {
                 Image(systemName: "dollarsign.circle")
                     .font(.system(size: 15, weight: .semibold))
                 Text(language.apiCostTitle)
-                    .font(UsageDesign.font(15, weight: .bold, language: language))
+                    .font(UsageDesign.font(.sectionTitle, language: language))
                 Spacer()
                 Text(language.standardAPIRates)
-                    .font(UsageDesign.font(10.5, weight: .medium, language: language))
+                    .font(UsageDesign.font(.secondaryBody, language: language))
                     .foregroundStyle(.secondary)
             }
 
             HStack(alignment: .firstTextBaseline) {
                 Text(sevenDayValue)
-                    .font(UsageDesign.font(25, weight: .bold, language: language))
+                    .font(UsageDesign.font(.priceMetric, language: language))
                     .foregroundStyle(UsageDesign.blue)
                     .monospacedDigit()
                 Text(language.metricSevenDays)
-                    .font(UsageDesign.font(11.5, weight: .medium, language: language))
+                    .font(UsageDesign.font(.resetTime, language: language))
                     .foregroundStyle(.secondary)
 
                 Spacer()
 
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(lifetimeValue)
-                        .font(UsageDesign.font(15, weight: .bold, language: language))
+                        .font(UsageDesign.font(.tokenMetric, language: language))
                         .monospacedDigit()
                     Text(language.lifetimeCost)
-                        .font(UsageDesign.font(10.5, language: language))
+                        .font(UsageDesign.font(.secondaryBody, language: language))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -237,11 +311,11 @@ private struct APICostEstimateCard: View {
                 Text(language.pricedCoverage(estimate?.coveragePercent ?? 0))
                     .monospacedDigit()
             }
-            .font(UsageDesign.font(10.5, weight: .medium, language: language))
+            .font(UsageDesign.font(.secondaryBody, language: language))
             .foregroundStyle(.secondary)
 
             Text(language.costDisclaimer)
-                .font(UsageDesign.font(9.5, language: language))
+                .font(UsageDesign.font(.errorStatus, language: language))
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .lineLimit(2)
@@ -283,14 +357,13 @@ private struct HeaderView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 9) {
                     Text(store.language.appTitle)
-                        .font(UsageDesign.font(20, weight: .bold, language: store.language))
+                        .font(UsageDesign.font(.applicationTitle, language: store.language))
                         .lineLimit(1)
                         .minimumScaleFactor(UsagePanelHeaderLayout.titleMinimumScaleFactor)
                         .layoutPriority(UsagePanelHeaderLayout.titleLayoutPriority)
                     if recovery == nil {
                         Text(store.snapshot.planLabel)
-                            .font(UsageDesign.font(11, weight: .bold, language: store.language))
-                            .tracking(1.0)
+                            .font(UsageDesign.font(.planLabel, language: store.language))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: true, vertical: false)
                     }
@@ -301,7 +374,7 @@ private struct HeaderView: View {
                         .fill(syncIsCurrent ? UsageDesign.green : Color.red)
                         .frame(width: 8, height: 8)
                     Text(syncStatus)
-                        .font(UsageDesign.font(13, language: store.language))
+                        .font(UsageDesign.font(.syncStatus, language: store.language))
                         .foregroundStyle(.secondary)
                         .lineLimit(recovery == nil ? 1 : 2)
                         .minimumScaleFactor(0.78)
@@ -313,11 +386,16 @@ private struct HeaderView: View {
             if let recovery {
                 HStack(spacing: 4) {
                     if let primaryAction = recovery.primaryAction {
-                        RecoveryActionButton(action: primaryAction, perform: perform)
+                        RecoveryActionButton(
+                            action: primaryAction,
+                            language: store.language,
+                            perform: perform
+                        )
                     }
                     if let secondaryAction = recovery.secondaryAction {
                         RecoveryActionButton(
                             action: secondaryAction,
+                            language: store.language,
                             isCompact: true,
                             perform: perform
                         )
@@ -404,6 +482,7 @@ private struct HeaderView: View {
 
 private struct RecoveryActionButton: View {
     let action: CodexPresentedAction
+    let language: AppLanguage
     var isCompact = false
     let perform: @MainActor (CodexConnectionAction) async -> Void
 
@@ -417,7 +496,7 @@ private struct RecoveryActionButton: View {
                     .frame(width: 30, height: 30)
             } else {
                 Text(action.title)
-                    .font(.system(size: 10.5, weight: .semibold))
+                    .font(UsageDesign.font(.secondaryBody, language: language))
                     .fixedSize(horizontal: true, vertical: false)
                     .padding(.horizontal, 7)
                     .frame(minHeight: 30)
@@ -459,10 +538,22 @@ private struct UsageSummaryCard: View {
                 ForEach(snapshot.metrics) { metric in
                     VStack(spacing: 4) {
                         Text(metric.value)
-                            .font(UsageDesign.font(18, weight: .bold, language: language))
+                            .font(
+                                UsageDesign.font(
+                                    .tokenMetric,
+                                    language: language,
+                                    sizeOverride: 18
+                                )
+                            )
                             .monospacedDigit()
                         Text(metric.label)
-                            .font(UsageDesign.font(12, weight: .medium, language: language))
+                            .font(
+                                UsageDesign.font(
+                                    .secondaryBody,
+                                    language: language,
+                                    sizeOverride: 12
+                                )
+                            )
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity)
@@ -491,10 +582,16 @@ private struct QuotaRow: View {
         VStack(spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Text(period.title)
-                    .font(UsageDesign.font(16, weight: .bold, language: language))
+                    .font(UsageDesign.font(.quotaLabel, language: language))
                 Spacer()
                 Text(period.isUnlimited ? "∞" : "\(period.remainingPercent)%")
-                    .font(UsageDesign.font(period.isUnlimited ? 16 : 24, weight: .semibold, language: language))
+                    .font(
+                        UsageDesign.font(
+                            .primaryQuotaValue,
+                            language: language,
+                            sizeOverride: period.isUnlimited ? 16 : nil
+                        )
+                    )
                     .foregroundStyle(period.isUnlimited ? Color.secondary : bar.tone == .low ? Color.red : UsageDesign.blue)
                     .monospacedDigit()
             }
@@ -523,7 +620,7 @@ private struct QuotaRow: View {
                 Spacer()
                 Text(period.resetText)
             }
-            .font(UsageDesign.font(11.5, language: language))
+            .font(UsageDesign.font(.resetTime, language: language))
             .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 14)
@@ -569,10 +666,16 @@ private struct RecentTasksCard: View {
                 Image(systemName: "list.bullet.rectangle")
                     .font(.system(size: 15, weight: .semibold))
                 Text(language.recentTasks)
-                    .font(UsageDesign.font(15, weight: .bold, language: language))
+                    .font(UsageDesign.font(.sectionTitle, language: language))
                 Spacer()
                 Text(language.threadTotalTokens)
-                    .font(UsageDesign.font(11, language: language))
+                    .font(
+                        UsageDesign.font(
+                            .secondaryBody,
+                            language: language,
+                            sizeOverride: 11
+                        )
+                    )
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 14)
@@ -601,15 +704,21 @@ private struct RecentTaskRow: View {
             HStack(alignment: .center, spacing: 10) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(task.title)
-                        .font(UsageDesign.font(14, weight: .bold, language: language))
+                        .font(
+                            UsageDesign.font(
+                                .sectionTitle,
+                                language: language,
+                                sizeOverride: 14
+                            )
+                        )
                         .lineLimit(1)
                     Text(task.time)
-                        .font(UsageDesign.font(10.5, language: language))
+                        .font(UsageDesign.font(.secondaryBody, language: language))
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
                 Text(task.tokenText)
-                    .font(UsageDesign.font(14.5, weight: .bold, language: language))
+                    .font(UsageDesign.font(.tokenMetric, language: language))
                     .foregroundStyle(UsageDesign.blue)
                     .monospacedDigit()
             }

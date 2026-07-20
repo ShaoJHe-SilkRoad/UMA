@@ -19,7 +19,7 @@ struct CodexConnectionBridgeView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(presentation.title)
-                        .font(UsageDesign.font(20, weight: .bold, language: language))
+                        .font(UsageDesign.font(.applicationTitle, language: language))
                     if presentation.showsProgress {
                         ProgressView()
                             .controlSize(.small)
@@ -29,14 +29,20 @@ struct CodexConnectionBridgeView: View {
             }
 
             Text(presentation.body)
-                .font(UsageDesign.font(13, language: language))
+                .font(UsageDesign.font(.body, language: language))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let detail = presentation.technicalDetail {
                 DisclosureGroup(language.connectionTechnicalDetail, isExpanded: $showsTechnicalDetail) {
                     Text(detail)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(
+                            UsageDesign.font(
+                                .errorStatus,
+                                language: language,
+                                sizeOverride: 11
+                            )
+                        )
                         .foregroundStyle(.secondary)
                         .textSelection(.disabled)
                 }
@@ -79,7 +85,12 @@ struct CodexConnectionBridgeView: View {
         }
         .buttonStyle(.bordered)
         .tint(primary ? UsageDesign.blue : .gray)
-        .fontWeight(primary ? .semibold : .regular)
+        .font(
+            UsageDesign.font(
+                primary ? .settingsLabel : .body,
+                language: language
+            )
+        )
         .focused($focusedAction, equals: item.action)
         .accessibilityLabel(item.title)
     }

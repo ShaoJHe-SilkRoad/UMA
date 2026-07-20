@@ -10,6 +10,14 @@ public final class UsageStore: ObservableObject {
     @Published private(set) var snapshot: UsageSnapshot
     @Published private(set) var providerSnapshots: [AgentUsageSnapshot] = []
     @Published private(set) var isRefreshing = false
+
+    public var presentedRecentTaskCount: Int {
+        snapshot.recentTasks.count
+    }
+
+    public var presentedMeteredPeriodCount: Int {
+        snapshot.periods.filter { !$0.isUnlimited }.count
+    }
     @Published public private(set) var lastError: String?
     @Published public private(set) var lastFailure: CodexUsageClientFailure?
     @Published public private(set) var language: AppLanguage
