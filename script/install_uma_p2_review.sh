@@ -3,11 +3,11 @@
 set -euo pipefail
 
 readonly APP_NAME="UMA"
-readonly REVIEW_ROOT="/Users/juliushe/Desktop/UMA0.9_Review"
+readonly REVIEW_ROOT="$HOME/Desktop/UMA0.9_Review"
 readonly REVIEW_APP="$REVIEW_ROOT/$APP_NAME.app"
-readonly LAUNCHER_APP="/Users/juliushe/Desktop/UMA0.9_Enter.app"
+readonly LAUNCHER_APP="$HOME/Desktop/UMA0.9_Enter.app"
 
-usage() { printf '%s\n' "Usage: $0 --candidate </private/tmp/uma-development-preview-package/.../UMA.app> --commit <40-hex-sha>"; }
+usage() { printf '%s\n' "Usage: $0 --candidate <absolute-path/UMA.app> --commit <40-hex-sha>"; }
 candidate=""
 commit=""
 while [[ $# -gt 0 ]]; do
@@ -18,13 +18,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-[[ "$candidate" = /private/tmp/uma-development-preview-package/*/"$APP_NAME".app ]] || { usage >&2; exit 2; }
+[[ "$candidate" = /*/"$APP_NAME".app && -d "$candidate" ]] || { usage >&2; exit 2; }
 [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { usage >&2; exit 2; }
 /usr/bin/xattr -cr "$candidate"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$candidate"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :UMAReviewCommit' "$candidate/Contents/Info.plist")" == "$commit" ]] || { printf '%s\n' "Candidate commit mismatch." >&2; exit 2; }
 
-staging="$(/usr/bin/mktemp -d /private/tmp/uma-p2-install.XXXXXX)"
+staging="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/uma-p2-install.XXXXXX")"
 trap '/bin/rm -rf "$staging"' EXIT
 /usr/bin/ditto "$candidate" "$staging/$APP_NAME.app"
 mkdir -p "$staging/UMA0.9_Enter.app/Contents/MacOS"
@@ -52,7 +52,8 @@ launcher_source="$staging/UMA0.9_Enter.swift"
     printf '%s\n' '    @MainActor'
     printf '%s\n' '    static func main() {'
     printf '%s\n' '        let application = NSApplication.shared'
-    printf '%s\n' '        let candidate = URL(fileURLWithPath: "/Users/juliushe/Desktop/UMA0.9_Review/UMA.app")'
+    printf '%s\n' '        let candidate = FileManager.default.homeDirectoryForCurrentUser'
+    printf '%s\n' '            .appendingPathComponent("Desktop/UMA0.9_Review/UMA.app")'
     printf '%s\n' '        let metadataCleaner = Process()'
     printf '%s\n' '        metadataCleaner.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")'
     printf '%s\n' '        metadataCleaner.arguments = ["-d", "com.apple.FinderInfo", candidate.path]'

@@ -63,7 +63,10 @@ struct UMAPublicIdentityTests {
         #expect(packageScript.contains("<key>CFBundleName</key><string>UMA</string>"))
         #expect(packageScript.contains("UMA-source-$commit.tar"))
         #expect(installer.contains(#"REVIEW_APP="$REVIEW_ROOT/$APP_NAME.app""#))
-        #expect(installer.contains("/Users/juliushe/Desktop/UMA0.9_Review/UMA.app"))
+        #expect(installer.contains(#"REVIEW_ROOT="$HOME/Desktop/UMA0.9_Review""#))
+        #expect(installer.contains(
+            #".appendingPathComponent("Desktop/UMA0.9_Review/UMA.app")"#
+        ))
     }
 
     @Test
@@ -72,17 +75,23 @@ struct UMAPublicIdentityTests {
             contentsOf: repositoryRoot.appendingPathComponent("README.md"),
             encoding: .utf8
         )
+        let compatibility = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("docs/COMPATIBILITY.md"),
+            encoding: .utf8
+        )
 
         #expect(readme.contains("# UMA"))
-        #expect(readme.contains("## Usage Monitor Altoget"))
+        #expect(readme.contains("**Usage Monitor Altoget**"))
         #expect(readme.contains(
-            "UMA 0.9 is a development preview. The current Codex connector and user interface have passed bounded functional and visual validation. Extended long-duration debugging is scheduled after this source push."
+            "UMA 0.9 is a development preview of a local-first macOS menu-bar usage monitor. The current Codex connector and interface have passed functional, visual, packaging, and bounded stability validation. Extended long-duration debugging remains scheduled after this repository publication."
         ))
         #expect(readme.contains("dist/UMA.app"))
-        #expect(readme.contains("outputs/UMA-preview-collapsed.png"))
-        #expect(readme.contains("outputs/UMA-preview-expanded.png"))
-        #expect(readme.contains("com.kevinchen.CodexUsageMonitor"))
-        #expect(readme.contains("Application Support/CodexUsageMonitor"))
+        #expect(readme.contains("Assets/Demo/uma-dark-collapsed.png"))
+        #expect(readme.contains("Assets/Demo/uma-dark-expanded.png"))
+        #expect(readme.contains("Assets/Demo/uma-light-collapsed.png"))
+        #expect(readme.contains("Assets/Demo/uma-settings.png"))
+        #expect(compatibility.contains("com.kevinchen.CodexUsageMonitor"))
+        #expect(compatibility.contains("Application Support/CodexUsageMonitor"))
         #expect(readme.contains("https://github.com/ower93/CodexUsageMonitor"))
         #expect(readme.contains("https://github.com/ShaoJHe-SilkRoad/UMA"))
         #expect(!readme.contains("ower93/CodexUsageMonitor/releases"))
