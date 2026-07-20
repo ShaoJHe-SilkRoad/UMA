@@ -8,7 +8,7 @@ readonly APP_NAME="UMA"
 readonly LEGACY_BUNDLE_ID="com.kevinchen.CodexUsageMonitor"
 
 usage() {
-    printf '%s\n' "Usage: $0 --commit <40-hex-sha> --output </private/tmp/uma-development-preview-package/.../UMA.app> --bundle-id com.kevinchen.CodexUsageMonitor --build <number>"
+    printf '%s\n' "Usage: $0 --commit <40-hex-sha> --output <absolute-output-directory/UMA.app> --bundle-id com.kevinchen.CodexUsageMonitor --build <number>"
 }
 
 commit=""
@@ -28,7 +28,7 @@ done
 [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { usage >&2; exit 2; }
 [[ "$build_number" =~ ^[0-9]{8,20}$ ]] || { usage >&2; exit 2; }
 [[ "$bundle_id" == "$LEGACY_BUNDLE_ID" ]] || { usage >&2; exit 2; }
-[[ "$output" = /private/tmp/uma-development-preview-package/*/"$APP_NAME".app ]] || { usage >&2; exit 2; }
+[[ "$output" = /*/"$APP_NAME".app ]] || { usage >&2; exit 2; }
 [[ ! -e "$output" && ! -L "$output" ]] || { printf '%s\n' "Refusing to overwrite candidate." >&2; exit 2; }
 git -C "$REPO_ROOT" cat-file -e "$commit^{commit}"
 
