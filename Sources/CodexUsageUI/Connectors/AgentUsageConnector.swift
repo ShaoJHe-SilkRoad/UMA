@@ -22,6 +22,7 @@ enum AgentSourceTier: String, Codable, CaseIterable, Sendable {
     case officialStructuredHook = "B"
     case officialCLIOrMetadata = "C"
     case authorizedReadOnlyRemote = "R"
+    case manualUserConfirmed = "M"
     case unsupported = "U"
 
     var isAdmissible: Bool { self != .unsupported }
@@ -37,6 +38,7 @@ enum AgentMetricScope: String, Codable, CaseIterable, Hashable, Sendable {
 enum AgentMetricProvenance: String, Codable, Sendable {
     case providerReported
     case locallyEstimated
+    case manualConfirmed
 }
 
 enum AgentConnectorFreshness: String, Codable, Sendable {
@@ -193,6 +195,43 @@ struct AgentUsageChannel: Codable, Sendable, Equatable, Identifiable {
     let accountMetrics: AgentAccountMetrics?
     let localActivityMetrics: AgentLocalActivityMetrics?
     let safeFailure: AgentSafeFailure?
+    /// Optional provider-neutral availability. Existing percentage-based
+    /// connectors continue to publish rate-limit windows unchanged.
+    let availability: AgentAvailabilityValue?
+
+    var availabilitySourceState: AgentAvailabilitySourceState {
+        availability?.sourceState ?? .unspecified
+    }
+
+    init(
+        id: Kind,
+        sourceTier: AgentSourceTier,
+        sourceVersion: String,
+        scopes: Set<AgentMetricScope>,
+        provenance: AgentMetricProvenance,
+        freshness: AgentConnectorFreshness,
+        capturedAt: Date?,
+        coverageNote: String?,
+        rateLimitWindows: [AgentRateLimitWindow],
+        accountMetrics: AgentAccountMetrics?,
+        localActivityMetrics: AgentLocalActivityMetrics?,
+        safeFailure: AgentSafeFailure?,
+        availability: AgentAvailabilityValue? = nil
+    ) {
+        self.id = id
+        self.sourceTier = sourceTier
+        self.sourceVersion = sourceVersion
+        self.scopes = scopes
+        self.provenance = provenance
+        self.freshness = freshness
+        self.capturedAt = capturedAt
+        self.coverageNote = coverageNote
+        self.rateLimitWindows = rateLimitWindows
+        self.accountMetrics = accountMetrics
+        self.localActivityMetrics = localActivityMetrics
+        self.safeFailure = safeFailure
+        self.availability = availability
+    }
 }
 
 /// The core snapshot deliberately contains aggregates and typed availability

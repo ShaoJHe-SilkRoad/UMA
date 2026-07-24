@@ -417,6 +417,7 @@ public final class UsageStore: ObservableObject {
                 windows: card.windows,
                 selectedWindowID: card.selectedWindowID,
                 remaining: card.remaining,
+                availability: card.availability,
                 severity: card.severity,
                 isRetainingLastValidValue: card.isRetainingLastValidValue,
                 capturedAt: card.capturedAt

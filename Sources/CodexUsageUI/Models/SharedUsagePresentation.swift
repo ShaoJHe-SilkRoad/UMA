@@ -52,6 +52,50 @@ public enum SharedRemainingValue: Codable, Equatable, Sendable {
     }
 }
 
+public struct SharedAvailabilityPresentation: Codable, Equatable, Sendable {
+    public let value: AgentAvailabilityValue
+    public let displayUnit: CreditUnit?
+    public let exactCreditValue: Int64?
+    public let normalizedRemainingFraction: Double?
+    public let severity: AgentAvailabilitySeverity
+    public let provenance: AvailabilityProvenance?
+    public let scope: CreditScope?
+    public let planTier: CreditPlanTier?
+    public let nextExpiryAt: Date?
+    public let compactText: String
+    public let accessibilityText: String
+
+    public var sourceState: AgentAvailabilitySourceState {
+        value.sourceState
+    }
+
+    public init(
+        value: AgentAvailabilityValue,
+        displayUnit: CreditUnit?,
+        exactCreditValue: Int64?,
+        normalizedRemainingFraction: Double?,
+        severity: AgentAvailabilitySeverity,
+        provenance: AvailabilityProvenance?,
+        scope: CreditScope?,
+        planTier: CreditPlanTier?,
+        nextExpiryAt: Date?,
+        compactText: String,
+        accessibilityText: String
+    ) {
+        self.value = value
+        self.displayUnit = displayUnit
+        self.exactCreditValue = exactCreditValue
+        self.normalizedRemainingFraction = normalizedRemainingFraction
+        self.severity = severity
+        self.provenance = provenance
+        self.scope = scope
+        self.planTier = planTier
+        self.nextExpiryAt = nextExpiryAt
+        self.compactText = compactText
+        self.accessibilityText = accessibilityText
+    }
+}
+
 public enum SharedUsageWindowKind: String, Codable, Sendable {
     case fiveHour
     case sevenDay
@@ -95,6 +139,7 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
     public let windows: [SharedUsageWindowPresentation]
     public let selectedWindowID: String?
     public let remaining: SharedRemainingValue
+    public let availability: SharedAvailabilityPresentation?
     public let severity: SharedUsageSeverity
     public let isRetainingLastValidValue: Bool
     public let capturedAt: Date
@@ -108,6 +153,7 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
         windows: [SharedUsageWindowPresentation],
         selectedWindowID: String?,
         remaining: SharedRemainingValue,
+        availability: SharedAvailabilityPresentation? = nil,
         severity: SharedUsageSeverity,
         isRetainingLastValidValue: Bool = false,
         capturedAt: Date = Date()
@@ -120,6 +166,7 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
         self.windows = windows
         self.selectedWindowID = selectedWindowID
         self.remaining = remaining
+        self.availability = availability
         self.severity = severity
         self.isRetainingLastValidValue = isRetainingLastValidValue
         self.capturedAt = capturedAt
@@ -149,16 +196,143 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
 }
 
 public enum SharedUsagePresentationPolicy {
+    private enum RemainingThresholdBand {
+        case available
+        case warning
+        case critical
+        case exhausted
+    }
+
     public static func severity(for remaining: SharedRemainingValue) -> SharedUsageSeverity {
         switch remaining {
         case let .finite(percent):
-            switch max(0, min(100, percent)) {
-            case 0...10: .critical
-            case 11..<26: .warning
-            default: .normal
+            switch thresholdBand(forPercent: percent) {
+            case .available: .normal
+            case .warning: .warning
+            case .critical, .exhausted: .critical
             }
         case .unlimited, .unavailable:
             .neutral
+        }
+    }
+
+    public static func availabilitySeverity(
+        for value: AgentAvailabilityValue
+    ) -> AgentAvailabilitySeverity {
+        switch value {
+        case let .percentage(percentage):
+            return availabilitySeverity(forFraction: percentage.value / 100)
+        case let .credits(balance):
+            if let fraction = balance.normalizedRemainingFraction {
+                return availabilitySeverity(forFraction: fraction)
+            }
+            return balance.isExhausted ? .exhausted : .available
+        case .unlimited, .unavailable:
+            return .neutral
+        case .invalid:
+            return .invalid
+        }
+    }
+
+    public static func makeAvailabilityPresentation(
+        value: AgentAvailabilityValue,
+        language: AppLanguage
+    ) -> SharedAvailabilityPresentation {
+        let compactText: String
+        let accessibilityText: String
+        let displayUnit: CreditUnit?
+        let exactCreditValue: Int64?
+        let provenance: AvailabilityProvenance?
+        let scope: CreditScope?
+        let planTier: CreditPlanTier?
+        let nextExpiryAt: Date?
+
+        switch value {
+        case let .percentage(percentage):
+            let rounded = Int(percentage.value.rounded())
+            compactText = "\(rounded)%"
+            accessibilityText = language == .english
+                ? "\(rounded) percent remaining"
+                : "剩余 \(rounded)%"
+            displayUnit = nil
+            exactCreditValue = nil
+            provenance = nil
+            scope = nil
+            planTier = nil
+            nextExpiryAt = nil
+        case let .credits(balance):
+            compactText = CreditFormatter.compact(balance.remaining)
+            accessibilityText = CreditFormatter.accessibilityRemaining(
+                balance.remaining,
+                language: language
+            )
+            displayUnit = balance.unit
+            exactCreditValue = balance.remaining
+            provenance = balance.provenance
+            scope = balance.scope
+            planTier = balance.planTier
+            nextExpiryAt = balance.nextExpiryAt
+        case .unlimited:
+            compactText = "∞"
+            accessibilityText = language == .english ? "unlimited" : "无限"
+            displayUnit = nil
+            exactCreditValue = nil
+            provenance = nil
+            scope = nil
+            planTier = nil
+            nextExpiryAt = nil
+        case .unavailable:
+            compactText = "—"
+            accessibilityText = language == .english ? "usage unavailable" : "额度不可用"
+            displayUnit = nil
+            exactCreditValue = nil
+            provenance = nil
+            scope = nil
+            planTier = nil
+            nextExpiryAt = nil
+        case .invalid:
+            compactText = "—"
+            accessibilityText = language == .english ? "invalid usage data" : "额度数据无效"
+            displayUnit = nil
+            exactCreditValue = nil
+            provenance = nil
+            scope = nil
+            planTier = nil
+            nextExpiryAt = nil
+        }
+
+        return SharedAvailabilityPresentation(
+            value: value,
+            displayUnit: displayUnit,
+            exactCreditValue: exactCreditValue,
+            normalizedRemainingFraction: value.normalizedRemainingFraction,
+            severity: availabilitySeverity(for: value),
+            provenance: provenance,
+            scope: scope,
+            planTier: planTier,
+            nextExpiryAt: nextExpiryAt,
+            compactText: compactText,
+            accessibilityText: accessibilityText
+        )
+    }
+
+    private static func availabilitySeverity(
+        forFraction fraction: Double
+    ) -> AgentAvailabilitySeverity {
+        switch thresholdBand(forPercent: fraction * 100) {
+        case .available: .available
+        case .warning: .warning
+        case .critical: .critical
+        case .exhausted: .exhausted
+        }
+    }
+
+    private static func thresholdBand(forPercent percent: Double) -> RemainingThresholdBand {
+        switch max(0, min(100, percent)) {
+        case 0: .exhausted
+        case 0...10: .critical
+        case 11..<26: .warning
+        default: .available
         }
     }
 
@@ -199,20 +373,42 @@ public enum SharedUsagePresentationPolicy {
             || accountChannel?.freshness == .unavailable
 
         let windows: [SharedUsageWindowPresentation]
-        let retained: Bool
+        let retainedWindows: Bool
         if sourceIsStale, let previous, !previous.windows.isEmpty {
             windows = previous.windows
-            retained = true
+            retainedWindows = true
         } else if sourceIsUnavailable,
                   freshWindows.allSatisfy({ $0.remaining == .unavailable }),
                   let previous,
                   !previous.windows.isEmpty {
             windows = previous.windows
-            retained = true
+            retainedWindows = true
         } else {
             windows = freshWindows
-            retained = sourceIsStale
+            retainedWindows = sourceIsStale
         }
+
+        let freshAvailability = accountChannel?.availability.map {
+            makeAvailabilityPresentation(value: $0, language: language)
+        }
+        let receivedManualConfirmation =
+            freshAvailability?.sourceState == .manualConfirmed
+        let availability: SharedAvailabilityPresentation?
+        let retainedAvailability: Bool
+        if receivedManualConfirmation {
+            availability = freshAvailability
+            retainedAvailability = false
+        } else if (sourceIsStale || sourceIsUnavailable),
+                  let previousAvailability = previous?.availability {
+            availability = previousAvailability
+            retainedAvailability = true
+        } else {
+            availability = freshAvailability
+            retainedAvailability = false
+        }
+        let retained = retainedWindows || retainedAvailability
+        let hasOnlyManualAvailability = freshWindows.isEmpty
+            && availability?.sourceState == .manualConfirmed
 
         let selectedID = selectedWindowID(
             windows: windows,
@@ -230,16 +426,23 @@ public enum SharedUsagePresentationPolicy {
         let planLabel = accountChannel?.accountMetrics?.planLabel
             .flatMap { $0.isEmpty ? nil : $0 }
             ?? previous?.planLabel
+        let presentedConnectionStatus = connectionStatus(snapshot.state)
+        let presentedFreshness = freshness(snapshot.freshness)
 
         return SharedUsageCardPresentation(
             id: snapshot.id.rawValue,
             providerName: snapshot.providerName,
             planLabel: planLabel,
-            connectionStatus: connectionStatus(snapshot.state),
-            freshness: freshness(snapshot.freshness),
+            connectionStatus: hasOnlyManualAvailability && presentedConnectionStatus.isHealthy
+                ? .disconnected
+                : presentedConnectionStatus,
+            freshness: hasOnlyManualAvailability && presentedFreshness == .fresh
+                ? .unavailable
+                : presentedFreshness,
             windows: windows,
             selectedWindowID: selectedID,
             remaining: remaining,
+            availability: availability,
             severity: severity(for: remaining),
             isRetainingLastValidValue: retained,
             capturedAt: snapshot.capturedAt
