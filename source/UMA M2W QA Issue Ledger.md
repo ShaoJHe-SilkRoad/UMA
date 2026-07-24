@@ -68,3 +68,21 @@ configured collapsed/expanded details, accessible disclosure action,
 Update-to-Settings routing, native scroll down/up, keyboard focus, zero owned
 children, zero observed network sockets, record nonmutation, and clean shutdown.
 Independent staged-index review and the authorized local commit remain required.
+
+## M2WDBG-G1 — Main-app manual availability debugging
+
+| Issue ID | Found by | Severity | Evidence | Acceptance impact | In scope | Repair | Focused retest | Regression retest | Status |
+|---|---|---|---|---|---|---|---|---|---|
+| M2WDBG-G1-001 | Persistence matrix | Blocking | Saving value-identical Credits returned before checking the primary/recovery pair. | A missing or corrupt recovery copy could remain silently degraded. | Yes | Preserve confirmation time and publication count, but still pass the accepted record through the bounded dual-copy store repair. | Missing-recovery duplicate-save test PASS | M2W-G2 persistence suite PASS | Closed — PASS |
+| M2WDBG-G1-002 | Relaunch and concurrent-edit matrix | Blocking | An already-open Settings draft could overwrite a newer manual confirmation saved by another surface. | A stale UI could destroy newer Human-entered data. | Yes | Track the draft base observation, reject the first stale Save without changing the draft, and require a deliberate second Save. | Stale-draft sequence PASS | M2W-G2 lifecycle suite PASS | Closed — PASS |
+| M2WDBG-G1-003 | Manual-entry matrix | Major | The form supported remaining plus used or total, but not an explicit remaining plus used plus total entry. | The accepted all-three verification route was unavailable. | Yes | Add one explicit all-three mode, exact consistency validation, backward-compatible optional Codable mode, and bounded Settings fields. | Valid/mismatched all-three matrix PASS | M2W-G1 value/Codable suites PASS | Closed — PASS |
+| M2WDBG-G1-004 | Task-owned runtime acceptance | Major | Foundation path canonicalization and inherited host bundle metadata could bypass the initial synthetic-store selector during direct executable launch. | A debug candidate could fall back to ordinary application storage instead of the task-owned fixture. | Yes | Canonicalize the nearest existing parent and require either the M2WDBG bundle namespace or the exact temporary evidence-package executable root. Isolate both manual and connector snapshot stores. | Bundle/path/rejection matrix PASS | Direct synthetic candidate PASS | Closed — PASS |
+| M2WDBG-G1-005 | Focused regression | Major | One asynchronous G2 publication assertion allowed only 20 scheduler yields and failed once while the isolated test passed. | The affected regression matrix was nondeterministically red under load. | Yes | Extend only the bounded listener-settling allowance to 200 yields without changing the expected state, write, or publication counts. | Isolated multicast test PASS | M2W affected suites PASS | Closed — PASS |
+
+M2WDBG-G1 pre-commit evidence: focused M2W matrix 45 tests / 5 suites PASS;
+full suite 137 tests / 18 suites PASS; Debug, Release, and strict-concurrency
+warnings-as-errors builds PASS; deterministic Light/Dark, warning, critical,
+Reduce Transparency, Increase Contrast, English, Simplified Chinese, and
+Codex-only Assistant renderer matrix PASS. The final report records the bounded
+resource session, independent staged-index review, commit-exact package audit,
+and direct-package smoke.

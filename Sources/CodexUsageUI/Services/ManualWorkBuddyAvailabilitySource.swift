@@ -90,6 +90,15 @@ actor ManualWorkBuddyAvailabilitySource {
     func save(_ observation: WorkBuddyManualObservation) async throws -> Bool {
         _ = await load()
         if let existing = state.observation, Self.sameValues(existing, observation), state.enabled {
+            // A value-identical Save must not advance confirmation time or
+            // publish again, but it still repairs a missing/corrupt persistence
+            // copy so the primary/recovery pair cannot silently degrade.
+            _ = try await store.save(
+                WorkBuddyManualPersistenceRecord(
+                    enabled: true,
+                    observation: existing
+                )
+            )
             return false
         }
         let record = WorkBuddyManualPersistenceRecord(enabled: true, observation: observation)
@@ -149,12 +158,13 @@ actor ManualWorkBuddyAvailabilitySource {
         )
     }
 
-    private static func sameValues(
+    nonisolated static func sameValues(
         _ lhs: WorkBuddyManualObservation,
         _ rhs: WorkBuddyManualObservation
     ) -> Bool {
         lhs.scope == rhs.scope
             && lhs.tier == rhs.tier
+            && lhs.resolvedEntryMode == rhs.resolvedEntryMode
             && lhs.balance.remaining == rhs.balance.remaining
             && lhs.balance.used == rhs.balance.used
             && lhs.balance.total == rhs.balance.total

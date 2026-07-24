@@ -188,9 +188,11 @@ extension AppLanguage {
         case (.english, .none): "Absolute only"
         case (.english, .used): "Used Credits"
         case (.english, .total): "Active total"
+        case (.english, .usedAndTotal): "Used + total"
         case (.simplifiedChinese, .none): "仅可用额"
         case (.simplifiedChinese, .used): "已用 Credits"
         case (.simplifiedChinese, .total): "当前总额"
+        case (.simplifiedChinese, .usedAndTotal): "已用 + 总额"
         }
     }
 
@@ -280,6 +282,8 @@ extension AppLanguage {
         case (.english, .integerOutOfRange): "The Credit value is outside the supported range."
         case (.english, .expiryMustBeFuture): "Expiry must be later than the confirmation time."
         case (.english, .noConfirmedValue): "Save a valid manual snapshot first."
+        case (.english, .staleDraft):
+            "Saved Credits changed. Review the latest value, then press Save again to replace it."
         case (.english, .unsupportedSchema): "This saved record uses an unsupported future version."
         case (.english, .recordTooLarge), (.english, .persistenceUnavailable):
             "The local WorkBuddy record could not be saved."
@@ -292,6 +296,8 @@ extension AppLanguage {
         case (.simplifiedChinese, .integerOutOfRange): "Credit 数值超出支持范围。"
         case (.simplifiedChinese, .expiryMustBeFuture): "到期时间必须晚于确认时间。"
         case (.simplifiedChinese, .noConfirmedValue): "请先保存有效的手动快照。"
+        case (.simplifiedChinese, .staleDraft):
+            "已保存的 Credits 已更改。请检查最新值，再次点击保存以替换。"
         case (.simplifiedChinese, .unsupportedSchema): "保存记录使用了不支持的未来版本。"
         case (.simplifiedChinese, .recordTooLarge), (.simplifiedChinese, .persistenceUnavailable):
             "无法保存本机 WorkBuddy 记录。"

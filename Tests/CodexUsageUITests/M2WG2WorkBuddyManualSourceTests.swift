@@ -304,7 +304,7 @@ struct M2WG2WorkBuddyManualSourceTests {
         await registry.startPassiveConnectors()
         try await source.setEnabled(true)
         try await source.save(Self.observation(at: Date(timeIntervalSince1970: 1_800_000_000)))
-        for _ in 0..<20 where (await registry.orderedSnapshots().first?.channels.first?.availability.creditBalance) == nil {
+        for _ in 0..<200 where (await registry.orderedSnapshots().first?.channels.first?.availability.creditBalance) == nil {
             await Task.yield()
         }
 

@@ -37,6 +37,9 @@ public final class WorkBuddySettingsModel: ObservableObject {
     private let now: @Sendable () -> Date
     private var sourceTask: Task<Void, Never>?
     private var didSeedDraft = false
+    private var draftBaseline: WorkBuddyManualDraft?
+    private var draftBaseObservation: WorkBuddyManualObservation?
+    private var pendingSaveObservation: WorkBuddyManualObservation?
 
     init(
         source: ManualWorkBuddyAvailabilitySource,
@@ -116,9 +119,20 @@ public final class WorkBuddySettingsModel: ObservableObject {
 
     public func save(language: AppLanguage = .english) {
         guard let observation = validatedDraft(), isEnabled else { return }
+        guard savedValuesMatchDraftBase() else {
+            // Keep the user's edit visible, but require a second deliberate
+            // Save after surfacing that another source action changed the
+            // persisted record. This prevents one stale click from overwriting
+            // a newer manual confirmation.
+            validationError = .staleDraft
+            draftBaseObservation = savedObservation
+            return
+        }
+        pendingSaveObservation = observation
         Task { @MainActor [weak self, source] in
             do {
                 let changed = try await source.save(observation)
+                self?.pendingSaveObservation = nil
                 self?.preview = nil
                 self?.validationError = nil
                 self?.statusMessage = changed ? "saved" : "unchanged"
@@ -126,8 +140,10 @@ public final class WorkBuddySettingsModel: ObservableObject {
                     language.workBuddyStatusMessage(changed ? "saved" : "unchanged")
                 )
             } catch let error as WorkBuddyManualValidationError {
+                self?.pendingSaveObservation = nil
                 self?.validationError = error
             } catch {
+                self?.pendingSaveObservation = nil
                 self?.validationError = .persistenceUnavailable
             }
         }
@@ -157,6 +173,9 @@ public final class WorkBuddySettingsModel: ObservableObject {
                 self?.validationError = nil
                 self?.statusMessage = "cleared"
                 self?.didSeedDraft = true
+                self?.draftBaseline = self?.draft
+                self?.draftBaseObservation = nil
+                self?.pendingSaveObservation = nil
                 self?.announce(language.workBuddyStatusMessage("cleared"))
             } catch {
                 self?.validationError = .persistenceUnavailable
@@ -180,12 +199,53 @@ public final class WorkBuddySettingsModel: ObservableObject {
     }
 
     private func receive(_ state: WorkBuddyManualSourceState) {
+        let hadUnsavedDraft = draftBaseline.map { draft != $0 } ?? false
+        let incoming = state.observation
         lifecycle = state.lifecycle
         isEnabled = state.enabled
-        savedObservation = state.observation
-        if !didSeedDraft, let observation = state.observation {
+        savedObservation = incoming
+
+        if pendingSaveObservation == incoming {
+            seedDraft(from: incoming)
+            pendingSaveObservation = nil
+        } else if !didSeedDraft || !hadUnsavedDraft {
+            seedDraft(from: incoming)
+        } else if let incoming,
+                  let base = draftBaseObservation,
+                  ManualWorkBuddyAvailabilitySource.sameValues(incoming, base) {
+            // Confirm Unchanged advances provenance time without invalidating
+            // edits based on the same Credit values.
+            draftBaseObservation = incoming
+        } else if incoming == nil, draftBaseObservation == nil {
+            // Enable/disable transitions without a saved value do not conflict
+            // with an in-progress first configuration.
+        } else if incoming != draftBaseObservation {
+            validationError = .staleDraft
+        }
+    }
+
+    private func seedDraft(from observation: WorkBuddyManualObservation?) {
+        if let observation {
             draft = .from(observation)
-            didSeedDraft = true
+        } else {
+            draft = WorkBuddyManualDraft()
+        }
+        draftBaseline = draft
+        draftBaseObservation = observation
+        didSeedDraft = true
+        if validationError == .staleDraft {
+            validationError = nil
+        }
+    }
+
+    private func savedValuesMatchDraftBase() -> Bool {
+        switch (savedObservation, draftBaseObservation) {
+        case (nil, nil):
+            true
+        case let (saved?, base?):
+            ManualWorkBuddyAvailabilitySource.sameValues(saved, base)
+        default:
+            false
         }
     }
 

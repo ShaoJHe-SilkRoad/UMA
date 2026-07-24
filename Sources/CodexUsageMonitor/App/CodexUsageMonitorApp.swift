@@ -3,11 +3,23 @@ import CodexUsageUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let runtime = UsageMonitorRuntime.live()
+    private let runtime: UsageMonitorRuntime
     private var store: UsageStore { runtime.store }
     private var statusBarController: StatusBarController?
     private var wakeRefreshObserver: CodexWakeRefreshObserver?
     private var isDisconnectingForTermination = false
+
+    override init() {
+        do {
+            runtime = try UsageMonitorRuntime.live(
+                bundleIdentifier: Bundle.main.bundleIdentifier,
+                environment: ProcessInfo.processInfo.environment
+            )
+        } catch {
+            fatalError("Invalid isolated M2WDBG store configuration")
+        }
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)

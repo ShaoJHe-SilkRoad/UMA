@@ -43,6 +43,7 @@ public enum WorkBuddyCreditCompanionField: String, Codable, CaseIterable, Identi
     case none
     case used
     case total
+    case usedAndTotal
 
     public var id: String { rawValue }
 }
@@ -69,21 +70,25 @@ public struct WorkBuddyManualObservation: Codable, Equatable, Sendable {
     public let scope: WorkBuddyManualScope
     public let tier: WorkBuddyPlanTier
     public let balance: CreditBalance
+    public let entryMode: WorkBuddyCreditCompanionField?
 
     public init(
         scope: WorkBuddyManualScope,
         tier: WorkBuddyPlanTier,
-        balance: CreditBalance
+        balance: CreditBalance,
+        entryMode: WorkBuddyCreditCompanionField? = nil
     ) throws {
         guard balance.scope == scope.creditScope,
               balance.planTier == scope.creditPlanTier,
               case let .manualConfirmed(confirmedAt) = balance.provenance,
-              confirmedAt == balance.observedAt else {
+              confirmedAt == balance.observedAt,
+              Self.entryMode(entryMode, matches: balance) else {
             throw WorkBuddyManualValidationError.invalidManualRecord
         }
         self.scope = scope
         self.tier = tier
         self.balance = balance
+        self.entryMode = entryMode
     }
 
     func confirming(at date: Date) throws -> WorkBuddyManualObservation {
@@ -99,8 +104,37 @@ public struct WorkBuddyManualObservation: Codable, Equatable, Sendable {
                 nextExpiryAt: balance.nextExpiryAt,
                 observedAt: date,
                 provenance: .manualConfirmed(at: date)
-            )
+            ),
+            entryMode: entryMode
         )
+    }
+
+    var resolvedEntryMode: WorkBuddyCreditCompanionField {
+        entryMode ?? Self.inferredEntryMode(for: balance)
+    }
+
+    private static func inferredEntryMode(
+        for balance: CreditBalance
+    ) -> WorkBuddyCreditCompanionField {
+        if balance.used != nil { return .used }
+        if balance.total != nil { return .total }
+        return .none
+    }
+
+    private static func entryMode(
+        _ mode: WorkBuddyCreditCompanionField?,
+        matches balance: CreditBalance
+    ) -> Bool {
+        switch mode ?? inferredEntryMode(for: balance) {
+        case .none:
+            balance.used == nil && balance.total == nil
+        case .used:
+            balance.used != nil && balance.total != nil
+        case .total:
+            balance.used == nil && balance.total != nil
+        case .usedAndTotal:
+            balance.used != nil && balance.total != nil
+        }
     }
 }
 
@@ -176,6 +210,7 @@ public enum WorkBuddyManualValidationError: String, Error, Codable, Equatable, S
     case persistenceUnavailable
     case corruptPersistence
     case noConfirmedValue
+    case staleDraft
 }
 
 public struct WorkBuddyManualDraft: Equatable, Sendable {
@@ -184,6 +219,7 @@ public struct WorkBuddyManualDraft: Equatable, Sendable {
     public var remainingText: String
     public var companionField: WorkBuddyCreditCompanionField
     public var companionText: String
+    public var explicitTotalText: String
     public var includesExpiry: Bool
     public var expiry: Date
 
@@ -193,6 +229,7 @@ public struct WorkBuddyManualDraft: Equatable, Sendable {
         remainingText: String = "",
         companionField: WorkBuddyCreditCompanionField = .used,
         companionText: String = "",
+        explicitTotalText: String = "",
         includesExpiry: Bool = false,
         expiry: Date = Date().addingTimeInterval(30 * 24 * 60 * 60)
     ) {
@@ -201,6 +238,7 @@ public struct WorkBuddyManualDraft: Equatable, Sendable {
         self.remainingText = remainingText
         self.companionField = companionField
         self.companionText = companionText
+        self.explicitTotalText = explicitTotalText
         self.includesExpiry = includesExpiry
         self.expiry = expiry
     }
@@ -210,12 +248,6 @@ public struct WorkBuddyManualDraft: Equatable, Sendable {
             remainingText,
             missing: .requiredRemaining
         )
-        let companion = try companionField == .none
-            ? nil
-            : Self.parseRequired(
-                companionText,
-                missing: companionField == .used ? .requiredUsed : .requiredTotal
-            )
         if includesExpiry, expiry <= confirmationDate {
             throw WorkBuddyManualValidationError.expiryMustBeFuture
         }
@@ -227,7 +259,10 @@ public struct WorkBuddyManualDraft: Equatable, Sendable {
             used = nil
             total = nil
         case .used:
-            guard let companion else { throw WorkBuddyManualValidationError.requiredUsed }
+            let companion = try Self.parseRequired(
+                companionText,
+                missing: .requiredUsed
+            )
             used = companion
             let result = remaining.addingReportingOverflow(companion)
             guard !result.overflow, result.partialValue > 0 else {
@@ -235,9 +270,20 @@ public struct WorkBuddyManualDraft: Equatable, Sendable {
             }
             total = result.partialValue
         case .total:
-            guard let companion else { throw WorkBuddyManualValidationError.requiredTotal }
             used = nil
-            total = companion
+            total = try Self.parseRequired(
+                companionText,
+                missing: .requiredTotal
+            )
+        case .usedAndTotal:
+            used = try Self.parseRequired(
+                companionText,
+                missing: .requiredUsed
+            )
+            total = try Self.parseRequired(
+                explicitTotalText,
+                missing: .requiredTotal
+            )
         }
 
         do {
@@ -251,23 +297,37 @@ public struct WorkBuddyManualDraft: Equatable, Sendable {
                 observedAt: confirmationDate,
                 provenance: .manualConfirmed(at: confirmationDate)
             )
-            return try WorkBuddyManualObservation(scope: scope, tier: tier, balance: balance)
+            return try WorkBuddyManualObservation(
+                scope: scope,
+                tier: tier,
+                balance: balance,
+                entryMode: companionField
+            )
         } catch is AgentAvailabilityValidationError {
             throw WorkBuddyManualValidationError.invalidManualRecord
         }
     }
 
     public static func from(_ observation: WorkBuddyManualObservation) -> WorkBuddyManualDraft {
-        WorkBuddyManualDraft(
+        let entryMode = observation.resolvedEntryMode
+        let companionText: String
+        switch entryMode {
+        case .none:
+            companionText = ""
+        case .used, .usedAndTotal:
+            companionText = observation.balance.used.map(String.init) ?? ""
+        case .total:
+            companionText = observation.balance.total.map(String.init) ?? ""
+        }
+        return WorkBuddyManualDraft(
             scope: observation.scope,
             tier: observation.tier,
             remainingText: String(observation.balance.remaining),
-            companionField: observation.balance.used != nil
-                ? .used
-                : (observation.balance.total == nil ? .none : .total),
-            companionText: observation.balance.used.map(String.init)
-                ?? observation.balance.total.map(String.init)
-                ?? "",
+            companionField: entryMode,
+            companionText: companionText,
+            explicitTotalText: entryMode == .usedAndTotal
+                ? observation.balance.total.map(String.init) ?? ""
+                : "",
             includesExpiry: observation.balance.nextExpiryAt != nil,
             expiry: observation.balance.nextExpiryAt
                 ?? observation.balance.observedAt.addingTimeInterval(30 * 24 * 60 * 60)

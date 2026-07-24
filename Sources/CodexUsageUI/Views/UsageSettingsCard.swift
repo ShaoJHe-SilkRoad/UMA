@@ -311,13 +311,33 @@ private struct WorkBuddySettingsSection: View {
 
                     if model.draft.companionField != .none {
                         TextField(
-                            language.workBuddyCompanionName(model.draft.companionField),
+                            language.workBuddyCompanionName(
+                                model.draft.companionField == .usedAndTotal
+                                    ? .used
+                                    : model.draft.companionField
+                            ),
                             text: $model.draft.companionText
                         )
                         .textFieldStyle(.roundedBorder)
                         .disabled(!model.isEnabled)
                         .accessibilityLabel(
-                            language.workBuddyCompanionName(model.draft.companionField)
+                            language.workBuddyCompanionName(
+                                model.draft.companionField == .usedAndTotal
+                                    ? .used
+                                    : model.draft.companionField
+                            )
+                        )
+                    }
+
+                    if model.draft.companionField == .usedAndTotal {
+                        TextField(
+                            language.workBuddyCompanionName(.total),
+                            text: $model.draft.explicitTotalText
+                        )
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!model.isEnabled)
+                        .accessibilityLabel(
+                            language.workBuddyCompanionName(.total)
                         )
                     }
 
