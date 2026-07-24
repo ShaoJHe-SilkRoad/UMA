@@ -12,6 +12,7 @@ public struct UsagePanelView: View {
     private let preferencesEnabled: Bool
     private let onHeightChange: ((CGFloat) -> Void)?
     private let localAccessConfirmationAction: CodexLocalAccessConfirmationAction?
+    private let workBuddySettings: WorkBuddySettingsModel?
 
     public init(
         store: UsageStore,
@@ -19,13 +20,15 @@ public struct UsagePanelView: View {
         preferencesEnabled: Bool = true,
         settingsInitiallyPresented: Bool = false,
         onHeightChange: ((CGFloat) -> Void)? = nil,
-        localAccessConfirmationAction: CodexLocalAccessConfirmationAction? = nil
+        localAccessConfirmationAction: CodexLocalAccessConfirmationAction? = nil,
+        workBuddySettings: WorkBuddySettingsModel? = nil
     ) {
         self.store = store
         self.tuning = tuning
         self.preferencesEnabled = preferencesEnabled
         self.onHeightChange = onHeightChange
         self.localAccessConfirmationAction = localAccessConfirmationAction
+        self.workBuddySettings = workBuddySettings
         _isShowingSettings = State(initialValue: settingsInitiallyPresented)
     }
 
@@ -130,23 +133,52 @@ public struct UsagePanelView: View {
                 .allowsHitTesting(false)
         }
         .overlay(alignment: .topTrailing) {
-            if isShowingSettings {
-                UsageSettingsCard(
-                    showUsageSummary: $storedShowUsageSummary,
-                    showRecentTasks: $storedShowRecentTasks,
-                    showAPICost: $storedShowAPICost,
-                    language: Binding(
-                        get: { store.language },
-                        set: { store.setLanguage($0) }
-                    ),
-                    tuning: tuning,
-                    maximumHeight: max(240, displayedHeight - 124),
-                    close: { isShowingSettings = false }
-                )
-                .padding(.top, 96)
-                .padding(.trailing, 16)
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .zIndex(10)
+            ZStack(alignment: .topTrailing) {
+                if !presentation.showsRealData,
+                   preferencesEnabled,
+                   !isShowingSettings {
+                    Button {
+                        isShowingSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, height: 28)
+                            .background(
+                                Circle()
+                                    .fill(.ultraThinMaterial)
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.white.opacity(0.22), lineWidth: 0.6)
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .help(store.language.showSettings)
+                    .accessibilityLabel(store.language.showSettings)
+                    .padding(.top, 14)
+                    .padding(.trailing, 16)
+                }
+
+                if isShowingSettings {
+                    UsageSettingsCard(
+                        showUsageSummary: $storedShowUsageSummary,
+                        showRecentTasks: $storedShowRecentTasks,
+                        showAPICost: $storedShowAPICost,
+                        language: Binding(
+                            get: { store.language },
+                            set: { store.setLanguage($0) }
+                        ),
+                        workBuddySettings: workBuddySettings,
+                        tuning: tuning,
+                        maximumHeight: max(240, displayedHeight - 124),
+                        close: { isShowingSettings = false }
+                    )
+                    .padding(.top, 96)
+                    .padding(.trailing, 16)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(10)
+                }
             }
         }
         .animation(.easeInOut(duration: 0.18), value: isShowingSettings)

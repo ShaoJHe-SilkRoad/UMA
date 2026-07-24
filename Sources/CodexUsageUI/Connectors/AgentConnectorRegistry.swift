@@ -53,10 +53,27 @@ actor AgentConnectorRegistry {
     func restorePersistedSnapshots() async {
         guard let snapshotStore else { return }
         let restored = await snapshotStore.load()
-        for snapshot in restored where connectors[snapshot.id] != nil {
+        for snapshot in restored
+        where connectors[snapshot.id]?.descriptor.supportsRestore == true {
             latest[snapshot.id] = snapshot
         }
         publish()
+    }
+
+    func startPassiveConnectors() async {
+        let passive = orderedIDs.compactMap { connectors[$0] }.filter {
+            $0.descriptor.capabilities.contains(.passiveLocalAvailability)
+        }
+        for connector in passive { listen(to: connector) }
+        await withTaskGroup(of: Void.self) { group in
+            for connector in passive {
+                group.addTask {
+                    _ = await connector.probe()
+                    await connector.start()
+                    await self.receive(await connector.currentSnapshot())
+                }
+            }
+        }
     }
 
     func startAll() async {
@@ -117,8 +134,14 @@ actor AgentConnectorRegistry {
 
     private func receive(_ snapshot: AgentUsageSnapshot) async {
         guard connectors[snapshot.id] != nil else { return }
+        guard latest[snapshot.id] != snapshot else { return }
         latest[snapshot.id] = snapshot
-        if let snapshotStore { try? await snapshotStore.save(orderedSnapshots()) }
+        if let snapshotStore {
+            let restorableSnapshots = orderedSnapshots().filter {
+                connectors[$0.id]?.descriptor.supportsRestore == true
+            }
+            try? await snapshotStore.save(restorableSnapshots)
+        }
         publish()
     }
 

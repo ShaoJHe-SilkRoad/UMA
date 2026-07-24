@@ -26,6 +26,7 @@ public final class UsageStore: ObservableObject {
     private let backgroundRefreshInterval: Duration
     private let resumesPersistedAuthorizedConnection: Bool
     private var registrySubscription: Task<Void, Never>?
+    private var passiveStartupTask: Task<Void, Never>?
     private var connectionTask: Task<Void, Never>?
     private var periodicRefreshTask: Task<Void, Never>?
     private var periodicRefreshGeneration: UInt64 = 0
@@ -127,7 +128,10 @@ public final class UsageStore: ObservableObject {
     public var currentState: CodexConnectionState { connectionState }
 
     public var hasPriorRealSnapshot: Bool {
-        providerSnapshots.contains(where: \.hasValidData) || previewDisplaysFixtureData
+        guard let primaryConnectorID else { return previewDisplaysFixtureData }
+        return providerSnapshots.contains {
+            $0.id == primaryConnectorID && $0.hasValidData
+        } || previewDisplaysFixtureData
     }
 
     public var allowsManualRefresh: Bool {
@@ -232,6 +236,8 @@ public final class UsageStore: ObservableObject {
     public func stopAllConnectors() async {
         guard !previewOnly, let registry else { return }
         connectionTask?.cancel()
+        passiveStartupTask?.cancel()
+        passiveStartupTask = nil
         cancelActiveRefresh()
         periodicRefreshGeneration &+= 1
         periodicRefreshTask?.cancel()
@@ -271,6 +277,9 @@ public final class UsageStore: ObservableObject {
             await registry.restorePersistedSnapshots()
             let stream = await registry.snapshots()
             self?.resumePersistedAuthorizedConnection()
+            self?.passiveStartupTask = Task {
+                await registry.startPassiveConnectors()
+            }
             for await snapshots in stream {
                 guard !Task.isCancelled else { return }
                 self?.receive(snapshots)
@@ -288,18 +297,22 @@ public final class UsageStore: ObservableObject {
     }
 
     private func receive(_ snapshots: [AgentUsageSnapshot]) {
-        guard !previewOnly, monitorConsentGranted else { return }
+        guard !previewOnly else { return }
+        let admittedSnapshots = monitorConsentGranted
+            ? snapshots
+            : snapshots.filter { $0.id != primaryConnectorID }
         // The registry stream is installed asynchronously. Its initial empty
         // yield can race a completed direct refresh; it must not erase the
         // newly verified primary snapshot or turn live values into an
         // apparent no-data state.
-        guard !snapshots.isEmpty || providerSnapshots.isEmpty else { return }
+        guard !admittedSnapshots.isEmpty || providerSnapshots.isEmpty else { return }
         presentationCards = SharedUsagePresentationPolicy.makeCards(
-            snapshots: snapshots,
+            snapshots: admittedSnapshots,
             previousCards: presentationCards,
             language: language
         )
-        providerSnapshots = snapshots
+        providerSnapshots = admittedSnapshots
+        guard monitorConsentGranted else { return }
         guard let primary = primarySnapshot else { return }
         snapshot = UsageSnapshot(agentSnapshot: primary, language: language)
         connectionState = Self.presentationState(primary.state, failure: primary.safeFailure)
@@ -356,8 +369,12 @@ public final class UsageStore: ObservableObject {
             monitorConsentGranted = false
             monitorConsentDecision = decision
             monitorConsentDecision.persist(to: consentDefaults)
-            providerSnapshots = []
-            presentationCards = []
+            providerSnapshots.removeAll { $0.id == primaryConnectorID }
+            presentationCards = SharedUsagePresentationPolicy.makeCards(
+                snapshots: providerSnapshots,
+                previousCards: presentationCards,
+                language: language
+            )
             snapshot = .empty(language: language)
             freshness = .noRealData
             connectionState = .notAuthorizedByMonitor
@@ -509,6 +526,7 @@ public final class UsageStore: ObservableObject {
 
     deinit {
         registrySubscription?.cancel()
+        passiveStartupTask?.cancel()
         connectionTask?.cancel()
         periodicRefreshTask?.cancel()
     }

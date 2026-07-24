@@ -343,7 +343,9 @@ public enum SharedUsagePresentationPolicy {
         now: Date = Date()
     ) -> [SharedUsageCardPresentation] {
         let previousByID = Dictionary(uniqueKeysWithValues: previousCards.map { ($0.id, $0) })
-        return snapshots.map {
+        return snapshots
+            .filter { !$0.capabilities.contains(.hiddenFromProviderSurfaces) }
+            .map {
             makeCard(
                 snapshot: $0,
                 previous: previousByID[$0.id.rawValue],

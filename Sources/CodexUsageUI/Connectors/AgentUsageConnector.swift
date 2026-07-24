@@ -6,7 +6,10 @@ struct AgentConnectorID: RawRepresentable, Codable, Hashable, Comparable, Sendab
     let rawValue: String
 
     init?(rawValue: String) {
-        guard rawValue.range(of: "^[a-z0-9]+(?:[.-][a-z0-9]+)*$", options: .regularExpression) != nil else {
+        guard rawValue.range(
+            of: "^[a-z][a-z0-9]*(?:[.-][A-Za-z][A-Za-z0-9]*)*$",
+            options: .regularExpression
+        ) != nil else {
             return nil
         }
         self.rawValue = rawValue
@@ -65,6 +68,8 @@ enum AgentConnectorCapability: String, Codable, CaseIterable, Hashable, Sendable
     case localActivity
     case rateLimits
     case accountUsage
+    case passiveLocalAvailability
+    case hiddenFromProviderSurfaces
 }
 
 /// Declarative, privacy-safe prerequisites.  Deliberately no free-form

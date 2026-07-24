@@ -10,7 +10,10 @@ final class StatusBarController: NSObject {
     private var assistantController: DesktopAssistantPanelController!
     private var storeObserver: AnyCancellable?
 
-    init(store: UsageStore) {
+    init(
+        store: UsageStore,
+        workBuddySettings: WorkBuddySettingsModel
+    ) {
         self.store = store
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
@@ -18,6 +21,7 @@ final class StatusBarController: NSObject {
         panelController = TransparentUsagePanelController(
             store: store,
             statusItem: statusItem,
+            workBuddySettings: workBuddySettings,
             visibilityDidChange: { [weak self] isVisible in
                 self?.statusItem.button?.highlight(isVisible)
                 self?.store.setPanelVisible(isVisible)

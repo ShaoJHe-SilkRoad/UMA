@@ -3,14 +3,18 @@ import CodexUsageUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let store = UsageStore()
+    private let runtime = UsageMonitorRuntime.live()
+    private var store: UsageStore { runtime.store }
     private var statusBarController: StatusBarController?
     private var wakeRefreshObserver: CodexWakeRefreshObserver?
     private var isDisconnectingForTermination = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        statusBarController = StatusBarController(store: store)
+        statusBarController = StatusBarController(
+            store: store,
+            workBuddySettings: runtime.workBuddySettings
+        )
         wakeRefreshObserver = CodexWakeRefreshObserver(store: store)
     }
 

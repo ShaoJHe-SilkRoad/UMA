@@ -27,6 +27,7 @@ final class TransparentUsagePanelController {
     init(
         store: UsageStore,
         statusItem: NSStatusItem,
+        workBuddySettings: WorkBuddySettingsModel,
         visibilityDidChange: @escaping (Bool) -> Void
     ) {
         self.statusItem = statusItem
@@ -39,7 +40,7 @@ final class TransparentUsagePanelController {
             defer: false
         )
 
-        configurePanel(store: store)
+        configurePanel(store: store, workBuddySettings: workBuddySettings)
     }
 
     func toggle() {
@@ -62,7 +63,10 @@ final class TransparentUsagePanelController {
         localEventMonitor = nil
     }
 
-    private func configurePanel(store: UsageStore) {
+    private func configurePanel(
+        store: UsageStore,
+        workBuddySettings: WorkBuddySettingsModel
+    ) {
         panel.level = .popUpMenu
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -90,7 +94,8 @@ final class TransparentUsagePanelController {
                 onHeightChange: { [weak self] height in
                     self?.resizePanel(to: height)
                 },
-                localAccessConfirmationAction: NativeLocalCodexAccessConfirmation.action(for: store)
+                localAccessConfirmationAction: NativeLocalCodexAccessConfirmation.action(for: store),
+                workBuddySettings: workBuddySettings
             )
         )
         hostingView.frame = NSRect(x: 0, y: 0, width: Layout.width, height: Layout.height)

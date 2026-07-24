@@ -5,6 +5,7 @@ struct UsageSettingsCard: View {
     @Binding var showRecentTasks: Bool
     @Binding var showAPICost: Bool
     @Binding var language: AppLanguage
+    let workBuddySettings: WorkBuddySettingsModel?
     let tuning: GlassTuning
     let maximumHeight: CGFloat
     let close: () -> Void
@@ -101,6 +102,16 @@ struct UsageSettingsCard: View {
             Divider()
                 .opacity(0.35)
 
+            if let workBuddySettings {
+                WorkBuddySettingsSection(
+                    model: workBuddySettings,
+                    language: language
+                )
+
+                Divider()
+                    .opacity(0.35)
+            }
+
             VStack(alignment: .leading, spacing: 7) {
                 Text(language.desktopAssistantSection)
                     .font(UsageDesign.font(10.5, weight: .medium, language: language))
@@ -189,6 +200,265 @@ struct UsageSettingsCard: View {
                 }
             }
         )
+    }
+}
+
+private struct WorkBuddySettingsSection: View {
+    @ObservedObject var model: WorkBuddySettingsModel
+    let language: AppLanguage
+    @State private var isExpanded = false
+    @State private var clearIsArmed = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                isExpanded.toggle()
+            } label: {
+                HStack {
+                    Label(language.workBuddySection, systemImage: "w.circle")
+                        .font(UsageDesign.font(12.5, weight: .semibold, language: language))
+                    Spacer()
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(language.workBuddySection)
+            .accessibilityValue(
+                isExpanded ? language.workBuddyExpanded : language.workBuddyCollapsed
+            )
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 9) {
+                    SettingsToggleRow(
+                        title: language.workBuddyEnable,
+                        systemImage: "checkmark.circle",
+                        language: language,
+                        isOn: Binding(
+                            get: { model.isEnabled },
+                            set: { model.setEnabled($0) }
+                        )
+                    )
+
+                    labeledValue(
+                        language.workBuddySource,
+                        value: language.workBuddyManualConfirmation
+                    )
+                    labeledValue(
+                        language.workBuddyScope,
+                        value: language.workBuddySharedWithCodeBuddy
+                    )
+
+                    Picker(language.workBuddyScope, selection: $model.draft.scope) {
+                        ForEach(WorkBuddyManualScope.allCases) {
+                            Text(language.workBuddyScopeName($0)).tag($0)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .disabled(!model.isEnabled)
+                    .accessibilityLabel(language.workBuddyScope)
+
+                    Picker(language.workBuddyTier, selection: $model.draft.tier) {
+                        ForEach(WorkBuddyPlanTier.allCases) {
+                            Text(language.workBuddyTierName($0)).tag($0)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .disabled(!model.isEnabled)
+                    .accessibilityLabel(language.workBuddyTier)
+
+                    if let suggestion = model.selectedTierSuggestion {
+                        Text(language.workBuddySuggestion(suggestion))
+                            .font(UsageDesign.font(9, language: language))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button(language.workBuddyUseSuggestion) {
+                            model.applySelectedTierSuggestion()
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(!model.isEnabled)
+                        .accessibilityHint(language.workBuddySuggestion(suggestion))
+                    }
+
+                    TextField(
+                        language.workBuddyAvailableCredits,
+                        text: $model.draft.remainingText
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(!model.isEnabled)
+                    .accessibilityLabel(language.workBuddyAvailableCredits)
+
+                    Picker(
+                        language.workBuddyCompanionName(model.draft.companionField),
+                        selection: $model.draft.companionField
+                    ) {
+                        ForEach(WorkBuddyCreditCompanionField.allCases) {
+                            Text(language.workBuddyCompanionName($0)).tag($0)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(!model.isEnabled)
+
+                    if model.draft.companionField != .none {
+                        TextField(
+                            language.workBuddyCompanionName(model.draft.companionField),
+                            text: $model.draft.companionText
+                        )
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!model.isEnabled)
+                        .accessibilityLabel(
+                            language.workBuddyCompanionName(model.draft.companionField)
+                        )
+                    }
+
+                    Toggle(language.workBuddyNextExpiry, isOn: $model.draft.includesExpiry)
+                        .toggleStyle(.checkbox)
+                        .disabled(!model.isEnabled)
+                        .accessibilityLabel(language.workBuddyNextExpiry)
+
+                    if model.draft.includesExpiry {
+                        DatePicker(
+                            language.workBuddyNextExpiry,
+                            selection: $model.draft.expiry,
+                            displayedComponents: [.date, .hourAndMinute]
+                        )
+                        .labelsHidden()
+                        .disabled(!model.isEnabled)
+                        .accessibilityLabel(language.workBuddyNextExpiry)
+                    }
+
+                    if let validationError = model.validationError {
+                        Text(language.workBuddyValidationMessage(validationError))
+                            .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityLabel(language.workBuddyValidationMessage(validationError))
+                    }
+
+                    if model.lifecycle == .invalidSavedData {
+                        Text(language.workBuddyInvalidSavedData)
+                            .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if !model.isEnabled || model.savedObservation == nil {
+                        Text(language.workBuddyNotConfigured)
+                            .font(UsageDesign.font(9.5, language: language))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let confirmedAt = model.savedObservation?.balance.observedAt {
+                        labeledValue(
+                            language.workBuddyLastConfirmed,
+                            value: language.workBuddyConfirmedAt(confirmedAt)
+                        )
+                    }
+
+                    if let preview = model.preview {
+                        previewView(preview)
+                    }
+
+                    Button(language.workBuddyOpenOfficialUsagePage) {
+                        model.openOfficialUsagePage()
+                    }
+                    .buttonStyle(.borderless)
+                    .help(language.workBuddyOfficialPageHint)
+                    .accessibilityHint(language.workBuddyOfficialPageHint)
+
+                    HStack(spacing: 6) {
+                        Button(language.workBuddyPreview) {
+                            model.makePreview()
+                        }
+                        .disabled(!model.isEnabled)
+
+                        Button(language.workBuddySaveUpdate) {
+                            model.save(language: language)
+                        }
+                        .disabled(!model.canSave)
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button(language.workBuddyConfirmUnchanged) {
+                        model.confirmUnchanged(language: language)
+                    }
+                    .disabled(!model.canConfirmUnchanged)
+                    .buttonStyle(.bordered)
+
+                    Button(
+                        clearIsArmed
+                            ? language.workBuddyConfirmClear
+                            : language.workBuddyClearData,
+                        role: .destructive
+                    ) {
+                        if clearIsArmed {
+                            model.clear(language: language)
+                            clearIsArmed = false
+                        } else {
+                            clearIsArmed = true
+                        }
+                    }
+                    .buttonStyle(.borderless)
+
+                    if let statusMessage = model.statusMessage {
+                        Text(language.workBuddyStatusMessage(statusMessage))
+                            .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityLabel(language.workBuddyStatusMessage(statusMessage))
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .onAppear { model.start() }
+        .onChange(of: model.draft) {
+            model.updateValidation()
+            clearIsArmed = false
+        }
+        .animation(.easeInOut(duration: 0.16), value: isExpanded)
+    }
+
+    private func labeledValue(_ label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+        }
+        .font(UsageDesign.font(10, weight: .medium, language: language))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func previewView(_ preview: WorkBuddyManualPreview) -> some View {
+        let balance = preview.observation.balance
+        return VStack(alignment: .leading, spacing: 3) {
+            Text(language.workBuddyManualSnapshot)
+                .font(UsageDesign.font(10.5, weight: .semibold, language: language))
+            Text("\(CreditFormatter.exact(balance.remaining, language: language)) Credits")
+            if let used = balance.used {
+                Text("\(language.workBuddyCompanionName(.used)): \(CreditFormatter.exact(used, language: language))")
+            }
+            if let total = balance.total {
+                Text("\(language.workBuddyCompanionName(.total)): \(CreditFormatter.exact(total, language: language))")
+            }
+            if let fraction = preview.remainingFraction {
+                Text("\(Int((fraction * 100).rounded()))%")
+            }
+            if balance.isExhausted {
+                Text(language.workBuddyConversationCreditsExhausted)
+            }
+            Text(language.workBuddyScopeName(preview.observation.scope))
+            Text(language.workBuddyTierName(preview.observation.tier))
+            Text(language.workBuddySharedWithCodeBuddy)
+            Text(language.workBuddyManualSnapshot)
+        }
+        .font(UsageDesign.font(9.5, language: language))
+        .foregroundStyle(.secondary)
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.08)))
+        .accessibilityElement(children: .combine)
     }
 }
 
