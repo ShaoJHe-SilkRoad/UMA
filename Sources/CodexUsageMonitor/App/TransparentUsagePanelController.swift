@@ -92,7 +92,9 @@ final class TransparentUsagePanelController {
                 store: store,
                 tuning: tuning,
                 onHeightChange: { [weak self] height in
-                    self?.resizePanel(to: height)
+                    DispatchQueue.main.async { [weak self] in
+                        self?.resizePanel(to: height)
+                    }
                 },
                 localAccessConfirmationAction: NativeLocalCodexAccessConfirmation.action(for: store),
                 workBuddySettings: workBuddySettings
@@ -107,7 +109,10 @@ final class TransparentUsagePanelController {
     }
 
     private func resizePanel(to height: CGFloat) {
-        let height = min(UsagePanelMetrics.height, max(135, height.rounded()))
+        let height = min(
+            UsagePanelMetrics.height,
+            max(UsagePanelMetrics.minimumHeight, height.rounded())
+        )
         guard abs(panel.frame.height - height) > 0.5 else { return }
 
         var frame = panel.frame

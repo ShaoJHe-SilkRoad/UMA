@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 environment: ProcessInfo.processInfo.environment
             )
         } catch {
-            fatalError("Invalid isolated M2WDBG store configuration")
+            fatalError("Invalid task-owned review store configuration")
         }
         super.init()
     }

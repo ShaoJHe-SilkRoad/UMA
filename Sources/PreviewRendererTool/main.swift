@@ -18,13 +18,6 @@ struct PreviewRendererTool {
         let isDark = arguments.contains("--dark")
         let reduceTransparency = arguments.contains("--reduce-transparency")
         let increaseContrast = arguments.contains("--increase-contrast")
-        if let recordPathArgument = arguments.first(where: {
-            $0.hasPrefix("--write-workbuddy-record=")
-        }) {
-            let path = String(recordPathArgument.dropFirst("--write-workbuddy-record=".count))
-            try writeWorkBuddyRecord(to: URL(fileURLWithPath: path))
-            return
-        }
         let background = LinearGradient(
             colors: [
                 Color(red: 0.72, green: 0.84, blue: 0.96),
@@ -94,19 +87,44 @@ struct PreviewRendererTool {
                 .environment(\.colorScheme, isDark ? ColorScheme.dark : ColorScheme.light)
             )
         } else {
-            renderSize = CGSize(
-                width: UsagePanelMetrics.width,
-                height: UsagePanelMetrics.height
-            )
             let workBuddyCard = try makeWorkBuddyCard(
                 arguments: arguments,
                 language: language
             )
+            let previewScenario = try codexPreviewScenario(arguments)
             let store = UsageStore.preview(
+                scenario: previewScenario,
                 language: language,
                 presentationCards: workBuddyCard.map { [$0] } ?? []
             )
             let tuning = GlassTuning.final
+            let expandedProviderIDs: Set<String> = arguments.contains("--workbuddy-expanded")
+                ? ["workbuddy.manualAvailability"]
+                : []
+            let appearanceOverride = UsagePanelAppearanceOverride(
+                reduceTransparency: reduceTransparency,
+                increaseContrast: increaseContrast,
+                reduceMotion: arguments.contains("--reduce-motion")
+            )
+            let cardVisibilityOverride = arguments.contains("--oracle-card-set")
+                ? UsagePanelCardVisibility(
+                    showUsageSummary: true,
+                    showRecentTasks: false,
+                    showAPICost: false
+                )
+                : nil
+            let panelHeight = measuredPanelHeight(
+                store: store,
+                tuning: tuning,
+                showsSettings: showsSettings,
+                expandedProviderIDs: expandedProviderIDs,
+                appearanceOverride: appearanceOverride,
+                cardVisibilityOverride: cardVisibilityOverride
+            )
+            renderSize = CGSize(
+                width: UsagePanelMetrics.width,
+                height: panelHeight
+            )
             content = AnyView(ZStack {
                 background
                 UsagePanelView(
@@ -114,17 +132,13 @@ struct PreviewRendererTool {
                     tuning: tuning,
                     preferencesEnabled: false,
                     settingsInitiallyPresented: showsSettings,
-                    expandedProviderIDs: arguments.contains("--workbuddy-expanded")
-                        ? ["workbuddy.manualAvailability"]
-                        : [],
-                    appearanceOverride: UsagePanelAppearanceOverride(
-                        reduceTransparency: reduceTransparency,
-                        increaseContrast: increaseContrast,
-                        reduceMotion: arguments.contains("--reduce-motion")
-                    )
+                    expandedProviderIDs: expandedProviderIDs,
+                    appearanceOverride: appearanceOverride,
+                    renderedHeightOverride: panelHeight,
+                    cardVisibilityOverride: cardVisibilityOverride
                 )
             }
-            .frame(width: UsagePanelMetrics.width, height: UsagePanelMetrics.height)
+            .frame(width: UsagePanelMetrics.width, height: panelHeight)
             .environment(\.colorScheme, isDark ? ColorScheme.dark : ColorScheme.light)
             )
         }
@@ -170,6 +184,66 @@ struct PreviewRendererTool {
         try png.write(to: URL(fileURLWithPath: outputPath), options: .atomic)
     }
 
+    private static func codexPreviewScenario(
+        _ arguments: [String]
+    ) throws -> CodexPreviewScenario {
+        guard let argument = arguments.first(where: {
+            $0.hasPrefix("--codex-scenario=")
+        }) else {
+            return .ready
+        }
+        let rawValue = String(argument.dropFirst("--codex-scenario=".count))
+        guard let scenario = CodexPreviewScenario(rawValue: rawValue) else {
+            throw PreviewError.invalidScenario
+        }
+        return scenario
+    }
+
+    private static func measuredPanelHeight(
+        store: UsageStore,
+        tuning: GlassTuning,
+        showsSettings: Bool,
+        expandedProviderIDs: Set<String>,
+        appearanceOverride: UsagePanelAppearanceOverride,
+        cardVisibilityOverride: UsagePanelCardVisibility?
+    ) -> CGFloat {
+        let measurement = PanelHeightMeasurement()
+        let host = NSHostingView(
+            rootView: UsagePanelView(
+                store: store,
+                tuning: tuning,
+                preferencesEnabled: false,
+                settingsInitiallyPresented: showsSettings,
+                expandedProviderIDs: expandedProviderIDs,
+                onHeightChange: { measurement.height = $0 },
+                appearanceOverride: appearanceOverride,
+                cardVisibilityOverride: cardVisibilityOverride
+            )
+        )
+        host.frame = CGRect(
+            x: 0,
+            y: 0,
+            width: UsagePanelMetrics.width,
+            height: UsagePanelMetrics.height
+        )
+        let window = NSWindow(
+            contentRect: host.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = host
+        window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+        window.orderBack(nil)
+        for _ in 0..<12 {
+            host.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        window.orderOut(nil)
+        return UsagePanelMetrics.resolvedContentHeight(measurement.height)
+    }
+
     private static func makeWorkBuddyCard(
         arguments: [String],
         language: AppLanguage
@@ -192,7 +266,9 @@ struct PreviewRendererTool {
         } else {
             lifecycle = .configured
             let remaining: Int64
-            if arguments.contains("--workbuddy-exhausted") {
+            if arguments.contains("--workbuddy-synthetic-3600") {
+                remaining = 3_600
+            } else if arguments.contains("--workbuddy-exhausted") {
                 remaining = 0
             } else if arguments.contains("--workbuddy-critical") {
                 remaining = 400
@@ -201,10 +277,12 @@ struct PreviewRendererTool {
             } else if arguments.contains("--workbuddy-absolute") {
                 remaining = 50_000
             } else {
-                remaining = 3_600
+                remaining = 500
             }
             let used: Int64? = if arguments.contains("--workbuddy-absolute") {
                 nil
+            } else if arguments.contains("--workbuddy-synthetic-3600") {
+                400
             } else if arguments.contains("--workbuddy-exhausted") {
                 4_000
             } else if arguments.contains("--workbuddy-critical") {
@@ -214,12 +292,22 @@ struct PreviewRendererTool {
             } else if arguments.contains("--workbuddy-total") {
                 nil
             } else {
-                400
+                0
+            }
+            let total: Int64? = if arguments.contains("--workbuddy-absolute") {
+                nil
+            } else if arguments.contains("--workbuddy-synthetic-3600")
+                || arguments.contains("--workbuddy-exhausted")
+                || arguments.contains("--workbuddy-critical")
+                || arguments.contains("--workbuddy-warning") {
+                4_000
+            } else {
+                500
             }
             let balance = try CreditBalance(
                 validatingRemaining: remaining,
                 used: used,
-                total: arguments.contains("--workbuddy-absolute") ? nil : 4_000,
+                total: total,
                 scope: .buddyAISharedPersonal,
                 planTier: .personal,
                 nextExpiryAt: now.addingTimeInterval(86_400),
@@ -235,7 +323,11 @@ struct PreviewRendererTool {
             id: "workbuddy.manualAvailability",
             providerName: "WorkBuddy",
             planLabel: lifecycle == .configured
-                ? WorkBuddyPlanTier.standard.rawValue
+                ? (
+                    arguments.contains("--workbuddy-synthetic-3600")
+                        ? WorkBuddyPlanTier.standard.rawValue
+                        : WorkBuddyPlanTier.experience.rawValue
+                )
                 : nil,
             connectionStatus: .disconnected,
             freshness: .unavailable,
@@ -249,52 +341,14 @@ struct PreviewRendererTool {
             capturedAt: now
         )
     }
+}
 
-    private static func writeWorkBuddyRecord(to url: URL) throws {
-        let observedAt = Date()
-        let balance = try CreditBalance(
-            validatingRemaining: Int64(3_600),
-            used: Int64(400),
-            total: Int64(4_000),
-            scope: .buddyAISharedPersonal,
-            planTier: .personal,
-            nextExpiryAt: observedAt.addingTimeInterval(86_400),
-            observedAt: observedAt,
-            provenance: .manualConfirmed(at: observedAt)
-        )
-        let observation = try WorkBuddyManualObservation(
-            scope: .personalShared,
-            tier: .standard,
-            balance: balance
-        )
-        let record = WorkBuddyManualPersistenceRecord(
-            enabled: true,
-            observation: observation
-        )
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        encoder.dateEncodingStrategy = .millisecondsSince1970
-        let data = try encoder.encode(record)
-        let directory = url.deletingLastPathComponent()
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o700],
-            ofItemAtPath: directory.path
-        )
-        for destination in [url, url.appendingPathExtension("backup")] {
-            try data.write(to: destination, options: Data.WritingOptions.atomic)
-            try FileManager.default.setAttributes(
-                [.posixPermissions: 0o600],
-                ofItemAtPath: destination.path
-            )
-        }
-    }
+@MainActor
+private final class PanelHeightMeasurement {
+    var height: CGFloat?
 }
 
 private enum PreviewError: Error {
     case renderFailed
+    case invalidScenario
 }

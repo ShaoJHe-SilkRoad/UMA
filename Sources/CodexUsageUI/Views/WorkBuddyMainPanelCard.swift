@@ -123,7 +123,7 @@ struct WorkBuddyMainPanelCard: View {
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 14)
-            .frame(minHeight: 82)
+            .frame(minHeight: UsagePanelMetrics.collapsedProviderCardHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

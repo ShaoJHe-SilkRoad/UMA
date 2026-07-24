@@ -5,11 +5,12 @@ public struct UsagePanelView: View {
     @ObservedObject var store: UsageStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("display.showUsageSummaryCard") private var storedShowUsageSummary = true
-    @AppStorage("display.showRecentTasksCard") private var storedShowRecentTasks = true
-    @AppStorage("display.showAPICostCard") private var storedShowAPICost = true
+    @AppStorage("display.showRecentTasksCard") private var storedShowRecentTasks = false
+    @AppStorage("display.showAPICostCard") private var storedShowAPICost = false
     @State private var isShowingSettings: Bool
     @State private var providerExpansion: MainPanelProviderExpansionState
     @State private var settingsDestination: UsageSettingsDestination?
+    @State private var measuredContentHeight: CGFloat?
 
     let tuning: GlassTuning
     private let preferencesEnabled: Bool
@@ -17,6 +18,8 @@ public struct UsagePanelView: View {
     private let localAccessConfirmationAction: CodexLocalAccessConfirmationAction?
     private let workBuddySettings: WorkBuddySettingsModel?
     private let appearanceOverride: UsagePanelAppearanceOverride?
+    private let renderedHeightOverride: CGFloat?
+    private let cardVisibilityOverride: UsagePanelCardVisibility?
 
     public init(
         store: UsageStore,
@@ -27,7 +30,9 @@ public struct UsagePanelView: View {
         onHeightChange: ((CGFloat) -> Void)? = nil,
         localAccessConfirmationAction: CodexLocalAccessConfirmationAction? = nil,
         workBuddySettings: WorkBuddySettingsModel? = nil,
-        appearanceOverride: UsagePanelAppearanceOverride? = nil
+        appearanceOverride: UsagePanelAppearanceOverride? = nil,
+        renderedHeightOverride: CGFloat? = nil,
+        cardVisibilityOverride: UsagePanelCardVisibility? = nil
     ) {
         self.store = store
         self.tuning = tuning
@@ -36,6 +41,8 @@ public struct UsagePanelView: View {
         self.localAccessConfirmationAction = localAccessConfirmationAction
         self.workBuddySettings = workBuddySettings
         self.appearanceOverride = appearanceOverride
+        self.renderedHeightOverride = renderedHeightOverride
+        self.cardVisibilityOverride = cardVisibilityOverride
         _isShowingSettings = State(initialValue: settingsInitiallyPresented)
         _providerExpansion = State(
             initialValue: MainPanelProviderExpansionState(
@@ -45,15 +52,18 @@ public struct UsagePanelView: View {
     }
 
     private var showUsageSummary: Bool {
-        preferencesEnabled ? storedShowUsageSummary : true
+        cardVisibilityOverride?.showUsageSummary
+            ?? (preferencesEnabled ? storedShowUsageSummary : true)
     }
 
     private var showRecentTasks: Bool {
-        preferencesEnabled ? storedShowRecentTasks : true
+        cardVisibilityOverride?.showRecentTasks
+            ?? (preferencesEnabled ? storedShowRecentTasks : true)
     }
 
     private var showAPICost: Bool {
-        preferencesEnabled ? storedShowAPICost : true
+        cardVisibilityOverride?.showAPICost
+            ?? (preferencesEnabled ? storedShowAPICost : true)
     }
 
     private var presentation: CodexConnectionPresentation {
@@ -73,20 +83,10 @@ public struct UsagePanelView: View {
     }
 
     private var preferredHeight: CGFloat {
-        let baseHeight: CGFloat
-        if presentation.showsRealData {
-            baseHeight = UsagePanelMetrics.preferredHeight(
-                showUsageSummary: showUsageSummary,
-                showRecentTasks: showRecentTasks,
-                showAPICost: showAPICost
-            )
-        } else {
-            baseHeight = 330
+        if let renderedHeightOverride {
+            return UsagePanelMetrics.resolvedContentHeight(renderedHeightOverride)
         }
-        let providerHeight = additionalProviderCards.reduce(CGFloat.zero) {
-            $0 + (providerExpansion.isExpanded($1.id) ? 330 : 94)
-        }
-        return min(UsagePanelMetrics.height, baseHeight + providerHeight)
+        return UsagePanelMetrics.resolvedContentHeight(measuredContentHeight)
     }
 
     private var displayedHeight: CGFloat {
@@ -103,7 +103,7 @@ public struct UsagePanelView: View {
 
     public var body: some View {
         ScrollView(.vertical) {
-            VStack(spacing: 12) {
+            VStack(spacing: UsagePanelMetrics.cardSpacing) {
                 if presentation.showsRealData {
                     HeaderView(
                         store: store,
@@ -156,9 +156,23 @@ public struct UsagePanelView: View {
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 12)
+            .padding(.horizontal, UsagePanelMetrics.outerHorizontalInset)
+            .padding(.top, UsagePanelMetrics.outerTopInset)
+            .padding(.bottom, UsagePanelMetrics.outerBottomInset)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: UsagePanelContentHeightPreferenceKey.self,
+                        value: proxy.size.height
+                    )
+                }
+            }
+            .onPreferenceChange(UsagePanelContentHeightPreferenceKey.self) { height in
+                guard renderedHeightOverride == nil, height > 0 else { return }
+                if measuredContentHeight.map({ abs($0 - height) > 0.5 }) ?? true {
+                    measuredContentHeight = height
+                }
+            }
         }
         .task {
             workBuddySettings?.start()
@@ -299,6 +313,14 @@ public struct UsagePanelView: View {
         case .openCodex, .updateCodex, .dismiss:
             break
         }
+    }
+}
+
+private struct UsagePanelContentHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

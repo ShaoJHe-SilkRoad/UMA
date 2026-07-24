@@ -2,6 +2,12 @@ import Foundation
 
 enum UsageMonitorRuntimeError: Error, Equatable {
     case invalidM2WDBGStoreConfiguration
+    case invalidM2WDBGR1StoreConfiguration
+}
+
+struct UsageMonitorStoreConfiguration: Equatable {
+    let workBuddyStoreURL: URL?
+    let snapshotStoreURL: URL?
 }
 
 /// Composition root for the built-in providers. Adding a future connector
@@ -44,7 +50,8 @@ public struct UsageMonitorRuntime {
         )
         let usageStore = UsageStore(
             registry: registry,
-            primaryConnectorID: CodexUsageConnector.connectorID
+            primaryConnectorID: CodexUsageConnector.connectorID,
+            consentDefaults: .standard
         )
         let settings = WorkBuddySettingsModel(source: manualSource)
         return UsageMonitorRuntime(store: usageStore, workBuddySettings: settings)
@@ -52,18 +59,79 @@ public struct UsageMonitorRuntime {
 
     /// Production uses the ordinary stores. A task-owned M2WDBG bundle must
     /// provide both valid isolated stores or startup fails before either
-    /// ordinary user store is constructed.
+    /// ordinary user store is constructed. The R1 review lane keeps the
+    /// production bundle identity and ordinary Codex snapshot environment,
+    /// while allowing only WorkBuddy's manual record to use a task-owned path.
     public static func live(
         bundleIdentifier: String?,
         environment: [String: String]
     ) throws -> UsageMonitorRuntime {
-        try live(
+        let configuration = try storeConfiguration(
             bundleIdentifier: bundleIdentifier,
             environment: environment,
-            allowedRoot: URL(
+            m2wdbgAllowedRoot: URL(
                 fileURLWithPath: "/private/tmp/uma-m2wdbg-runtime",
                 isDirectory: true
+            ),
+            r1AllowedRoot: URL(
+                fileURLWithPath: "/private/tmp/uma-m2wdbg-r1-runtime",
+                isDirectory: true
             )
+        )
+        return live(
+            workBuddyStoreURL: configuration.workBuddyStoreURL,
+            snapshotStoreURL: configuration.snapshotStoreURL
+        )
+    }
+
+    nonisolated static func storeConfiguration(
+        bundleIdentifier: String?,
+        environment: [String: String],
+        m2wdbgAllowedRoot: URL,
+        r1AllowedRoot: URL
+    ) throws -> UsageMonitorStoreConfiguration {
+        if environment.keys.contains("UMA_M2WDBG_R1_MANUAL_STORE") {
+            guard bundleIdentifier == "com.kevinchen.CodexUsageMonitor",
+                  let workBuddyStoreURL = r1ManualStoreURL(
+                bundleIdentifier: bundleIdentifier,
+                environment: environment,
+                allowedRoot: r1AllowedRoot
+            ) else {
+                throw UsageMonitorRuntimeError.invalidM2WDBGR1StoreConfiguration
+            }
+            return UsageMonitorStoreConfiguration(
+                workBuddyStoreURL: workBuddyStoreURL,
+                snapshotStoreURL: nil
+            )
+        }
+
+        guard bundleIdentifier?.hasPrefix(
+            "com.kevinchen.CodexUsageMonitor.m2wdbg."
+        ) == true
+        else {
+            return UsageMonitorStoreConfiguration(
+                workBuddyStoreURL: nil,
+                snapshotStoreURL: nil
+            )
+        }
+        guard let workBuddyStoreURL = m2wdbgStoreURL(
+            bundleIdentifier: bundleIdentifier,
+            environment: environment,
+            variable: "UMA_M2WDBG_MANUAL_STORE",
+            allowedRoot: m2wdbgAllowedRoot
+        ),
+              let snapshotStoreURL = m2wdbgStoreURL(
+                bundleIdentifier: bundleIdentifier,
+                environment: environment,
+                variable: "UMA_M2WDBG_SNAPSHOT_STORE",
+                allowedRoot: m2wdbgAllowedRoot
+              )
+        else {
+            throw UsageMonitorRuntimeError.invalidM2WDBGStoreConfiguration
+        }
+        return UsageMonitorStoreConfiguration(
+            workBuddyStoreURL: workBuddyStoreURL,
+            snapshotStoreURL: snapshotStoreURL
         )
     }
 
@@ -72,36 +140,20 @@ public struct UsageMonitorRuntime {
         environment: [String: String],
         allowedRoot: URL
     ) throws -> UsageMonitorRuntime {
-        guard bundleIdentifier?.hasPrefix(
-            "com.kevinchen.CodexUsageMonitor.m2wdbg."
-        ) == true
-        else {
-            return live()
-        }
-        guard let workBuddyStoreURL = m2wdbgStoreURL(
+        let configuration = try storeConfiguration(
             bundleIdentifier: bundleIdentifier,
             environment: environment,
-            variable: "UMA_M2WDBG_MANUAL_STORE",
-            allowedRoot: allowedRoot
-        ),
-              let snapshotStoreURL = m2wdbgStoreURL(
-                bundleIdentifier: bundleIdentifier,
-                environment: environment,
-                variable: "UMA_M2WDBG_SNAPSHOT_STORE",
-                allowedRoot: allowedRoot
-              )
-        else {
-            throw UsageMonitorRuntimeError.invalidM2WDBGStoreConfiguration
-        }
+            m2wdbgAllowedRoot: allowedRoot,
+            r1AllowedRoot: allowedRoot
+        )
         return live(
-            workBuddyStoreURL: workBuddyStoreURL,
-            snapshotStoreURL: snapshotStoreURL
+            workBuddyStoreURL: configuration.workBuddyStoreURL,
+            snapshotStoreURL: configuration.snapshotStoreURL
         )
     }
 
-    /// A packaged debug candidate may opt into an isolated synthetic store.
-    /// Production bundle identifiers and paths outside the task-owned root are
-    /// deliberately ignored.
+    /// A packaged debug candidate may opt into isolated synthetic stores.
+    /// Paths outside the task-owned root are deliberately ignored.
     nonisolated public static func m2wdbgStoreURL(
         bundleIdentifier: String?,
         environment: [String: String],
@@ -132,6 +184,41 @@ public struct UsageMonitorRuntime {
         else {
             return nil
         }
+        return validatedJSONStoreURL(rawPath: rawPath, allowedRoot: allowedRoot)
+    }
+
+    nonisolated public static func r1ManualStoreURL(
+        bundleIdentifier: String?,
+        environment: [String: String]
+    ) -> URL? {
+        r1ManualStoreURL(
+            bundleIdentifier: bundleIdentifier,
+            environment: environment,
+            allowedRoot: URL(
+                fileURLWithPath: "/private/tmp/uma-m2wdbg-r1-runtime",
+                isDirectory: true
+            )
+        )
+    }
+
+    nonisolated static func r1ManualStoreURL(
+        bundleIdentifier: String?,
+        environment: [String: String],
+        allowedRoot: URL
+    ) -> URL? {
+        guard bundleIdentifier == "com.kevinchen.CodexUsageMonitor",
+              let rawPath = environment["UMA_M2WDBG_R1_MANUAL_STORE"],
+              rawPath.hasPrefix("/")
+        else {
+            return nil
+        }
+        return validatedJSONStoreURL(rawPath: rawPath, allowedRoot: allowedRoot)
+    }
+
+    nonisolated private static func validatedJSONStoreURL(
+        rawPath: String,
+        allowedRoot: URL
+    ) -> URL? {
         let fileManager = FileManager.default
         let lexicalRoot = allowedRoot.standardizedFileURL
         var rootIsDirectory: ObjCBool = false

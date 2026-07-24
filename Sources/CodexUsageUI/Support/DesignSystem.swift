@@ -16,17 +16,48 @@ public struct UsagePanelAppearanceOverride: Equatable, Sendable {
     }
 }
 
+public struct UsagePanelCardVisibility: Equatable, Sendable {
+    public let showUsageSummary: Bool
+    public let showRecentTasks: Bool
+    public let showAPICost: Bool
+
+    public init(
+        showUsageSummary: Bool,
+        showRecentTasks: Bool,
+        showAPICost: Bool
+    ) {
+        self.showUsageSummary = showUsageSummary
+        self.showRecentTasks = showRecentTasks
+        self.showAPICost = showAPICost
+    }
+}
+
 public enum UsagePanelMetrics {
     public static let width: CGFloat = 370
     public static let height: CGFloat = 776
+    public static let minimumHeight: CGFloat = 135
     public static let settingsMinimumHeight: CGFloat = 430
+    public static let outerHorizontalInset: CGFloat = 16
+    public static let outerTopInset: CGFloat = 14
+    public static let outerBottomInset: CGFloat = 12
+    public static let cardSpacing: CGFloat = 12
+    public static let collapsedProviderCardHeight: CGFloat = 82
+
+    public static var collapsedProviderContribution: CGFloat {
+        collapsedProviderCardHeight + cardSpacing
+    }
+
+    public static func resolvedContentHeight(_ measuredHeight: CGFloat?) -> CGFloat {
+        let measuredHeight = measuredHeight.map(ceil) ?? minimumHeight
+        return min(height, max(minimumHeight, measuredHeight))
+    }
 
     public static func preferredHeight(
         showUsageSummary: Bool,
         showRecentTasks: Bool,
         showAPICost: Bool
     ) -> CGFloat {
-        var result: CGFloat = 135
+        var result = minimumHeight
         if showUsageSummary {
             result += 271
         }
