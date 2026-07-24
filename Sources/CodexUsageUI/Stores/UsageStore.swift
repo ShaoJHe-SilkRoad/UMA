@@ -5,6 +5,7 @@ import Foundation
 public final class UsageStore: ObservableObject {
     @Published private(set) var snapshot: UsageSnapshot
     @Published private(set) var providerSnapshots: [AgentUsageSnapshot] = []
+    @Published public private(set) var presentationCards: [SharedUsageCardPresentation] = []
     @Published private(set) var isRefreshing = false
     @Published public private(set) var lastError: String?
     @Published public private(set) var lastFailure: CodexUsageClientFailure?
@@ -109,7 +110,13 @@ public final class UsageStore: ObservableObject {
     /// unlimited five-hour grant is rendered as ∞ in the panel, so it must
     /// not make the compact status item claim a misleading ordinary 100%.
     public var menuPercent: Int? {
-        snapshot.periods.first(where: { !$0.isUnlimited })?.remainingPercent
+        if let primaryID = primaryConnectorID?.rawValue,
+           let primaryCard = presentationCards.first(where: { $0.id == primaryID }) {
+            return primaryCard.remaining.displayPercent
+        }
+        return previewOnly
+            ? snapshot.periods.first(where: { !$0.isUnlimited })?.remainingPercent
+            : nil
     }
 
     public var statusText: String {
@@ -188,6 +195,7 @@ public final class UsageStore: ObservableObject {
     ) async {
         isRefreshing = true
         connectionState = hasPriorRealSnapshot ? .refreshingWithPreviousRealData : .resolvingExecutable
+        updatePresentationConnection(.transitional)
         do {
             try await registry.refresh(id, trigger: trigger)
             guard !Task.isCancelled else { return }
@@ -250,6 +258,11 @@ public final class UsageStore: ObservableObject {
         } else {
             snapshot = .empty(language: newLanguage)
         }
+        presentationCards = SharedUsagePresentationPolicy.makeCards(
+            snapshots: providerSnapshots,
+            previousCards: presentationCards,
+            language: newLanguage
+        )
     }
 
     private func beginRegistryObservation() {
@@ -281,6 +294,11 @@ public final class UsageStore: ObservableObject {
         // newly verified primary snapshot or turn live values into an
         // apparent no-data state.
         guard !snapshots.isEmpty || providerSnapshots.isEmpty else { return }
+        presentationCards = SharedUsagePresentationPolicy.makeCards(
+            snapshots: snapshots,
+            previousCards: presentationCards,
+            language: language
+        )
         providerSnapshots = snapshots
         guard let primary = primarySnapshot else { return }
         snapshot = UsageSnapshot(agentSnapshot: primary, language: language)
@@ -314,6 +332,7 @@ public final class UsageStore: ObservableObject {
         }
         isRefreshing = true
         connectionState = .resolvingExecutable
+        updatePresentationConnection(.transitional)
         do {
             try await registry.perform(command, for: id)
             receive(await registry.orderedSnapshots())
@@ -338,12 +357,14 @@ public final class UsageStore: ObservableObject {
             monitorConsentDecision = decision
             monitorConsentDecision.persist(to: consentDefaults)
             providerSnapshots = []
+            presentationCards = []
             snapshot = .empty(language: language)
             freshness = .noRealData
             connectionState = .notAuthorizedByMonitor
         } else {
             connectionState = monitorConsentGranted ? .idle : .notAuthorizedByMonitor
             freshness = hasPriorRealSnapshot ? .stale : .noRealData
+            updatePresentationConnection(.disconnected, freshness: .stale)
         }
         lastError = nil
         lastFailure = nil
@@ -363,6 +384,44 @@ public final class UsageStore: ObservableObject {
         lastError = codexFailureDescription(lastFailure)
         connectionState = hasPriorRealSnapshot ? .staleWithPreviousRealData(lastFailure!) : .recoverableFailure(lastFailure!)
         freshness = hasPriorRealSnapshot ? .stale : .noRealData
+        updatePresentationConnection(hasPriorRealSnapshot ? .stale : .failed, freshness: .stale)
+    }
+
+    private func updatePresentationConnection(
+        _ status: SharedConnectionStatus,
+        freshness overrideFreshness: SharedUsageFreshness? = nil
+    ) {
+        presentationCards = Self.cardsByUpdatingPrimaryConnection(
+            presentationCards,
+            primaryConnectorID: primaryConnectorID,
+            status: status,
+            freshness: overrideFreshness
+        )
+    }
+
+    static func cardsByUpdatingPrimaryConnection(
+        _ cards: [SharedUsageCardPresentation],
+        primaryConnectorID: AgentConnectorID?,
+        status: SharedConnectionStatus,
+        freshness overrideFreshness: SharedUsageFreshness? = nil
+    ) -> [SharedUsageCardPresentation] {
+        guard let primaryID = primaryConnectorID?.rawValue else { return cards }
+        return cards.map { card in
+            guard card.id == primaryID else { return card }
+            return SharedUsageCardPresentation(
+                id: card.id,
+                providerName: card.providerName,
+                planLabel: card.planLabel,
+                connectionStatus: status,
+                freshness: overrideFreshness ?? card.freshness,
+                windows: card.windows,
+                selectedWindowID: card.selectedWindowID,
+                remaining: card.remaining,
+                severity: card.severity,
+                isRetainingLastValidValue: card.isRetainingLastValidValue,
+                capturedAt: card.capturedAt
+            )
+        }
     }
 
     private func cancelActiveRefresh() {

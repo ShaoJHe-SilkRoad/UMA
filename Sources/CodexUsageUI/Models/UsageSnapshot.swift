@@ -168,11 +168,21 @@ extension UsageSnapshot {
         let account = agentSnapshot.channels.first(where: { $0.id == .account })
         let local = agentSnapshot.channels.first(where: { $0.id == .localActivity })
         let windows = (account?.rateLimitWindows ?? []).sorted { $0.kind.rawValue < $1.kind.rawValue }
-        let periods = windows.enumerated().map { index, window in
-            UsagePeriod(
+        let periods = windows.enumerated().compactMap { index, window -> UsagePeriod? in
+            let remainingPercent: Int
+            if window.isUnlimited {
+                remainingPercent = 100
+            } else if let used = window.usedPercent,
+                      used.isFinite,
+                      (0...100).contains(used) {
+                remainingPercent = Int((100 - used).rounded())
+            } else {
+                return nil
+            }
+            return UsagePeriod(
                 id: window.id,
                 title: language.quotaTitle(durationMinutes: window.kind == .fiveHour ? 300 : (window.kind == .sevenDay ? 10_080 : nil), index: index),
-                remainingPercent: window.isUnlimited ? 100 : max(0, min(100, Int((100 - (window.usedPercent ?? 0)).rounded()))),
+                remainingPercent: remainingPercent,
                 isUnlimited: window.isUnlimited,
                 resetText: language.resetDescription(for: window.resetsAt, now: now)
             )

@@ -140,6 +140,7 @@ public struct UsagePanelView: View {
                         set: { store.setLanguage($0) }
                     ),
                     tuning: tuning,
+                    maximumHeight: max(240, displayedHeight - 124),
                     close: { isShowingSettings = false }
                 )
                 .padding(.top, 96)

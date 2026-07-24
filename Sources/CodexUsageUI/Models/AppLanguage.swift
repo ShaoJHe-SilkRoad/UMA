@@ -415,6 +415,45 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    var desktopAssistantSection: String {
+        switch self {
+        case .simplifiedChinese: "桌面助手"
+        case .english: "Desktop Assistant"
+        }
+    }
+
+    var desktopAssistantEnabled: String {
+        switch self {
+        case .simplifiedChinese: "显示桌面助手"
+        case .english: "Show Desktop Assistant"
+        }
+    }
+
+    var desktopAssistantAlwaysOnTop: String {
+        switch self {
+        case .simplifiedChinese: "始终置顶"
+        case .english: "Always on Top"
+        }
+    }
+
+    var desktopAssistantDensity: String {
+        switch self {
+        case .simplifiedChinese: "布局"
+        case .english: "Layout"
+        }
+    }
+
+    func desktopAssistantDensityName(_ density: DesktopAssistantDensity) -> String {
+        switch (self, density) {
+        case (.simplifiedChinese, .automatic): "自动"
+        case (.simplifiedChinese, .regular): "常规"
+        case (.simplifiedChinese, .minimalist): "极简"
+        case (.english, .automatic): "Auto"
+        case (.english, .regular): "Regular"
+        case (.english, .minimalist): "Minimal"
+        }
+    }
+
     var languageSetting: String {
         switch self {
         case .simplifiedChinese: "语言"
