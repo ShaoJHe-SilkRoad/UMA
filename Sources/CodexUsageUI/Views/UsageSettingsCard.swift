@@ -1,11 +1,16 @@
 import SwiftUI
 
+enum UsageSettingsDestination: Equatable {
+    case workBuddy
+}
+
 struct UsageSettingsCard: View {
     @Binding var showUsageSummary: Bool
     @Binding var showRecentTasks: Bool
     @Binding var showAPICost: Bool
     @Binding var language: AppLanguage
     let workBuddySettings: WorkBuddySettingsModel?
+    let destination: UsageSettingsDestination?
     let tuning: GlassTuning
     let maximumHeight: CGFloat
     let close: () -> Void
@@ -105,7 +110,8 @@ struct UsageSettingsCard: View {
             if let workBuddySettings {
                 WorkBuddySettingsSection(
                     model: workBuddySettings,
-                    language: language
+                    language: language,
+                    expandOnAppear: destination == .workBuddy
                 )
 
                 Divider()
@@ -205,7 +211,9 @@ struct UsageSettingsCard: View {
 
 private struct WorkBuddySettingsSection: View {
     @ObservedObject var model: WorkBuddySettingsModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let language: AppLanguage
+    let expandOnAppear: Bool
     @State private var isExpanded = false
     @State private var clearIsArmed = false
 
@@ -408,15 +416,32 @@ private struct WorkBuddySettingsSection: View {
                             .accessibilityLabel(language.workBuddyStatusMessage(statusMessage))
                     }
                 }
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .transition(
+                    reduceMotion
+                        ? .opacity
+                        : .opacity.combined(with: .move(edge: .top))
+                )
             }
         }
-        .onAppear { model.start() }
+        .onAppear {
+            model.start()
+            if expandOnAppear {
+                isExpanded = true
+            }
+        }
+        .onChange(of: expandOnAppear) {
+            if expandOnAppear {
+                isExpanded = true
+            }
+        }
         .onChange(of: model.draft) {
             model.updateValidation()
             clearIsArmed = false
         }
-        .animation(.easeInOut(duration: 0.16), value: isExpanded)
+        .animation(
+            reduceMotion ? nil : .easeInOut(duration: 0.16),
+            value: isExpanded
+        )
     }
 
     private func labeledValue(_ label: String, value: String) -> some View {

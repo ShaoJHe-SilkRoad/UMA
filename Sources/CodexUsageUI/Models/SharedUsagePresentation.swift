@@ -25,6 +25,13 @@ public enum SharedUsageSeverity: String, Codable, Sendable {
     case neutral
 }
 
+public enum SharedAvailabilityLifecycle: String, Codable, Equatable, Sendable {
+    case configured
+    case unconfigured
+    case invalid
+    case unavailable
+}
+
 public enum SharedRemainingValue: Codable, Equatable, Sendable {
     case finite(Double)
     case unlimited
@@ -140,6 +147,8 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
     public let selectedWindowID: String?
     public let remaining: SharedRemainingValue
     public let availability: SharedAvailabilityPresentation?
+    public let availabilityLifecycle: SharedAvailabilityLifecycle?
+    public let isVisibleInDesktopAssistant: Bool
     public let severity: SharedUsageSeverity
     public let isRetainingLastValidValue: Bool
     public let capturedAt: Date
@@ -154,6 +163,8 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
         selectedWindowID: String?,
         remaining: SharedRemainingValue,
         availability: SharedAvailabilityPresentation? = nil,
+        availabilityLifecycle: SharedAvailabilityLifecycle? = nil,
+        isVisibleInDesktopAssistant: Bool = true,
         severity: SharedUsageSeverity,
         isRetainingLastValidValue: Bool = false,
         capturedAt: Date = Date()
@@ -167,6 +178,8 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
         self.selectedWindowID = selectedWindowID
         self.remaining = remaining
         self.availability = availability
+        self.availabilityLifecycle = availabilityLifecycle
+        self.isVisibleInDesktopAssistant = isVisibleInDesktopAssistant
         self.severity = severity
         self.isRetainingLastValidValue = isRetainingLastValidValue
         self.capturedAt = capturedAt
@@ -182,6 +195,9 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
     }
 
     public var tooltipText: String {
+        if let availability {
+            return availability.accessibilityText
+        }
         let window = selectedWindow?.accessibilityLabel ?? "usage window unavailable"
         let value: String
         switch remaining {
@@ -226,7 +242,7 @@ public enum SharedUsagePresentationPolicy {
             if let fraction = balance.normalizedRemainingFraction {
                 return availabilitySeverity(forFraction: fraction)
             }
-            return balance.isExhausted ? .exhausted : .available
+            return balance.isExhausted ? .exhausted : .neutral
         case .unlimited, .unavailable:
             return .neutral
         case .invalid:
@@ -331,7 +347,7 @@ public enum SharedUsagePresentationPolicy {
         switch max(0, min(100, percent)) {
         case 0: .exhausted
         case 0...10: .critical
-        case 11..<26: .warning
+        case 10..<26: .warning
         default: .available
         }
     }
@@ -344,7 +360,7 @@ public enum SharedUsagePresentationPolicy {
     ) -> [SharedUsageCardPresentation] {
         let previousByID = Dictionary(uniqueKeysWithValues: previousCards.map { ($0.id, $0) })
         return snapshots
-            .filter { !$0.capabilities.contains(.hiddenFromProviderSurfaces) }
+            .filter(isVisibleInMainPanel)
             .map {
             makeCard(
                 snapshot: $0,
@@ -353,6 +369,22 @@ public enum SharedUsagePresentationPolicy {
                 now: now
             )
         }
+    }
+
+    private static func isVisibleInMainPanel(_ snapshot: AgentUsageSnapshot) -> Bool {
+        guard !snapshot.capabilities.contains(.hiddenFromProviderSurfaces) else {
+            return false
+        }
+        guard snapshot.capabilities.contains(.passiveLocalAvailability),
+              let account = snapshot.channels.first(where: { $0.id == .account }),
+              account.provenance == .manualConfirmed,
+              account.availability == .unavailable,
+              account.safeFailure == nil,
+              snapshot.safeFailure == nil else {
+            return true
+        }
+        // A passive manual source with no value and no safe failure is disabled.
+        return false
     }
 
     static func makeCard(
@@ -393,6 +425,22 @@ public enum SharedUsagePresentationPolicy {
         let freshAvailability = accountChannel?.availability.map {
             makeAvailabilityPresentation(value: $0, language: language)
         }
+        let availabilityLifecycle: SharedAvailabilityLifecycle? = {
+            guard accountChannel?.provenance == .manualConfirmed else { return nil }
+            if freshAvailability?.sourceState == .manualConfirmed {
+                return .configured
+            }
+            switch accountChannel?.safeFailure ?? snapshot.safeFailure {
+            case .malformedResponse:
+                return .invalid
+            case .unavailable:
+                return .unconfigured
+            case nil:
+                return .unavailable
+            default:
+                return .unavailable
+            }
+        }()
         let receivedManualConfirmation =
             freshAvailability?.sourceState == .manualConfirmed
         let availability: SharedAvailabilityPresentation?
@@ -400,7 +448,10 @@ public enum SharedUsagePresentationPolicy {
         if receivedManualConfirmation {
             availability = freshAvailability
             retainedAvailability = false
-        } else if (sourceIsStale || sourceIsUnavailable),
+        } else if (
+            sourceIsStale
+                || (sourceIsUnavailable && availabilityLifecycle == nil)
+        ),
                   let previousAvailability = previous?.availability {
             availability = previousAvailability
             retainedAvailability = true
@@ -427,7 +478,7 @@ public enum SharedUsagePresentationPolicy {
         }
         let planLabel = accountChannel?.accountMetrics?.planLabel
             .flatMap { $0.isEmpty ? nil : $0 }
-            ?? previous?.planLabel
+            ?? (retainedAvailability ? previous?.planLabel : nil)
         let presentedConnectionStatus = connectionStatus(snapshot.state)
         let presentedFreshness = freshness(snapshot.freshness)
 
@@ -445,6 +496,10 @@ public enum SharedUsagePresentationPolicy {
             selectedWindowID: selectedID,
             remaining: remaining,
             availability: availability,
+            availabilityLifecycle: availabilityLifecycle,
+            isVisibleInDesktopAssistant: !snapshot.capabilities.contains(
+                .hiddenFromDesktopAssistant
+            ),
             severity: severity(for: remaining),
             isRetainingLastValidValue: retained,
             capturedAt: snapshot.capturedAt

@@ -285,7 +285,7 @@ struct M2WG2WorkBuddyManualSourceTests {
     }
 
     @Test
-    func connectorIsStableManualHiddenAndRefreshIsACompleteNoOp() async throws {
+    func connectorIsStableManualMainPanelOnlyAndRefreshIsACompleteNoOp() async throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let persistence = WorkBuddyManualAvailabilityStore(
@@ -317,15 +317,16 @@ struct M2WG2WorkBuddyManualSourceTests {
         #expect(snapshot.channels.first?.provenance == .manualConfirmed)
         #expect(snapshot.channels.first?.availability?.sourceState == .manualConfirmed)
         #expect(snapshot.channels.first?.availability.creditBalance?.scope.poolIdentity == .buddyAISharedCredits)
-        #expect(snapshot.capabilities.contains(.hiddenFromProviderSurfaces))
+        #expect(!snapshot.capabilities.contains(.hiddenFromProviderSurfaces))
+        #expect(snapshot.capabilities.contains(.hiddenFromDesktopAssistant))
         #expect(snapshot.capabilities.contains(.passiveLocalAvailability))
-        #expect(
-            SharedUsagePresentationPolicy.makeCards(
-                snapshots: [snapshot],
-                previousCards: [],
-                language: .english
-            ).isEmpty
+        let cards = SharedUsagePresentationPolicy.makeCards(
+            snapshots: [snapshot],
+            previousCards: [],
+            language: .english
         )
+        #expect(cards.map(\.id) == ["workbuddy.manualAvailability"])
+        #expect(cards.allSatisfy { !$0.isVisibleInDesktopAssistant })
 
         let writes = await persistence.writeCount
         let publications = await source.publicationCount
@@ -342,7 +343,7 @@ struct M2WG2WorkBuddyManualSourceTests {
     }
 
     @Test @MainActor
-    func usageStoreAdmitsManualStateWithoutCodexConsentButNeverPresentsIt() async throws {
+    func usageStorePresentsManualStateWithoutCodexConsentOnlyInMainPanel() async throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let persistence = WorkBuddyManualAvailabilityStore(
@@ -368,13 +369,15 @@ struct M2WG2WorkBuddyManualSourceTests {
             await Task.yield()
         }
         #expect(store.providerSnapshots.map(\.id.rawValue) == ["workbuddy.manualAvailability"])
-        #expect(store.presentationCards.isEmpty)
+        #expect(store.presentationCards.map(\.id) == ["workbuddy.manualAvailability"])
+        #expect(store.assistantPresentationCards.isEmpty)
         #expect(!store.hasPriorRealSnapshot)
 
         store.grantMonitorConsent()
         await store.disconnectAndForgetConsent()
         #expect(store.providerSnapshots.map(\.id.rawValue) == ["workbuddy.manualAvailability"])
-        #expect(store.presentationCards.isEmpty)
+        #expect(store.presentationCards.map(\.id) == ["workbuddy.manualAvailability"])
+        #expect(store.assistantPresentationCards.isEmpty)
         await store.stopAllConnectors()
     }
 

@@ -70,6 +70,7 @@ enum AgentConnectorCapability: String, Codable, CaseIterable, Hashable, Sendable
     case accountUsage
     case passiveLocalAvailability
     case hiddenFromProviderSurfaces
+    case hiddenFromDesktopAssistant
 }
 
 /// Declarative, privacy-safe prerequisites.  Deliberately no free-form

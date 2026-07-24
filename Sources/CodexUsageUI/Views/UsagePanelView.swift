@@ -3,25 +3,31 @@ import SwiftUI
 
 public struct UsagePanelView: View {
     @ObservedObject var store: UsageStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("display.showUsageSummaryCard") private var storedShowUsageSummary = true
     @AppStorage("display.showRecentTasksCard") private var storedShowRecentTasks = true
     @AppStorage("display.showAPICostCard") private var storedShowAPICost = true
     @State private var isShowingSettings: Bool
+    @State private var providerExpansion: MainPanelProviderExpansionState
+    @State private var settingsDestination: UsageSettingsDestination?
 
     let tuning: GlassTuning
     private let preferencesEnabled: Bool
     private let onHeightChange: ((CGFloat) -> Void)?
     private let localAccessConfirmationAction: CodexLocalAccessConfirmationAction?
     private let workBuddySettings: WorkBuddySettingsModel?
+    private let appearanceOverride: UsagePanelAppearanceOverride?
 
     public init(
         store: UsageStore,
         tuning: GlassTuning,
         preferencesEnabled: Bool = true,
         settingsInitiallyPresented: Bool = false,
+        expandedProviderIDs: Set<String> = [],
         onHeightChange: ((CGFloat) -> Void)? = nil,
         localAccessConfirmationAction: CodexLocalAccessConfirmationAction? = nil,
-        workBuddySettings: WorkBuddySettingsModel? = nil
+        workBuddySettings: WorkBuddySettingsModel? = nil,
+        appearanceOverride: UsagePanelAppearanceOverride? = nil
     ) {
         self.store = store
         self.tuning = tuning
@@ -29,7 +35,13 @@ public struct UsagePanelView: View {
         self.onHeightChange = onHeightChange
         self.localAccessConfirmationAction = localAccessConfirmationAction
         self.workBuddySettings = workBuddySettings
+        self.appearanceOverride = appearanceOverride
         _isShowingSettings = State(initialValue: settingsInitiallyPresented)
+        _providerExpansion = State(
+            initialValue: MainPanelProviderExpansionState(
+                expandedProviderIDs: expandedProviderIDs
+            )
+        )
     }
 
     private var showUsageSummary: Bool {
@@ -61,12 +73,20 @@ public struct UsagePanelView: View {
     }
 
     private var preferredHeight: CGFloat {
-        guard presentation.showsRealData else { return 330 }
-        return UsagePanelMetrics.preferredHeight(
-            showUsageSummary: showUsageSummary,
-            showRecentTasks: showRecentTasks,
-            showAPICost: showAPICost
-        )
+        let baseHeight: CGFloat
+        if presentation.showsRealData {
+            baseHeight = UsagePanelMetrics.preferredHeight(
+                showUsageSummary: showUsageSummary,
+                showRecentTasks: showRecentTasks,
+                showAPICost: showAPICost
+            )
+        } else {
+            baseHeight = 330
+        }
+        let providerHeight = additionalProviderCards.reduce(CGFloat.zero) {
+            $0 + (providerExpansion.isExpanded($1.id) ? 330 : 94)
+        }
+        return min(UsagePanelMetrics.height, baseHeight + providerHeight)
     }
 
     private var displayedHeight: CGFloat {
@@ -75,41 +95,76 @@ public struct UsagePanelView: View {
             : preferredHeight
     }
 
-    public var body: some View {
-        VStack(spacing: 12) {
-            if presentation.showsRealData {
-                HeaderView(
-                    store: store,
-                    recovery: retainedSnapshotRecovery,
-                    tuning: tuning,
-                    isShowingSettings: $isShowingSettings,
-                    perform: perform
-                )
-                if showUsageSummary {
-                    UsageSummaryCard(snapshot: store.snapshot, language: store.language, tuning: tuning)
-                }
-                if showRecentTasks {
-                    RecentTasksCard(tasks: store.snapshot.recentTasks, language: store.language, tuning: tuning)
-                }
-                if showAPICost {
-                    APICostEstimateCard(
-                        estimate: store.snapshot.apiCostEstimate,
-                        language: store.language,
-                        tuning: tuning
-                    )
-                }
-                FooterView(snapshot: store.snapshot, language: store.language)
-            } else {
-                CodexConnectionBridgeView(
-                    presentation: presentation,
-                    language: store.language,
-                    perform: perform
-                )
-            }
+    private var additionalProviderCards: [SharedUsageCardPresentation] {
+        store.presentationCards.filter {
+            $0.id == WorkBuddyManualPersistenceRecord.connectorID
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 12)
+    }
+
+    public var body: some View {
+        ScrollView(.vertical) {
+            VStack(spacing: 12) {
+                if presentation.showsRealData {
+                    HeaderView(
+                        store: store,
+                        recovery: retainedSnapshotRecovery,
+                        tuning: tuning,
+                        isShowingSettings: $isShowingSettings,
+                        perform: perform
+                    )
+                    if showUsageSummary {
+                        UsageSummaryCard(snapshot: store.snapshot, language: store.language, tuning: tuning)
+                    }
+                    ForEach(additionalProviderCards) { card in
+                        WorkBuddyMainPanelCard(
+                            card: card,
+                            language: store.language,
+                            tuning: tuning,
+                            settings: workBuddySettings,
+                            isExpanded: expansionBinding(for: card.id),
+                            openSettings: { openWorkBuddySettings() },
+                            appearanceOverride: appearanceOverride
+                        )
+                    }
+                    if showRecentTasks {
+                        RecentTasksCard(tasks: store.snapshot.recentTasks, language: store.language, tuning: tuning)
+                    }
+                    if showAPICost {
+                        APICostEstimateCard(
+                            estimate: store.snapshot.apiCostEstimate,
+                            language: store.language,
+                            tuning: tuning
+                        )
+                    }
+                    FooterView(snapshot: store.snapshot, language: store.language)
+                } else {
+                    CodexConnectionBridgeView(
+                        presentation: presentation,
+                        language: store.language,
+                        perform: perform
+                    )
+                    ForEach(additionalProviderCards) { card in
+                        WorkBuddyMainPanelCard(
+                            card: card,
+                            language: store.language,
+                            tuning: tuning,
+                            settings: workBuddySettings,
+                            isExpanded: expansionBinding(for: card.id),
+                            openSettings: { openWorkBuddySettings() },
+                            appearanceOverride: appearanceOverride
+                        )
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 12)
+        }
+        .task {
+            workBuddySettings?.start()
+        }
+        .scrollIndicators(.automatic)
+        .scrollBounceBehavior(.basedOnSize)
         .frame(width: UsagePanelMetrics.width, height: displayedHeight)
         .background {
             BalancedPanelTint(tuning: tuning)
@@ -138,6 +193,7 @@ public struct UsagePanelView: View {
                    preferencesEnabled,
                    !isShowingSettings {
                     Button {
+                        settingsDestination = nil
                         isShowingSettings = true
                     } label: {
                         Image(systemName: "gearshape")
@@ -170,25 +226,57 @@ public struct UsagePanelView: View {
                             set: { store.setLanguage($0) }
                         ),
                         workBuddySettings: workBuddySettings,
+                        destination: settingsDestination,
                         tuning: tuning,
                         maximumHeight: max(240, displayedHeight - 124),
-                        close: { isShowingSettings = false }
+                        close: {
+                            isShowingSettings = false
+                            settingsDestination = nil
+                        }
                     )
                     .padding(.top, 96)
                     .padding(.trailing, 16)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .transition(
+                        usesReduceMotion
+                            ? .opacity
+                            : .move(edge: .top).combined(with: .opacity)
+                    )
                     .zIndex(10)
                 }
             }
         }
-        .animation(.easeInOut(duration: 0.18), value: isShowingSettings)
-        .animation(.easeInOut(duration: 0.18), value: preferredHeight)
+        .animation(
+            usesReduceMotion ? nil : .easeInOut(duration: 0.18),
+            value: isShowingSettings
+        )
+        .animation(
+            usesReduceMotion ? nil : .easeInOut(duration: 0.18),
+            value: preferredHeight
+        )
         .onAppear {
             onHeightChange?(displayedHeight)
         }
         .onChange(of: displayedHeight) { _, newHeight in
             onHeightChange?(newHeight)
         }
+    }
+
+    private func expansionBinding(for id: String) -> Binding<Bool> {
+        Binding(
+            get: { providerExpansion.isExpanded(id) },
+            set: { expanded in
+                providerExpansion.setExpanded(expanded, providerID: id)
+            }
+        )
+    }
+
+    private func openWorkBuddySettings() {
+        settingsDestination = .workBuddy
+        isShowingSettings = true
+    }
+
+    private var usesReduceMotion: Bool {
+        appearanceOverride?.reduceMotion ?? reduceMotion
     }
 
     @MainActor

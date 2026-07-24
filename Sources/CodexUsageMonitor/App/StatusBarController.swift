@@ -87,7 +87,7 @@ final class StatusBarController: NSObject {
             store.menuPercent.map { store.language.remainingAccessibilityLabel(percent: $0) } ?? store.language.appTitle
         )
         assistantController.update(
-            cards: store.presentationCards.map {
+            cards: store.assistantPresentationCards.map {
                 DesktopAssistantCard(shared: $0, language: store.language)
             }
         )

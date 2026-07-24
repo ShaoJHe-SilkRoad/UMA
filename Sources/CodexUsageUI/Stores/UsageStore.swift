@@ -61,7 +61,8 @@ public final class UsageStore: ObservableObject {
 
     public static func preview(
         scenario: CodexPreviewScenario = .ready,
-        language: AppLanguage = .simplifiedChinese
+        language: AppLanguage = .simplifiedChinese,
+        presentationCards: [SharedUsageCardPresentation] = []
     ) -> UsageStore {
         UsageStore(
             autoRefresh: false,
@@ -70,7 +71,8 @@ public final class UsageStore: ObservableObject {
             registry: nil,
             primaryConnectorID: nil,
             consentDefaults: nil,
-            previewScenario: scenario
+            previewScenario: scenario,
+            previewPresentationCards: presentationCards
         )
     }
 
@@ -82,6 +84,7 @@ public final class UsageStore: ObservableObject {
         primaryConnectorID: AgentConnectorID?,
         consentDefaults: UserDefaults? = nil,
         previewScenario: CodexPreviewScenario = .ready,
+        previewPresentationCards: [SharedUsageCardPresentation] = [],
         visibleRefreshInterval: Duration = .seconds(120),
         backgroundRefreshInterval: Duration = .seconds(900)
     ) {
@@ -95,6 +98,7 @@ public final class UsageStore: ObservableObject {
         self.visibleRefreshInterval = visibleRefreshInterval
         self.backgroundRefreshInterval = backgroundRefreshInterval
         self.language = selectedLanguage
+        self.presentationCards = previewPresentationCards
         self.snapshot = previewOnly && previewScenario.displaysFixtureData ? .preview(language: selectedLanguage) : .empty(language: selectedLanguage)
         self.connectionState = previewOnly ? previewScenario.connectionState : .notAuthorizedByMonitor
         self.isRefreshing = previewOnly && previewScenario == .refreshing
@@ -118,6 +122,10 @@ public final class UsageStore: ObservableObject {
         return previewOnly
             ? snapshot.periods.first(where: { !$0.isUnlimited })?.remainingPercent
             : nil
+    }
+
+    public var assistantPresentationCards: [SharedUsageCardPresentation] {
+        presentationCards.filter(\.isVisibleInDesktopAssistant)
     }
 
     public var statusText: String {
@@ -435,6 +443,8 @@ public final class UsageStore: ObservableObject {
                 selectedWindowID: card.selectedWindowID,
                 remaining: card.remaining,
                 availability: card.availability,
+                availabilityLifecycle: card.availabilityLifecycle,
+                isVisibleInDesktopAssistant: card.isVisibleInDesktopAssistant,
                 severity: card.severity,
                 isRetainingLastValidValue: card.isRetainingLastValidValue,
                 capturedAt: card.capturedAt

@@ -134,7 +134,7 @@ struct M2WG1CreditAvailabilityCoreTests {
         #expect(missing.normalizedRemainingFraction == nil)
         #expect(
             SharedUsagePresentationPolicy.availabilitySeverity(for: .credits(missing))
-                == .available
+                == .neutral
         )
 
         let tierOnly = try CreditBalance(

@@ -33,6 +33,116 @@ extension AppLanguage {
         self == .simplifiedChinese ? "与 CodeBuddy 共享" : "Shared with CodeBuddy"
     }
 
+    var workBuddyBuddyAISharedCredits: String {
+        self == .simplifiedChinese ? "Buddy AI 共享 Credits" : "Buddy AI shared Credits"
+    }
+
+    func workBuddyCreditsAvailable(_ exactValue: String) -> String {
+        self == .simplifiedChinese
+            ? "\(exactValue) Credits 可用"
+            : "\(exactValue) Credits available"
+    }
+
+    func workBuddyUsedOfActive(used: String, total: String) -> String {
+        self == .simplifiedChinese
+            ? "已用 \(used)，当前总额 \(total)"
+            : "\(used) used of \(total) active"
+    }
+
+    func workBuddyActiveTotalValue(_ exactValue: String) -> String {
+        self == .simplifiedChinese
+            ? "当前总额 \(exactValue)"
+            : "\(exactValue) active total"
+    }
+
+    var workBuddyConfirmed: String {
+        self == .simplifiedChinese ? "确认于" : "Confirmed"
+    }
+
+    var workBuddyNotYetConfirmed: String {
+        self == .simplifiedChinese ? "尚未确认" : "Not yet confirmed"
+    }
+
+    func workBuddyRelativeConfirmationAge(from date: Date, to now: Date) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(date)))
+        switch seconds {
+        case 0..<60:
+            return self == .simplifiedChinese ? "刚刚" : "just now"
+        case 60..<3_600:
+            let minutes = seconds / 60
+            return self == .simplifiedChinese ? "\(minutes) 分钟前" : "\(minutes)m ago"
+        case 3_600..<86_400:
+            let hours = seconds / 3_600
+            return self == .simplifiedChinese ? "\(hours) 小时前" : "\(hours)h ago"
+        default:
+            let days = seconds / 86_400
+            return self == .simplifiedChinese ? "\(days) 天前" : "\(days)d ago"
+        }
+    }
+
+    var workBuddyMainPanelNotConfigured: String {
+        self == .simplifiedChinese
+            ? "WorkBuddy Credits 尚未配置。请打开官方用量页面，然后在设置中输入当前可用和已用 Credits。"
+            : "WorkBuddy Credits are not configured. Open the official usage page, then enter the current available and used Credits in Settings."
+    }
+
+    var workBuddyMainPanelUnavailable: String {
+        self == .simplifiedChinese ? "WorkBuddy 手动快照不可用。" : "WorkBuddy manual snapshot is unavailable."
+    }
+
+    var workBuddyNotConfiguredState: String {
+        self == .simplifiedChinese ? "未配置" : "Not configured"
+    }
+
+    var workBuddyUnavailableState: String {
+        self == .simplifiedChinese ? "不可用" : "Unavailable"
+    }
+
+    var workBuddyAutomaticSyncUnavailable: String {
+        self == .simplifiedChinese
+            ? "自动同步不可用；此数值来自手动确认。"
+            : "Automatic sync is unavailable; this value is manually confirmed."
+    }
+
+    var workBuddyManualEntryNoSync: String {
+        self == .simplifiedChinese
+            ? "仅支持手动输入；自动同步不可用。"
+            : "Manual entry only; automatic sync is unavailable."
+    }
+
+    var workBuddyUpdateCredits: String {
+        self == .simplifiedChinese ? "更新 Credits" : "Update Credits"
+    }
+
+    var workBuddyExactConfirmation: String {
+        self == .simplifiedChinese ? "准确确认时间" : "Exact confirmation"
+    }
+
+    var workBuddyNextExpiryLabel: String {
+        self == .simplifiedChinese ? "下次到期" : "Next expiry"
+    }
+
+    func workBuddyExpiryAt(_ date: Date) -> String {
+        workBuddyConfirmedAt(date)
+    }
+
+    func workBuddyAvailabilityState(_ severity: AgentAvailabilitySeverity) -> String {
+        switch (self, severity) {
+        case (.english, .available): "Available"
+        case (.english, .warning): "Warning"
+        case (.english, .critical): "Critical"
+        case (.english, .exhausted): "Exhausted"
+        case (.english, .neutral): "Manual value"
+        case (.english, .invalid): "Invalid data"
+        case (.simplifiedChinese, .available): "可用"
+        case (.simplifiedChinese, .warning): "警告"
+        case (.simplifiedChinese, .critical): "严重不足"
+        case (.simplifiedChinese, .exhausted): "已耗尽"
+        case (.simplifiedChinese, .neutral): "手动数值"
+        case (.simplifiedChinese, .invalid): "数据无效"
+        }
+    }
+
     var workBuddyScope: String {
         self == .simplifiedChinese ? "范围" : "Scope"
     }
@@ -112,6 +222,12 @@ extension AppLanguage {
 
     var workBuddyClearData: String {
         self == .simplifiedChinese ? "清除 WorkBuddy 数据" : "Clear WorkBuddy data"
+    }
+
+    var workBuddyClearInSettingsHint: String {
+        self == .simplifiedChinese
+            ? "打开 WorkBuddy 设置并使用两步确认清除。"
+            : "Opens WorkBuddy Settings for the two-step clear confirmation."
     }
 
     var workBuddyConfirmClear: String {

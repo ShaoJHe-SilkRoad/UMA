@@ -1,5 +1,21 @@
 import SwiftUI
 
+public struct UsagePanelAppearanceOverride: Equatable, Sendable {
+    public let reduceTransparency: Bool
+    public let increaseContrast: Bool
+    public let reduceMotion: Bool
+
+    public init(
+        reduceTransparency: Bool,
+        increaseContrast: Bool,
+        reduceMotion: Bool
+    ) {
+        self.reduceTransparency = reduceTransparency
+        self.increaseContrast = increaseContrast
+        self.reduceMotion = reduceMotion
+    }
+}
+
 public enum UsagePanelMetrics {
     public static let width: CGFloat = 370
     public static let height: CGFloat = 776
