@@ -327,12 +327,26 @@ struct PreviewRendererTool {
             } else {
                 500
             }
+            let scope: CreditScope = if arguments.contains("--workbuddy-enterprise") {
+                .buddyAIEnterpriseShared
+            } else if arguments.contains("--workbuddy-unknown-scope") {
+                .buddyAIUnknown
+            } else {
+                .buddyAISharedPersonal
+            }
+            let planTier: CreditPlanTier? = if arguments.contains("--workbuddy-enterprise") {
+                .enterprise
+            } else if arguments.contains("--workbuddy-unknown-scope") {
+                nil
+            } else {
+                .personal
+            }
             let balance = try CreditBalance(
                 validatingRemaining: remaining,
                 used: used,
                 total: total,
-                scope: .buddyAISharedPersonal,
-                planTier: .personal,
+                scope: scope,
+                planTier: planTier,
                 nextExpiryAt: now.addingTimeInterval(86_400),
                 observedAt: now,
                 provenance: .manualConfirmed(at: now)
@@ -346,11 +360,17 @@ struct PreviewRendererTool {
             id: "workbuddy.manualAvailability",
             providerName: "WorkBuddy",
             planLabel: lifecycle == .configured
-                ? (
-                    arguments.contains("--workbuddy-synthetic-3600")
+                ? {
+                    if arguments.contains("--workbuddy-enterprise") {
+                        return WorkBuddyPlanTier.enterprise.rawValue
+                    }
+                    if arguments.contains("--workbuddy-unknown-scope") {
+                        return WorkBuddyPlanTier.unknown.rawValue
+                    }
+                    return arguments.contains("--workbuddy-synthetic-3600")
                         ? WorkBuddyPlanTier.standard.rawValue
                         : WorkBuddyPlanTier.experience.rawValue
-                )
+                }()
                 : nil,
             connectionStatus: .disconnected,
             freshness: .unavailable,

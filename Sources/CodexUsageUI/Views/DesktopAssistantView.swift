@@ -247,9 +247,7 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
                 severity: availabilitySeverity,
                 isStale: card.isRetainingLastValidValue,
                 language: language,
-                accessibilityLabel: presentation.map {
-                    Self.makeCreditAccessibilityLabel($0, language: language)
-                }
+                accessibilityLabel: presentation?.accessibilityLabel
                     ?? card.tooltipText
             )
             return
@@ -351,38 +349,6 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
             return "\(providerName)，\(status)，\(selectedWindowAccessibilityLabel)，\(usage)\(freshness)。"
         }
         return "\(providerName), \(status), \(selectedWindowAccessibilityLabel), \(usage)\(freshness)."
-    }
-
-    private static func makeCreditAccessibilityLabel(
-        _ presentation: WorkBuddyMainPanelPresentation,
-        language: AppLanguage
-    ) -> String {
-        let hasConfirmedSnapshot =
-            presentation.state == .configured || presentation.state == .exhausted
-        var parts = [presentation.providerName]
-        if hasConfirmedSnapshot {
-            parts.append(language.workBuddyManualSnapshot)
-        }
-        parts.append(presentation.availableText)
-        if let detail = presentation.balanceDetail {
-            parts.append(detail)
-        }
-        parts.append(presentation.severityText)
-        if hasConfirmedSnapshot {
-            parts.append(presentation.scopeTitle)
-            parts.append(presentation.scopeDetail)
-            parts.append(presentation.manualStatus)
-            if let exact = presentation.exactConfirmation {
-                parts.append("\(language.workBuddyExactConfirmation): \(exact)")
-            }
-            if let tier = presentation.tierText {
-                parts.append("\(language.workBuddyTier): \(tier)")
-            }
-            if let expiry = presentation.expiryText {
-                parts.append("\(language.workBuddyNextExpiryLabel): \(expiry)")
-            }
-        }
-        return parts.joined(separator: ", ") + "."
     }
 
     private static func makeStructuredCreditAccessibilityLabel(

@@ -132,6 +132,7 @@ public struct WorkBuddyMainPanelPresentation: Equatable, Sendable {
             availableText
         ]
         if let balanceDetail { accessibilityParts.append(balanceDetail) }
+        accessibilityParts.append(language.workBuddyBuddyAISharedCredits)
         accessibilityParts.append(language.workBuddySharedWithCodeBuddy)
         accessibilityParts.append(
             confirmedAt == nil ? language.workBuddyManualConfirmation : manualStatus

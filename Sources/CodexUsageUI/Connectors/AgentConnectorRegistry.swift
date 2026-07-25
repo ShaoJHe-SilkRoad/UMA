@@ -24,7 +24,7 @@ actor AgentConnectorRegistry {
             self.connectors[id] = connector
             self.orderedIDs.append(id)
         }
-        self.orderedIDs.sort()
+        self.orderedIDs.sort(by: AgentProviderOrder.precedes)
     }
 
     func register(_ connector: any AgentUsageConnector) throws {
@@ -32,7 +32,7 @@ actor AgentConnectorRegistry {
         guard connectors[id] == nil else { throw AgentConnectorRegistryError.duplicateConnector(id) }
         connectors[id] = connector
         orderedIDs.append(id)
-        orderedIDs.sort()
+        orderedIDs.sort(by: AgentProviderOrder.precedes)
         listen(to: connector)
     }
 
@@ -136,7 +136,8 @@ actor AgentConnectorRegistry {
         guard connectors[snapshot.id] != nil else { return }
         guard latest[snapshot.id] != snapshot else { return }
         latest[snapshot.id] = snapshot
-        if let snapshotStore {
+        if let snapshotStore,
+           connectors[snapshot.id]?.descriptor.supportsRestore == true {
             let restorableSnapshots = orderedSnapshots().filter {
                 connectors[$0.id]?.descriptor.supportsRestore == true
             }

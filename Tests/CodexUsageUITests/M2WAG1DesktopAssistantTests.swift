@@ -10,7 +10,11 @@ struct M2WAG1DesktopAssistantTests {
     @Test
     func providerVisibilityOrderAndDensityUseStableIdentity() throws {
         let codex = codexCard()
-        let future = placeholderCard(id: "claude.code", providerName: "Future provider")
+        let claude = placeholderCard(id: "claude.code", providerName: "Claude Code")
+        let manus = placeholderCard(id: "manus.api", providerName: "Manus")
+        let cursor = placeholderCard(id: "cursor.usage", providerName: "Cursor")
+        let kimi = placeholderCard(id: "kimi.plus", providerName: "Kimi+")
+        let doubao = placeholderCard(id: "doubao.usage", providerName: "Doubao")
         let workBuddy = try workBuddyCard(remaining: 500, used: 0, total: 500)
         let hidden = SharedUsageCardPresentation(
             id: "hidden.provider",
@@ -35,9 +39,26 @@ struct M2WAG1DesktopAssistantTests {
         )
         #expect(
             SharedUsagePresentationPolicy.assistantCards(
-                from: [workBuddy, hidden, future, codex]
+                from: [
+                    doubao,
+                    kimi,
+                    cursor,
+                    manus,
+                    workBuddy,
+                    hidden,
+                    claude,
+                    codex,
+                ]
             ).map(\.id)
-                == ["codex.local", "claude.code", "workbuddy.manualAvailability"]
+                == [
+                    "codex.local",
+                    "claude.code",
+                    "workbuddy.manualAvailability",
+                    "manus.api",
+                    "cursor.usage",
+                    "kimi.plus",
+                    "doubao.usage",
+                ]
         )
         #expect(DesktopAssistantDensity.automatic.resolvedDensity(visibleProviderCount: 2) == .regular)
         #expect(DesktopAssistantDensity.automatic.resolvedDensity(visibleProviderCount: 4) == .regular)
@@ -173,6 +194,11 @@ struct M2WAG1DesktopAssistantTests {
         #expect(unconfigured.accessibilityLabel.contains("not configured"))
         #expect(invalid.accessibilityLabel.contains("invalid"))
         #expect(unavailable.accessibilityLabel.contains("unavailable"))
+        for card in [unconfigured, invalid, unavailable] {
+            #expect(card.accessibilityLabel.contains("Buddy AI shared Credits"))
+            #expect(card.accessibilityLabel.contains("Manual confirmation"))
+            #expect(card.accessibilityLabel.contains("Shared with CodeBuddy"))
+        }
         #expect(Set([unconfigured.accessibilityLabel, invalid.accessibilityLabel, unavailable.accessibilityLabel]).count == 3)
     }
 
@@ -325,6 +351,8 @@ struct M2WAG1DesktopAssistantTests {
         )
         #expect(renderer.contains("--assistant-workbuddy"))
         #expect(renderer.contains("--workbuddy-synthetic-3600"))
+        #expect(renderer.contains("--workbuddy-enterprise"))
+        #expect(renderer.contains("--workbuddy-unknown-scope"))
         #expect(renderer.contains("remaining = 500"))
         #expect(renderer.contains("stackSize("))
         #expect(!renderer.contains("--write-workbuddy-record"))

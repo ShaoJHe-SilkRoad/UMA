@@ -362,40 +362,30 @@ public enum SharedUsagePresentationPolicy {
         return snapshots
             .filter(isVisibleInMainPanel)
             .map {
-            makeCard(
-                snapshot: $0,
-                previous: previousByID[$0.id.rawValue],
-                language: language,
-                now: now
-            )
-        }
+                makeCard(
+                    snapshot: $0,
+                    previous: previousByID[$0.id.rawValue],
+                    language: language,
+                    now: now
+                )
+            }
+            .sorted {
+                AgentProviderOrder.precedes(raw: $0.id, $1.id)
+            }
     }
 
     /// Desktop Assistant order is a presentation-identity contract. It never
     /// depends on quota value, source state, confirmation age, tier, or
-    /// failure. Codex remains first and WorkBuddy remains after any future
-    /// admitted provider without creating an empty placeholder.
+    /// failure. The roadmap priority is Codex, Claude Code, WorkBuddy, Manus,
+    /// Cursor, Kimi+, then Doubao without creating empty placeholders.
     public static func assistantCards(
         from cards: [SharedUsageCardPresentation]
     ) -> [SharedUsageCardPresentation] {
         cards
             .filter(\.isVisibleInDesktopAssistant)
             .sorted { lhs, rhs in
-                let lhsKey = assistantOrderKey(for: lhs.id)
-                let rhsKey = assistantOrderKey(for: rhs.id)
-                return lhsKey == rhsKey ? lhs.id < rhs.id : lhsKey < rhsKey
+                AgentProviderOrder.precedes(raw: lhs.id, rhs.id)
             }
-    }
-
-    private static func assistantOrderKey(for id: String) -> Int {
-        switch id {
-        case CodexUsageConnector.connectorID.rawValue:
-            0
-        case WorkBuddyAvailabilityConnector.connectorID.rawValue:
-            2
-        default:
-            1
-        }
     }
 
     private static func isVisibleInMainPanel(_ snapshot: AgentUsageSnapshot) -> Bool {

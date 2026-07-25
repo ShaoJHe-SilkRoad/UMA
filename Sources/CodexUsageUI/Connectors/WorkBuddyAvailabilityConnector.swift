@@ -110,7 +110,9 @@ actor WorkBuddyAvailabilityConnector: AgentUsageConnector {
             provenance: .manualConfirmed,
             freshness: .unavailable,
             capturedAt: observation?.balance.observedAt,
-            coverageNote: "Manual snapshot · Shared with CodeBuddy",
+            coverageNote: observation == nil
+                ? nil
+                : "Manual snapshot · Shared with CodeBuddy",
             rateLimitWindows: [],
             accountMetrics: observation.map {
                 AgentAccountMetrics(

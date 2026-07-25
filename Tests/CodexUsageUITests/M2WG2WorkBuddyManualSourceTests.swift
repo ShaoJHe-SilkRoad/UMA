@@ -327,6 +327,13 @@ struct M2WG2WorkBuddyManualSourceTests {
         )
         #expect(cards.map(\.id) == ["workbuddy.manualAvailability"])
         #expect(cards.allSatisfy { $0.isVisibleInDesktopAssistant })
+        #expect(snapshot.channels.first?.coverageNote == "Manual snapshot · Shared with CodeBuddy")
+        #expect(!FileManager.default.fileExists(atPath: (await genericStore.url).path))
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: (await genericStore.backupURL).path
+            )
+        )
 
         let writes = await persistence.writeCount
         let publications = await source.publicationCount
@@ -339,7 +346,47 @@ struct M2WG2WorkBuddyManualSourceTests {
         #expect(await source.publicationCount == publications)
         #expect(afterRefresh.channels.first?.availability.creditBalance?.observedAt == confirmedAt)
         #expect((await genericStore.load()).isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: (await genericStore.url).path))
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: (await genericStore.backupURL).path
+            )
+        )
         await registry.stopAll()
+    }
+
+    @Test
+    func emptyManualStatesDoNotFabricateSnapshotMetadata() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = ManualWorkBuddyAvailabilitySource(
+            store: WorkBuddyManualAvailabilityStore(
+                fileURL: directory.appendingPathComponent("manual.json")
+            )
+        )
+
+        let unconfiguredConnector = WorkBuddyAvailabilityConnector(source: source)
+        await unconfiguredConnector.start()
+        let unconfigured = await unconfiguredConnector.currentSnapshot()
+        #expect(unconfigured.channels.first?.coverageNote == nil)
+        #expect(unconfigured.channels.first?.availability == .unavailable)
+        await unconfiguredConnector.stop()
+
+        try await source.setEnabled(true)
+        let enabledConnector = WorkBuddyAvailabilityConnector(source: source)
+        await enabledConnector.start()
+        let enabledWithoutValue = await enabledConnector.currentSnapshot()
+        #expect(enabledWithoutValue.channels.first?.coverageNote == nil)
+        #expect(enabledWithoutValue.channels.first?.availability == .unavailable)
+        await enabledConnector.stop()
+
+        try await source.setEnabled(false)
+        let disabledConnector = WorkBuddyAvailabilityConnector(source: source)
+        await disabledConnector.start()
+        let disabled = await disabledConnector.currentSnapshot()
+        #expect(disabled.channels.first?.coverageNote == nil)
+        #expect(disabled.channels.first?.availability == .unavailable)
+        await disabledConnector.stop()
     }
 
     @Test @MainActor

@@ -126,3 +126,17 @@ with warnings as errors PASS; Regular and Minimalist 500-Credit task-owned UI
 inspection PASS; stable-ID navigation expanded WorkBuddy without Settings,
 Refresh, record mutation, or confirmation-time change; independent
 architecture/privacy and presentation/accessibility re-reviews PASS.
+
+## M2WADBG-G1 — Combined main/Assistant closeout
+
+| Issue ID | Found by | Severity | First evidence | Root cause | Repair | Focused retest | Affected regression | Final status |
+|---|---|---|---|---|---|---|---|---|
+| M2WADBG-001 | Provider-order correction audit | Blocking | M2WA assigned WorkBuddy a generic terminal Assistant priority, so every future provider would precede it. | The local two-provider shortcut encoded “WorkBuddy last” instead of the Founder roadmap. | Add one provider-identity priority shared by registry, main presentation, and Assistant: Codex, Claude Code, WorkBuddy, Manus, Cursor, Kimi+, Doubao, then lexical fallback. | Combined roadmap-order suite pending final run. | M2WA visibility/density suite pending final run. | Repaired; verification pending |
+| M2WADBG-002 | Architecture/privacy audit | Major | Empty, disabled, and invalid WorkBuddy snapshots carried the raw note “Manual snapshot · Shared with CodeBuddy” despite having no observation. | Connector metadata was unconditional. | Emit the note only when a confirmed observation exists; keep empty states explicitly unavailable. | Empty-state metadata suite pending final run. | Manual-source lifecycle suite pending final run. | Repaired; verification pending |
+| M2WADBG-003 | Persistence ownership audit | Blocking | A changed non-restorable WorkBuddy event could invoke the generic connector snapshot store with an empty restorable set, creating or rewriting an unrelated file. | Registry write gating checked only whether a snapshot store existed. | Permit generic snapshot-store writes only when the connector that changed supports restore. | Fifty-write manual matrix plus twenty-refresh no-file proof pending final run. | Snapshot migration and WorkBuddy manual-source suites pending final run. | Repaired; verification pending |
+| M2WADBG-004 | Main/Assistant parity audit | Blocking | Assistant reconstructed a WorkBuddy accessibility sentence independently from the main-panel presentation. | Two surface-specific semantic formatters could drift in scope, tier, expiry, or lifecycle wording. | Reuse the exact `WorkBuddyMainPanelPresentation.accessibilityLabel` in Assistant. | Configured, severity-boundary, enterprise, unknown-scope, and lifecycle parity matrix pending final run. | English/zh-CN and main-panel suites pending final run. | Repaired; verification pending |
+| M2WADBG-005 | Presentation/accessibility QA | Major | Renderer evidence covered the Founder personal record but not enterprise shared or unknown scope. | Explicit in-memory renderer flags were absent. | Add enterprise and unknown-scope renderer-only scenarios without persistence. | Renderer contract and visual matrix pending final run. | Fixture-isolation audit pending final run. | Repaired; verification pending |
+
+M2WADBG issues may move to `Closed — PASS` only after the focused combined
+suite, affected regressions, full suite, three required builds, commit-exact
+package audit, direct physical acceptance, and bounded resource session pass.

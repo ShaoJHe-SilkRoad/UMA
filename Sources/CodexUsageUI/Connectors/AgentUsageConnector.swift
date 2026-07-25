@@ -20,6 +20,43 @@ struct AgentConnectorID: RawRepresentable, Codable, Hashable, Comparable, Sendab
     static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
 }
 
+/// Stable product ordering keyed only by provider identity. Missing providers
+/// do not create placeholders, and runtime state can never move a row.
+enum AgentProviderOrder {
+    private static let fallbackPriority = 1_000
+
+    static func priority(for id: AgentConnectorID) -> Int {
+        let providerNamespace = id.rawValue.split(
+            separator: ".",
+            maxSplits: 1
+        ).first.map(String.init) ?? id.rawValue
+        return switch providerNamespace {
+        case "codex": 0
+        case "claude": 100
+        case "workbuddy": 200
+        case "manus": 300
+        case "cursor": 400
+        case "kimi": 500
+        case "doubao": 600
+        default: fallbackPriority
+        }
+    }
+
+    static func precedes(_ lhs: AgentConnectorID, _ rhs: AgentConnectorID) -> Bool {
+        let lhsPriority = priority(for: lhs)
+        let rhsPriority = priority(for: rhs)
+        return lhsPriority == rhsPriority ? lhs < rhs : lhsPriority < rhsPriority
+    }
+
+    static func precedes(raw lhs: String, _ rhs: String) -> Bool {
+        guard let lhsID = AgentConnectorID(rawValue: lhs),
+              let rhsID = AgentConnectorID(rawValue: rhs) else {
+            return lhs < rhs
+        }
+        return precedes(lhsID, rhsID)
+    }
+}
+
 enum AgentSourceTier: String, Codable, CaseIterable, Sendable {
     case officialLocalService = "A"
     case officialStructuredHook = "B"
