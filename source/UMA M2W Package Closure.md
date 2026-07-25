@@ -2,6 +2,37 @@
 
 Date: 2026-07-25
 
+## R3 authoritative package supersession
+
+- Product: UMA
+- Marketing version: `0.10.1`
+- Internal build: `202607250004`
+- Bundle identifier: `com.kevinchen.CodexUsageMonitor`
+- Architecture: `arm64`
+- Signing: strict deep ad-hoc
+- Final closeout revision: the commit containing this record
+- Final package path:
+  `/private/tmp/uma-local-live-final-<first-12-of-final-closeout-commit>/UMA.app`
+- Provenance:
+  `Resources/UMA-Local-Live-Provenance.plist`
+
+The R3 package admits only currently active, authenticated, locally readable
+providers. Manual WorkBuddy remains packaged for Settings, persistence
+compatibility, and migration, but it is hidden from the main panel, status
+summary, and Assistant and exposes no login action. No manual record is seeded
+or bundled. A zero-provider launch uses the neutral panel state and suppresses
+the empty Assistant shell while retaining its enabled preference.
+
+The historical M2WADBG package record below remains evidence for its accepted
+milestone. R3 supersedes its manual WorkBuddy production-visibility behavior.
+
+R3 pre-package acceptance passed 181/181 tests across 27 suites, Debug,
+Release, and strict-concurrency warnings-as-errors Release builds, the
+zero-provider/Codex-only/qualified-Chinese-Agent renderer matrix, and a bounded
+40-minute task-owned resource window. The final report records the exact R3
+closeout commit, tree, source-archive digest, executable digest, dependency and
+contents audit, exact-path launch, and clean shutdown.
+
 ## Closed delivery
 
 - Product: UMA

@@ -2,7 +2,43 @@
 
 Date: 2026-07-25
 
-## Final status
+## R3 authoritative production supersession
+
+```text
+manual Credit infrastructure:
+retained
+
+manual WorkBuddy production visibility:
+disabled
+
+current visible provider:
+Codex only when active, authenticated, and locally readable
+
+WorkBuddy:
+hidden until source admission
+
+Chinese-agent login:
+optional only after source admission and only when login is the sole missing condition
+
+scan triggers:
+application launch and Manual Refresh/Check Again only
+
+M2W-LIVE:
+dormant
+```
+
+M2WADBG-R3 supersedes the historical visible manual-provider behavior recorded
+later in this file. It does not delete the exact Decimal Credit model, manual
+schema, saved record, Settings workflow, migrations, or tests. Manual data is
+compatibility/fallback infrastructure and is not production display authority.
+
+One provider-neutral scanner produces one current admission set. The main panel,
+status item, and Desktop Assistant derive only from it. When no provider is
+admitted, the panel presents the neutral local-Agent guidance, the status item
+has no fabricated percentage, and the Assistant hides its shell without
+changing its enabled preference.
+
+## Historical manual-program status
 
 ```text
 M2W:
@@ -17,9 +53,9 @@ NO-GO
 Official-source migration:
 M2W-LIVE-G1 dormant
 
-Current providers:
+Historical M2W providers:
 Codex
-WorkBuddy
+WorkBuddy manual presentation (superseded by M2WADBG-R3)
 
 Future provider order:
 Codex
@@ -88,6 +124,7 @@ Human operations.
 - M2WDBG-G1 / R1 main-app validation and repair: closed
 - M2WA-G1 Desktop Assistant presentation: closed
 - M2WADBG-G1 combined closeout: closed
+- M2WADBG-R3 local-live admission and Chinese login contract: closed
 
 The runtime repair is commit
 `3140623a798f721afa0202f13269bccaebbdc75e`. The final closeout revision is
@@ -97,6 +134,17 @@ package.
 
 ## Acceptance summary
 
+- M2WADBG-R3 focused scanner/package suites: `12 / 12` PASS.
+- M2WADBG-R3 full suite: `181 / 181` PASS across 27 suites.
+- M2WADBG-R3 Debug, Release, and strict-concurrency warnings-as-errors Release
+  builds: PASS.
+- M2WADBG-R3 renderer matrix: PASS for zero-provider and Codex-only states,
+  English and Simplified Chinese, Light and Dark appearances, Reduce
+  Transparency, Increase Contrast, and the qualified synthetic Chinese-Agent
+  login option.
+- M2WADBG-R3 bounded 40-minute task-owned resource window: PASS with one host,
+  one status item, zero owned provider children, no open network socket, 0.0%
+  CPU and 26,000 KiB RSS at the final sample, and clean shutdown.
 - Focused combined closeout tests: `5 / 5` PASS across 2 suites.
 - Affected WorkBuddy/Assistant regressions: `51 / 51` PASS across 4 suites.
 - Full suite: `163 / 163` PASS across 23 suites.
@@ -113,6 +161,11 @@ package.
   validation.
 
 ## Completion boundary
+
+`M2WADBG-R3 PASS — LOCAL-LIVE PROVIDER ADMISSION AND CHINESE LOGIN CONTRACT CLOSED`
+
+The former `M2WADBG-G1` result below remains historical evidence only; its
+manual WorkBuddy visibility is superseded by R3.
 
 `M2WADBG-G1 PASS — M2W MANUAL WORKBUDDY PROGRAM CLOSED`
 

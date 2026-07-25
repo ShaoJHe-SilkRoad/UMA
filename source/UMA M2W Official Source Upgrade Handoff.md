@@ -6,21 +6,21 @@ Date: 2026-07-25
 
 `M2W-LIVE-G1` is dormant. This record does not authorize it.
 
-The accepted WorkBuddy source remains manual user confirmation through:
+Manual user confirmation remains retained compatibility infrastructure through:
 
 ```text
 Manual WorkBuddy Settings
 → ManualWorkBuddyAvailabilitySource
 → WorkBuddyAvailabilityConnector
 → AgentConnectorRegistry
-→ one UsageStore
-→ SharedUsagePresentationPolicy
-→ one immutable AgentCardViewModel
-├── main panel
-└── Desktop Assistant
+→ Settings and migration compatibility
 ```
 
-Automatic structured WorkBuddy synchronization remains `NO-GO`. No WorkBuddy
+It is classified `manualOnly` and is hidden from production provider surfaces.
+Automatic structured WorkBuddy synchronization remains `NO-GO`. The trusted
+5.3.5 Hook recheck at commit
+`f59f8d5dc7773cd40aad1eeae49fc01e22413f46` admitted no public Credits
+contract, event, or getter and is read-only evidence. No WorkBuddy
 account, provider, application, browser content, private file, database,
 process, memory, credential, Keychain, OCR, or network source was inspected or
 used by M2W.
@@ -62,15 +62,16 @@ A future Founder-authorized official-source goal must establish:
 9. package, privacy, fixture-isolation, and commit-exact acceptance;
 10. a separate Founder decision to activate the source.
 
-Until those gates pass, the manual source remains the only accepted source and
-the application must not attempt background discovery or synchronization.
+Until those gates pass, WorkBuddy remains hidden. Its manual source remains
+preserved but cannot surface-admit a provider. The application must not attempt
+background discovery or synchronization.
 
 ## Provider roadmap boundary
 
-Current:
+Current production-visible order:
 
 ```text
-Codex → WorkBuddy
+Codex, only when currently admitted
 ```
 
 Future admitted order:
