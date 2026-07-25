@@ -96,7 +96,7 @@ public struct WorkBuddyManualObservation: Codable, Equatable, Sendable {
             scope: scope,
             tier: tier,
             balance: CreditBalance(
-                validatingRemaining: balance.remaining,
+                validatingDecimalRemaining: balance.remaining,
                 used: balance.used,
                 total: balance.total,
                 scope: balance.scope,
@@ -252,8 +252,8 @@ public struct WorkBuddyManualDraft: Equatable, Sendable {
             throw WorkBuddyManualValidationError.expiryMustBeFuture
         }
 
-        let used: Int64?
-        let total: Int64?
+        let used: Decimal?
+        let total: Decimal?
         switch companionField {
         case .none:
             used = nil
@@ -264,11 +264,11 @@ public struct WorkBuddyManualDraft: Equatable, Sendable {
                 missing: .requiredUsed
             )
             used = companion
-            let result = remaining.addingReportingOverflow(companion)
-            guard !result.overflow, result.partialValue > 0 else {
+            let result = remaining + companion
+            guard !result.isNaN, result <= Decimal(Int64.max), result > 0 else {
                 throw WorkBuddyManualValidationError.integerOutOfRange
             }
-            total = result.partialValue
+            total = result
         case .total:
             used = nil
             total = try Self.parseRequired(
@@ -288,7 +288,7 @@ public struct WorkBuddyManualDraft: Equatable, Sendable {
 
         do {
             let balance = try CreditBalance(
-                validatingRemaining: remaining,
+                validatingDecimalRemaining: remaining,
                 used: used,
                 total: total,
                 scope: scope.creditScope,
@@ -315,18 +315,18 @@ public struct WorkBuddyManualDraft: Equatable, Sendable {
         case .none:
             companionText = ""
         case .used, .usedAndTotal:
-            companionText = observation.balance.used.map(String.init) ?? ""
+            companionText = observation.balance.used.map(CreditFormatter.editable) ?? ""
         case .total:
-            companionText = observation.balance.total.map(String.init) ?? ""
+            companionText = observation.balance.total.map(CreditFormatter.editable) ?? ""
         }
         return WorkBuddyManualDraft(
             scope: observation.scope,
             tier: observation.tier,
-            remainingText: String(observation.balance.remaining),
+            remainingText: CreditFormatter.editable(observation.balance.remaining),
             companionField: entryMode,
             companionText: companionText,
             explicitTotalText: entryMode == .usedAndTotal
-                ? observation.balance.total.map(String.init) ?? ""
+                ? observation.balance.total.map(CreditFormatter.editable) ?? ""
                 : "",
             includesExpiry: observation.balance.nextExpiryAt != nil,
             expiry: observation.balance.nextExpiryAt
@@ -337,12 +337,16 @@ public struct WorkBuddyManualDraft: Equatable, Sendable {
     private static func parseRequired(
         _ text: String,
         missing: WorkBuddyManualValidationError
-    ) throws -> Int64 {
+    ) throws -> Decimal {
         guard !text.isEmpty else { throw missing }
-        guard text.range(of: "^[0-9]+$", options: .regularExpression) != nil else {
+        guard text.range(
+            of: "^[0-9]+(?:\\.[0-9]+)?$",
+            options: .regularExpression
+        ) != nil else {
             throw WorkBuddyManualValidationError.invalidInteger
         }
-        guard let value = Int64(text) else {
+        guard let value = CreditDecimalCodec.parseEditable(text),
+              value <= Decimal(Int64.max) else {
             throw WorkBuddyManualValidationError.integerOutOfRange
         }
         return value

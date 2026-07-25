@@ -62,7 +62,7 @@ public enum SharedRemainingValue: Codable, Equatable, Sendable {
 public struct SharedAvailabilityPresentation: Codable, Equatable, Sendable {
     public let value: AgentAvailabilityValue
     public let displayUnit: CreditUnit?
-    public let exactCreditValue: Int64?
+    public let exactCreditValue: Decimal?
     public let normalizedRemainingFraction: Double?
     public let severity: AgentAvailabilitySeverity
     public let provenance: AvailabilityProvenance?
@@ -79,7 +79,7 @@ public struct SharedAvailabilityPresentation: Codable, Equatable, Sendable {
     public init(
         value: AgentAvailabilityValue,
         displayUnit: CreditUnit?,
-        exactCreditValue: Int64?,
+        exactCreditValue: Decimal?,
         normalizedRemainingFraction: Double?,
         severity: AgentAvailabilitySeverity,
         provenance: AvailabilityProvenance?,
@@ -257,7 +257,7 @@ public enum SharedUsagePresentationPolicy {
         let compactText: String
         let accessibilityText: String
         let displayUnit: CreditUnit?
-        let exactCreditValue: Int64?
+        let exactCreditValue: Decimal?
         let provenance: AvailabilityProvenance?
         let scope: CreditScope?
         let planTier: CreditPlanTier?

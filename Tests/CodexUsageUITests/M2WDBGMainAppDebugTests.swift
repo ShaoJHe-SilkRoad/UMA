@@ -319,7 +319,7 @@ struct M2WDBGMainAppDebugTests {
         let invalidDrafts: [WorkBuddyManualDraft] = [
             .init(remainingText: "", companionField: .none),
             .init(remainingText: "-1", companionField: .none),
-            .init(remainingText: "1.5", companionField: .none),
+            .init(remainingText: "1..5", companionField: .none),
             .init(
                 remainingText: "9223372036854775808",
                 companionField: .none

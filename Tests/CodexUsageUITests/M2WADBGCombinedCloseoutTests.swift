@@ -114,7 +114,7 @@ struct M2WADBGCombinedCloseoutTests {
 
             #expect(shared.id == WorkBuddyManualPersistenceRecord.connectorID)
             #expect(assistant.id == shared.id)
-            #expect(assistant.usageValue.displayText == main.compactValue)
+            #expect(assistant.usageText(for: .regular) == main.compactValue)
             #expect(assistant.tintFraction == main.remainingFraction)
             #expect(assistant.sourceMark == .manual)
             #expect(assistant.accessibilityLabel == main.accessibilityLabel)
@@ -165,7 +165,7 @@ struct M2WADBGCombinedCloseoutTests {
                 language: .english
             )
             #expect(assistant.accessibilityLabel == main.accessibilityLabel)
-            #expect(assistant.usageValue.displayText == main.compactValue)
+            #expect(assistant.usageText(for: .regular) == main.compactValue)
             #expect(assistant.tintFraction == main.remainingFraction)
         }
 

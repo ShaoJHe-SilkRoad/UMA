@@ -145,3 +145,17 @@ commit-exact package/privacy/fixture audit PASS; isolated Founder
 `500 / 0 / 500` direct physical acceptance PASS; Shared Refresh and owned-child
 recovery PASS; 31-minute bounded process/network/resource session PASS; exact
 pre-validation preference restoration PASS.
+
+## M2W-R2 — Fractional manual Credit restoration
+
+| Issue ID | First evidence | Root cause | Repair | Focused retest | Regression retest | Final status |
+|---|---|---|---|---|---|---|
+| M2W-R2-001 | Founder-required `2,099.47 Credits` could not enter the accepted manual model because `CreditBalance` and its draft parser required `Int64`. | Exact Credit authority, persistence, and arithmetic were integer-only; changing only the display formatter would have lost the fractional balance before presentation. | Use Foundation `Decimal` for remaining, used, total, derived totals, equality, and validation. Encode schema-2 balances as canonical decimal strings with a 38-digit precision bound; decode schema-1 integer records exactly; reject malformed, excessive-precision, numerically encoded schema-2, fractional schema-1, and future-schema records. | Exact `2,099.47` draft/save/encode/decode/reseed PASS; legacy schema-1 `500` PASS; malformed, ambiguous, and excessive-precision rejection PASS. | Full 169-test / 25-suite run, Debug, Release, and strict-concurrency warnings-as-errors Release builds PASS. | Closed — PASS |
+| M2W-R2-002 | The existing Credit compact formatter was shared by the main panel and Assistant and did not support fractional inputs, `M`, or rollover boundaries. | Compact text was treated as shared Credit display truth instead of a density-specific visual representation. | Keep main panel, Regular Assistant, Settings, expanded details, Tooltip, and VoiceOver on exact localized decimal text; use round-half-up `k`/`M` text only for Minimalist Assistant; retain exact fraction, severity, exhaustion, provenance, and absolute-only no-fill semantics. | Required 15-value matrix PASS, including `999.50 → 1k`, `999,950 → 1M`, and `2,099.47 → 2.1k`; exact surface and semantic-parity assertions PASS. | Affected M2W 74-test matrix PASS before schema hardening; final full 169-test / 25-suite run PASS after the versioned persistence repair. | Closed — PASS |
+| M2W-R2-003 | The accepted closeout package helper was path-locked to the prior M2WADBG artifact and could not create the authorized R2 path. | Commit-exact packaging intentionally fails closed per delivery scope. | Add a separate fail-closed R2 helper for `/private/tmp/uma-m2w-r2-final-<short-commit>/UMA.app`, build `202607250003`, commit provenance, source-archive digest, strict deep ad-hoc signing, and binary/icon/plist-only contents. | R2 package-contract suite PASS. | Existing M2WADBG, M2WA, M2WDBG, and R0 package-contract suites plus full suite PASS. | Closed — PASS |
+
+M2W-R2 automated evidence: focused fractional-Credit suite 5/5 PASS; R2
+package-contract suite PASS; full suite 169/169 across 25 suites; Debug PASS;
+Release PASS; strict-concurrency warnings-as-errors Release PASS;
+`git diff --check` PASS. Commit-exact package audit and exact-path physical validation are
+the authorized post-commit delivery gates.

@@ -15,7 +15,7 @@ struct M2WG2WorkBuddyManualSourceTests {
             companionField: .none,
             companionText: ""
         ).validated(at: now)
-        #expect(absolute.balance.remaining == Int64.max)
+        #expect(absolute.balance.remaining == Decimal(Int64.max))
         #expect(absolute.balance.used == nil)
         #expect(absolute.balance.total == nil)
         #expect(absolute.balance.normalizedRemainingFraction == nil)
@@ -43,7 +43,13 @@ struct M2WG2WorkBuddyManualSourceTests {
         #expect(total.balance.total == 500)
         #expect(total.balance.planTier == .enterprise)
 
-        for invalid in ["-1", "1.5", "NaN", "inf", "1,000", " 1", "1 "] {
+        let fractional = try WorkBuddyManualDraft(
+            remainingText: "2099.47",
+            companionField: .none
+        ).validated(at: now)
+        #expect(fractional.balance.remaining == Decimal(string: "2099.47"))
+
+        for invalid in ["-1", "1..5", "NaN", "inf", "1,000", " 1", "1 "] {
             #expect(throws: WorkBuddyManualValidationError.self) {
                 try WorkBuddyManualDraft(
                     remainingText: invalid,

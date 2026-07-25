@@ -65,9 +65,7 @@ public struct WorkBuddyMainPanelPresentation: Equatable, Sendable {
         let exactRemaining = balance.map {
             CreditFormatter.exact($0.remaining, language: language)
         }
-        let compactValue = balance.map {
-            CreditFormatter.compact($0.remaining)
-        } ?? "—"
+        let compactValue = exactRemaining ?? "—"
         let availableText: String = switch state {
         case .configured:
             language.workBuddyCreditsAvailable(exactRemaining ?? "—")

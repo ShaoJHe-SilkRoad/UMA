@@ -63,14 +63,14 @@ struct M2WG1CreditAvailabilityCoreTests {
             )
             #expect(CreditFormatter.compact(remaining) == compact)
             #expect(presentation.compactText == compact)
-            #expect(presentation.exactCreditValue == remaining)
+            #expect(presentation.exactCreditValue == Decimal(remaining))
             #expect(presentation.displayUnit == .credits)
             #expect(!presentation.compactText.contains("%"))
             #expect(presentation.accessibilityText.contains("Credits"))
         }
 
         let maximum = try balance(remaining: Int64.max)
-        #expect(maximum.remaining == Int64.max)
+        #expect(maximum.remaining == Decimal(Int64.max))
         #expect(maximum.normalizedRemainingFraction == nil)
     }
 
@@ -100,9 +100,8 @@ struct M2WG1CreditAvailabilityCoreTests {
         #expect(throws: AgentAvailabilityValidationError.nonFiniteNumber) {
             try doubleBalance(remaining: .nan)
         }
-        #expect(throws: AgentAvailabilityValidationError.nonIntegralCredits) {
-            try doubleBalance(remaining: 3.5)
-        }
+        let fractional = try doubleBalance(remaining: 3.5)
+        #expect(fractional.remaining == Decimal(string: "3.5"))
         #expect(throws: AgentAvailabilityValidationError.creditsOutOfRange) {
             try doubleBalance(remaining: Double(Int64.max))
         }
@@ -283,10 +282,10 @@ struct M2WG1CreditAvailabilityCoreTests {
               "schemaVersion": 1,
               "kind": "credits",
               "balance": {
-                "schemaVersion": 1,
-                "remaining": 3600,
-                "used": 400,
-                "total": 4000,
+                "schemaVersion": 2,
+                "remaining": "3600",
+                "used": "400",
+                "total": "4000",
                 "unit": "credits",
                 "scope": {
                   "kind": "buddyAISharedPersonal",
@@ -322,7 +321,7 @@ struct M2WG1CreditAvailabilityCoreTests {
             return
         }
         var futureBalanceObject = balanceObject
-        futureBalanceObject["schemaVersion"] = 2
+        futureBalanceObject["schemaVersion"] = 3
         availabilityObject["balance"] = futureBalanceObject
         let futureBalanceData = try JSONSerialization.data(withJSONObject: availabilityObject)
         #expect(throws: DecodingError.self) {

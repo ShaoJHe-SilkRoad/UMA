@@ -188,12 +188,57 @@ public enum AgentAvailabilitySourceState: String, Codable, Equatable, Sendable {
     case unspecified
 }
 
-public struct CreditBalance: Codable, Equatable, Sendable {
-    public static let schemaVersion = 1
+enum CreditDecimalCodec {
+    static let maximumPrecision = 38
 
-    public let remaining: Int64
-    public let used: Int64?
-    public let total: Int64?
+    static func parseEditable(_ text: String) -> Decimal? {
+        guard text.range(
+            of: "^[0-9]+(?:\\.[0-9]+)?$",
+            options: .regularExpression
+        ) != nil,
+        precision(of: text) <= maximumPrecision,
+        let value = Decimal(
+            string: text,
+            locale: Locale(identifier: "en_US_POSIX")
+        ),
+        !value.isNaN else {
+            return nil
+        }
+        return value
+    }
+
+    static func parseCanonical(_ text: String) -> Decimal? {
+        guard let value = parseEditable(text), canonicalString(value) == text else {
+            return nil
+        }
+        return value
+    }
+
+    static func canonicalString(_ value: Decimal) -> String {
+        NSDecimalNumber(decimal: value).stringValue
+    }
+
+    static func hasSupportedPrecision(_ value: Decimal) -> Bool {
+        precision(of: canonicalString(value)) <= maximumPrecision
+    }
+
+    private static func precision(of text: String) -> Int {
+        let parts = text.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: false)
+        let integerDigits = parts[0].drop { $0 == "0" }.count
+        let fractionalDigits = parts.count == 2 ? parts[1].count : 0
+        return max(1, integerDigits + fractionalDigits)
+    }
+}
+
+public struct CreditBalance: Codable, Equatable, Sendable {
+    public static let schemaVersion = 2
+    public static let legacyIntegerSchemaVersion = 1
+    public static let maximumDecimalPrecision = CreditDecimalCodec.maximumPrecision
+    private static let maximumValue = Decimal(Int64.max)
+
+    public let remaining: Decimal
+    public let used: Decimal?
+    public let total: Decimal?
     public let unit: CreditUnit
     public let scope: CreditScope
     public let planTier: CreditPlanTier?
@@ -212,8 +257,47 @@ public struct CreditBalance: Codable, Equatable, Sendable {
         observedAt: Date,
         provenance: AvailabilityProvenance
     ) throws {
+        try self.init(
+            validatingDecimalRemaining: Decimal(remaining),
+            used: used.map(Decimal.init),
+            total: total.map(Decimal.init),
+            unit: unit,
+            scope: scope,
+            planTier: planTier,
+            nextExpiryAt: nextExpiryAt,
+            observedAt: observedAt,
+            provenance: provenance
+        )
+    }
+
+    public init(
+        validatingDecimalRemaining remaining: Decimal,
+        used: Decimal? = nil,
+        total: Decimal? = nil,
+        unit: CreditUnit = .credits,
+        scope: CreditScope,
+        planTier: CreditPlanTier? = nil,
+        nextExpiryAt: Date? = nil,
+        observedAt: Date,
+        provenance: AvailabilityProvenance
+    ) throws {
+        guard !remaining.isNaN,
+              used.map({ !$0.isNaN }) ?? true,
+              total.map({ !$0.isNaN }) ?? true else {
+            throw AgentAvailabilityValidationError.creditsOutOfRange
+        }
+        guard CreditDecimalCodec.hasSupportedPrecision(remaining),
+              used.map(CreditDecimalCodec.hasSupportedPrecision) ?? true,
+              total.map(CreditDecimalCodec.hasSupportedPrecision) ?? true else {
+            throw AgentAvailabilityValidationError.creditsOutOfRange
+        }
         guard remaining >= 0, used.map({ $0 >= 0 }) ?? true else {
             throw AgentAvailabilityValidationError.negativeCredits
+        }
+        guard remaining <= Self.maximumValue,
+              used.map({ $0 <= Self.maximumValue }) ?? true,
+              total.map({ $0 <= Self.maximumValue }) ?? true else {
+            throw AgentAvailabilityValidationError.creditsOutOfRange
         }
         if let total {
             guard total > 0 else {
@@ -230,11 +314,11 @@ public struct CreditBalance: Codable, Equatable, Sendable {
         }
 
         if let used {
-            let sum = remaining.addingReportingOverflow(used)
-            guard !sum.overflow else {
+            let sum = remaining + used
+            guard Self.isSupported(sum) else {
                 throw AgentAvailabilityValidationError.arithmeticOverflow
             }
-            if let total, sum.partialValue != total {
+            if let total, sum != total {
                 throw AgentAvailabilityValidationError.inconsistentCreditValues
             }
         }
@@ -262,7 +346,7 @@ public struct CreditBalance: Codable, Equatable, Sendable {
         provenance: AvailabilityProvenance
     ) throws {
         try self.init(
-            validatingRemaining: Self.exactCredits(remaining),
+            validatingDecimalRemaining: Self.exactCredits(remaining),
             used: try used.map(Self.exactCredits),
             total: try total.map(Self.exactCredits),
             unit: unit,
@@ -274,17 +358,18 @@ public struct CreditBalance: Codable, Equatable, Sendable {
         )
     }
 
-    public var derivedTotal: Int64? {
+    public var derivedTotal: Decimal? {
         if let total { return total }
         guard let used else { return nil }
-        let sum = remaining.addingReportingOverflow(used)
-        guard !sum.overflow, sum.partialValue > 0 else { return nil }
-        return sum.partialValue
+        let sum = remaining + used
+        guard Self.isSupported(sum), sum > 0 else { return nil }
+        return sum
     }
 
     public var normalizedRemainingFraction: Double? {
         guard let denominator = derivedTotal, denominator > 0 else { return nil }
-        return Double(remaining) / Double(denominator)
+        return NSDecimalNumber(decimal: remaining).doubleValue
+            / NSDecimalNumber(decimal: denominator).doubleValue
     }
 
     public var isExhausted: Bool { remaining == 0 }
@@ -305,7 +390,7 @@ public struct CreditBalance: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let version = try container.decode(Int.self, forKey: .schemaVersion)
-        guard version == Self.schemaVersion else {
+        guard version == Self.legacyIntegerSchemaVersion || version == Self.schemaVersion else {
             throw DecodingError.dataCorruptedError(
                 forKey: .schemaVersion,
                 in: container,
@@ -314,17 +399,71 @@ public struct CreditBalance: Codable, Equatable, Sendable {
         }
 
         do {
-            try self.init(
-                validatingRemaining: container.decode(Int64.self, forKey: .remaining),
-                used: container.decodeIfPresent(Int64.self, forKey: .used),
-                total: container.decodeIfPresent(Int64.self, forKey: .total),
-                unit: container.decode(CreditUnit.self, forKey: .unit),
-                scope: container.decode(CreditScope.self, forKey: .scope),
-                planTier: container.decodeIfPresent(CreditPlanTier.self, forKey: .planTier),
-                nextExpiryAt: container.decodeIfPresent(Date.self, forKey: .nextExpiryAt),
-                observedAt: container.decode(Date.self, forKey: .observedAt),
-                provenance: container.decode(AvailabilityProvenance.self, forKey: .provenance)
+            let unit = try container.decode(CreditUnit.self, forKey: .unit)
+            let scope = try container.decode(CreditScope.self, forKey: .scope)
+            let planTier = try container.decodeIfPresent(
+                CreditPlanTier.self,
+                forKey: .planTier
             )
+            let nextExpiryAt = try container.decodeIfPresent(
+                Date.self,
+                forKey: .nextExpiryAt
+            )
+            let observedAt = try container.decode(Date.self, forKey: .observedAt)
+            let provenance = try container.decode(
+                AvailabilityProvenance.self,
+                forKey: .provenance
+            )
+
+            if version == Self.legacyIntegerSchemaVersion {
+                try self.init(
+                    validatingRemaining: container.decode(Int64.self, forKey: .remaining),
+                    used: container.decodeIfPresent(Int64.self, forKey: .used),
+                    total: container.decodeIfPresent(Int64.self, forKey: .total),
+                    unit: unit,
+                    scope: scope,
+                    planTier: planTier,
+                    nextExpiryAt: nextExpiryAt,
+                    observedAt: observedAt,
+                    provenance: provenance
+                )
+            } else {
+                let remainingText = try container.decode(String.self, forKey: .remaining)
+                let usedText = try container.decodeIfPresent(String.self, forKey: .used)
+                let totalText = try container.decodeIfPresent(String.self, forKey: .total)
+                guard let remaining = CreditDecimalCodec.parseCanonical(remainingText) else {
+                    throw AgentAvailabilityValidationError.creditsOutOfRange
+                }
+                let used: Decimal?
+                if let usedText {
+                    guard let parsed = CreditDecimalCodec.parseCanonical(usedText) else {
+                        throw AgentAvailabilityValidationError.creditsOutOfRange
+                    }
+                    used = parsed
+                } else {
+                    used = nil
+                }
+                let total: Decimal?
+                if let totalText {
+                    guard let parsed = CreditDecimalCodec.parseCanonical(totalText) else {
+                        throw AgentAvailabilityValidationError.creditsOutOfRange
+                    }
+                    total = parsed
+                } else {
+                    total = nil
+                }
+                try self.init(
+                    validatingDecimalRemaining: remaining,
+                    used: used,
+                    total: total,
+                    unit: unit,
+                    scope: scope,
+                    planTier: planTier,
+                    nextExpiryAt: nextExpiryAt,
+                    observedAt: observedAt,
+                    provenance: provenance
+                )
+            }
         } catch let error as AgentAvailabilityValidationError {
             throw DecodingError.dataCorruptedError(
                 forKey: .remaining,
@@ -337,9 +476,15 @@ public struct CreditBalance: Codable, Equatable, Sendable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(Self.schemaVersion, forKey: .schemaVersion)
-        try container.encode(remaining, forKey: .remaining)
-        try container.encodeIfPresent(used, forKey: .used)
-        try container.encodeIfPresent(total, forKey: .total)
+        try container.encode(CreditDecimalCodec.canonicalString(remaining), forKey: .remaining)
+        try container.encodeIfPresent(
+            used.map(CreditDecimalCodec.canonicalString),
+            forKey: .used
+        )
+        try container.encodeIfPresent(
+            total.map(CreditDecimalCodec.canonicalString),
+            forKey: .total
+        )
         try container.encode(unit, forKey: .unit)
         try container.encode(scope, forKey: .scope)
         try container.encodeIfPresent(planTier, forKey: .planTier)
@@ -348,20 +493,22 @@ public struct CreditBalance: Codable, Equatable, Sendable {
         try container.encode(provenance, forKey: .provenance)
     }
 
-    private static func exactCredits(_ value: Double) throws -> Int64 {
+    private static func exactCredits(_ value: Double) throws -> Decimal {
         guard value.isFinite else {
             throw AgentAvailabilityValidationError.nonFiniteNumber
-        }
-        guard value.rounded(.towardZero) == value else {
-            throw AgentAvailabilityValidationError.nonIntegralCredits
         }
         guard value >= 0 else {
             throw AgentAvailabilityValidationError.negativeCredits
         }
-        guard let exact = Int64(exactly: value) else {
+        guard let exact = CreditDecimalCodec.parseEditable(String(value)),
+              isSupported(exact) else {
             throw AgentAvailabilityValidationError.creditsOutOfRange
         }
         return exact
+    }
+
+    private static func isSupported(_ value: Decimal) -> Bool {
+        !value.isNaN && value >= 0 && value <= maximumValue
     }
 }
 
@@ -512,24 +659,50 @@ public enum AgentAvailabilitySeverity: String, Codable, Equatable, Sendable {
 
 public enum CreditFormatter {
     public static func compact(_ value: Int64) -> String {
-        guard value >= 1_000 else { return String(value) }
-        let roundedTenths = value / 100 + (value % 100 >= 50 ? 1 : 0)
-        let whole = roundedTenths / 10
-        let decimal = roundedTenths % 10
-        return decimal == 0 ? "\(whole)k" : "\(whole).\(decimal)k"
+        compact(Decimal(value))
+    }
+
+    public static func compact(_ value: Decimal) -> String {
+        if value < 1_000 {
+            let rounded = roundHalfUp(value, scale: 0)
+            if rounded >= 1_000 {
+                return "1k"
+            }
+            return decimalString(rounded)
+        }
+
+        if value < 1_000_000 {
+            let roundedThousands = roundHalfUp(value / 1_000, scale: 1)
+            if roundedThousands >= 1_000 {
+                return "1M"
+            }
+            return "\(decimalString(roundedThousands))k"
+        }
+
+        let roundedMillions = roundHalfUp(value / 1_000_000, scale: 1)
+        return "\(decimalString(roundedMillions))M"
     }
 
     public static func exact(_ value: Int64, language: AppLanguage) -> String {
+        exact(Decimal(value), language: language)
+    }
+
+    public static func exact(_ value: Decimal, language: AppLanguage) -> String {
         let formatter = NumberFormatter()
         formatter.locale = language.locale
         formatter.numberStyle = .decimal
-        formatter.maximumFractionDigits = 0
+        formatter.maximumFractionDigits = 38
         formatter.minimumFractionDigits = 0
         formatter.usesGroupingSeparator = true
-        return formatter.string(from: NSNumber(value: value)) ?? String(value)
+        return formatter.string(from: NSDecimalNumber(decimal: value))
+            ?? decimalString(value)
     }
 
     public static func accessibilityRemaining(_ value: Int64, language: AppLanguage) -> String {
+        accessibilityRemaining(Decimal(value), language: language)
+    }
+
+    public static func accessibilityRemaining(_ value: Decimal, language: AppLanguage) -> String {
         let exactValue = exact(value, language: language)
         switch language {
         case .english:
@@ -537,5 +710,20 @@ public enum CreditFormatter {
         case .simplifiedChinese:
             return "剩余 \(exactValue) Credits"
         }
+    }
+
+    public static func editable(_ value: Decimal) -> String {
+        decimalString(value)
+    }
+
+    private static func roundHalfUp(_ value: Decimal, scale: Int) -> Decimal {
+        var source = value
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &source, scale, .plain)
+        return rounded
+    }
+
+    private static func decimalString(_ value: Decimal) -> String {
+        CreditDecimalCodec.canonicalString(value)
     }
 }

@@ -125,6 +125,7 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
     public let resetText: String
     public let detailText: String?
     public let usageValue: DesktopAssistantUsageValue
+    public let regularUsageText: String?
     public let tintFraction: Double?
     public let severity: DesktopAssistantUsageSeverity
     public let isStale: Bool
@@ -141,6 +142,7 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         resetText: String = "",
         detailText: String? = nil,
         usageValue: DesktopAssistantUsageValue,
+        regularUsageText: String? = nil,
         tintFraction: Double? = nil,
         severity: DesktopAssistantUsageSeverity,
         isStale: Bool,
@@ -157,6 +159,7 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         self.resetText = resetText
         self.detailText = detailText
         self.usageValue = usageValue
+        self.regularUsageText = regularUsageText
         self.tintFraction = tintFraction.map { min(1, max(0, $0)) }
             ?? usageValue.finitePercent.map { Double($0) / 100 }
         self.severity = severity
@@ -172,6 +175,13 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
     }
 
     public var toolTip: String { accessibilityLabel }
+
+    public func usageText(for density: DesktopAssistantResolvedDensity) -> String {
+        if density == .regular, let regularUsageText {
+            return regularUsageText
+        }
+        return usageValue.displayText
+    }
 
     public init(
         shared card: SharedUsageCardPresentation,
@@ -243,6 +253,9 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
                 usageValue: availability?.displayUnit == .credits
                     ? .credits(availability?.compactText ?? "—")
                     : .unavailable,
+                regularUsageText: availability?.exactCreditValue.map {
+                    CreditFormatter.exact($0, language: language)
+                },
                 tintFraction: availability?.normalizedRemainingFraction,
                 severity: availabilitySeverity,
                 isStale: card.isRetainingLastValidValue,
@@ -273,6 +286,9 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
                 selectedWindowShortLabel: "",
                 selectedWindowAccessibilityLabel: "",
                 usageValue: .credits(availability.compactText),
+                regularUsageText: availability.exactCreditValue.map {
+                    CreditFormatter.exact($0, language: language)
+                },
                 tintFraction: availability.normalizedRemainingFraction,
                 severity: availabilitySeverity,
                 isStale: card.freshness == .stale || card.isRetainingLastValidValue,
@@ -575,7 +591,7 @@ private struct DesktopAssistantCardView: View {
     }
 
     private var valueLabel: some View {
-        Text(card.usageValue.displayText)
+        Text(card.usageText(for: density))
             .font(.system(
                 size: DesktopAssistantMetrics.percentageFontSize,
                 weight: .medium,

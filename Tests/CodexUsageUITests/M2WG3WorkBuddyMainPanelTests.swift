@@ -39,7 +39,7 @@ struct M2WG3WorkBuddyMainPanelTests {
         )
 
         #expect(presentation.state == .configured)
-        #expect(presentation.compactValue == "3.6k")
+        #expect(presentation.compactValue == "3,600")
         #expect(presentation.availableText == "3,600 Credits available")
         #expect(presentation.balanceDetail == "400 used of 4,000 active")
         #expect(presentation.remainingFraction == card.availability?.normalizedRemainingFraction)
@@ -60,12 +60,12 @@ struct M2WG3WorkBuddyMainPanelTests {
             (Int64(0), "0"),
             (Int64(1), "1"),
             (Int64(500), "500"),
-            (Int64(3_600), "3.6k"),
-            (Int64(50_000), "50k"),
-            (Int64(200_000), "200k")
+            (Int64(3_600), "3,600"),
+            (Int64(50_000), "50,000"),
+            (Int64(200_000), "200,000")
         ]
     )
-    func compactCreditsAreDeterministic(value: Int64, expected: String) throws {
+    func mainPanelCreditsRemainExact(value: Int64, expected: String) throws {
         let card = try #require(try makeCard(remaining: value))
         let presentation = try #require(
             WorkBuddyMainPanelPresentation.make(card: card, language: .english, now: now)
