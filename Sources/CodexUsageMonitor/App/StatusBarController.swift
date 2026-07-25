@@ -27,7 +27,11 @@ final class StatusBarController: NSObject {
                 self?.store.setPanelVisible(isVisible)
             }
         )
-        assistantController = DesktopAssistantPanelController()
+        assistantController = DesktopAssistantPanelController(
+            onSelectProvider: { [weak self] providerID in
+                self?.panelController.show(expandingProviderID: providerID)
+            }
+        )
         configureStatusButton()
         observeUsageChanges()
         updateStatusButton()

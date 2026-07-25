@@ -13,6 +13,7 @@ private final class DesktopAssistantPanel: NSPanel {
 final class DesktopAssistantPanelController {
     private let panel: DesktopAssistantPanel
     private let defaults: UserDefaults
+    private let onSelectProvider: ((String) -> Void)?
     private var preferences: DesktopAssistantPreferences
     private var cards: [DesktopAssistantCard] = []
     private var moveObserver: NSObjectProtocol?
@@ -22,8 +23,12 @@ final class DesktopAssistantPanelController {
     private var shouldBeVisible: Bool
     private var positionSaveTask: Task<Void, Never>?
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        onSelectProvider: ((String) -> Void)? = nil
+    ) {
         self.defaults = defaults
+        self.onSelectProvider = onSelectProvider
         preferences = DesktopAssistantPreferences.load(from: defaults)
         shouldBeVisible = preferences.isEnabled
         panel = DesktopAssistantPanel(
@@ -129,11 +134,21 @@ final class DesktopAssistantPanelController {
 
     private func installContent(density: DesktopAssistantResolvedDensity) {
         let hostingView = NSHostingView(
-            rootView: DesktopAssistantView(cards: cards, density: density)
+            rootView: DesktopAssistantView(
+                cards: cards,
+                density: density,
+                onSelectCard: { [weak self] providerID in
+                    self?.handleSelection(providerID: providerID)
+                }
+            )
         )
         hostingView.wantsLayer = true
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
         panel.contentView = hostingView
+    }
+
+    func handleSelection(providerID: String) {
+        onSelectProvider?(providerID)
     }
 
     private func show() {
@@ -224,10 +239,10 @@ final class DesktopAssistantPanelController {
         for density: DesktopAssistantResolvedDensity,
         preserveSavedPosition: Bool
     ) {
-        let rowSize = DesktopAssistantMetrics.size(for: density)
-        let count = max(1, cards.count)
-        let totalHeight = rowSize.height * CGFloat(count) + CGFloat(max(0, count - 1)) * 4
-        let targetSize = CGSize(width: rowSize.width, height: totalHeight)
+        let targetSize = DesktopAssistantMetrics.stackSize(
+            for: density,
+            rowCount: max(1, cards.count)
+        )
         let screen = screenForSavedPosition() ?? panel.screen ?? NSScreen.main ?? NSScreen.screens.first
         guard let screen else { return }
         let visible = screen.visibleFrame

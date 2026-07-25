@@ -125,7 +125,7 @@ public final class UsageStore: ObservableObject {
     }
 
     public var assistantPresentationCards: [SharedUsageCardPresentation] {
-        presentationCards.filter(\.isVisibleInDesktopAssistant)
+        SharedUsagePresentationPolicy.assistantCards(from: presentationCards)
     }
 
     public var statusText: String {

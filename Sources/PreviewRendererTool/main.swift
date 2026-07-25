@@ -69,13 +69,31 @@ struct PreviewRendererTool {
                 severity: SharedUsagePresentationPolicy.severity(for: remaining),
                 isRetainingLastValidValue: arguments.contains("--stale")
             )
-            let size = DesktopAssistantMetrics.size(for: density)
+            let workBuddyCard = try makeWorkBuddyCard(
+                arguments: arguments,
+                language: language
+            )
+            var assistantCards: [DesktopAssistantCard] = []
+            if !arguments.contains("--assistant-workbuddy-only") {
+                assistantCards.append(
+                    DesktopAssistantCard(shared: shared, language: language)
+                )
+            }
+            if let workBuddyCard {
+                assistantCards.append(
+                    DesktopAssistantCard(shared: workBuddyCard, language: language)
+                )
+            }
+            let size = DesktopAssistantMetrics.stackSize(
+                for: density,
+                rowCount: assistantCards.count
+            )
             renderSize = size
             content = AnyView(
                 ZStack {
                     background
                     DesktopAssistantView(
-                        cards: [DesktopAssistantCard(shared: shared, language: language)],
+                        cards: assistantCards,
                         density: density,
                         appearanceOverride: DesktopAssistantAppearanceOverride(
                             reduceTransparency: reduceTransparency,
@@ -248,7 +266,9 @@ struct PreviewRendererTool {
         arguments: [String],
         language: AppLanguage
     ) throws -> SharedUsageCardPresentation? {
-        guard arguments.contains(where: { $0.hasPrefix("--workbuddy") }) else {
+        guard arguments.contains("--assistant-workbuddy")
+            || arguments.contains("--assistant-workbuddy-only")
+            || arguments.contains(where: { $0.hasPrefix("--workbuddy") }) else {
             return nil
         }
         let now = Date(timeIntervalSince1970: 1_800_000_000)
@@ -263,6 +283,9 @@ struct PreviewRendererTool {
                 value: .invalid(reason: .unsupportedSchema),
                 language: language
             )
+        } else if arguments.contains("--workbuddy-unavailable") {
+            lifecycle = .unavailable
+            availability = nil
         } else {
             lifecycle = .configured
             let remaining: Int64
@@ -336,7 +359,7 @@ struct PreviewRendererTool {
             remaining: .unavailable,
             availability: availability,
             availabilityLifecycle: lifecycle,
-            isVisibleInDesktopAssistant: false,
+            isVisibleInDesktopAssistant: true,
             severity: .neutral,
             capturedAt: now
         )

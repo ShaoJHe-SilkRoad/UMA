@@ -371,6 +371,33 @@ public enum SharedUsagePresentationPolicy {
         }
     }
 
+    /// Desktop Assistant order is a presentation-identity contract. It never
+    /// depends on quota value, source state, confirmation age, tier, or
+    /// failure. Codex remains first and WorkBuddy remains after any future
+    /// admitted provider without creating an empty placeholder.
+    public static func assistantCards(
+        from cards: [SharedUsageCardPresentation]
+    ) -> [SharedUsageCardPresentation] {
+        cards
+            .filter(\.isVisibleInDesktopAssistant)
+            .sorted { lhs, rhs in
+                let lhsKey = assistantOrderKey(for: lhs.id)
+                let rhsKey = assistantOrderKey(for: rhs.id)
+                return lhsKey == rhsKey ? lhs.id < rhs.id : lhsKey < rhsKey
+            }
+    }
+
+    private static func assistantOrderKey(for id: String) -> Int {
+        switch id {
+        case CodexUsageConnector.connectorID.rawValue:
+            0
+        case WorkBuddyAvailabilityConnector.connectorID.rawValue:
+            2
+        default:
+            1
+        }
+    }
+
     private static func isVisibleInMainPanel(_ snapshot: AgentUsageSnapshot) -> Bool {
         guard !snapshot.capabilities.contains(.hiddenFromProviderSurfaces) else {
             return false

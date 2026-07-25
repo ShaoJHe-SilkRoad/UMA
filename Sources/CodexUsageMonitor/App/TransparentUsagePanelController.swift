@@ -7,6 +7,20 @@ private final class TransparentUsagePanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+struct UsagePanelNavigationRequest: Equatable {
+    let expandedProviderIDs: Set<String>
+    let settingsInitiallyPresented: Bool
+    let requestsRefresh: Bool
+
+    static func assistantSelection(providerID: String) -> Self {
+        Self(
+            expandedProviderIDs: [providerID],
+            settingsInitiallyPresented: false,
+            requestsRefresh: false
+        )
+    }
+}
+
 @MainActor
 final class TransparentUsagePanelController {
     private enum Layout {
@@ -19,6 +33,8 @@ final class TransparentUsagePanelController {
 
     private let panel: TransparentUsagePanel
     private let tuning: GlassTuning
+    private let store: UsageStore
+    private let workBuddySettings: WorkBuddySettingsModel
     private weak var statusItem: NSStatusItem?
     private let visibilityDidChange: (Bool) -> Void
     private var globalEventMonitor: Any?
@@ -30,6 +46,8 @@ final class TransparentUsagePanelController {
         workBuddySettings: WorkBuddySettingsModel,
         visibilityDidChange: @escaping (Bool) -> Void
     ) {
+        self.store = store
+        self.workBuddySettings = workBuddySettings
         self.statusItem = statusItem
         self.visibilityDidChange = visibilityDidChange
         tuning = .final
@@ -40,11 +58,27 @@ final class TransparentUsagePanelController {
             defer: false
         )
 
-        configurePanel(store: store, workBuddySettings: workBuddySettings)
+        configurePanel(
+            store: store,
+            workBuddySettings: workBuddySettings,
+            expandedProviderIDs: []
+        )
     }
 
     func toggle() {
         panel.isVisible ? close() : show()
+    }
+
+    func show(expandingProviderID providerID: String) {
+        let request = UsagePanelNavigationRequest.assistantSelection(
+            providerID: providerID
+        )
+        configurePanel(
+            store: store,
+            workBuddySettings: workBuddySettings,
+            expandedProviderIDs: request.expandedProviderIDs
+        )
+        show()
     }
 
     func tearDown() {
@@ -65,7 +99,8 @@ final class TransparentUsagePanelController {
 
     private func configurePanel(
         store: UsageStore,
-        workBuddySettings: WorkBuddySettingsModel
+        workBuddySettings: WorkBuddySettingsModel,
+        expandedProviderIDs: Set<String>
     ) {
         panel.level = .popUpMenu
         panel.isOpaque = false
@@ -91,6 +126,7 @@ final class TransparentUsagePanelController {
             rootView: UsagePanelView(
                 store: store,
                 tuning: tuning,
+                expandedProviderIDs: expandedProviderIDs,
                 onHeightChange: { [weak self] height in
                     DispatchQueue.main.async { [weak self] in
                         self?.resizePanel(to: height)

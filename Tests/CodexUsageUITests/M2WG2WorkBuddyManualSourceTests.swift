@@ -285,7 +285,7 @@ struct M2WG2WorkBuddyManualSourceTests {
     }
 
     @Test
-    func connectorIsStableManualMainPanelOnlyAndRefreshIsACompleteNoOp() async throws {
+    func connectorIsStableManualSharedPresentationAndRefreshIsACompleteNoOp() async throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let persistence = WorkBuddyManualAvailabilityStore(
@@ -318,7 +318,7 @@ struct M2WG2WorkBuddyManualSourceTests {
         #expect(snapshot.channels.first?.availability?.sourceState == .manualConfirmed)
         #expect(snapshot.channels.first?.availability.creditBalance?.scope.poolIdentity == .buddyAISharedCredits)
         #expect(!snapshot.capabilities.contains(.hiddenFromProviderSurfaces))
-        #expect(snapshot.capabilities.contains(.hiddenFromDesktopAssistant))
+        #expect(!snapshot.capabilities.contains(.hiddenFromDesktopAssistant))
         #expect(snapshot.capabilities.contains(.passiveLocalAvailability))
         let cards = SharedUsagePresentationPolicy.makeCards(
             snapshots: [snapshot],
@@ -326,7 +326,7 @@ struct M2WG2WorkBuddyManualSourceTests {
             language: .english
         )
         #expect(cards.map(\.id) == ["workbuddy.manualAvailability"])
-        #expect(cards.allSatisfy { !$0.isVisibleInDesktopAssistant })
+        #expect(cards.allSatisfy { $0.isVisibleInDesktopAssistant })
 
         let writes = await persistence.writeCount
         let publications = await source.publicationCount
@@ -343,7 +343,7 @@ struct M2WG2WorkBuddyManualSourceTests {
     }
 
     @Test @MainActor
-    func usageStorePresentsManualStateWithoutCodexConsentOnlyInMainPanel() async throws {
+    func usageStorePresentsManualStateWithoutCodexConsentAcrossSharedSurfaces() async throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let persistence = WorkBuddyManualAvailabilityStore(
@@ -370,14 +370,14 @@ struct M2WG2WorkBuddyManualSourceTests {
         }
         #expect(store.providerSnapshots.map(\.id.rawValue) == ["workbuddy.manualAvailability"])
         #expect(store.presentationCards.map(\.id) == ["workbuddy.manualAvailability"])
-        #expect(store.assistantPresentationCards.isEmpty)
+        #expect(store.assistantPresentationCards.map(\.id) == ["workbuddy.manualAvailability"])
         #expect(!store.hasPriorRealSnapshot)
 
         store.grantMonitorConsent()
         await store.disconnectAndForgetConsent()
         #expect(store.providerSnapshots.map(\.id.rawValue) == ["workbuddy.manualAvailability"])
         #expect(store.presentationCards.map(\.id) == ["workbuddy.manualAvailability"])
-        #expect(store.assistantPresentationCards.isEmpty)
+        #expect(store.assistantPresentationCards.map(\.id) == ["workbuddy.manualAvailability"])
         await store.stopAllConnectors()
     }
 

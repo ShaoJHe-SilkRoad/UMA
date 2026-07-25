@@ -521,7 +521,7 @@ struct M2WDBGMainAppDebugTests {
         )
         #expect(
             store.assistantPresentationCards.map(\.id)
-                == ["codex.local"]
+                == ["codex.local", "workbuddy.manualAvailability"]
         )
         await store.stopAllConnectors()
     }

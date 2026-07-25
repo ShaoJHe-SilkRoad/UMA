@@ -184,7 +184,7 @@ struct M2WDBGR1RepairTests {
             remaining: .unavailable,
             availability: availability,
             availabilityLifecycle: .configured,
-            isVisibleInDesktopAssistant: false,
+            isVisibleInDesktopAssistant: true,
             severity: .neutral,
             capturedAt: confirmedAt
         )
@@ -204,7 +204,7 @@ struct M2WDBGR1RepairTests {
         #expect(presentation.tierText == "Experience")
         #expect(presentation.scopeTitle == "Buddy AI shared Credits")
         #expect(!presentation.accessibilityLabel.contains("3,600"))
-        #expect(!card.isVisibleInDesktopAssistant)
+        #expect(card.isVisibleInDesktopAssistant)
     }
 
     @Test

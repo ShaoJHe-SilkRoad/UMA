@@ -12,6 +12,7 @@ public enum DesktopAssistantMetrics {
     public static let minimalistReservedWindowWidth: CGFloat = 0
     public static let percentageFontSize: CGFloat = 13
     public static let tintFeatherWidth: CGFloat = 6
+    public static let rowSpacing: CGFloat = 4
 
     public static func size(for density: DesktopAssistantResolvedDensity) -> CGSize {
         switch density {
@@ -20,6 +21,19 @@ public enum DesktopAssistantMetrics {
         case .minimalist:
             CGSize(width: minimalistWidth, height: minimalistHeight)
         }
+    }
+
+    public static func stackSize(
+        for density: DesktopAssistantResolvedDensity,
+        rowCount: Int
+    ) -> CGSize {
+        let row = size(for: density)
+        let count = max(0, rowCount)
+        let gaps = max(0, count - 1)
+        return CGSize(
+            width: row.width,
+            height: row.height * CGFloat(count) + rowSpacing * CGFloat(gaps)
+        )
     }
 }
 
@@ -62,6 +76,7 @@ public enum DesktopAssistantConnectionState: String, Equatable, Sendable {
 
 public enum DesktopAssistantUsageValue: Equatable, Sendable {
     case finite(Int)
+    case credits(String)
     case unlimited
     case unavailable
 
@@ -74,12 +89,19 @@ public enum DesktopAssistantUsageValue: Equatable, Sendable {
         switch self {
         case .finite(let value):
             "\(min(100, max(0, value)))%"
+        case .credits(let value):
+            value
         case .unlimited:
             "∞"
         case .unavailable:
             "—"
         }
     }
+}
+
+public enum DesktopAssistantSourceMark: Equatable, Sendable {
+    case connection
+    case manual
 }
 
 public enum DesktopAssistantUsageSeverity: String, Equatable, Sendable {
@@ -97,9 +119,11 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
     public let providerName: String
     public let planLabel: String?
     public let connectionState: DesktopAssistantConnectionState
+    public let sourceMark: DesktopAssistantSourceMark
     public let selectedWindowShortLabel: String
     public let selectedWindowAccessibilityLabel: String
     public let resetText: String
+    public let detailText: String?
     public let usageValue: DesktopAssistantUsageValue
     public let tintFraction: Double?
     public let severity: DesktopAssistantUsageSeverity
@@ -111,9 +135,11 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         providerName: String,
         planLabel: String? = nil,
         connectionState: DesktopAssistantConnectionState,
+        sourceMark: DesktopAssistantSourceMark = .connection,
         selectedWindowShortLabel: String,
         selectedWindowAccessibilityLabel: String,
         resetText: String = "",
+        detailText: String? = nil,
         usageValue: DesktopAssistantUsageValue,
         tintFraction: Double? = nil,
         severity: DesktopAssistantUsageSeverity,
@@ -125,9 +151,11 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         self.providerName = providerName
         self.planLabel = planLabel
         self.connectionState = connectionState
+        self.sourceMark = sourceMark
         self.selectedWindowShortLabel = selectedWindowShortLabel
         self.selectedWindowAccessibilityLabel = selectedWindowAccessibilityLabel
         self.resetText = resetText
+        self.detailText = detailText
         self.usageValue = usageValue
         self.tintFraction = tintFraction.map { min(1, max(0, $0)) }
             ?? usageValue.finitePercent.map { Double($0) / 100 }
@@ -163,7 +191,7 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         case .failed:
             .failed
         }
-        let usageValue: DesktopAssistantUsageValue = switch card.remaining {
+        let percentageUsageValue: DesktopAssistantUsageValue = switch card.remaining {
         case .finite:
             .finite(card.remaining.displayPercent ?? 0)
         case .unlimited:
@@ -171,7 +199,7 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         case .unavailable:
             .unavailable
         }
-        let severity: DesktopAssistantUsageSeverity = switch card.severity {
+        let percentageSeverity: DesktopAssistantUsageSeverity = switch card.severity {
         case .normal:
             .normal
         case .warning:
@@ -181,6 +209,87 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         case .neutral:
             .neutral
         }
+        let isManualAvailability = card.availabilityLifecycle != nil
+            || card.availability?.sourceState == .manualConfirmed
+        if isManualAvailability {
+            let availability = card.availability
+            let availabilitySeverity: DesktopAssistantUsageSeverity = switch availability?.severity {
+            case .available:
+                .normal
+            case .warning:
+                .warning
+            case .critical, .exhausted:
+                .critical
+            case .neutral, .invalid, nil:
+                .neutral
+            }
+            let presentation = WorkBuddyMainPanelPresentation.make(
+                card: card,
+                language: language
+            )
+            let hasManualSnapshot =
+                availability?.sourceState == .manualConfirmed
+            self.init(
+                id: card.id,
+                providerName: card.providerName,
+                planLabel: card.planLabel,
+                connectionState: connectionState,
+                sourceMark: .manual,
+                selectedWindowShortLabel: "",
+                selectedWindowAccessibilityLabel: "",
+                detailText: hasManualSnapshot
+                    ? language.workBuddyManualSnapshot
+                    : presentation?.severityText,
+                usageValue: availability?.displayUnit == .credits
+                    ? .credits(availability?.compactText ?? "—")
+                    : .unavailable,
+                tintFraction: availability?.normalizedRemainingFraction,
+                severity: availabilitySeverity,
+                isStale: card.isRetainingLastValidValue,
+                language: language,
+                accessibilityLabel: presentation.map {
+                    Self.makeCreditAccessibilityLabel($0, language: language)
+                }
+                    ?? card.tooltipText
+            )
+            return
+        }
+        if let availability = card.availability,
+           availability.displayUnit == .credits {
+            let availabilitySeverity: DesktopAssistantUsageSeverity = switch availability.severity {
+            case .available:
+                .normal
+            case .warning:
+                .warning
+            case .critical, .exhausted:
+                .critical
+            case .neutral, .invalid:
+                .neutral
+            }
+            self.init(
+                id: card.id,
+                providerName: card.providerName,
+                planLabel: card.planLabel,
+                connectionState: connectionState,
+                sourceMark: .connection,
+                selectedWindowShortLabel: "",
+                selectedWindowAccessibilityLabel: "",
+                usageValue: .credits(availability.compactText),
+                tintFraction: availability.normalizedRemainingFraction,
+                severity: availabilitySeverity,
+                isStale: card.freshness == .stale || card.isRetainingLastValidValue,
+                language: language,
+                accessibilityLabel: Self.makeStructuredCreditAccessibilityLabel(
+                    providerName: card.providerName,
+                    connectionState: connectionState,
+                    availability: availability,
+                    isStale: card.freshness == .stale || card.isRetainingLastValidValue,
+                    language: language
+                )
+            )
+            return
+        }
+
         self.init(
             id: card.id,
             providerName: card.providerName,
@@ -190,9 +299,9 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
             selectedWindowAccessibilityLabel: card.selectedWindow?.accessibilityLabel
                 ?? "usage window unavailable",
             resetText: card.selectedWindow?.resetText ?? "",
-            usageValue: usageValue,
+            usageValue: percentageUsageValue,
             tintFraction: card.remaining.tintFraction,
-            severity: severity,
+            severity: percentageSeverity,
             isStale: card.freshness == .stale || card.isRetainingLastValidValue,
             language: language
         )
@@ -221,10 +330,14 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         let usage: String = switch (language, usageValue) {
         case let (.english, .finite(value)):
             "\(min(100, max(0, value))) percent remaining"
+        case let (.english, .credits(value)):
+            "\(value) Credits remaining"
         case (.english, .unlimited): "unlimited"
         case (.english, .unavailable): "usage unavailable"
         case let (.simplifiedChinese, .finite(value)):
             "剩余 \(min(100, max(0, value)))%"
+        case let (.simplifiedChinese, .credits(value)):
+            "剩余 \(value) Credits"
         case (.simplifiedChinese, .unlimited): "无限额度"
         case (.simplifiedChinese, .unavailable): "额度不可用"
         }
@@ -238,6 +351,68 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
             return "\(providerName)，\(status)，\(selectedWindowAccessibilityLabel)，\(usage)\(freshness)。"
         }
         return "\(providerName), \(status), \(selectedWindowAccessibilityLabel), \(usage)\(freshness)."
+    }
+
+    private static func makeCreditAccessibilityLabel(
+        _ presentation: WorkBuddyMainPanelPresentation,
+        language: AppLanguage
+    ) -> String {
+        let hasConfirmedSnapshot =
+            presentation.state == .configured || presentation.state == .exhausted
+        var parts = [presentation.providerName]
+        if hasConfirmedSnapshot {
+            parts.append(language.workBuddyManualSnapshot)
+        }
+        parts.append(presentation.availableText)
+        if let detail = presentation.balanceDetail {
+            parts.append(detail)
+        }
+        parts.append(presentation.severityText)
+        if hasConfirmedSnapshot {
+            parts.append(presentation.scopeTitle)
+            parts.append(presentation.scopeDetail)
+            parts.append(presentation.manualStatus)
+            if let exact = presentation.exactConfirmation {
+                parts.append("\(language.workBuddyExactConfirmation): \(exact)")
+            }
+            if let tier = presentation.tierText {
+                parts.append("\(language.workBuddyTier): \(tier)")
+            }
+            if let expiry = presentation.expiryText {
+                parts.append("\(language.workBuddyNextExpiryLabel): \(expiry)")
+            }
+        }
+        return parts.joined(separator: ", ") + "."
+    }
+
+    private static func makeStructuredCreditAccessibilityLabel(
+        providerName: String,
+        connectionState: DesktopAssistantConnectionState,
+        availability: SharedAvailabilityPresentation,
+        isStale: Bool,
+        language: AppLanguage
+    ) -> String {
+        let status: String = switch (language, connectionState) {
+        case (.english, .connected): "connected"
+        case (.english, .reconnecting): "reconnecting"
+        case (.english, .disconnected): "disconnected"
+        case (.english, .unavailable): "unavailable"
+        case (.english, .failed): "failed"
+        case (.simplifiedChinese, .connected): "已连接"
+        case (.simplifiedChinese, .reconnecting): "正在重新连接"
+        case (.simplifiedChinese, .disconnected): "已断开"
+        case (.simplifiedChinese, .unavailable): "不可用"
+        case (.simplifiedChinese, .failed): "连接失败"
+        }
+        let stale = switch (language, isStale) {
+        case (.english, true): ", stale"
+        case (.simplifiedChinese, true): "，数据已过期"
+        default: ""
+        }
+        if language == .simplifiedChinese {
+            return "\(providerName)，\(status)，\(availability.accessibilityText)\(stale)。"
+        }
+        return "\(providerName), \(status), \(availability.accessibilityText)\(stale)."
     }
 }
 
@@ -307,24 +482,28 @@ public struct DesktopAssistantView: View {
     public let cards: [DesktopAssistantCard]
     public let density: DesktopAssistantResolvedDensity
     public let appearanceOverride: DesktopAssistantAppearanceOverride?
+    public let onSelectCard: ((String) -> Void)?
 
     public init(
         cards: [DesktopAssistantCard],
         density: DesktopAssistantResolvedDensity,
-        appearanceOverride: DesktopAssistantAppearanceOverride? = nil
+        appearanceOverride: DesktopAssistantAppearanceOverride? = nil,
+        onSelectCard: ((String) -> Void)? = nil
     ) {
         self.cards = cards
         self.density = density
         self.appearanceOverride = appearanceOverride
+        self.onSelectCard = onSelectCard
     }
 
     public var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: DesktopAssistantMetrics.rowSpacing) {
             ForEach(cards) { card in
                 DesktopAssistantCardView(
                     card: card,
                     density: density,
-                    appearanceOverride: appearanceOverride
+                    appearanceOverride: appearanceOverride,
+                    onSelect: onSelectCard
                 )
             }
         }
@@ -339,6 +518,7 @@ private struct DesktopAssistantCardView: View {
     let card: DesktopAssistantCard
     let density: DesktopAssistantResolvedDensity
     let appearanceOverride: DesktopAssistantAppearanceOverride?
+    let onSelect: ((String) -> Void)?
 
     private var size: CGSize { DesktopAssistantMetrics.size(for: density) }
     private var radius: CGFloat {
@@ -375,14 +555,21 @@ private struct DesktopAssistantCardView: View {
         }
         .opacity(card.isStale ? 0.78 : 1)
         .help(card.toolTip)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onSelect?(card.id)
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(card.accessibilityLabel))
+        .accessibilityAction {
+            onSelect?(card.id)
+        }
     }
 
     private var minimalistContent: some View {
         HStack(spacing: DesktopAssistantMetrics.minimalistGap) {
-            connectionMark(diameter: DesktopAssistantMetrics.minimalistConnectionDiameter)
-            percentageLabel
+            sourceMark(diameter: DesktopAssistantMetrics.minimalistConnectionDiameter)
+            valueLabel
         }
         .fixedSize(horizontal: true, vertical: false)
         .frame(maxWidth: .infinity, alignment: .center)
@@ -390,12 +577,14 @@ private struct DesktopAssistantCardView: View {
 
     private var regularContent: some View {
         HStack(spacing: 8) {
-            connectionMark(diameter: 24)
+            sourceMark(diameter: 24)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     Text(card.providerName)
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    if let planLabel = card.planLabel, !planLabel.isEmpty {
+                    if card.sourceMark == .connection,
+                       let planLabel = card.planLabel,
+                       !planLabel.isEmpty {
                         Text(planLabel)
                             .font(.system(size: 8.5, weight: .medium, design: .rounded))
                             .foregroundStyle(.secondary)
@@ -403,9 +592,10 @@ private struct DesktopAssistantCardView: View {
                 }
                 .lineLimit(1)
                 Text(
-                    card.resetText.isEmpty
+                    card.detailText
+                        ?? (card.resetText.isEmpty
                         ? card.selectedWindowShortLabel
-                        : "\(card.selectedWindowShortLabel) · \(card.resetText)"
+                        : "\(card.selectedWindowShortLabel) · \(card.resetText)")
                 )
                 .font(.system(size: 9, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
@@ -413,12 +603,12 @@ private struct DesktopAssistantCardView: View {
                 .truncationMode(.tail)
             }
             Spacer(minLength: 4)
-            percentageLabel
+            valueLabel
         }
         .padding(.horizontal, 12)
     }
 
-    private var percentageLabel: some View {
+    private var valueLabel: some View {
         Text(card.usageValue.displayText)
             .font(.system(
                 size: DesktopAssistantMetrics.percentageFontSize,
@@ -426,21 +616,38 @@ private struct DesktopAssistantCardView: View {
                 design: .rounded
             ))
             .monospacedDigit()
-            .foregroundStyle(percentageColor)
+            .foregroundStyle(valueColor)
             .lineLimit(1)
             .fixedSize()
     }
 
-    private func connectionMark(diameter: CGFloat) -> some View {
-        ZStack {
-            Circle()
-                .stroke(connectionColor, lineWidth: 1.5)
-            Text("C")
-                .font(.system(size: diameter * 0.56, weight: .semibold, design: .rounded))
-                .foregroundStyle(connectionColor)
+    @ViewBuilder
+    private func sourceMark(diameter: CGFloat) -> some View {
+        switch card.sourceMark {
+        case .connection:
+            ZStack {
+                Circle()
+                    .stroke(connectionColor, lineWidth: 1.5)
+                Text("C")
+                    .font(.system(size: diameter * 0.56, weight: .semibold, design: .rounded))
+                    .foregroundStyle(connectionColor)
+            }
+            .frame(width: diameter, height: diameter)
+            .accessibilityHidden(true)
+        case .manual:
+            ZStack {
+                RoundedRectangle(cornerRadius: diameter * 0.28, style: .continuous)
+                    .stroke(
+                        Color.secondary,
+                        style: StrokeStyle(lineWidth: 1.5, dash: [2, 1.5])
+                    )
+                Text("M")
+                    .font(.system(size: diameter * 0.50, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: diameter, height: diameter)
+            .accessibilityHidden(true)
         }
-        .frame(width: diameter, height: diameter)
-        .accessibilityHidden(true)
     }
 
     @ViewBuilder
@@ -513,7 +720,7 @@ private struct DesktopAssistantCardView: View {
         }
     }
 
-    private var percentageColor: Color {
+    private var valueColor: Color {
         switch card.severity {
         case .normal, .neutral:
             .primary

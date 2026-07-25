@@ -105,3 +105,24 @@ matrix, protected-oracle audit, task-owned live review, shared Refresh, and
 clean task-owned shutdown. Delivery remains subject to the required staged-index
 examination, one authorized commit, commit-exact package audit, and sole-instance
 exact-package smoke.
+
+## M2WA-G1 — WorkBuddy Desktop Assistant
+
+| Issue ID | Found by | Severity | Evidence | Acceptance impact | In scope | Repair | Focused retest | Regression retest | Status |
+|---|---|---|---|---|---|---|---|---|---|
+| M2WA-001 | Architecture and privacy audit | Blocking | WorkBuddy retained the predecessor `.hiddenFromDesktopAssistant` capability. | The accepted immutable shared presentation could not reach Assistant. | Yes | Remove only the obsolete surface-exclusion capability; retain the single manual source, connector, registry, store, and refresh behavior. | Visibility/order suite PASS | WorkBuddy source and full suite PASS | Closed — PASS |
+| M2WA-002 | Assistant inventory | Blocking | The Assistant adapter consumed percentage windows only and ignored native availability. | WorkBuddy would render `—` or fake quota semantics instead of Credits. | Yes | Add native compact Credit adaptation from shared compact text, normalized fraction, and centralized severity while preserving the Codex branch. | Credit/state matrix PASS | Codex Assistant contract PASS | Closed — PASS |
+| M2WA-003 | Presentation/accessibility QA | Blocking | Every row used a connected-state `C` mark and quota-window accessibility. | Manual data could appear live and omit exact Credit/source/scope details. | Yes | Add a shape-and-glyph-distinct manual mark and shared-presentation-derived EN/zh-CN tooltip/VoiceOver semantics. | Manual/accessibility matrix PASS | Appearance and localization suites PASS | Closed — PASS |
+| M2WA-004 | Assistant inventory | Major | Assistant ordering depended incidentally on registry lexical order. | A future provider identity could appear before Codex or after WorkBuddy. | Yes | Centralize stable identity ordering: Codex first, future admitted providers next, WorkBuddy last, without placeholders. | 0/1/2/future ordering matrix PASS | Main-panel order regression PASS | Closed — PASS |
+| M2WA-005 | Interaction inventory | Blocking | Assistant rows had no selection action or targeted main-panel route. | WorkBuddy could not open and expand its existing main-panel provider card. | Yes | Forward a stable-ID accessibility/click action through the host controller and reuse the existing expanded-provider input without opening Settings or mutating data. | Behavioral navigation/defaults contract and task-owned click PASS | Main-panel lifecycle regression PASS | Closed — PASS |
+| M2WA-006 | Renderer/package inventory | Major | The renderer supported only a one-row Codex Assistant, and the R1 package helper refused the M2WA path. | Required two-row visual evidence and commit-exact delivery could not be produced. | Yes | Add explicit in-memory Assistant scenarios and one fail-closed M2WA commit-archive package helper. | Renderer/package contract PASS | Privacy and package-content audit PASS | Closed — PASS |
+| M2WA-007 | Independent architecture review | Blocking | Empty and error states unconditionally displayed and announced `Manual snapshot`. | Unconfigured, invalid, and unavailable records falsely claimed a Human confirmation. | Yes | Derive snapshot wording from manual provenance and use lifecycle-specific visible/accessibility state text when no valid confirmation exists. | Lifecycle truthfulness matrix and repaired renders PASS | M2W-G3 lifecycle regression PASS | Closed — PASS |
+| M2WA-008 | Presentation/accessibility QA | Blocking | Credit units alone selected the WorkBuddy/manual presentation branch. | A future official structured Credit provider could receive a false manual mark and WorkBuddy-specific wording. | Yes | Derive manual state from shared provenance/lifecycle and add a provider-neutral structured-Credit adapter. | Official-structured negative fixture PASS | Shared presentation and full suite PASS | Closed — PASS |
+| M2WA-009 | Presentation/accessibility QA | Major | The first truthfulness repair removed the Regular detail line from every empty state. | Unconfigured, invalid, and unavailable were visually indistinguishable. | Yes | Reuse the existing lifecycle severity text as the truthful Regular detail while retaining `—` as the value. | Three-state detail and renderer matrix PASS | Accessibility and main-panel regressions PASS | Closed — PASS |
+
+M2WA-G1 final evidence: focused M2WA suite 11/11 PASS; full suite 157/157
+across 21 suites PASS; Debug PASS; Release PASS; strict-concurrency Release
+with warnings as errors PASS; Regular and Minimalist 500-Credit task-owned UI
+inspection PASS; stable-ID navigation expanded WorkBuddy without Settings,
+Refresh, record mutation, or confirmation-time change; independent
+architecture/privacy and presentation/accessibility re-reviews PASS.

@@ -12,8 +12,7 @@ actor WorkBuddyAvailabilityConnector: AgentUsageConnector {
         sourceVersion: "1",
         supportedScopes: [.account],
         capabilities: [
-            .passiveLocalAvailability,
-            .hiddenFromDesktopAssistant
+            .passiveLocalAvailability
         ],
         configurationRequirements: [],
         privacyAllowlist: [

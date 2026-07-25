@@ -7,7 +7,7 @@ struct M2WG3WorkBuddyMainPanelTests {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
     @Test
-    func workBuddyIsSecondInMainPanelAndExcludedFromAssistant() throws {
+    func workBuddyIsSecondInMainPanelAndAssistant() throws {
         let codex = codexSnapshot()
         let workBuddy = try workBuddySnapshot(remaining: 3_600, used: 400)
         let cards = SharedUsagePresentationPolicy.makeCards(
@@ -20,8 +20,11 @@ struct M2WG3WorkBuddyMainPanelTests {
         #expect(cards.map(\.id) == ["codex.local", "workbuddy.manualAvailability"])
         #expect(cards.map(\.providerName) == ["Codex", "WorkBuddy"])
         #expect(cards[0].isVisibleInDesktopAssistant)
-        #expect(!cards[1].isVisibleInDesktopAssistant)
-        #expect(cards.filter(\.isVisibleInDesktopAssistant).map(\.id) == ["codex.local"])
+        #expect(cards[1].isVisibleInDesktopAssistant)
+        #expect(
+            SharedUsagePresentationPolicy.assistantCards(from: cards).map(\.id)
+                == ["codex.local", "workbuddy.manualAvailability"]
+        )
     }
 
     @Test
@@ -463,7 +466,7 @@ struct M2WG3WorkBuddyMainPanelTests {
                     availability: .credits(balance)
                 )
             ],
-            capabilities: [.passiveLocalAvailability, .hiddenFromDesktopAssistant],
+            capabilities: [.passiveLocalAvailability],
             safeFailure: nil
         )
     }
@@ -496,7 +499,7 @@ struct M2WG3WorkBuddyMainPanelTests {
                     availability: .unavailable
                 )
             ],
-            capabilities: [.passiveLocalAvailability, .hiddenFromDesktopAssistant],
+            capabilities: [.passiveLocalAvailability],
             safeFailure: failure
         )
     }
