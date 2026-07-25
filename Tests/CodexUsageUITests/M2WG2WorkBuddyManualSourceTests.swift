@@ -308,13 +308,15 @@ struct M2WG2WorkBuddyManualSourceTests {
         )
 
         await registry.startPassiveConnectors()
+        await connector.start()
         try await source.setEnabled(true)
         try await source.save(Self.observation(at: Date(timeIntervalSince1970: 1_800_000_000)))
         for _ in 0..<200 where (await registry.orderedSnapshots().first?.channels.first?.availability.creditBalance) == nil {
             await Task.yield()
         }
 
-        let snapshot = try #require(await registry.orderedSnapshots().first)
+        #expect(await registry.orderedSnapshots().isEmpty)
+        let snapshot = await connector.currentSnapshot()
         #expect(snapshot.id.rawValue == "workbuddy.manualAvailability")
         #expect(snapshot.providerName == "WorkBuddy")
         #expect(snapshot.state == .inactive)
@@ -323,16 +325,15 @@ struct M2WG2WorkBuddyManualSourceTests {
         #expect(snapshot.channels.first?.provenance == .manualConfirmed)
         #expect(snapshot.channels.first?.availability?.sourceState == .manualConfirmed)
         #expect(snapshot.channels.first?.availability.creditBalance?.scope.poolIdentity == .buddyAISharedCredits)
-        #expect(!snapshot.capabilities.contains(.hiddenFromProviderSurfaces))
-        #expect(!snapshot.capabilities.contains(.hiddenFromDesktopAssistant))
+        #expect(snapshot.capabilities.contains(.hiddenFromProviderSurfaces))
+        #expect(snapshot.capabilities.contains(.hiddenFromDesktopAssistant))
         #expect(snapshot.capabilities.contains(.passiveLocalAvailability))
         let cards = SharedUsagePresentationPolicy.makeCards(
             snapshots: [snapshot],
             previousCards: [],
             language: .english
         )
-        #expect(cards.map(\.id) == ["workbuddy.manualAvailability"])
-        #expect(cards.allSatisfy { $0.isVisibleInDesktopAssistant })
+        #expect(cards.isEmpty)
         #expect(snapshot.channels.first?.coverageNote == "Manual snapshot · Shared with CodeBuddy")
         #expect(!FileManager.default.fileExists(atPath: (await genericStore.url).path))
         #expect(
@@ -345,9 +346,9 @@ struct M2WG2WorkBuddyManualSourceTests {
         let publications = await source.publicationCount
         let confirmedAt = snapshot.channels.first?.availability.creditBalance?.observedAt
         for _ in 0..<20 {
-            try await registry.refresh(connector.id, trigger: .manual)
+            await connector.refresh(trigger: .manual)
         }
-        let afterRefresh = try #require(await registry.orderedSnapshots().first)
+        let afterRefresh = await connector.currentSnapshot()
         #expect(await persistence.writeCount == writes)
         #expect(await source.publicationCount == publications)
         #expect(afterRefresh.channels.first?.availability.creditBalance?.observedAt == confirmedAt)
@@ -396,7 +397,7 @@ struct M2WG2WorkBuddyManualSourceTests {
     }
 
     @Test @MainActor
-    func usageStorePresentsManualStateWithoutCodexConsentAcrossSharedSurfaces() async throws {
+    func usageStoreKeepsManualStateHiddenAcrossSharedSurfaces() async throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let persistence = WorkBuddyManualAvailabilityStore(
@@ -408,7 +409,7 @@ struct M2WG2WorkBuddyManualSourceTests {
         let defaults = UserDefaults(suiteName: "m2w-g2-\(UUID().uuidString)")!
         defaults.removePersistentDomain(forName: defaultsSuiteName(defaults))
         let store = UsageStore(
-            autoRefresh: false,
+            autoRefresh: true,
             previewOnly: false,
             language: .english,
             registry: registry,
@@ -418,24 +419,26 @@ struct M2WG2WorkBuddyManualSourceTests {
 
         try await source.setEnabled(true)
         try await source.save(Self.observation(at: Date(timeIntervalSince1970: 1_800_000_000)))
-        for _ in 0..<50 where store.providerSnapshots.isEmpty {
+        for _ in 0..<50 {
             await Task.yield()
         }
-        #expect(store.providerSnapshots.map(\.id.rawValue) == ["workbuddy.manualAvailability"])
-        #expect(store.presentationCards.map(\.id) == ["workbuddy.manualAvailability"])
-        #expect(store.assistantPresentationCards.map(\.id) == ["workbuddy.manualAvailability"])
+        #expect(store.providerSnapshots.isEmpty)
+        #expect(store.presentationCards.isEmpty)
+        #expect(store.assistantPresentationCards.isEmpty)
         #expect(!store.hasPriorRealSnapshot)
+        let before = await source.load()
 
         store.grantMonitorConsent()
         await store.disconnectAndForgetConsent()
-        #expect(store.providerSnapshots.map(\.id.rawValue) == ["workbuddy.manualAvailability"])
-        #expect(store.presentationCards.map(\.id) == ["workbuddy.manualAvailability"])
-        #expect(store.assistantPresentationCards.map(\.id) == ["workbuddy.manualAvailability"])
+        #expect(store.providerSnapshots.isEmpty)
+        #expect(store.presentationCards.isEmpty)
+        #expect(store.assistantPresentationCards.isEmpty)
+        #expect(await source.load() == before)
         await store.stopAllConnectors()
     }
 
     @Test @MainActor
-    func persistedCodexResumeDoesNotWaitForPassiveSourceStartup() async throws {
+    func persistedCodexLaunchScanSkipsManualSourceStartup() async throws {
         let primary = StartupOrderingConnector(
             rawID: "codex.local",
             passive: false,
@@ -452,7 +455,7 @@ struct M2WG2WorkBuddyManualSourceTests {
         defaults.removePersistentDomain(forName: suiteName)
         CodexMonitorConsentDecision.granted.persist(to: defaults)
         let store = UsageStore(
-            autoRefresh: false,
+            autoRefresh: true,
             previewOnly: false,
             language: .english,
             registry: registry,
@@ -464,10 +467,9 @@ struct M2WG2WorkBuddyManualSourceTests {
             await Task.yield()
         }
         #expect(await primary.performCount == 1)
-        #expect(await passive.didEnterStart)
+        #expect(!(await passive.didEnterStart))
         #expect(!(await passive.didFinishStart))
 
-        await passive.releaseStart()
         await store.stopAllConnectors()
         defaults.removePersistentDomain(forName: suiteName)
     }

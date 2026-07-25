@@ -19,7 +19,12 @@ actor CodexUsageConnector: AgentUsageConnector {
         privacyAllowlist: ["account availability", "rate limits", "aggregate account usage", "metadata-only local aggregates"],
         supportsRestore: true,
         supportsUninstall: true,
-        unsupportedFields: ["account identity", "credentials", "conversation content", "source code", "raw payload"]
+        unsupportedFields: ["account identity", "credentials", "conversation content", "source code", "raw payload"],
+        expectedRuntime: .activeOfficialApplicationCLIOrService,
+        localSourceClass: .admittedStructuredLocal,
+        authenticationMethod: .existingLocalSession,
+        usageReadContract: .currentStructuredLocalRead,
+        loginAssistance: .existingSessionOnly
     )!
 
     private let client: any CodexUsageClient

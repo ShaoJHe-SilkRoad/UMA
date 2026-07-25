@@ -12,7 +12,9 @@ actor WorkBuddyAvailabilityConnector: AgentUsageConnector {
         sourceVersion: "1",
         supportedScopes: [.account],
         capabilities: [
-            .passiveLocalAvailability
+            .passiveLocalAvailability,
+            .hiddenFromProviderSurfaces,
+            .hiddenFromDesktopAssistant
         ],
         configurationRequirements: [],
         privacyAllowlist: [
@@ -35,7 +37,12 @@ actor WorkBuddyAvailabilityConnector: AgentUsageConnector {
             "credentials",
             "taskContent",
             "conversationContent"
-        ]
+        ],
+        expectedRuntime: .none,
+        localSourceClass: .manualOnly,
+        authenticationMethod: .none,
+        usageReadContract: ProviderUsageReadContract.none,
+        loginAssistance: .none
     )!
 
     private let source: ManualWorkBuddyAvailabilitySource

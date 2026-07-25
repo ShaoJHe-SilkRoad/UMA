@@ -10,9 +10,11 @@ struct UsageSettingsCard: View {
     @Binding var showAPICost: Bool
     @Binding var language: AppLanguage
     let workBuddySettings: WorkBuddySettingsModel?
+    let providerLoginOptions: [ProviderLoginOption]
     let destination: UsageSettingsDestination?
     let tuning: GlassTuning
     let maximumHeight: CGFloat
+    let checkAgain: () -> Void
     let close: () -> Void
 
     @State private var launchAtLoginState = LaunchAtLoginService.state
@@ -106,6 +108,17 @@ struct UsageSettingsCard: View {
 
             Divider()
                 .opacity(0.35)
+
+            if !providerLoginOptions.isEmpty {
+                ProviderLoginAssistanceSection(
+                    options: providerLoginOptions,
+                    language: language,
+                    checkAgain: checkAgain
+                )
+
+                Divider()
+                    .opacity(0.35)
+            }
 
             if let workBuddySettings {
                 WorkBuddySettingsSection(
@@ -504,6 +517,42 @@ private struct WorkBuddySettingsSection: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.08)))
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct ProviderLoginAssistanceSection: View {
+    let options: [ProviderLoginOption]
+    let language: AppLanguage
+    let checkAgain: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(language.localLiveProvidersSection)
+                .font(UsageDesign.font(10.5, weight: .medium, language: language))
+                .foregroundStyle(.secondary)
+
+            ForEach(options) { option in
+                VStack(alignment: .leading, spacing: 7) {
+                    Label(option.providerName, systemImage: "person.crop.circle.badge.checkmark")
+                        .font(UsageDesign.font(12.5, weight: .semibold, language: language))
+
+                    Link(destination: option.officialApplicationURL) {
+                        Label(language.loginForDataSync, systemImage: "arrow.up.forward.app")
+                    }
+                    .help(language.loginForDataSyncHint)
+                    .accessibilityHint(language.loginForDataSyncHint)
+
+                    Button(language.checkAgain, action: checkAgain)
+                        .buttonStyle(.bordered)
+                        .accessibilityHint(language.noLocalLiveAgentsGuidance)
+                }
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.secondary.opacity(0.08))
+                )
+            }
+        }
     }
 }
 

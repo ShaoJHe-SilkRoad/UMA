@@ -5,17 +5,19 @@ import Testing
 
 struct M1AG2ConnectorCoreTests {
     @Test
-    func registryOrdersConnectorsAndKeepsAHealthyProviderWhenAnotherFails() async throws {
+    func registryOrdersAndAdmitsOnlyTheHealthyProvider() async throws {
         let healthy = TestConnector(id: "alpha.agent", snapshot: Self.snapshot(id: "alpha.agent", state: .ready, failure: nil))
         let failed = TestConnector(id: "zeta.agent", snapshot: Self.snapshot(id: "zeta.agent", state: .failed, failure: .unavailable))
         let registry = try AgentConnectorRegistry(connectors: [failed, healthy])
 
-        await registry.startAll()
+        let admission = await registry.scanSurfaceAdmissions(
+            trigger: .manualRefresh
+        )
         let snapshots = await registry.orderedSnapshots()
 
-        #expect(snapshots.map(\.id.rawValue) == ["alpha.agent", "zeta.agent"])
+        #expect(admission.admittedProviderIDs.map(\.rawValue) == ["alpha.agent"])
+        #expect(snapshots.map(\.id.rawValue) == ["alpha.agent"])
         #expect(snapshots[0].hasValidData)
-        #expect(snapshots[1].safeFailure == .unavailable)
     }
 
     @Test
@@ -117,11 +119,17 @@ struct M1AG2ConnectorCoreTests {
     }
 
     @Test
-    func registryDeliversIndependentEventsAndStopsEveryOwnedConnector() async throws {
+    func registryRemovesFailedEventsAndStopsEveryOwnedConnectorOnce() async throws {
         let alpha = TestConnector(id: "alpha.agent", snapshot: Self.snapshot(id: "alpha.agent", state: .ready, failure: nil))
         let zeta = TestConnector(id: "zeta.agent", snapshot: Self.snapshot(id: "zeta.agent", state: .ready, failure: nil))
         let registry = try AgentConnectorRegistry(connectors: [zeta, alpha])
-        await registry.startAll()
+        let admission = await registry.scanSurfaceAdmissions(
+            trigger: .manualRefresh
+        )
+        #expect(
+            admission.admittedProviderIDs.map(\.rawValue)
+                == ["alpha.agent", "zeta.agent"]
+        )
 
         for _ in 0..<10 {
             if await zeta.hasListener { break }
@@ -131,13 +139,19 @@ struct M1AG2ConnectorCoreTests {
 
         await zeta.emit(Self.snapshot(id: "zeta.agent", state: .failed, failure: .processExited))
         for _ in 0..<10 {
-            if (await registry.orderedSnapshots().first(where: { $0.id.rawValue == "zeta.agent" })?.safeFailure) == .processExited { break }
+            if await registry.orderedSnapshots().allSatisfy({
+                $0.id.rawValue != "zeta.agent"
+            }) { break }
             await Task.yield()
         }
         let snapshots = await registry.orderedSnapshots()
-        #expect(snapshots.map(\.id.rawValue) == ["alpha.agent", "zeta.agent"])
+        #expect(snapshots.map(\.id.rawValue) == ["alpha.agent"])
         #expect(snapshots.first(where: { $0.id.rawValue == "alpha.agent" })?.hasValidData == true)
-        #expect(snapshots.first(where: { $0.id.rawValue == "zeta.agent" })?.safeFailure == .processExited)
+        #expect(
+            await registry.surfaceAdmissionSet()?.records.first(where: {
+                $0.id.rawValue == "zeta.agent"
+            })?.admission == .hiddenCurrentReadFailed
+        )
 
         await registry.stopAll()
         #expect(await alpha.stopCount == 1)
@@ -282,7 +296,7 @@ struct M1AG2ConnectorCoreTests {
     }
 
     @Test @MainActor
-    func adaptiveRefreshUsesVisibleCadenceThenAConservativeBackgroundFallback() async throws {
+    func panelVisibilityCreatesNoPeriodicDiscoveryRefresh() async throws {
         let client = EventRecordingClient(usage: Self.liveUsage)
         let registry = AgentUsageRuntime.makeCodexRegistry(
             snapshotStore: nil,
@@ -303,25 +317,18 @@ struct M1AG2ConnectorCoreTests {
         await store.refresh()
         store.setPanelVisible(true)
 
-        for _ in 0..<50 where !(await client.triggers.contains(.timer)) {
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        #expect(await client.triggers.contains(.timer))
+        try? await Task.sleep(for: .milliseconds(90))
+        #expect(!(await client.triggers.contains(.timer)))
 
         store.setPanelVisible(false)
         let timerCountAtBackgroundTransition = await client.timerTriggerCount
-        try? await Task.sleep(for: .milliseconds(25))
+        try? await Task.sleep(for: .milliseconds(90))
         #expect(await client.timerTriggerCount == timerCountAtBackgroundTransition)
-
-        for _ in 0..<30 where (await client.timerTriggerCount) == timerCountAtBackgroundTransition {
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        #expect(await client.timerTriggerCount > timerCountAtBackgroundTransition)
         await store.stopAllConnectors()
     }
 
     @Test @MainActor
-    func workspaceWakeUsesTheExistingWakeRefreshLane() async throws {
+    func workspaceWakeCreatesNoEligibilityOrUsageRead() async throws {
         let client = EventRecordingClient(usage: Self.liveUsage)
         let store = UsageStore(
             autoRefresh: false,
@@ -339,10 +346,9 @@ struct M1AG2ConnectorCoreTests {
         let wakeObserver = CodexWakeRefreshObserver(store: store)
         NotificationCenter.default.post(name: NSWorkspace.didWakeNotification, object: nil)
 
-        for _ in 0..<30 where !(await client.triggers.contains(.wake)) {
-            await Task.yield()
-        }
-        #expect(await client.triggers == [.wake])
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(await client.triggers.isEmpty)
+        #expect(await client.verifiedFetchCount == 0)
         wakeObserver.invalidate()
         await store.stopAllConnectors()
     }

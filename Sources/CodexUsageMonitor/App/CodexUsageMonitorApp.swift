@@ -6,7 +6,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let runtime: UsageMonitorRuntime
     private var store: UsageStore { runtime.store }
     private var statusBarController: StatusBarController?
-    private var wakeRefreshObserver: CodexWakeRefreshObserver?
     private var isDisconnectingForTermination = false
 
     override init() {
@@ -27,7 +26,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store: store,
             workBuddySettings: runtime.workBuddySettings
         )
-        wakeRefreshObserver = CodexWakeRefreshObserver(store: store)
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -41,8 +39,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        wakeRefreshObserver?.invalidate()
-        wakeRefreshObserver = nil
         statusBarController?.tearDown()
     }
 }

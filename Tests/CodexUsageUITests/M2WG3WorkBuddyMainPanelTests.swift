@@ -7,7 +7,7 @@ struct M2WG3WorkBuddyMainPanelTests {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
     @Test
-    func workBuddyIsSecondInMainPanelAndAssistant() throws {
+    func manualWorkBuddyIsHiddenFromMainPanelAndAssistant() throws {
         let codex = codexSnapshot()
         let workBuddy = try workBuddySnapshot(remaining: 3_600, used: 400)
         let cards = SharedUsagePresentationPolicy.makeCards(
@@ -17,13 +17,12 @@ struct M2WG3WorkBuddyMainPanelTests {
             now: now
         )
 
-        #expect(cards.map(\.id) == ["codex.local", "workbuddy.manualAvailability"])
-        #expect(cards.map(\.providerName) == ["Codex", "WorkBuddy"])
+        #expect(cards.map(\.id) == ["codex.local"])
+        #expect(cards.map(\.providerName) == ["Codex"])
         #expect(cards[0].isVisibleInDesktopAssistant)
-        #expect(cards[1].isVisibleInDesktopAssistant)
         #expect(
             SharedUsagePresentationPolicy.assistantCards(from: cards).map(\.id)
-                == ["codex.local", "workbuddy.manualAvailability"]
+                == ["codex.local"]
         )
     }
 
@@ -180,19 +179,10 @@ struct M2WG3WorkBuddyMainPanelTests {
     }
 
     @Test
-    func workBuddyOrderingAndValueSurviveIndependentCodexStates() throws {
-        let previous = SharedUsagePresentationPolicy.makeCards(
-            snapshots: [
-                codexSnapshot(state: .ready),
-                try workBuddySnapshot(remaining: 3_600, used: 400)
-            ],
-            previousCards: [],
-            language: .english,
-            now: now
-        )
-        let originalCodex = try #require(previous.first)
-
+    func manualWorkBuddyRemainsHiddenAcrossIndependentCodexStates() throws {
+        let workBuddy = try workBuddySnapshot(remaining: 3_600, used: 400)
         for state in [
+            AgentConnectorState.ready,
             AgentConnectorState.waitingForFirstResponse,
             .stale,
             .failed
@@ -200,34 +190,44 @@ struct M2WG3WorkBuddyMainPanelTests {
             let cards = SharedUsagePresentationPolicy.makeCards(
                 snapshots: [
                     codexSnapshot(state: state),
-                    try workBuddySnapshot(remaining: 3_600, used: 400)
+                    workBuddy
                 ],
-                previousCards: previous,
+                previousCards: [],
                 language: .english,
                 now: now.addingTimeInterval(60)
             )
-            #expect(cards.map(\.id) == ["codex.local", "workbuddy.manualAvailability"])
-            #expect(cards[1].availability?.value.creditBalance?.remaining == 3_600)
-            #expect(cards[1].availability?.value.creditBalance?.used == 400)
-            #expect(cards[0].id == originalCodex.id)
+            #expect(
+                cards.map(\.id)
+                    == (state == .ready ? ["codex.local"] : [])
+            )
         }
+        let compatibilityCard = SharedUsagePresentationPolicy.makeCard(
+            snapshot: workBuddy,
+            previous: nil,
+            language: .english,
+            now: now
+        )
+        #expect(
+            compatibilityCard.availability?.value.creditBalance?.remaining
+                == 3_600
+        )
+        #expect(
+            compatibilityCard.availability?.value.creditBalance?.used == 400
+        )
     }
 
     @Test
     func manualLifecycleDoesNotRetainAFormerBalanceForUnconfiguredOrInvalid() throws {
         let configured = try #require(try makeCard(remaining: 3_600, used: 400))
-        let unconfigured = SharedUsagePresentationPolicy.makeCards(
-            snapshots: [
-                workBuddyLifecycleSnapshot(
-                    failure: .unavailable,
-                    capturedAt: now.addingTimeInterval(60)
-                )
-            ],
-            previousCards: [configured],
+        let unconfiguredCard = SharedUsagePresentationPolicy.makeCard(
+            snapshot: workBuddyLifecycleSnapshot(
+                failure: .unavailable,
+                capturedAt: now.addingTimeInterval(60)
+            ),
+            previous: configured,
             language: .english,
             now: now.addingTimeInterval(60)
         )
-        let unconfiguredCard = try #require(unconfigured.first)
         #expect(unconfiguredCard.availabilityLifecycle == .unconfigured)
         #expect(unconfiguredCard.availability?.sourceState != .manualConfirmed)
         #expect(!unconfiguredCard.isRetainingLastValidValue)
@@ -245,18 +245,15 @@ struct M2WG3WorkBuddyMainPanelTests {
         #expect(unconfiguredPresentation.manualStatus == "Not yet confirmed")
         #expect(!unconfiguredPresentation.accessibilityLabel.contains("snapshot"))
 
-        let invalid = SharedUsagePresentationPolicy.makeCards(
-            snapshots: [
-                workBuddyLifecycleSnapshot(
-                    failure: .malformedResponse,
-                    capturedAt: now.addingTimeInterval(120)
-                )
-            ],
-            previousCards: [configured],
+        let invalidCard = SharedUsagePresentationPolicy.makeCard(
+            snapshot: workBuddyLifecycleSnapshot(
+                failure: .malformedResponse,
+                capturedAt: now.addingTimeInterval(120)
+            ),
+            previous: configured,
             language: .english,
             now: now.addingTimeInterval(120)
         )
-        let invalidCard = try #require(invalid.first)
         #expect(invalidCard.availabilityLifecycle == .invalid)
         #expect(invalidCard.availability?.sourceState != .manualConfirmed)
         #expect(!invalidCard.isRetainingLastValidValue)
@@ -271,7 +268,7 @@ struct M2WG3WorkBuddyMainPanelTests {
     }
 
     @Test
-    func disabledManualSourceIsHiddenButUnconfiguredAndInvalidRemainVisible() {
+    func everyManualLifecycleIsHiddenFromProviderSurfaces() {
         let disabled = workBuddyLifecycleSnapshot(failure: nil, capturedAt: now)
         let unconfigured = workBuddyLifecycleSnapshot(
             failure: .unavailable,
@@ -296,7 +293,7 @@ struct M2WG3WorkBuddyMainPanelTests {
                 previousCards: [],
                 language: .english,
                 now: now
-            ).map(\.availabilityLifecycle) == [.unconfigured, .invalid]
+            ).isEmpty
         )
     }
 
@@ -350,7 +347,7 @@ struct M2WG3WorkBuddyMainPanelTests {
             encoding: .utf8
         )
 
-        #expect(panel.contains("WorkBuddyMainPanelCard"))
+        #expect(!panel.contains("WorkBuddyMainPanelCard"))
         #expect(panel.contains("expandedProviderIDs"))
         #expect(panel.contains("settingsDestination = .workBuddy"))
         #expect(panel.contains("ScrollView(.vertical)"))
@@ -406,19 +403,17 @@ struct M2WG3WorkBuddyMainPanelTests {
         total: Int64? = nil,
         tier: WorkBuddyPlanTier = .standard
     ) throws -> SharedUsageCardPresentation? {
-        SharedUsagePresentationPolicy.makeCards(
-            snapshots: [
-                try workBuddySnapshot(
-                    remaining: remaining,
-                    used: used,
-                    total: total,
-                    tier: tier
-                )
-            ],
-            previousCards: [],
+        SharedUsagePresentationPolicy.makeCard(
+            snapshot: try workBuddySnapshot(
+                remaining: remaining,
+                used: used,
+                total: total,
+                tier: tier
+            ),
+            previous: nil,
             language: .english,
             now: now
-        ).first
+        )
     }
 
     private func workBuddySnapshot(

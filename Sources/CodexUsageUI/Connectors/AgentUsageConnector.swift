@@ -68,6 +68,37 @@ enum AgentSourceTier: String, Codable, CaseIterable, Sendable {
     var isAdmissible: Bool { self != .unsupported }
 }
 
+/// Surface admission is intentionally stricter than the historical source
+/// tier. A source can remain supported for persistence or Settings while being
+/// ineligible for production provider surfaces.
+enum ProviderLocalSourceClass: String, Codable, Sendable {
+    case admittedStructuredLocal
+    case manualOnly
+    case unsupported
+}
+
+enum ProviderRuntimeRequirement: String, Codable, Sendable {
+    case activeOfficialApplicationCLIOrService
+    case none
+}
+
+enum ProviderAuthenticationMethod: String, Codable, Sendable {
+    case existingLocalSession
+    case officialApplicationOwnedSession
+    case none
+}
+
+enum ProviderUsageReadContract: String, Codable, Sendable {
+    case currentStructuredLocalRead
+    case none
+}
+
+enum ProviderLoginAssistance: String, Codable, Sendable {
+    case none
+    case existingSessionOnly
+    case userInitiatedOfficialChineseAppLogin
+}
+
 enum AgentMetricScope: String, Codable, CaseIterable, Hashable, Sendable {
     case account
     case device
@@ -149,6 +180,14 @@ struct AgentConnectorDescriptor: Codable, Sendable, Equatable {
     let supportsRestore: Bool
     let supportsUninstall: Bool
     let unsupportedFields: Set<String>
+    let providerPriority: Int
+    let expectedRuntime: ProviderRuntimeRequirement
+    let localSourceClass: ProviderLocalSourceClass
+    let authenticationMethod: ProviderAuthenticationMethod
+    let usageReadContract: ProviderUsageReadContract
+    let loginAssistance: ProviderLoginAssistance
+    let isRegisteredChineseAgent: Bool
+    let officialLoginApplicationURL: URL?
 
     init?(
         id: AgentConnectorID,
@@ -162,13 +201,30 @@ struct AgentConnectorDescriptor: Codable, Sendable, Equatable {
         privacyAllowlist: Set<String>,
         supportsRestore: Bool,
         supportsUninstall: Bool,
-        unsupportedFields: Set<String>
+        unsupportedFields: Set<String>,
+        providerPriority: Int? = nil,
+        expectedRuntime: ProviderRuntimeRequirement = .activeOfficialApplicationCLIOrService,
+        localSourceClass: ProviderLocalSourceClass? = nil,
+        authenticationMethod: ProviderAuthenticationMethod = .existingLocalSession,
+        usageReadContract: ProviderUsageReadContract? = nil,
+        loginAssistance: ProviderLoginAssistance = .existingSessionOnly,
+        isRegisteredChineseAgent: Bool = false,
+        officialLoginApplicationURL: URL? = nil
     ) {
+        let resolvedLocalSourceClass = localSourceClass
+            ?? Self.defaultLocalSourceClass(for: sourceTier)
         guard sourceTier.isAdmissible,
               !providerName.isEmpty,
               !officialSource.isEmpty,
               !sourceVersion.isEmpty,
-              !supportedScopes.isEmpty else { return nil }
+              !supportedScopes.isEmpty,
+              loginAssistance != .userInitiatedOfficialChineseAppLogin
+                || (
+                    isRegisteredChineseAgent
+                        && officialLoginApplicationURL != nil
+                        && resolvedLocalSourceClass == .admittedStructuredLocal
+                )
+        else { return nil }
         self.id = id
         self.providerName = providerName
         self.officialSource = officialSource
@@ -181,6 +237,30 @@ struct AgentConnectorDescriptor: Codable, Sendable, Equatable {
         self.supportsRestore = supportsRestore
         self.supportsUninstall = supportsUninstall
         self.unsupportedFields = unsupportedFields
+        self.providerPriority = providerPriority ?? AgentProviderOrder.priority(for: id)
+        self.expectedRuntime = expectedRuntime
+        self.localSourceClass = resolvedLocalSourceClass
+        self.authenticationMethod = authenticationMethod
+        self.usageReadContract = usageReadContract
+            ?? (resolvedLocalSourceClass == .admittedStructuredLocal
+                ? .currentStructuredLocalRead
+                : .none)
+        self.loginAssistance = loginAssistance
+        self.isRegisteredChineseAgent = isRegisteredChineseAgent
+        self.officialLoginApplicationURL = officialLoginApplicationURL
+    }
+
+    private static func defaultLocalSourceClass(
+        for sourceTier: AgentSourceTier
+    ) -> ProviderLocalSourceClass {
+        switch sourceTier {
+        case .officialLocalService, .officialStructuredHook, .officialCLIOrMetadata:
+            .admittedStructuredLocal
+        case .manualUserConfirmed:
+            .manualOnly
+        case .authorizedReadOnlyRemote, .unsupported:
+            .unsupported
+        }
     }
 }
 

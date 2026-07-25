@@ -12,12 +12,16 @@ actor AgentConnectorRegistry {
     private var latest: [AgentConnectorID: AgentUsageSnapshot] = [:]
     private var continuation: AsyncStream<[AgentUsageSnapshot]>.Continuation?
     private let snapshotStore: AgentConnectorSnapshotStore?
+    private let eligibilityScanner: LocalProviderEligibilityScanner
+    private var currentAdmissionSet: ProviderSurfaceAdmissionSet?
 
     init(
         connectors initialConnectors: [any AgentUsageConnector] = [],
-        snapshotStore: AgentConnectorSnapshotStore? = nil
+        snapshotStore: AgentConnectorSnapshotStore? = nil,
+        eligibilityScanner: LocalProviderEligibilityScanner = LocalProviderEligibilityScanner()
     ) throws {
         self.snapshotStore = snapshotStore
+        self.eligibilityScanner = eligibilityScanner
         for connector in initialConnectors {
             let id = connector.id
             guard self.connectors[id] == nil else { throw AgentConnectorRegistryError.duplicateConnector(id) }
@@ -33,7 +37,6 @@ actor AgentConnectorRegistry {
         connectors[id] = connector
         orderedIDs.append(id)
         orderedIDs.sort(by: AgentProviderOrder.precedes)
-        listen(to: connector)
     }
 
     func orderedDescriptors() -> [AgentConnectorDescriptor] {
@@ -41,13 +44,69 @@ actor AgentConnectorRegistry {
     }
 
     func snapshots() -> AsyncStream<[AgentUsageSnapshot]> {
-        AsyncStream { continuation in
+        AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             self.continuation = continuation
-            continuation.yield(self.orderedSnapshots())
             continuation.onTermination = { [weak self] _ in
                 Task { await self?.clearContinuation() }
             }
         }
+    }
+
+    /// Runs the one launch/manual eligibility scan and atomically replaces the
+    /// visible provider set. Persisted snapshots never enter this path.
+    func scanSurfaceAdmissions(
+        trigger: ProviderEligibilityScanTrigger,
+        excludedProviderIDs: Set<AgentConnectorID> = []
+    ) async -> ProviderSurfaceAdmissionSet {
+        let candidates = orderedIDs.compactMap { id -> RegisteredProviderCandidate? in
+            guard let connector = connectors[id] else { return nil }
+            return RegisteredProviderCandidate(
+                connector: connector,
+                descriptor: connector.descriptor
+            )
+        }
+        let result = await eligibilityScanner.scan(
+            candidates: candidates,
+            excludedProviderIDs: excludedProviderIDs,
+            trigger: trigger
+        )
+
+        let admittedIDs = Set(result.admittedProviderIDs)
+        let previouslyAdmittedIDs = Set(latest.keys)
+        let hiddenListenerIDs = listeners.keys.filter {
+            !admittedIDs.contains($0)
+        }
+        for id in hiddenListenerIDs {
+            listeners[id]?.cancel()
+            listeners[id] = nil
+        }
+        latest = Dictionary(
+            uniqueKeysWithValues: result.admittedSnapshots.map { ($0.id, $0) }
+        )
+        currentAdmissionSet = result
+
+        for id in orderedIDs {
+            guard let connector = connectors[id] else { continue }
+            if admittedIDs.contains(id) {
+                listen(to: connector)
+            } else if connector.descriptor.localSourceClass
+                        == .admittedStructuredLocal,
+                      !excludedProviderIDs.contains(id)
+                        || previouslyAdmittedIDs.contains(id) {
+                await connector.stop()
+            }
+        }
+        await persistCurrentAdmittedSnapshots()
+        publish()
+        return result
+    }
+
+    func surfaceAdmissionSet() -> ProviderSurfaceAdmissionSet? {
+        currentAdmissionSet
+    }
+
+    func scannerDiagnostics() async -> LocalProviderEligibilityScannerDiagnostics {
+        await eligibilityScanner.diagnostics()
     }
 
     func restorePersistedSnapshots() async {
@@ -63,6 +122,8 @@ actor AgentConnectorRegistry {
     func startPassiveConnectors() async {
         let passive = orderedIDs.compactMap { connectors[$0] }.filter {
             $0.descriptor.capabilities.contains(.passiveLocalAvailability)
+                && $0.descriptor.localSourceClass
+                    == .admittedStructuredLocal
         }
         for connector in passive { listen(to: connector) }
         await withTaskGroup(of: Void.self) { group in
@@ -108,12 +169,15 @@ actor AgentConnectorRegistry {
     }
 
     func stopAll() async {
-        let registered = orderedIDs.compactMap { connectors[$0] }
+        let registered = listeners.keys.compactMap { connectors[$0] }
         listeners.values.forEach { $0.cancel() }
         listeners.removeAll()
         await withTaskGroup(of: Void.self) { group in
             for connector in registered { group.addTask { await connector.stop() } }
         }
+        latest.removeAll()
+        currentAdmissionSet = nil
+        publish()
     }
 
     func orderedSnapshots() -> [AgentUsageSnapshot] {
@@ -133,17 +197,83 @@ actor AgentConnectorRegistry {
     }
 
     private func receive(_ snapshot: AgentUsageSnapshot) async {
-        guard connectors[snapshot.id] != nil else { return }
+        guard let connector = connectors[snapshot.id] else { return }
+        guard connector.descriptor.localSourceClass
+                == .admittedStructuredLocal
+        else {
+            latest[snapshot.id] = nil
+            return
+        }
+        guard let currentAdmissionSet else {
+            // Connector lifecycle and restore helpers cannot surface-admit a
+            // provider. Only a completed eligibility scan can establish the
+            // current admission set.
+            return
+        }
+        do {
+            // A current read publishes this transient state before its one
+            // completed result. It is not a failed admission and must not
+            // terminate the connector that owns the in-flight read.
+            if snapshot.state == .waitingForFirstResponse { return }
+            let admission = LocalProviderEligibilityScanner.admission(
+                for: snapshot,
+                descriptor: connector.descriptor
+            )
+            guard case .admitted = admission else {
+                latest[snapshot.id] = nil
+                listeners[snapshot.id]?.cancel()
+                listeners[snapshot.id] = nil
+                self.currentAdmissionSet = ProviderSurfaceAdmissionSet(
+                    trigger: currentAdmissionSet.trigger,
+                    scanGeneration: currentAdmissionSet.scanGeneration,
+                    records: currentAdmissionSet.records.map { record in
+                        guard record.id == snapshot.id else { return record }
+                        return ProviderSurfaceAdmissionRecord(
+                            id: record.id,
+                            providerName: record.providerName,
+                            priority: record.priority,
+                            admission: admission,
+                            loginOption: LocalProviderEligibilityScanner.loginOption(
+                                for: connector.descriptor,
+                                admission: admission
+                            )
+                        )
+                    }
+                )
+                if snapshot.state != .inactive {
+                    await connector.stop()
+                }
+                publish()
+                return
+            }
+            self.currentAdmissionSet = ProviderSurfaceAdmissionSet(
+                trigger: currentAdmissionSet.trigger,
+                scanGeneration: currentAdmissionSet.scanGeneration,
+                records: currentAdmissionSet.records.map { record in
+                    guard record.id == snapshot.id else { return record }
+                    return ProviderSurfaceAdmissionRecord(
+                        id: record.id,
+                        providerName: record.providerName,
+                        priority: record.priority,
+                        admission: admission,
+                        loginOption: nil
+                    )
+                }
+            )
+        }
         guard latest[snapshot.id] != snapshot else { return }
         latest[snapshot.id] = snapshot
-        if let snapshotStore,
-           connectors[snapshot.id]?.descriptor.supportsRestore == true {
-            let restorableSnapshots = orderedSnapshots().filter {
-                connectors[$0.id]?.descriptor.supportsRestore == true
-            }
-            try? await snapshotStore.save(restorableSnapshots)
-        }
+        await persistCurrentAdmittedSnapshots()
         publish()
+    }
+
+    private func persistCurrentAdmittedSnapshots() async {
+        guard let snapshotStore else { return }
+        let restorableSnapshots = orderedSnapshots().filter {
+            connectors[$0.id]?.descriptor.supportsRestore == true
+        }
+        guard !restorableSnapshots.isEmpty else { return }
+        try? await snapshotStore.save(restorableSnapshots)
     }
 
     private func publish() { continuation?.yield(orderedSnapshots()) }

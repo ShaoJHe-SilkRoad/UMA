@@ -392,16 +392,19 @@ public enum SharedUsagePresentationPolicy {
         guard !snapshot.capabilities.contains(.hiddenFromProviderSurfaces) else {
             return false
         }
-        guard snapshot.capabilities.contains(.passiveLocalAvailability),
+        guard snapshot.state == .ready,
+              snapshot.freshness == .fresh,
+              snapshot.safeFailure == nil,
               let account = snapshot.channels.first(where: { $0.id == .account }),
-              account.provenance == .manualConfirmed,
-              account.availability == .unavailable,
-              account.safeFailure == nil,
-              snapshot.safeFailure == nil else {
+              account.sourceTier != .manualUserConfirmed,
+              account.provenance == .providerReported,
+              account.freshness == .fresh,
+              account.safeFailure == nil
+        else { return false }
+        if account.availabilitySourceState == .officialStructured {
             return true
         }
-        // A passive manual source with no value and no safe failure is disabled.
-        return false
+        return !account.rateLimitWindows.isEmpty
     }
 
     static func makeCard(

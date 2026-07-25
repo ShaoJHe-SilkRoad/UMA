@@ -110,7 +110,7 @@ struct M1AG1DualSourceConnectorTests {
     }
 
     @Test @MainActor
-    func unavailableAccountDoesNotHideLocalChannel() async {
+    func unavailableAccountHidesTheProviderDespiteLocalMetadata() async {
         let local = CodexLocalActivitySnapshot(
             availability: .available,
             source: "This Mac: Codex session metadata",
@@ -131,18 +131,19 @@ struct M1AG1DualSourceConnectorTests {
         )
         store.grantMonitorConsent()
         await store.refresh()
-        for _ in 0..<40 where store.snapshot.localSource?.isAvailable != true {
+        for _ in 0..<40 where store.isRefreshing {
             try? await Task.sleep(for: .milliseconds(5))
         }
 
-        #expect(store.snapshot.providerSource?.isAvailable == false)
-        #expect(store.snapshot.localSource?.isAvailable == true)
-        #expect(store.snapshot.recentTasks.first?.tokenText == "321")
-        #expect(store.hasPriorRealSnapshot)
+        #expect(store.providerSnapshots.isEmpty)
+        #expect(store.presentationCards.isEmpty)
+        #expect(store.snapshot.providerSource == nil)
+        #expect(store.snapshot.localSource == nil)
+        #expect(!store.hasPriorRealSnapshot)
     }
 
     @Test @MainActor
-    func providerRefreshFailureRetainsNewIndependentLocalSnapshot() async {
+    func providerRefreshFailureRemovesStaleAndIndependentLocalPresentation() async {
         let firstLocal = localSnapshot(tokenCount: 10)
         let secondLocal = localSnapshot(tokenCount: 20)
         let store = UsageStore(
@@ -155,17 +156,18 @@ struct M1AG1DualSourceConnectorTests {
         store.grantMonitorConsent()
         await store.refresh()
         await store.refresh()
-        for _ in 0..<40 where store.snapshot.recentTasks.first?.tokenText != "20" {
+        for _ in 0..<40 where store.isRefreshing {
             try? await Task.sleep(for: .milliseconds(5))
         }
 
-        #expect(store.snapshot.recentTasks.first?.tokenText == "20")
-        #expect(store.snapshot.providerSource?.freshness == .stale)
-        #expect(store.snapshot.localSource?.freshness == .fresh)
+        #expect(store.providerSnapshots.isEmpty)
+        #expect(store.presentationCards.isEmpty)
+        #expect(store.snapshot.providerSource == nil)
+        #expect(store.snapshot.localSource == nil)
     }
 
     @Test @MainActor
-    func firstProviderFailureStillPresentsIndependentLocalActivity() async {
+    func firstProviderFailureHidesIndependentLocalActivity() async {
         let store = UsageStore(
             autoRefresh: false,
             language: .english,
@@ -175,7 +177,7 @@ struct M1AG1DualSourceConnectorTests {
         )
         store.grantMonitorConsent()
         await store.refresh()
-        for _ in 0..<40 where store.snapshot.localSource?.isAvailable != true {
+        for _ in 0..<40 where store.isRefreshing {
             try? await Task.sleep(for: .milliseconds(5))
         }
 
@@ -185,9 +187,10 @@ struct M1AG1DualSourceConnectorTests {
             hasPriorRealSnapshot: store.hasPriorRealSnapshot,
             language: store.language
         )
-        #expect(store.snapshot.localSource?.isAvailable == true)
-        #expect(store.snapshot.recentTasks.first?.tokenText == "77")
-        #expect(presentation.showsRealData)
+        #expect(store.providerSnapshots.isEmpty)
+        #expect(store.presentationCards.isEmpty)
+        #expect(store.snapshot.localSource == nil)
+        #expect(!presentation.showsRealData)
     }
 
     @Test @MainActor
@@ -281,6 +284,9 @@ struct M1AG1DualSourceConnectorTests {
         for _ in 0..<40 where store.currentState != .ready {
             try? await Task.sleep(for: .milliseconds(5))
         }
+        for _ in 0..<40 where !store.allowsManualRefresh {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
 
         #expect(store.monitorConsentGranted)
         #expect(client.accountReadCallCount == 1)
@@ -304,6 +310,9 @@ struct M1AG1DualSourceConnectorTests {
         store.handleLocalAccessDecision(true)
         await localReader.waitUntilReading()
         for _ in 0..<40 where client.accountReadCallCount == 0 {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        for _ in 0..<40 where store.isRefreshing {
             try? await Task.sleep(for: .milliseconds(5))
         }
 

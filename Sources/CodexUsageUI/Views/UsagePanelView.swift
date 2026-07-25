@@ -97,7 +97,7 @@ public struct UsagePanelView: View {
 
     private var additionalProviderCards: [SharedUsageCardPresentation] {
         store.presentationCards.filter {
-            $0.id == WorkBuddyManualPersistenceRecord.connectorID
+            $0.id != CodexUsageConnector.connectorID.rawValue
         }
     }
 
@@ -116,14 +116,10 @@ public struct UsagePanelView: View {
                         UsageSummaryCard(snapshot: store.snapshot, language: store.language, tuning: tuning)
                     }
                     ForEach(additionalProviderCards) { card in
-                        WorkBuddyMainPanelCard(
+                        LocalLiveProviderCard(
                             card: card,
                             language: store.language,
-                            tuning: tuning,
-                            settings: workBuddySettings,
-                            isExpanded: expansionBinding(for: card.id),
-                            openSettings: { openWorkBuddySettings() },
-                            appearanceOverride: appearanceOverride
+                            tuning: tuning
                         )
                     }
                     if showRecentTasks {
@@ -137,23 +133,20 @@ public struct UsagePanelView: View {
                         )
                     }
                     FooterView(snapshot: store.snapshot, language: store.language)
-                } else {
-                    CodexConnectionBridgeView(
-                        presentation: presentation,
-                        language: store.language,
-                        perform: perform
-                    )
-                    ForEach(additionalProviderCards) { card in
-                        WorkBuddyMainPanelCard(
+                } else if !store.presentationCards.isEmpty {
+                    ForEach(store.presentationCards) { card in
+                        LocalLiveProviderCard(
                             card: card,
                             language: store.language,
-                            tuning: tuning,
-                            settings: workBuddySettings,
-                            isExpanded: expansionBinding(for: card.id),
-                            openSettings: { openWorkBuddySettings() },
-                            appearanceOverride: appearanceOverride
+                            tuning: tuning
                         )
                     }
+                } else {
+                    LocalLiveEmptyStateView(
+                        language: store.language,
+                        isRefreshing: store.isRefreshing,
+                        refresh: refreshFromEmptyState
+                    )
                 }
             }
             .padding(.horizontal, UsagePanelMetrics.outerHorizontalInset)
@@ -173,9 +166,6 @@ public struct UsagePanelView: View {
                     measuredContentHeight = height
                 }
             }
-        }
-        .task {
-            workBuddySettings?.start()
         }
         .scrollIndicators(.automatic)
         .scrollBounceBehavior(.basedOnSize)
@@ -240,9 +230,13 @@ public struct UsagePanelView: View {
                             set: { store.setLanguage($0) }
                         ),
                         workBuddySettings: workBuddySettings,
+                        providerLoginOptions: store.providerLoginOptions,
                         destination: settingsDestination,
                         tuning: tuning,
                         maximumHeight: max(240, displayedHeight - 124),
+                        checkAgain: {
+                            Task { await store.checkLocalSessionAgain() }
+                        },
                         close: {
                             isShowingSettings = false
                             settingsDestination = nil
@@ -289,6 +283,17 @@ public struct UsagePanelView: View {
         isShowingSettings = true
     }
 
+    @MainActor
+    private func refreshFromEmptyState() async {
+        if !store.monitorConsentGranted {
+            guard localAccessConfirmationAction?.request() == true else {
+                return
+            }
+            store.grantMonitorConsent()
+        }
+        await store.refresh()
+    }
+
     private var usesReduceMotion: Bool {
         appearanceOverride?.reduceMotion ?? reduceMotion
     }
@@ -313,6 +318,78 @@ public struct UsagePanelView: View {
         case .openCodex, .updateCodex, .dismiss:
             break
         }
+    }
+}
+
+private struct LocalLiveEmptyStateView: View {
+    let language: AppLanguage
+    let isRefreshing: Bool
+    let refresh: @MainActor () async -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "dot.radiowaves.left.and.right")
+                .font(.system(size: 24, weight: .medium))
+                .foregroundStyle(UsageDesign.blue)
+                .accessibilityHidden(true)
+            Text(language.noLocalLiveAgentsTitle)
+                .font(UsageDesign.font(13, weight: .semibold, language: language))
+                .multilineTextAlignment(.center)
+            Text(language.noLocalLiveAgentsGuidance)
+                .font(UsageDesign.font(10.5, language: language))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(language.refreshUsage) {
+                Task { await refresh() }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isRefreshing)
+            .accessibilityHint(language.noLocalLiveAgentsGuidance)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+        .padding(.horizontal, 20)
+        .background {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(.thinMaterial)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.22), lineWidth: 0.7)
+        }
+    }
+}
+
+private struct LocalLiveProviderCard: View {
+    let card: SharedUsageCardPresentation
+    let language: AppLanguage
+    let tuning: GlassTuning
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "circle.fill")
+                .font(.system(size: 8))
+                .foregroundStyle(.green)
+            Text(card.providerName)
+                .font(UsageDesign.font(13, weight: .semibold, language: language))
+            Spacer()
+            Text(card.availability?.compactText ?? card.remaining.displayText)
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .monospacedDigit()
+        }
+        .padding(14)
+        .background {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(.thinMaterial)
+            GlassCardBackground(tuning: tuning)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.white.opacity(0.22), lineWidth: 0.7)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(card.accessibilityLabel)
     }
 }
 

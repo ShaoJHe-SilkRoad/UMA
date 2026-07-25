@@ -113,7 +113,10 @@ struct PreviewRendererTool {
             let store = UsageStore.preview(
                 scenario: previewScenario,
                 language: language,
-                presentationCards: workBuddyCard.map { [$0] } ?? []
+                presentationCards: workBuddyCard.map { [$0] } ?? [],
+                chineseLoginProviderName: arguments.contains(
+                    "--chinese-login-option"
+                ) ? "Kimi" : nil
             )
             let tuning = GlassTuning.final
             let expandedProviderIDs: Set<String> = arguments.contains("--workbuddy-expanded")
@@ -170,7 +173,7 @@ struct PreviewRendererTool {
             defer: false
         )
         window.contentView = host
-        window.title = "UMA M2W-G3 Review Candidate"
+        window.title = "UMA M2WADBG-R3 Review Candidate"
         host.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
         if interactive {

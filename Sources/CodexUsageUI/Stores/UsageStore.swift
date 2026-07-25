@@ -6,6 +6,7 @@ public final class UsageStore: ObservableObject {
     @Published private(set) var snapshot: UsageSnapshot
     @Published private(set) var providerSnapshots: [AgentUsageSnapshot] = []
     @Published public private(set) var presentationCards: [SharedUsageCardPresentation] = []
+    @Published private(set) var providerLoginOptions: [ProviderLoginOption] = []
     @Published private(set) var isRefreshing = false
     @Published public private(set) var lastError: String?
     @Published public private(set) var lastFailure: CodexUsageClientFailure?
@@ -20,22 +21,12 @@ public final class UsageStore: ObservableObject {
     private let primaryConnectorID: AgentConnectorID?
     private let previewOnly: Bool
     private let previewDisplaysFixtureData: Bool
+    private let performsLaunchScan: Bool
     private let consentDefaults: UserDefaults?
-    private let autoRefreshEnabled: Bool
-    private let visibleRefreshInterval: Duration
-    private let backgroundRefreshInterval: Duration
-    private let resumesPersistedAuthorizedConnection: Bool
     private var registrySubscription: Task<Void, Never>?
-    private var passiveStartupTask: Task<Void, Never>?
-    private var connectionTask: Task<Void, Never>?
-    private var periodicRefreshTask: Task<Void, Never>?
-    private var periodicRefreshGeneration: UInt64 = 0
-    private var periodicRefreshUsesVisibleInterval: Bool?
-    /// Store callers join this task before reaching the registry. It keeps a
-    /// menu action, lifecycle wake, timer, and provider event from creating
-    /// parallel connector commands above the client-level coordinator.
-    private var activeRefreshTask: Task<Void, Never>?
-    private var activeRefreshGeneration: UInt64 = 0
+    private var activeScanTask: Task<Void, Never>?
+    private var activeScanTrigger: ProviderEligibilityScanTrigger?
+    private var activeScanGeneration: UInt64 = 0
 
     public convenience init(autoRefresh: Bool = true, language: AppLanguage? = nil) {
         self.init(
@@ -48,7 +39,11 @@ public final class UsageStore: ObservableObject {
         )
     }
 
-    public convenience init(autoRefresh: Bool = true, previewOnly: Bool, language: AppLanguage? = nil) {
+    public convenience init(
+        autoRefresh: Bool = true,
+        previewOnly: Bool,
+        language: AppLanguage? = nil
+    ) {
         self.init(
             autoRefresh: autoRefresh,
             previewOnly: previewOnly,
@@ -62,9 +57,24 @@ public final class UsageStore: ObservableObject {
     public static func preview(
         scenario: CodexPreviewScenario = .ready,
         language: AppLanguage = .simplifiedChinese,
-        presentationCards: [SharedUsageCardPresentation] = []
+        presentationCards: [SharedUsageCardPresentation] = [],
+        chineseLoginProviderName: String? = nil
     ) -> UsageStore {
-        UsageStore(
+        let loginOptions: [ProviderLoginOption]
+        if let chineseLoginProviderName,
+           let officialApplicationURL = URL(string: "agent-preview://login"),
+           let id = AgentConnectorID(rawValue: "kimi.preview") {
+            loginOptions = [
+                ProviderLoginOption(
+                    id: id,
+                    providerName: chineseLoginProviderName,
+                    officialApplicationURL: officialApplicationURL
+                )
+            ]
+        } else {
+            loginOptions = []
+        }
+        return UsageStore(
             autoRefresh: false,
             previewOnly: true,
             language: language,
@@ -72,7 +82,8 @@ public final class UsageStore: ObservableObject {
             primaryConnectorID: nil,
             consentDefaults: nil,
             previewScenario: scenario,
-            previewPresentationCards: presentationCards
+            previewPresentationCards: presentationCards,
+            previewLoginOptions: loginOptions
         )
     }
 
@@ -85,38 +96,47 @@ public final class UsageStore: ObservableObject {
         consentDefaults: UserDefaults? = nil,
         previewScenario: CodexPreviewScenario = .ready,
         previewPresentationCards: [SharedUsageCardPresentation] = [],
+        previewLoginOptions: [ProviderLoginOption] = [],
         visibleRefreshInterval: Duration = .seconds(120),
         backgroundRefreshInterval: Duration = .seconds(900)
     ) {
+        _ = visibleRefreshInterval
+        _ = backgroundRefreshInterval
         let selectedLanguage = language ?? AppLanguage.resolveAndPersist()
         self.registry = registry
         self.primaryConnectorID = primaryConnectorID
         self.previewOnly = previewOnly
-        self.previewDisplaysFixtureData = previewOnly && previewScenario.displaysFixtureData
+        self.previewDisplaysFixtureData =
+            previewOnly && previewScenario.displaysFixtureData
+        self.performsLaunchScan = autoRefresh
         self.consentDefaults = consentDefaults
-        self.autoRefreshEnabled = autoRefresh
-        self.visibleRefreshInterval = visibleRefreshInterval
-        self.backgroundRefreshInterval = backgroundRefreshInterval
         self.language = selectedLanguage
         self.presentationCards = previewPresentationCards
-        self.snapshot = previewOnly && previewScenario.displaysFixtureData ? .preview(language: selectedLanguage) : .empty(language: selectedLanguage)
-        self.connectionState = previewOnly ? previewScenario.connectionState : .notAuthorizedByMonitor
+        self.providerLoginOptions = previewLoginOptions
+        self.snapshot = previewOnly && previewScenario.displaysFixtureData
+            ? .preview(language: selectedLanguage)
+            : .empty(language: selectedLanguage)
+        self.connectionState = previewOnly
+            ? previewScenario.connectionState
+            : .notAuthorizedByMonitor
         self.isRefreshing = previewOnly && previewScenario == .refreshing
-        let decision = previewOnly ? .granted : CodexMonitorConsentDecision.load(from: consentDefaults)
-        self.resumesPersistedAuthorizedConnection = !previewOnly && decision == .granted
+        let decision = previewOnly
+            ? .granted
+            : CodexMonitorConsentDecision.load(from: consentDefaults)
         self.monitorConsentDecision = decision
         self.monitorConsentGranted = decision == .granted
-        if !previewOnly, decision == .granted { self.connectionState = .idle }
+        if !previewOnly, decision == .granted {
+            self.connectionState = .idle
+        }
         self.freshness = previewOnly ? .fixture : .noRealData
         beginRegistryObservation()
     }
 
-    /// `nil` remains distinct from an actual 0% quota. An authoritative
-    /// unlimited five-hour grant is rendered as ∞ in the panel, so it must
-    /// not make the compact status item claim a misleading ordinary 100%.
     public var menuPercent: Int? {
         if let primaryID = primaryConnectorID?.rawValue,
-           let primaryCard = presentationCards.first(where: { $0.id == primaryID }) {
+           let primaryCard = presentationCards.first(where: {
+               $0.id == primaryID
+           }) {
             return primaryCard.remaining.displayPercent
         }
         return previewOnly
@@ -129,23 +149,31 @@ public final class UsageStore: ObservableObject {
     }
 
     public var statusText: String {
-        if previewOnly, connectionState == .ready { return language.demoStatus }
+        if previewOnly, connectionState == .ready {
+            return language.demoStatus
+        }
         return connectionState.statusText(language: language)
     }
 
     public var currentState: CodexConnectionState { connectionState }
 
     public var hasPriorRealSnapshot: Bool {
-        guard let primaryConnectorID else { return previewDisplaysFixtureData }
+        guard let primaryConnectorID else {
+            return previewDisplaysFixtureData
+        }
         return providerSnapshots.contains {
-            $0.id == primaryConnectorID && $0.hasValidData
+            $0.id == primaryConnectorID
+                && $0.state == .ready
+                && $0.freshness == .fresh
         } || previewDisplaysFixtureData
     }
 
     public var allowsManualRefresh: Bool {
-        let hasVisibleProviderData = snapshot.providerSource?.isAvailable == true
-        guard monitorConsentGranted, hasPriorRealSnapshot || hasVisibleProviderData else { return false }
-        return connectionState == .ready || connectionState.isFailure
+        !previewOnly && !isRefreshing
+    }
+
+    var admittedProviderIDs: [AgentConnectorID] {
+        providerSnapshots.map(\.id)
     }
 
     public func grantMonitorConsent() {
@@ -154,7 +182,7 @@ public final class UsageStore: ObservableObject {
         monitorConsentDecision.persist(to: consentDefaults)
         monitorConsentGranted = true
         connectionState = .idle
-        freshness = hasPriorRealSnapshot ? .stale : .noRealData
+        freshness = .noRealData
         lastError = nil
         lastFailure = nil
     }
@@ -165,62 +193,48 @@ public final class UsageStore: ObservableObject {
 
     public func handleLocalAccessDecision(_ accepted: Bool) {
         guard accepted else {
-            Task { @MainActor in await declineMonitorConsent() }
+            monitorConsentGranted = false
+            monitorConsentDecision = .declined
+            monitorConsentDecision.persist(to: consentDefaults)
+            receive([], loginOptions: [])
+            Task { @MainActor [weak self] in
+                await self?.disconnectPrimary(clearConsent: false)
+            }
             return
         }
-        let wasGranted = monitorConsentGranted
+        let wasGranted = monitorConsentDecision == .granted
         grantMonitorConsent()
-        if !wasGranted { beginConnection(.connect) }
+        guard !wasGranted else { return }
+        Task { @MainActor [weak self] in
+            await self?.performEligibilityScan(trigger: .manualRefresh)
+        }
     }
 
-    public func requestReconnect() { beginConnection(.reconnect) }
+    public func requestReconnect() {
+        Task { @MainActor [weak self] in
+            await self?.performEligibilityScan(trigger: .manualRefresh)
+        }
+    }
 
-    public func refresh() async { await refresh(trigger: .manual) }
+    public func refresh() async {
+        await performEligibilityScan(trigger: .manualRefresh)
+    }
 
-    /// Every account-refresh cause enters the one registry/client refresh
-    /// lane. Local display-age changes deliberately never call this method.
+    /// Non-user triggers are display/lifecycle events and never initiate
+    /// eligibility discovery. Accepted connector event streams remain owned by
+    /// their connector and flow through the registry independently.
     public func refresh(trigger: CodexRefreshTrigger) async {
-        guard !previewOnly, monitorConsentGranted, let registry, let id = primaryConnectorID else {
-            if !previewOnly { setConsentMissingFailure() }
-            return
-        }
-        if let activeRefreshTask {
-            await activeRefreshTask.value
-            return
-        }
-        activeRefreshGeneration &+= 1
-        let generation = activeRefreshGeneration
-        let task = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.performRefresh(trigger: trigger, registry: registry, id: id)
-        }
-        activeRefreshTask = task
-        await task.value
-        guard activeRefreshGeneration == generation else { return }
-        activeRefreshTask = nil
+        guard trigger == .manual else { return }
+        await performEligibilityScan(trigger: .manualRefresh)
     }
 
-    private func performRefresh(
-        trigger: CodexRefreshTrigger,
-        registry: AgentConnectorRegistry,
-        id: AgentConnectorID
-    ) async {
-        isRefreshing = true
-        connectionState = hasPriorRealSnapshot ? .refreshingWithPreviousRealData : .resolvingExecutable
-        updatePresentationConnection(.transitional)
-        do {
-            try await registry.refresh(id, trigger: trigger)
-            guard !Task.isCancelled else { return }
-            receive(await registry.orderedSnapshots())
-        }
-        catch {
-            guard !Task.isCancelled else { return }
-            applyRegistryFailure(.unknown)
-        }
+    public func connectToLocalSession() async {
+        await performEligibilityScan(trigger: .manualRefresh)
     }
 
-    public func connectToLocalSession() async { await performPrimary(.connect) }
-    public func checkLocalSessionAgain() async { await performPrimary(.connect) }
+    public func checkLocalSessionAgain() async {
+        await performEligibilityScan(trigger: .checkAgain)
+    }
 
     public func cancelLocalSessionReconciliation() async {
         await disconnectPrimary(clearConsent: false)
@@ -234,131 +248,143 @@ public final class UsageStore: ObservableObject {
         await disconnectPrimary(clearConsent: true)
     }
 
-    public func reconnectMonitor() async { await performPrimary(.reconnect) }
+    public func reconnectMonitor() async {
+        await performEligibilityScan(trigger: .manualRefresh)
+    }
 
-    /// Lifecycle code invokes this once after a system wake. It joins any
-    /// existing provider read rather than starting another connector or child.
-    public func handleApplicationWake() async { await refresh(trigger: .wake) }
+    /// Wake is intentionally not a discovery trigger.
+    public func handleApplicationWake() async {}
 
-    /// Called by the application lifecycle, not by a single provider view.
     public func stopAllConnectors() async {
         guard !previewOnly, let registry else { return }
-        connectionTask?.cancel()
-        passiveStartupTask?.cancel()
-        passiveStartupTask = nil
-        cancelActiveRefresh()
-        periodicRefreshGeneration &+= 1
-        periodicRefreshTask?.cancel()
-        periodicRefreshTask = nil
-        periodicRefreshUsesVisibleInterval = nil
+        activeScanGeneration &+= 1
+        activeScanTask?.cancel()
+        activeScanTask = nil
+        activeScanTrigger = nil
+        registrySubscription?.cancel()
         await registry.stopAll()
+        receive([], loginOptions: [])
     }
 
     public func setPanelVisible(_ isVisible: Bool) {
         guard !previewOnly else { return }
-        guard isPanelVisible != isVisible else { return }
         isPanelVisible = isVisible
-        updatePeriodicRefreshSchedule()
     }
 
     public func setLanguage(_ newLanguage: AppLanguage) {
         guard newLanguage != language else { return }
         language = newLanguage
-        UserDefaults.standard.set(newLanguage.rawValue, forKey: AppLanguage.storageKey)
-        if let primary = primarySnapshot {
-            snapshot = UsageSnapshot(agentSnapshot: primary, language: newLanguage)
-        } else if previewDisplaysFixtureData {
-            snapshot = .preview(language: newLanguage)
-        } else {
-            snapshot = .empty(language: newLanguage)
-        }
-        presentationCards = SharedUsagePresentationPolicy.makeCards(
-            snapshots: providerSnapshots,
-            previousCards: presentationCards,
-            language: newLanguage
+        UserDefaults.standard.set(
+            newLanguage.rawValue,
+            forKey: AppLanguage.storageKey
         )
+        rebuildPresentation()
     }
 
     private func beginRegistryObservation() {
         guard let registry else { return }
         registrySubscription = Task { [weak self] in
-            await registry.restorePersistedSnapshots()
             let stream = await registry.snapshots()
-            self?.resumePersistedAuthorizedConnection()
-            self?.passiveStartupTask = Task {
-                await registry.startPassiveConnectors()
+            await registry.restorePersistedSnapshots()
+            if self?.performsLaunchScan == true {
+                await self?.performEligibilityScan(trigger: .applicationLaunch)
             }
             for await snapshots in stream {
                 guard !Task.isCancelled else { return }
-                self?.receive(snapshots)
+                guard let admissionSet = await registry.surfaceAdmissionSet(),
+                      snapshots == admissionSet.admittedSnapshots
+                else { continue }
+                self?.receive(
+                    snapshots,
+                    loginOptions: admissionSet.loginOptions
+                )
             }
         }
     }
 
-    /// A persisted monitor authorization is enough to resume the one owned
-    /// Codex session after a restart.  The registry stream yields its stale
-    /// snapshot first; the reconnect then replaces it with a fresh provider
-    /// snapshot without requiring another Connect/Allow interaction.
-    private func resumePersistedAuthorizedConnection() {
-        guard resumesPersistedAuthorizedConnection, monitorConsentGranted else { return }
-        beginConnection(.connect)
+    private func performEligibilityScan(
+        trigger: ProviderEligibilityScanTrigger
+    ) async {
+        guard !previewOnly, let registry else { return }
+        if let activeScanTask {
+            let activeTrigger = activeScanTrigger
+            await activeScanTask.value
+            if activeTrigger == trigger { return }
+        }
+
+        let excluded: Set<AgentConnectorID>
+        if !monitorConsentGranted, let primaryConnectorID {
+            excluded = [primaryConnectorID]
+        } else {
+            excluded = []
+        }
+        isRefreshing = true
+        activeScanTrigger = trigger
+        activeScanGeneration &+= 1
+        let generation = activeScanGeneration
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await registry.scanSurfaceAdmissions(
+                trigger: trigger,
+                excludedProviderIDs: excluded
+            )
+            self.receive(
+                result.admittedSnapshots,
+                loginOptions: result.loginOptions
+            )
+        }
+        activeScanTask = task
+        await task.value
+        if activeScanGeneration == generation {
+            activeScanTask = nil
+            activeScanTrigger = nil
+            isRefreshing = false
+        }
     }
 
-    private func receive(_ snapshots: [AgentUsageSnapshot]) {
+    private func receive(
+        _ snapshots: [AgentUsageSnapshot],
+        loginOptions: [ProviderLoginOption]
+    ) {
         guard !previewOnly else { return }
-        let admittedSnapshots = monitorConsentGranted
-            ? snapshots
-            : snapshots.filter { $0.id != primaryConnectorID }
-        // The registry stream is installed asynchronously. Its initial empty
-        // yield can race a completed direct refresh; it must not erase the
-        // newly verified primary snapshot or turn live values into an
-        // apparent no-data state.
-        guard !admittedSnapshots.isEmpty || providerSnapshots.isEmpty else { return }
+        providerSnapshots = snapshots
+        providerLoginOptions = loginOptions
+        rebuildPresentation()
+    }
+
+    private func rebuildPresentation() {
         presentationCards = SharedUsagePresentationPolicy.makeCards(
-            snapshots: admittedSnapshots,
+            snapshots: providerSnapshots,
             previousCards: presentationCards,
             language: language
         )
-        providerSnapshots = admittedSnapshots
-        guard monitorConsentGranted else { return }
-        guard let primary = primarySnapshot else { return }
+        guard let primary = primarySnapshot else {
+            snapshot = previewDisplaysFixtureData
+                ? .preview(language: language)
+                : .empty(language: language)
+            connectionState = monitorConsentGranted
+                ? .idle
+                : .notAuthorizedByMonitor
+            freshness = previewDisplaysFixtureData ? .fixture : .noRealData
+            lastFailure = nil
+            lastError = nil
+            return
+        }
         snapshot = UsageSnapshot(agentSnapshot: primary, language: language)
-        connectionState = Self.presentationState(primary.state, failure: primary.safeFailure)
+        connectionState = Self.presentationState(
+            primary.state,
+            failure: primary.safeFailure
+        )
         freshness = Self.presentationFreshness(primary.freshness)
         lastFailure = primary.safeFailure.map(Self.codexFailure)
         lastError = codexFailureDescription(lastFailure)
-        if primary.state == .ready || primary.state == .stale || primary.state == .authenticationRequired || primary.state == .failed {
-            isRefreshing = false
-        }
-        updatePeriodicRefreshSchedule()
     }
 
     private var primarySnapshot: AgentUsageSnapshot? {
         guard let primaryConnectorID else { return nil }
-        return providerSnapshots.first(where: { $0.id == primaryConnectorID })
-    }
-
-    private func beginConnection(_ command: AgentConnectorCommand) {
-        guard !previewOnly, monitorConsentGranted, connectionTask == nil else { return }
-        connectionTask = Task { @MainActor [weak self] in
-            defer { self?.connectionTask = nil }
-            await self?.performPrimary(command)
-        }
-    }
-
-    private func performPrimary(_ command: AgentConnectorCommand) async {
-        guard !previewOnly, monitorConsentGranted, let registry, let id = primaryConnectorID else {
-            if !previewOnly { setConsentMissingFailure() }
-            return
-        }
-        isRefreshing = true
-        connectionState = .resolvingExecutable
-        updatePresentationConnection(.transitional)
-        do {
-            try await registry.perform(command, for: id)
-            receive(await registry.orderedSnapshots())
-        }
-        catch { applyRegistryFailure(.unknown) }
+        return providerSnapshots.first(where: {
+            $0.id == primaryConnectorID
+        })
     }
 
     private func disconnectPrimary(
@@ -366,10 +392,10 @@ public final class UsageStore: ObservableObject {
         decision: CodexMonitorConsentDecision = .unknown
     ) async {
         guard !previewOnly else { return }
-        connectionTask?.cancel()
-        connectionTask = nil
-        cancelActiveRefresh()
-        isRefreshing = false
+        activeScanGeneration &+= 1
+        activeScanTask?.cancel()
+        activeScanTask = nil
+        activeScanTrigger = nil
         if let registry, let id = primaryConnectorID {
             try? await registry.perform(.disconnect, for: id)
         }
@@ -377,51 +403,8 @@ public final class UsageStore: ObservableObject {
             monitorConsentGranted = false
             monitorConsentDecision = decision
             monitorConsentDecision.persist(to: consentDefaults)
-            providerSnapshots.removeAll { $0.id == primaryConnectorID }
-            presentationCards = SharedUsagePresentationPolicy.makeCards(
-                snapshots: providerSnapshots,
-                previousCards: presentationCards,
-                language: language
-            )
-            snapshot = .empty(language: language)
-            freshness = .noRealData
-            connectionState = .notAuthorizedByMonitor
-        } else {
-            connectionState = monitorConsentGranted ? .idle : .notAuthorizedByMonitor
-            freshness = hasPriorRealSnapshot ? .stale : .noRealData
-            updatePresentationConnection(.disconnected, freshness: .stale)
         }
-        lastError = nil
-        lastFailure = nil
-        updatePeriodicRefreshSchedule()
-    }
-
-    private func setConsentMissingFailure() {
-        connectionState = .notAuthorizedByMonitor
-        freshness = hasPriorRealSnapshot ? .stale : .noRealData
-        lastFailure = .monitorConsentMissing
-        lastError = codexFailureDescription(lastFailure)
-    }
-
-    private func applyRegistryFailure(_ failure: AgentSafeFailure) {
-        isRefreshing = false
-        lastFailure = Self.codexFailure(failure)
-        lastError = codexFailureDescription(lastFailure)
-        connectionState = hasPriorRealSnapshot ? .staleWithPreviousRealData(lastFailure!) : .recoverableFailure(lastFailure!)
-        freshness = hasPriorRealSnapshot ? .stale : .noRealData
-        updatePresentationConnection(hasPriorRealSnapshot ? .stale : .failed, freshness: .stale)
-    }
-
-    private func updatePresentationConnection(
-        _ status: SharedConnectionStatus,
-        freshness overrideFreshness: SharedUsageFreshness? = nil
-    ) {
-        presentationCards = Self.cardsByUpdatingPrimaryConnection(
-            presentationCards,
-            primaryConnectorID: primaryConnectorID,
-            status: status,
-            freshness: overrideFreshness
-        )
+        receive([], loginOptions: [])
     }
 
     static func cardsByUpdatingPrimaryConnection(
@@ -452,65 +435,26 @@ public final class UsageStore: ObservableObject {
         }
     }
 
-    private func cancelActiveRefresh() {
-        activeRefreshGeneration &+= 1
-        activeRefreshTask?.cancel()
-        activeRefreshTask = nil
-    }
-
-    private var allowsPeriodicRefresh: Bool {
-        autoRefreshEnabled && monitorConsentGranted && hasPriorRealSnapshot && connectionState == .ready
-    }
-
-    private func updatePeriodicRefreshSchedule() {
-        guard allowsPeriodicRefresh else {
-            periodicRefreshGeneration &+= 1
-            periodicRefreshTask?.cancel()
-            periodicRefreshTask = nil
-            periodicRefreshUsesVisibleInterval = nil
-            return
-        }
-        let usesVisibleInterval = isPanelVisible
-        if periodicRefreshTask != nil,
-           periodicRefreshUsesVisibleInterval == usesVisibleInterval {
-            return
-        }
-        periodicRefreshGeneration &+= 1
-        periodicRefreshTask?.cancel()
-        let generation = periodicRefreshGeneration
-        periodicRefreshUsesVisibleInterval = usesVisibleInterval
-        let interval = usesVisibleInterval ? visibleRefreshInterval : backgroundRefreshInterval
-        periodicRefreshTask = Task { @MainActor [weak self] in
-            defer {
-                if let self, self.periodicRefreshGeneration == generation {
-                    self.periodicRefreshTask = nil
-                    self.periodicRefreshUsesVisibleInterval = nil
-                }
-            }
-            while !Task.isCancelled {
-                try? await Task.sleep(for: interval)
-                guard let self,
-                      self.periodicRefreshGeneration == generation,
-                      self.allowsPeriodicRefresh
-                else { return }
-                await self.refresh(trigger: .timer)
-            }
-        }
-    }
-
-    private static func presentationState(_ state: AgentConnectorState, failure: AgentSafeFailure?) -> CodexConnectionState {
+    private static func presentationState(
+        _ state: AgentConnectorState,
+        failure: AgentSafeFailure?
+    ) -> CodexConnectionState {
         switch state {
         case .inactive: .idle
         case .authenticationRequired: .officialCodexSignInRequired
         case .waitingForFirstResponse: .checkingAccount
         case .ready: .ready
-        case .stale: .staleWithPreviousRealData(codexFailure(failure ?? .unknown))
+        case .stale:
+            .staleWithPreviousRealData(codexFailure(failure ?? .unknown))
         case .unsupported: .blockedFailure(.protocolIncompatible)
-        case .failed: .recoverableFailure(codexFailure(failure ?? .unknown))
+        case .failed:
+            .recoverableFailure(codexFailure(failure ?? .unknown))
         }
     }
 
-    private static func presentationFreshness(_ freshness: AgentConnectorFreshness) -> UsageFreshness {
+    private static func presentationFreshness(
+        _ freshness: AgentConnectorFreshness
+    ) -> UsageFreshness {
         switch freshness {
         case .fresh: .fresh
         case .stale: .stale
@@ -518,7 +462,9 @@ public final class UsageStore: ObservableObject {
         }
     }
 
-    private static func codexFailure(_ failure: AgentSafeFailure) -> CodexUsageClientFailure {
+    private static func codexFailure(
+        _ failure: AgentSafeFailure
+    ) -> CodexUsageClientFailure {
         switch failure {
         case .authorizationRequired: .accountAuthorizationRequired
         case .unavailable: .codexApplicationNotFound
@@ -530,14 +476,16 @@ public final class UsageStore: ObservableObject {
         }
     }
 
-    private func codexFailureDescription(_ failure: CodexUsageClientFailure?) -> String? {
-        failure.map { CodexUsageClientError($0).description(language: language) }
+    private func codexFailureDescription(
+        _ failure: CodexUsageClientFailure?
+    ) -> String? {
+        failure.map {
+            CodexUsageClientError($0).description(language: language)
+        }
     }
 
     deinit {
         registrySubscription?.cancel()
-        passiveStartupTask?.cancel()
-        connectionTask?.cancel()
-        periodicRefreshTask?.cancel()
+        activeScanTask?.cancel()
     }
 }

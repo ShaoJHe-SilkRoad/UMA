@@ -255,6 +255,7 @@ struct M2WADBGCombinedCloseoutTests {
             (await source.currentState()).observation?.balance.observedAt
                 == confirmedBeforeRefresh
         )
+        #expect((await registry.orderedSnapshots()).isEmpty)
         #expect(!FileManager.default.fileExists(atPath: genericURL.path))
         #expect(
             !FileManager.default.fileExists(
@@ -354,12 +355,35 @@ struct M2WADBGCombinedCloseoutTests {
         AgentUsageSnapshot(
             id: AgentConnectorID(rawValue: id)!,
             providerName: id,
-            state: .inactive,
+            state: .ready,
             capturedAt: capturedAt,
-            lastSuccessfulAt: nil,
-            freshness: .unavailable,
-            channels: [],
-            capabilities: [],
+            lastSuccessfulAt: capturedAt,
+            freshness: .fresh,
+            channels: [
+                AgentUsageChannel(
+                    id: .account,
+                    sourceTier: .officialStructuredHook,
+                    sourceVersion: "synthetic-order-v1",
+                    scopes: [.account],
+                    provenance: .providerReported,
+                    freshness: .fresh,
+                    capturedAt: capturedAt,
+                    coverageNote: nil,
+                    rateLimitWindows: [
+                        AgentRateLimitWindow(
+                            id: "synthetic",
+                            kind: .other,
+                            usedPercent: 50,
+                            isUnlimited: false,
+                            resetsAt: nil
+                        )
+                    ],
+                    accountMetrics: nil,
+                    localActivityMetrics: nil,
+                    safeFailure: nil
+                )
+            ],
+            capabilities: [.accountUsage],
             safeFailure: nil
         )
     }

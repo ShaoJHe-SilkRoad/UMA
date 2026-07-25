@@ -497,8 +497,7 @@ struct M2WDBGMainAppDebugTests {
         )
         #expect(try await source.save(manual))
         await waitUntil {
-            store.presentationCards.map(\.id)
-                == ["codex.local", "workbuddy.manualAvailability"]
+            store.presentationCards.map(\.id) == ["codex.local"]
         }
 
         let writes = await persistence.writeCount
@@ -516,12 +515,10 @@ struct M2WDBGMainAppDebugTests {
                 == confirmedAt
         )
         #expect(
-            store.presentationCards.map(\.id)
-                == ["codex.local", "workbuddy.manualAvailability"]
+            store.presentationCards.map(\.id) == ["codex.local"]
         )
         #expect(
-            store.assistantPresentationCards.map(\.id)
-                == ["codex.local", "workbuddy.manualAvailability"]
+            store.assistantPresentationCards.map(\.id) == ["codex.local"]
         )
         await store.stopAllConnectors()
     }
