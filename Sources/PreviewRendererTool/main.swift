@@ -134,11 +134,26 @@ struct PreviewRendererTool {
                     showAPICost: false
                 )
                 : nil
+            let workBuddyLogin = (
+                arguments.contains("--workbuddy-login")
+                    || arguments.contains("--workbuddy-login-unverified")
+            )
+                ? WorkBuddyLoginCoordinator.preview(
+                    signatureTrust: arguments.contains(
+                        "--workbuddy-login-unverified"
+                    ) ? .unverifiable : .trusted
+                )
+                : nil
+            let workBuddySettings = workBuddyLogin == nil
+                ? nil
+                : WorkBuddySettingsModel.preview()
             let panelHeight = measuredPanelHeight(
                 store: store,
                 tuning: tuning,
                 showsSettings: showsSettings,
                 expandedProviderIDs: expandedProviderIDs,
+                workBuddySettings: workBuddySettings,
+                workBuddyLogin: workBuddyLogin,
                 appearanceOverride: appearanceOverride,
                 cardVisibilityOverride: cardVisibilityOverride
             )
@@ -154,6 +169,8 @@ struct PreviewRendererTool {
                     preferencesEnabled: false,
                     settingsInitiallyPresented: showsSettings,
                     expandedProviderIDs: expandedProviderIDs,
+                    workBuddySettings: workBuddySettings,
+                    workBuddyLogin: workBuddyLogin,
                     appearanceOverride: appearanceOverride,
                     renderedHeightOverride: panelHeight,
                     cardVisibilityOverride: cardVisibilityOverride
@@ -225,6 +242,8 @@ struct PreviewRendererTool {
         tuning: GlassTuning,
         showsSettings: Bool,
         expandedProviderIDs: Set<String>,
+        workBuddySettings: WorkBuddySettingsModel?,
+        workBuddyLogin: WorkBuddyLoginCoordinator?,
         appearanceOverride: UsagePanelAppearanceOverride,
         cardVisibilityOverride: UsagePanelCardVisibility?
     ) -> CGFloat {
@@ -237,6 +256,8 @@ struct PreviewRendererTool {
                 settingsInitiallyPresented: showsSettings,
                 expandedProviderIDs: expandedProviderIDs,
                 onHeightChange: { measurement.height = $0 },
+                workBuddySettings: workBuddySettings,
+                workBuddyLogin: workBuddyLogin,
                 appearanceOverride: appearanceOverride,
                 cardVisibilityOverride: cardVisibilityOverride
             )
@@ -269,6 +290,10 @@ struct PreviewRendererTool {
         arguments: [String],
         language: AppLanguage
     ) throws -> SharedUsageCardPresentation? {
+        if arguments.contains("--workbuddy-login")
+            || arguments.contains("--workbuddy-login-unverified") {
+            return nil
+        }
         guard arguments.contains("--assistant-workbuddy")
             || arguments.contains("--assistant-workbuddy-only")
             || arguments.contains(where: { $0.hasPrefix("--workbuddy") }) else {

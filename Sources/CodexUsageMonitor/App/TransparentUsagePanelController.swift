@@ -35,6 +35,7 @@ final class TransparentUsagePanelController {
     private let tuning: GlassTuning
     private let store: UsageStore
     private let workBuddySettings: WorkBuddySettingsModel
+    private let workBuddyLogin: WorkBuddyLoginCoordinator
     private weak var statusItem: NSStatusItem?
     private let visibilityDidChange: (Bool) -> Void
     private var globalEventMonitor: Any?
@@ -44,10 +45,12 @@ final class TransparentUsagePanelController {
         store: UsageStore,
         statusItem: NSStatusItem,
         workBuddySettings: WorkBuddySettingsModel,
+        workBuddyLogin: WorkBuddyLoginCoordinator,
         visibilityDidChange: @escaping (Bool) -> Void
     ) {
         self.store = store
         self.workBuddySettings = workBuddySettings
+        self.workBuddyLogin = workBuddyLogin
         self.statusItem = statusItem
         self.visibilityDidChange = visibilityDidChange
         tuning = .final
@@ -61,6 +64,7 @@ final class TransparentUsagePanelController {
         configurePanel(
             store: store,
             workBuddySettings: workBuddySettings,
+            workBuddyLogin: workBuddyLogin,
             expandedProviderIDs: []
         )
     }
@@ -76,6 +80,7 @@ final class TransparentUsagePanelController {
         configurePanel(
             store: store,
             workBuddySettings: workBuddySettings,
+            workBuddyLogin: workBuddyLogin,
             expandedProviderIDs: request.expandedProviderIDs
         )
         show()
@@ -100,6 +105,7 @@ final class TransparentUsagePanelController {
     private func configurePanel(
         store: UsageStore,
         workBuddySettings: WorkBuddySettingsModel,
+        workBuddyLogin: WorkBuddyLoginCoordinator,
         expandedProviderIDs: Set<String>
     ) {
         panel.level = .popUpMenu
@@ -133,7 +139,8 @@ final class TransparentUsagePanelController {
                     }
                 },
                 localAccessConfirmationAction: NativeLocalCodexAccessConfirmation.action(for: store),
-                workBuddySettings: workBuddySettings
+                workBuddySettings: workBuddySettings,
+                workBuddyLogin: workBuddyLogin
             )
         )
         hostingView.frame = NSRect(x: 0, y: 0, width: Layout.width, height: Layout.height)

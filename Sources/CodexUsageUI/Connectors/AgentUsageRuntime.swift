@@ -33,6 +33,7 @@ enum AgentUsageRuntime {
 public struct UsageMonitorRuntime {
     public let store: UsageStore
     public let workBuddySettings: WorkBuddySettingsModel
+    public let workBuddyLogin: WorkBuddyLoginCoordinator
 
     public static func live(
         workBuddyStoreURL: URL? = nil,
@@ -54,7 +55,12 @@ public struct UsageMonitorRuntime {
             consentDefaults: .standard
         )
         let settings = WorkBuddySettingsModel(source: manualSource)
-        return UsageMonitorRuntime(store: usageStore, workBuddySettings: settings)
+        let login = WorkBuddyLoginCoordinator()
+        return UsageMonitorRuntime(
+            store: usageStore,
+            workBuddySettings: settings,
+            workBuddyLogin: login
+        )
     }
 
     /// Production uses the ordinary stores. A task-owned M2WDBG bundle must

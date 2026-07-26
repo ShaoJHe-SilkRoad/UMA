@@ -17,6 +17,7 @@ public struct UsagePanelView: View {
     private let onHeightChange: ((CGFloat) -> Void)?
     private let localAccessConfirmationAction: CodexLocalAccessConfirmationAction?
     private let workBuddySettings: WorkBuddySettingsModel?
+    private let workBuddyLogin: WorkBuddyLoginCoordinator?
     private let appearanceOverride: UsagePanelAppearanceOverride?
     private let renderedHeightOverride: CGFloat?
     private let cardVisibilityOverride: UsagePanelCardVisibility?
@@ -30,6 +31,7 @@ public struct UsagePanelView: View {
         onHeightChange: ((CGFloat) -> Void)? = nil,
         localAccessConfirmationAction: CodexLocalAccessConfirmationAction? = nil,
         workBuddySettings: WorkBuddySettingsModel? = nil,
+        workBuddyLogin: WorkBuddyLoginCoordinator? = nil,
         appearanceOverride: UsagePanelAppearanceOverride? = nil,
         renderedHeightOverride: CGFloat? = nil,
         cardVisibilityOverride: UsagePanelCardVisibility? = nil
@@ -40,10 +42,16 @@ public struct UsagePanelView: View {
         self.onHeightChange = onHeightChange
         self.localAccessConfirmationAction = localAccessConfirmationAction
         self.workBuddySettings = workBuddySettings
+        self.workBuddyLogin = workBuddyLogin
         self.appearanceOverride = appearanceOverride
         self.renderedHeightOverride = renderedHeightOverride
         self.cardVisibilityOverride = cardVisibilityOverride
         _isShowingSettings = State(initialValue: settingsInitiallyPresented)
+        _settingsDestination = State(
+            initialValue: settingsInitiallyPresented && workBuddyLogin != nil
+                ? .workBuddy
+                : nil
+        )
         _providerExpansion = State(
             initialValue: MainPanelProviderExpansionState(
                 expandedProviderIDs: expandedProviderIDs
@@ -230,6 +238,7 @@ public struct UsagePanelView: View {
                             set: { store.setLanguage($0) }
                         ),
                         workBuddySettings: workBuddySettings,
+                        workBuddyLogin: workBuddyLogin,
                         providerLoginOptions: store.providerLoginOptions,
                         destination: settingsDestination,
                         tuning: tuning,

@@ -51,6 +51,18 @@ public final class WorkBuddySettingsModel: ObservableObject {
         self.now = now
     }
 
+    public static func preview() -> WorkBuddySettingsModel {
+        let store = WorkBuddyManualAvailabilityStore(
+            fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "uma-workbuddy-login-renderer-\(UUID().uuidString).json"
+                )
+        )
+        return WorkBuddySettingsModel(
+            source: ManualWorkBuddyAvailabilitySource(store: store)
+        )
+    }
+
     deinit {
         sourceTask?.cancel()
     }

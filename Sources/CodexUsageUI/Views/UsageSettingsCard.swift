@@ -10,6 +10,7 @@ struct UsageSettingsCard: View {
     @Binding var showAPICost: Bool
     @Binding var language: AppLanguage
     let workBuddySettings: WorkBuddySettingsModel?
+    let workBuddyLogin: WorkBuddyLoginCoordinator?
     let providerLoginOptions: [ProviderLoginOption]
     let destination: UsageSettingsDestination?
     let tuning: GlassTuning
@@ -27,14 +28,7 @@ struct UsageSettingsCard: View {
     private var assistantDensityRaw = DesktopAssistantDensity.automatic.rawValue
 
     var body: some View {
-        ViewThatFits(in: .vertical) {
-            settingsContent
-            ScrollView(.vertical) {
-                settingsContent
-            }
-            .scrollIndicators(.automatic)
-            .accessibilityLabel(language.settingsTitle)
-        }
+        adaptiveContent
         .padding(14)
         .frame(width: 306)
         .frame(maxHeight: maximumHeight)
@@ -50,6 +44,27 @@ struct UsageSettingsCard: View {
         .shadow(color: Color.black.opacity(0.14), radius: 14, y: 8)
         .onAppear {
             launchAtLoginState = LaunchAtLoginService.state
+        }
+    }
+
+    @ViewBuilder
+    private var adaptiveContent: some View {
+        if workBuddyLogin != nil {
+            ScrollView(.vertical) {
+                settingsContent
+                    .frame(width: 278, alignment: .leading)
+            }
+            .scrollIndicators(.automatic)
+            .accessibilityLabel(language.settingsTitle)
+        } else {
+            ViewThatFits(in: .vertical) {
+                settingsContent
+                ScrollView(.vertical) {
+                    settingsContent
+                }
+                .scrollIndicators(.automatic)
+                .accessibilityLabel(language.settingsTitle)
+            }
         }
     }
 
@@ -123,6 +138,7 @@ struct UsageSettingsCard: View {
             if let workBuddySettings {
                 WorkBuddySettingsSection(
                     model: workBuddySettings,
+                    login: workBuddyLogin,
                     language: language,
                     expandOnAppear: destination == .workBuddy
                 )
@@ -224,11 +240,25 @@ struct UsageSettingsCard: View {
 
 private struct WorkBuddySettingsSection: View {
     @ObservedObject var model: WorkBuddySettingsModel
+    let login: WorkBuddyLoginCoordinator?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let language: AppLanguage
     let expandOnAppear: Bool
     @State private var isExpanded = false
     @State private var clearIsArmed = false
+
+    init(
+        model: WorkBuddySettingsModel,
+        login: WorkBuddyLoginCoordinator?,
+        language: AppLanguage,
+        expandOnAppear: Bool
+    ) {
+        self.model = model
+        self.login = login
+        self.language = language
+        self.expandOnAppear = expandOnAppear
+        _isExpanded = State(initialValue: expandOnAppear)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -253,6 +283,16 @@ private struct WorkBuddySettingsSection: View {
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 9) {
+                    if let login {
+                        WorkBuddyLoginAssistanceSection(
+                            coordinator: login,
+                            language: language
+                        )
+
+                        Divider()
+                            .opacity(0.35)
+                    }
+
                     SettingsToggleRow(
                         title: language.workBuddyEnable,
                         systemImage: "checkmark.circle",
@@ -517,6 +557,216 @@ private struct WorkBuddySettingsSection: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.08)))
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct WorkBuddyLoginAssistanceSection: View {
+    @ObservedObject var coordinator: WorkBuddyLoginCoordinator
+    let language: AppLanguage
+
+    private let officialInstructionsURL = URL(
+        string: "https://www.workbuddy.cn/docs/workbuddy/Usage"
+    )!
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(
+                language.workBuddyLoginForDataSync,
+                systemImage: "person.crop.circle.badge.checkmark"
+            )
+            .font(UsageDesign.font(12, weight: .semibold, language: language))
+
+            Text(language.workBuddyLoginPrivacySummary)
+                .font(UsageDesign.font(9.5, language: language))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            installationStatus
+
+            Button(language.workBuddyLoginForDataSync) {
+                coordinator.startLogin()
+            }
+            .buttonStyle(.bordered)
+            .accessibilityHint(language.workBuddyLoginPrivacySummary)
+
+            if coordinator.flowState.isActive
+                || coordinator.flowState == .completed
+                || {
+                    if case .failed = coordinator.flowState { return true }
+                    return false
+                }() {
+                Text(language.workBuddyAccountType)
+                    .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                    .foregroundStyle(.secondary)
+
+                Picker("", selection: $coordinator.accountMode) {
+                    ForEach(WorkBuddyLoginAccountMode.allCases) { mode in
+                        Text(language.workBuddyAccountMode(mode)).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .accessibilityLabel(language.workBuddyAccountType)
+                .accessibilityHint(language.workBuddyAccountModeHint)
+
+                Text(language.workBuddyAccountModeHint)
+                    .font(UsageDesign.font(9, language: language))
+                    .foregroundStyle(.secondary)
+
+                WorkBuddyLoginConfirmationRow(
+                    title: language.workBuddyLoginPrivacyConfirmation,
+                    isOn: coordinator.privacyConfirmed,
+                    language: language,
+                    action: {
+                        coordinator.setPrivacyConfirmed(
+                            !coordinator.privacyConfirmed
+                        )
+                    }
+                )
+
+                if coordinator.installation.application?
+                    .signatureTrust.requiresOfficialInstallConfirmation == true {
+                    Text(language.workBuddyOfficialInstallWarning)
+                        .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel(language.workBuddyOfficialInstallWarning)
+
+                    WorkBuddyLoginConfirmationRow(
+                        title: language.workBuddyOfficialInstallConfirmation,
+                        isOn: coordinator.officialInstallConfirmed,
+                        language: language,
+                        action: {
+                            coordinator.setOfficialInstallConfirmed(
+                                !coordinator.officialInstallConfirmed
+                            )
+                        }
+                    )
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(language.workBuddyLoginStepsTitle)
+                        .font(UsageDesign.font(10, weight: .semibold, language: language))
+                    ForEach(
+                        Array(
+                            language.workBuddyLoginSteps(
+                                coordinator.accountMode
+                            ).enumerated()
+                        ),
+                        id: \.offset
+                    ) { index, step in
+                        Text("\(index + 1). \(step)")
+                    }
+                }
+                .font(UsageDesign.font(9.5, language: language))
+                .foregroundStyle(.secondary)
+                .accessibilityElement(children: .combine)
+
+                HStack(spacing: 6) {
+                    Button(language.workBuddyOpenApplication) {
+                        coordinator.openOfficialApplication()
+                    }
+                    .disabled(!coordinator.canOpenOfficialApplication)
+
+                    Button(language.checkAgain) {
+                        coordinator.checkAgain()
+                    }
+                    .disabled(
+                        coordinator.flowState != .awaitingUserCompletion
+                            && coordinator.flowState != .completed
+                    )
+                }
+                .buttonStyle(.bordered)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Button(
+                        language.workBuddyCancelLogin,
+                        role: .cancel
+                    ) {
+                        coordinator.cancel()
+                    }
+                    .buttonStyle(.borderless)
+
+                    Link(
+                        language.workBuddyOpenOfficialLoginInstructions,
+                        destination: officialInstructionsURL
+                    )
+                    .accessibilityHint(language.workBuddyLoginPrivacySummary)
+                }
+
+                flowStatus
+            }
+        }
+        .padding(9)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.secondary.opacity(0.07))
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var installationStatus: some View {
+        switch coordinator.installation {
+        case .notInstalled:
+            Text(language.workBuddyNotInstalled)
+                .foregroundStyle(.red)
+        case .invalidBundleIdentity:
+            Text(language.workBuddyInvalidIdentity)
+                .foregroundStyle(.red)
+        case let .available(application):
+            Text(
+                [
+                    language.workBuddyInstalled,
+                    application.version
+                ].compactMap { $0 }.joined(separator: " · ")
+            )
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var flowStatus: some View {
+        switch coordinator.flowState {
+        case .awaitingUserCompletion:
+            Text(language.workBuddyAwaitingCompletion)
+        case .completed:
+            Text(language.workBuddySafeCompletionResult)
+        case let .failed(failure):
+            Text(language.workBuddyLoginFailure(failure))
+        case .opening:
+            ProgressView()
+                .controlSize(.small)
+        case .idle, .confirmationRequired, .readyToOpen, .checking, .cancelled:
+            EmptyView()
+        }
+    }
+}
+
+private struct WorkBuddyLoginConfirmationRow: View {
+    let title: String
+    let isOn: Bool
+    let language: AppLanguage
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: isOn ? "checkmark.square.fill" : "square")
+                    .foregroundStyle(isOn ? UsageDesign.blue : Color.secondary)
+                Text(title)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(
+            isOn
+                ? language.enabledAccessibilityValue
+                : language.disabledAccessibilityValue
+        )
     }
 }
 
