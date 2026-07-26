@@ -1,6 +1,6 @@
 # UMA WorkBuddy Account Web Sync QA Issue Ledger
 
-Version: 1.1
+Version: 1.2
 Date: 2026-07-26
 Goal: M2WACCOUNT-G1
 
@@ -20,6 +20,7 @@ Goal: M2WACCOUNT-G1
 | WA-012 | Official page value and UMA value could differ or external sessions could be changed. | Requires Human login, same-time official balance comparison, WorkBuddy.app-closed proof, Disconnect proof, and Safari/Chrome/WorkBuddy session preservation check. | Pending Human gate |
 | WA-027 | “Allow Once” could silently authorize later navigation to the same external host. | External approval is scoped to the single navigation decision; no host approval is cached, and every later external navigation requires a new Human confirmation. | Automated PASS |
 | WA-028 | The apex domain or a query-bearing page could bypass the exact official-origin and route boundary. | Only `https://www.workbuddy.cn` is admitted without confirmation; `https://workbuddy.cn` is treated as external, and extraction rejects query- or fragment-bearing variants of the exact Plan and Usage route. | Automated PASS |
+| WA-029 | A broad full-command process listing exposed an unrelated third-party bearer-like command argument in tool output. | Root cause was the diagnostic shape, not WorkBuddy: no WorkBuddy credential, cookie, identity, Git, package, temporary artifact, or screenshot exposure was found. The Founder accepted the residual risk and removed token rotation as a development gate. Future task diagnostics are argument-free and allowlisted, using only PID, parent PID when required, elapsed time, state, executable basename or approved path, and owned-child count. A focused source/script audit rejects full-argv and environment-dump commands. | Accepted nonblocking risk; prevention PASS |
 
 ## All-pool repair ledger
 
@@ -42,12 +43,13 @@ Goal: M2WACCOUNT-G1
 
 ## Verification state
 
-The version-1.1 repair passed 46 focused tests across the account-web,
-all-pool, and Minimalist suites; the full suite passed 234 tests across 30
-suites. Debug, Release, and strict-concurrency Release with warnings-as-errors
-builds passed. Light/Dark English and Simplified Chinese renderer evidence
-passed for the main panel, Regular Assistant, Minimalist Assistant, and
-increased-contrast presentation. Independent Examiner review found one
-incomplete-section readiness gap; the bounded retry repair and focused
-regression were independently rechecked as resolved. Commit-exact package
-audit and Human same-time balance comparison remain pending.
+The version-1.2 repair passed 46 focused tests across the account-web,
+all-pool, and Minimalist suites plus the focused safe-diagnostics audit; the
+full suite passed 235 tests across 31 suites. Debug, Release, and
+strict-concurrency Release with warnings-as-errors builds passed. Light/Dark
+English and Simplified Chinese renderer evidence passed for the main panel,
+Regular Assistant, Minimalist Assistant, and increased-contrast presentation.
+Independent Examiner review found one incomplete-section readiness gap; the
+bounded retry repair and focused regression were independently rechecked as
+resolved. The pre-closeout commit-exact package passed static audit; final
+package audit and Human same-time balance comparison remain pending.
