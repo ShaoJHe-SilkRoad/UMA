@@ -4,7 +4,19 @@ Date: 2026-07-25
 
 ## Status
 
-`M2W-LIVE-G1` is dormant. This record does not authorize it.
+`M2W-LIVE-G1` remains dormant. M2WACCOUNT-G1 separately admits one
+WorkBuddy-only Experimental source:
+
+```text
+Human consent
+→ UMA-owned isolated authenticated WebKit session
+→ exact official Plan and Usage route
+→ current validated all-pool Credit observation
+→ authenticatedAccountWeb admission
+```
+
+This exemption is not the automatic structured local source contemplated by
+M2W-LIVE-G1 and does not authorize another provider.
 
 Manual user confirmation remains retained compatibility infrastructure through:
 
@@ -17,13 +29,15 @@ Manual WorkBuddy Settings
 ```
 
 It is classified `manualOnly` and is hidden from production provider surfaces.
-Automatic structured WorkBuddy synchronization remains `NO-GO`. The trusted
+An official automatic API, Hook, or local structured WorkBuddy source remains
+`NO-GO`. The trusted
 5.3.5 Hook recheck at commit
 `f59f8d5dc7773cd40aad1eeae49fc01e22413f46` admitted no public Credits
-contract, event, or getter and is read-only evidence. No WorkBuddy
-account, provider, application, browser content, private file, database,
-process, memory, credential, Keychain, OCR, or network source was inspected or
-used by M2W.
+contract, event, or getter and is read-only evidence. M2WACCOUNT-G1 does not
+change that result: it reads only allowlisted Credit fields from the
+Human-authenticated official page inside UMA's isolated session, with no
+credential, identity, cookie, token, full HTML, browser storage, private API,
+background poll, or provider task access.
 
 ## Contracts an official source must preserve
 
@@ -62,16 +76,18 @@ A future Founder-authorized official-source goal must establish:
 9. package, privacy, fixture-isolation, and commit-exact acceptance;
 10. a separate Founder decision to activate the source.
 
-Until those gates pass, WorkBuddy remains hidden. Its manual source remains
-preserved but cannot surface-admit a provider. The application must not attempt
-background discovery or synchronization.
+Until those gates pass, the manual and local-live paths remain unable to admit
+WorkBuddy. The distinct account-web exemption may admit WorkBuddy only after a
+current successful foreground read; failure, expiry, consent withdrawal, or
+Disconnect removes it immediately. The application must not attempt background
+discovery or synchronization.
 
 ## Provider roadmap boundary
 
-Current production-visible order:
+Current production-visible order when each provider is currently admitted:
 
 ```text
-Codex, only when currently admitted
+Codex → WorkBuddy
 ```
 
 Future admitted order:

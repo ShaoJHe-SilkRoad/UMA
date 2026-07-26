@@ -1,10 +1,10 @@
 # UMA WorkBuddy Account Web Sync Package Closure
 
-Version: 1.0
-Date: 2026-07-25
+Version: 1.1
+Date: 2026-07-26
 Goal: M2WACCOUNT-G1
 
-Status: `PENDING HUMAN PHYSICAL BALANCE COMPARISON`
+Status: `CLOSED — ACCOUNT WEB SYNC ACCEPTED`
 
 ## Required final package
 
@@ -36,5 +36,26 @@ The package must be built from the exact final commit archive and contain only:
 - Safari, Chrome, and WorkBuddy.app sessions remain untouched;
 - clean shutdown, clean worktree, and empty index.
 
-Final hashes, commit IDs, validation counts, and privacy findings will be added
-only after the runtime and Human gates pass.
+## Accepted physical closeout
+
+- Runtime commit: `1e87aa9bd332f3900f42804e00f6ae120002ae5f`.
+- Authenticated website observation:
+  subscription `7,847.34`, add-on `0.00`, benefit/gift `100.00`, total
+  `7,947.34`.
+- The Human diagnostic `7,849.75` tracked the subscription subtotal within
+  `2.41` Credits of normal intervening use and omitted the current `100.00`
+  website benefit/gift pool. The Founder-approved website-source authority
+  makes that repeated desktop-style near-`100` diagnostic nonblocking.
+- Main panel and Regular Assistant showed `7,947.34`; Minimalist showed
+  `7.9k`; Tooltip and VoiceOver retained `7,947.34 Credits available`.
+- WorkBuddy.app was closed and Sync Now still produced a current admitted
+  account-web snapshot.
+- Disconnect cleared consent and the UMA-owned account-web admission, removed
+  WorkBuddy from both provider surfaces, and preserved the separate legacy
+  manual `500` record.
+- The runtime commit-exact package passed its provenance, architecture,
+  signature, dependency, privacy, fixture-isolation, and content audits.
+
+The exact final closeout commit, tree, final package path, hashes, and
+path-independent manifest digest are generated after this record is committed
+and are recorded in the final task report and package provenance.

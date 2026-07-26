@@ -2,7 +2,41 @@
 
 Date: 2026-07-25
 
-## R3 authoritative production supersession
+## M2WACCOUNT-G1 WorkBuddy-only supersession
+
+```text
+manual Credit infrastructure:
+retained and separate
+
+manual WorkBuddy production visibility:
+disabled
+
+current visible providers:
+Codex when locally admitted
+WorkBuddy only after a current successful authenticated account-web read
+
+WorkBuddy source:
+Experimental authenticatedAccountWeb
+
+scan triggers:
+application launch with an established isolated session
+Manual Refresh
+Sync Now
+Check Again
+
+background polling:
+none
+
+M2W-LIVE:
+dormant
+```
+
+M2WACCOUNT-G1 supersedes the R3 WorkBuddy-hidden boundary only for the explicit
+Founder-approved account-web exemption. It does not alter another provider's
+local-live contract and does not turn the retained manual record into a
+production fallback.
+
+## R3 predecessor boundary
 
 ```text
 manual Credit infrastructure:
@@ -11,11 +45,8 @@ retained
 manual WorkBuddy production visibility:
 disabled
 
-current visible provider:
+R3-era visible provider:
 Codex only when active, authenticated, and locally readable
-
-WorkBuddy:
-hidden until source admission
 
 Chinese-agent login:
 optional only after source admission and only when login is the sole missing condition
@@ -27,16 +58,19 @@ M2W-LIVE:
 dormant
 ```
 
-M2WADBG-R3 supersedes the historical visible manual-provider behavior recorded
-later in this file. It does not delete the exact Decimal Credit model, manual
-schema, saved record, Settings workflow, migrations, or tests. Manual data is
-compatibility/fallback infrastructure and is not production display authority.
+M2WADBG-R3 remains the accepted predecessor for local-live admission and
+supersedes the historical visible manual-provider behavior recorded later in
+this file. M2WACCOUNT-G1 changes only WorkBuddy's separately authorized
+account-web admission. Neither goal deletes the exact Decimal Credit model,
+manual schema, saved record, Settings workflow, migrations, or tests. Manual
+data is compatibility infrastructure and is not production display authority.
 
 One provider-neutral scanner produces one current admission set. The main panel,
-status item, and Desktop Assistant derive only from it. When no provider is
-admitted, the panel presents the neutral local-Agent guidance, the status item
-has no fabricated percentage, and the Assistant hides its shell without
-changing its enabled preference.
+status item, and Desktop Assistant derive only from it. The WorkBuddy
+account-web connector publishes into that shared set only after a current
+successful foreground read. When no provider is admitted, the panel presents
+the neutral local-Agent guidance, the status item has no fabricated percentage,
+and the Assistant hides its shell without changing its enabled preference.
 
 ## Historical manual-program status
 
@@ -125,6 +159,7 @@ Human operations.
 - M2WA-G1 Desktop Assistant presentation: closed
 - M2WADBG-G1 combined closeout: closed
 - M2WADBG-R3 local-live admission and Chinese login contract: closed
+- M2WACCOUNT-G1 WorkBuddy-only direct account web synchronization: closed
 
 The runtime repair is commit
 `3140623a798f721afa0202f13269bccaebbdc75e`. The final closeout revision is
@@ -160,7 +195,26 @@ package.
 - Original UMA preferences restored byte-for-byte after task-owned physical
   validation.
 
-## Completion boundary
+## Current completion boundary
+
+`M2WACCOUNT-G1 PASS — WORKBUDDY DIRECT ACCOUNT WEB SYNC COMPLETED`
+
+Runtime revision:
+`1e87aa9bd332f3900f42804e00f6ae120002ae5f`.
+
+The accepted account-web closeout used a complete authenticated website
+observation of subscription `7,847.34`, add-on `0.00`, benefit/gift `100.00`,
+and total `7,947.34`. The Human diagnostic `7,849.75` followed the
+subscription subtotal within `2.41` Credits of normal intervening use and
+omitted the current `100.00` website pool; under the explicit Founder source
+order it did not override the complete current website observation. WorkBuddy
+remained admitted with WorkBuddy.app closed, then disappeared from both
+surfaces after Disconnect. The manual `500` record remained unchanged.
+
+The exact final closeout revision, tree, package path, and digests are recorded
+in the final task report and embedded in the commit-exact package provenance.
+
+## Historical completion boundaries
 
 `M2WADBG-R3 PASS — LOCAL-LIVE PROVIDER ADMISSION AND CHINESE LOGIN CONTRACT CLOSED`
 
