@@ -3,6 +3,39 @@ import Combine
 import Foundation
 import WebKit
 
+struct WorkBuddyAccountWebExtractionAttempt: Equatable, Sendable {
+    let data: Data
+    let failure: WorkBuddyAccountWebFailure?
+}
+
+@MainActor
+enum WorkBuddyAccountWebExtractionReadiness {
+    static let maximumAttempts = 20
+    static let delay = Duration.milliseconds(250)
+
+    static func evaluate(
+        isCurrent: () -> Bool,
+        read: () async throws -> WorkBuddyAccountWebExtractionAttempt,
+        wait: (Duration) async throws -> Void = { duration in
+            try await Task.sleep(for: duration)
+        }
+    ) async throws -> WorkBuddyAccountWebExtractionAttempt? {
+        for attempt in 0..<maximumAttempts {
+            guard isCurrent() else { return nil }
+            let result = try await read()
+            guard isCurrent() else { return nil }
+            let isStillRendering =
+                result.failure == .unexpectedPage
+                    || result.failure == .malformedCredits
+            guard isStillRendering, attempt + 1 < maximumAttempts else {
+                return result
+            }
+            try await wait(delay)
+        }
+        return nil
+    }
+}
+
 @MainActor
 public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObject {
     public static let disclosureVersion =
@@ -39,6 +72,7 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
     private var window: NSWindow?
     private var navigationContinuation: CheckedContinuation<Void, Error>?
     private var navigationTimeoutTask: Task<Void, Never>?
+    private var readGeneration: UInt64 = 0
 
     var canReadOnApplicationLaunch: Bool {
         consentGranted
@@ -101,6 +135,8 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
             flowState = .consentRequired
             return .failure(.consentRequired)
         }
+        readGeneration &+= 1
+        let generation = readGeneration
         let browser = ensureBrowser()
         flowState = .synchronizing
         do {
@@ -109,38 +145,64 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
                 in: browser
             )
         } catch let failure as WorkBuddyAccountWebFailure {
+            guard readGeneration == generation else {
+                return .failure(.webContentUnavailable)
+            }
             flowState = .failed(failure)
             return .failure(failure)
         } catch {
+            guard readGeneration == generation else {
+                return .failure(.webContentUnavailable)
+            }
             flowState = .failed(.webContentUnavailable)
             return .failure(.webContentUnavailable)
         }
 
+        guard readGeneration == generation else {
+            return .failure(.webContentUnavailable)
+        }
         guard WorkBuddyAccountWebPolicy.isExactUsagePage(browser.url) else {
             flowState = .signInRequired
             return .authenticationRequired
         }
         do {
-            let value = try await browser.evaluateJavaScript(
-                WorkBuddyAccountWebExtractorScript.source
+            let attempt = try await WorkBuddyAccountWebExtractionReadiness.evaluate(
+                isCurrent: { [weak self] in
+                    self?.readGeneration == generation
+                },
+                read: {
+                    guard WorkBuddyAccountWebPolicy.isExactUsagePage(browser.url)
+                    else {
+                        throw WorkBuddyAccountWebFailure.authenticationRequired
+                    }
+                    let value = try await browser.evaluateJavaScript(
+                        WorkBuddyAccountWebExtractorScript.source
+                    )
+                    guard let dictionary = value as? [String: Any] else {
+                        throw WorkBuddyAccountWebFailure.malformedCredits
+                    }
+                    let data = try JSONSerialization.data(
+                        withJSONObject: dictionary,
+                        options: [.sortedKeys]
+                    )
+                    return WorkBuddyAccountWebExtractionAttempt(
+                        data: data,
+                        failure: (dictionary["failure"] as? String).flatMap(
+                            WorkBuddyAccountWebFailure.init(rawValue:)
+                        )
+                    )
+                }
             )
-            guard let dictionary = value as? [String: Any] else {
-                flowState = .failed(.malformedCredits)
-                return .failure(.malformedCredits)
+            guard let attempt else {
+                return .failure(.webContentUnavailable)
             }
-            if let failure = dictionary["failure"] as? String {
-                let mapped = WorkBuddyAccountWebFailure(rawValue: failure)
-                    ?? .malformedCredits
-                flowState = .failed(mapped)
-                return .failure(mapped)
+            if let failure = attempt.failure {
+                flowState = .failed(failure)
+                return .failure(failure)
             }
-            let data = try JSONSerialization.data(
-                withJSONObject: dictionary,
-                options: [.sortedKeys]
-            )
             let payload = try JSONDecoder().decode(
                 WorkBuddyAccountWebExtractionPayload.self,
-                from: data
+                from: attempt.data
             )
             let result = WorkBuddyAccountWebExtractor.validate(
                 payload,
@@ -160,7 +222,17 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
                 flowState = .failed(failure)
             }
             return result
+        } catch WorkBuddyAccountWebFailure.authenticationRequired {
+            guard readGeneration == generation else {
+                return .failure(.webContentUnavailable)
+            }
+            defaults.removeObject(forKey: Self.sessionEstablishedKey)
+            flowState = .signInRequired
+            return .authenticationRequired
         } catch {
+            guard readGeneration == generation else {
+                return .failure(.webContentUnavailable)
+            }
             flowState = .failed(.malformedCredits)
             return .failure(.malformedCredits)
         }
@@ -188,6 +260,7 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
     }
 
     public func cancel() {
+        readGeneration &+= 1
         webView?.stopLoading()
         navigationTimeoutTask?.cancel()
         navigationTimeoutTask = nil
@@ -289,6 +362,7 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
     }
 
     private func releaseBrowser() {
+        readGeneration &+= 1
         navigationTimeoutTask?.cancel()
         navigationTimeoutTask = nil
         navigationContinuation?.resume(

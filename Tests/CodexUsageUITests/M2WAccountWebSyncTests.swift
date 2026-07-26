@@ -460,6 +460,9 @@ struct M2WAccountWebSyncTests {
         #expect(!controller.contains("poll"))
         #expect(!controller.contains("backgroundRefresh"))
         #expect(!controller.contains("DispatchSourceTimer"))
+        #expect(controller.contains("maximumAttempts = 20"))
+        #expect(controller.contains("delay = Duration.milliseconds(250)"))
+        #expect(controller.contains("readGeneration &+= 1"))
         let readStart = try #require(
             controller.range(of: "func readCurrentCredits()")
         )
@@ -473,6 +476,82 @@ struct M2WAccountWebSyncTests {
             readStart.lowerBound..<disconnectStart.lowerBound
         ]
         #expect(!readImplementation.contains("showWindow()"))
+    }
+
+    @Test @MainActor
+    func extractionReadinessRecoversAfterBoundedRenderingDelay() async throws {
+        var reads = 0
+        var waits: [Duration] = []
+        let success = try extractionAttempt(
+            WorkBuddyAccountWebExtractionPayload(
+                extractorVersion: 1,
+                rows: [
+                    WorkBuddyAccountWebSanitizedRow(
+                        remaining: "2099.47",
+                        used: nil,
+                        total: nil
+                    )
+                ]
+            )
+        )
+
+        let result = try await WorkBuddyAccountWebExtractionReadiness.evaluate(
+            isCurrent: { true },
+            read: {
+                reads += 1
+                return reads < 3
+                    ? try extractionAttempt(failure: .unexpectedPage)
+                    : success
+            },
+            wait: { waits.append($0) }
+        )
+
+        #expect(result == success)
+        #expect(reads == 3)
+        #expect(waits == [.milliseconds(250), .milliseconds(250)])
+    }
+
+    @Test @MainActor
+    func extractionReadinessFailsClosedAfterExactAttemptLimit() async throws {
+        var reads = 0
+        var waits = 0
+        let failure = try extractionAttempt(failure: .malformedCredits)
+
+        let result = try await WorkBuddyAccountWebExtractionReadiness.evaluate(
+            isCurrent: { true },
+            read: {
+                reads += 1
+                return failure
+            },
+            wait: { _ in waits += 1 }
+        )
+
+        #expect(result == failure)
+        #expect(reads == 20)
+        #expect(waits == 19)
+    }
+
+    @Test @MainActor
+    func extractionReadinessStopsWithoutLatePublicationAfterInvalidation() async throws {
+        var isCurrent = true
+        var reads = 0
+        var waits = 0
+
+        let result = try await WorkBuddyAccountWebExtractionReadiness.evaluate(
+            isCurrent: { isCurrent },
+            read: {
+                reads += 1
+                return try extractionAttempt(failure: .unexpectedPage)
+            },
+            wait: { _ in
+                waits += 1
+                isCurrent = false
+            }
+        )
+
+        #expect(result == nil)
+        #expect(reads == 1)
+        #expect(waits == 1)
     }
 
     @Test
@@ -631,6 +710,33 @@ struct M2WAccountWebSyncTests {
             throw WorkBuddyAccountWebFailure.malformedCredits
         }
         return reading
+    }
+
+    private func extractionAttempt(
+        _ payload: WorkBuddyAccountWebExtractionPayload? = nil,
+        failure: WorkBuddyAccountWebFailure? = nil
+    ) throws -> WorkBuddyAccountWebExtractionAttempt {
+        var dictionary: [String: Any] = [
+            "extractorVersion": WorkBuddyAccountWebReading.extractorVersion,
+            "rows": []
+        ]
+        if let payload {
+            dictionary = try #require(
+                JSONSerialization.jsonObject(
+                    with: JSONEncoder().encode(payload)
+                ) as? [String: Any]
+            )
+        }
+        if let failure {
+            dictionary["failure"] = failure.rawValue
+        }
+        return WorkBuddyAccountWebExtractionAttempt(
+            data: try JSONSerialization.data(
+                withJSONObject: dictionary,
+                options: [.sortedKeys]
+            ),
+            failure: failure
+        )
     }
 
     private func packageRoot() -> URL {
