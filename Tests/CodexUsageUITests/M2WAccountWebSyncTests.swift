@@ -439,8 +439,69 @@ struct M2WAccountWebSyncTests {
         }
         #expect(extractor.contains(".plans-usage__quota-row"))
         #expect(extractor.contains(".plans-usage__quota-remain"))
-        #expect(controller.contains("WKWebsiteDataStore.remove("))
+        #expect(controller.contains("WKWebsiteDataStore.allWebsiteDataTypes()"))
+        #expect(controller.contains("fetchDataRecords(ofTypes: dataTypes)"))
+        #expect(controller.contains("removeData(ofTypes: dataTypes, for: records)"))
+        #expect(controller.contains("WorkBuddyOwnedWebsiteDataClearer.clear("))
         #expect(controller.contains("forIdentifier:"))
+    }
+
+    @Test @MainActor
+    func ownedWebsiteDataClearerSucceedsForEmptyDedicatedStore() async {
+        var removed: [[Int]] = []
+
+        let didClear = await WorkBuddyOwnedWebsiteDataClearer.clear(
+            fetch: { [] },
+            remove: { removed.append($0) }
+        )
+
+        #expect(didClear)
+        #expect(removed == [[]])
+    }
+
+    @Test @MainActor
+    func ownedWebsiteDataClearerRemovesFetchedRecordsAndVerifiesEmpty() async {
+        var records = [1, 2]
+        var removed: [[Int]] = []
+
+        let didClear = await WorkBuddyOwnedWebsiteDataClearer.clear(
+            fetch: { records },
+            remove: {
+                removed.append($0)
+                records.removeAll()
+            }
+        )
+
+        #expect(didClear)
+        #expect(removed == [[1, 2]])
+        #expect(records.isEmpty)
+    }
+
+    @Test @MainActor
+    func ownedWebsiteDataClearerFailsClosedWhenRecordsRemain() async {
+        let didClear = await WorkBuddyOwnedWebsiteDataClearer.clear(
+            fetch: { [1] },
+            remove: { _ in }
+        )
+
+        #expect(!didClear)
+    }
+
+    @Test @MainActor
+    func disconnectMapsOwnedWebsiteDataClearFailureToExplicitState() async {
+        let suite = "M2WAccountWebSyncTests.clear-failure.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = WorkBuddyAccountWebSessionController(
+            defaults: defaults,
+            websiteDataClearer: { false }
+        )
+        controller.grantConsent()
+
+        await controller.disconnectAndClearOwnedWebsiteData()
+
+        #expect(!controller.consentGranted)
+        #expect(controller.flowState == .failed(.websiteDataClearFailed))
     }
 
     @Test

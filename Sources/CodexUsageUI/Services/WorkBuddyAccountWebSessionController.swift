@@ -37,6 +37,18 @@ enum WorkBuddyAccountWebExtractionReadiness {
 }
 
 @MainActor
+enum WorkBuddyOwnedWebsiteDataClearer {
+    static func clear<Record>(
+        fetch: () async -> [Record],
+        remove: ([Record]) async -> Void
+    ) async -> Bool {
+        let records = await fetch()
+        await remove(records)
+        return await fetch().isEmpty
+    }
+}
+
+@MainActor
 public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObject {
     public static let disclosureVersion =
         WorkBuddyAccountWebConsentRecord.currentDisclosureVersion
@@ -52,10 +64,11 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
             releaseBrowser()
             if oldValue == .persistent && sessionMode == .nonpersistent {
                 Task { @MainActor [weak self] in
-                    guard !(await Self.clearPersistentWebsiteData()) else {
+                    guard let self,
+                          !(await websiteDataClearer()) else {
                         return
                     }
-                    self?.flowState = .failed(.websiteDataClearFailed)
+                    flowState = .failed(.websiteDataClearFailed)
                 }
             }
         }
@@ -68,6 +81,7 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
         uuidString: "99F5E198-BD63-4450-8EE1-2447F27A5F2D"
     )!
     private let defaults: UserDefaults
+    private let websiteDataClearer: @MainActor () async -> Bool
     private var webView: WKWebView?
     private var window: NSWindow?
     private var navigationContinuation: CheckedContinuation<Void, Error>?
@@ -84,8 +98,14 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
         self.init(defaults: .standard)
     }
 
-    init(defaults: UserDefaults) {
+    init(
+        defaults: UserDefaults,
+        websiteDataClearer: (@MainActor () async -> Bool)? = nil
+    ) {
         self.defaults = defaults
+        self.websiteDataClearer = websiteDataClearer ?? {
+            await WorkBuddyAccountWebSessionController.clearPersistentWebsiteData()
+        }
         let record: WorkBuddyAccountWebConsentRecord? = defaults.data(
             forKey: Self.consentKey
         ).flatMap {
@@ -244,19 +264,32 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
         consentGranted = false
         defaults.removeObject(forKey: Self.consentKey)
         defaults.removeObject(forKey: Self.sessionEstablishedKey)
-        flowState = await Self.clearPersistentWebsiteData()
+        flowState = await websiteDataClearer()
             ? .idle
             : .failed(.websiteDataClearFailed)
     }
 
     private static func clearPersistentWebsiteData() async -> Bool {
-        await withCheckedContinuation { continuation in
-            WKWebsiteDataStore.remove(
-                forIdentifier: Self.persistentDataStoreIdentifier
-            ) { error in
-                continuation.resume(returning: error == nil)
+        let dataStore = WKWebsiteDataStore(
+            forIdentifier: Self.persistentDataStoreIdentifier
+        )
+        let dataTypes = WKWebsiteDataStore.allWebsiteDataTypes()
+        return await WorkBuddyOwnedWebsiteDataClearer.clear(
+            fetch: {
+                await withCheckedContinuation { continuation in
+                    dataStore.fetchDataRecords(ofTypes: dataTypes) { records in
+                        continuation.resume(returning: records)
+                    }
+                }
+            },
+            remove: { records in
+                await withCheckedContinuation { continuation in
+                    dataStore.removeData(ofTypes: dataTypes, for: records) {
+                        continuation.resume()
+                    }
+                }
             }
-        }
+        )
     }
 
     public func cancel() {
