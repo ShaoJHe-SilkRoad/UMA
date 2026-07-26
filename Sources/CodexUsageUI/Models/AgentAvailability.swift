@@ -667,24 +667,28 @@ public enum CreditFormatter {
     }
 
     public static func compact(_ value: Decimal) -> String {
+        guard WorkBuddyAccountCreditRules.isValid(value) else { return "—" }
+        if value == 0 { return "0" }
+        if value < 1 { return "<1" }
         if value < 1_000 {
-            let rounded = roundHalfUp(value, scale: 0)
-            if rounded >= 1_000 {
-                return "1k"
-            }
-            return decimalString(rounded)
+            return decimalString(truncate(value, scale: 0))
         }
 
+        let divisor: Decimal
+        let suffix: String
         if value < 1_000_000 {
-            let roundedThousands = roundHalfUp(value / 1_000, scale: 1)
-            if roundedThousands >= 1_000 {
-                return "1M"
-            }
-            return "\(decimalString(roundedThousands))k"
+            divisor = 1_000
+            suffix = "k"
+        } else if value < 1_000_000_000 {
+            divisor = 1_000_000
+            suffix = "M"
+        } else {
+            divisor = 1_000_000_000
+            suffix = "B"
         }
-
-        let roundedMillions = roundHalfUp(value / 1_000_000, scale: 1)
-        return "\(decimalString(roundedMillions))M"
+        let scaled = value / divisor
+        let truncated = truncate(scaled, scale: scaled < 100 ? 1 : 0)
+        return "\(decimalString(truncated))\(suffix)"
     }
 
     public static func exact(_ value: Int64, language: AppLanguage) -> String {
@@ -698,6 +702,22 @@ public enum CreditFormatter {
         formatter.maximumFractionDigits = 38
         formatter.minimumFractionDigits = 0
         formatter.usesGroupingSeparator = true
+        return formatter.string(from: NSDecimalNumber(decimal: value))
+            ?? decimalString(value)
+    }
+
+    public static func exactTwoDecimal(
+        _ value: Decimal,
+        language: AppLanguage
+    ) -> String {
+        guard WorkBuddyAccountCreditRules.isValid(value) else { return "—" }
+        let formatter = NumberFormatter()
+        formatter.locale = language.locale
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 2
+        formatter.usesGroupingSeparator = true
+        formatter.roundingMode = .down
         return formatter.string(from: NSDecimalNumber(decimal: value))
             ?? decimalString(value)
     }
@@ -716,15 +736,28 @@ public enum CreditFormatter {
         }
     }
 
+    public static func accessibilityAvailable(
+        _ value: Decimal,
+        language: AppLanguage
+    ) -> String {
+        let exactValue = exactTwoDecimal(value, language: language)
+        switch language {
+        case .english:
+            return "\(exactValue) Credits available"
+        case .simplifiedChinese:
+            return "可用 \(exactValue) Credits"
+        }
+    }
+
     public static func editable(_ value: Decimal) -> String {
         decimalString(value)
     }
 
-    private static func roundHalfUp(_ value: Decimal, scale: Int) -> Decimal {
+    private static func truncate(_ value: Decimal, scale: Int) -> Decimal {
         var source = value
-        var rounded = Decimal()
-        NSDecimalRound(&rounded, &source, scale, .plain)
-        return rounded
+        var truncated = Decimal()
+        NSDecimalRound(&truncated, &source, scale, .down)
+        return truncated
     }
 
     private static func decimalString(_ value: Decimal) -> String {

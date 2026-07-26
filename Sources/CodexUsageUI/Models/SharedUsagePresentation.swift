@@ -137,6 +137,91 @@ public struct SharedUsageWindowPresentation: Codable, Equatable, Identifiable, S
     }
 }
 
+public struct SharedAccountCreditBreakdown: Codable, Equatable, Sendable {
+    public let subscriptionRemaining: Decimal
+    public let addOnRemaining: Decimal
+    public let benefitGiftRemaining: Decimal
+    public let calculatedTotalRemaining: Decimal
+    public let observedAt: Date
+
+    public init(
+        subscriptionRemaining: Decimal,
+        addOnRemaining: Decimal,
+        benefitGiftRemaining: Decimal,
+        calculatedTotalRemaining: Decimal,
+        observedAt: Date
+    ) {
+        self.subscriptionRemaining = subscriptionRemaining
+        self.addOnRemaining = addOnRemaining
+        self.benefitGiftRemaining = benefitGiftRemaining
+        self.calculatedTotalRemaining = calculatedTotalRemaining
+        self.observedAt = observedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case subscriptionRemaining
+        case addOnRemaining
+        case benefitGiftRemaining
+        case calculatedTotalRemaining
+        case observedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        func decimal(_ key: CodingKeys) throws -> Decimal {
+            let text = try container.decode(String.self, forKey: key)
+            guard let value = WorkBuddyAccountCreditRules.parseCanonical(text)
+            else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: key,
+                    in: container,
+                    debugDescription: "Invalid canonical Credit value."
+                )
+            }
+            return value
+        }
+        let subscription = try decimal(.subscriptionRemaining)
+        let addOn = try decimal(.addOnRemaining)
+        let benefitGift = try decimal(.benefitGiftRemaining)
+        let total = try decimal(.calculatedTotalRemaining)
+        guard subscription + addOn + benefitGift == total else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .calculatedTotalRemaining,
+                in: container,
+                debugDescription: "Inconsistent Credit breakdown."
+            )
+        }
+        self.init(
+            subscriptionRemaining: subscription,
+            addOnRemaining: addOn,
+            benefitGiftRemaining: benefitGift,
+            calculatedTotalRemaining: total,
+            observedAt: try container.decode(Date.self, forKey: .observedAt)
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(
+            CreditDecimalCodec.canonicalString(subscriptionRemaining),
+            forKey: .subscriptionRemaining
+        )
+        try container.encode(
+            CreditDecimalCodec.canonicalString(addOnRemaining),
+            forKey: .addOnRemaining
+        )
+        try container.encode(
+            CreditDecimalCodec.canonicalString(benefitGiftRemaining),
+            forKey: .benefitGiftRemaining
+        )
+        try container.encode(
+            CreditDecimalCodec.canonicalString(calculatedTotalRemaining),
+            forKey: .calculatedTotalRemaining
+        )
+        try container.encode(observedAt, forKey: .observedAt)
+    }
+}
+
 public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let providerName: String
@@ -147,6 +232,7 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
     public let selectedWindowID: String?
     public let remaining: SharedRemainingValue
     public let availability: SharedAvailabilityPresentation?
+    public let accountCreditBreakdown: SharedAccountCreditBreakdown?
     public let availabilityLifecycle: SharedAvailabilityLifecycle?
     public let sourceDescription: String?
     public let isVisibleInDesktopAssistant: Bool
@@ -164,6 +250,7 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
         selectedWindowID: String?,
         remaining: SharedRemainingValue,
         availability: SharedAvailabilityPresentation? = nil,
+        accountCreditBreakdown: SharedAccountCreditBreakdown? = nil,
         availabilityLifecycle: SharedAvailabilityLifecycle? = nil,
         sourceDescription: String? = nil,
         isVisibleInDesktopAssistant: Bool = true,
@@ -180,6 +267,7 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
         self.selectedWindowID = selectedWindowID
         self.remaining = remaining
         self.availability = availability
+        self.accountCreditBreakdown = accountCreditBreakdown
         self.availabilityLifecycle = availabilityLifecycle
         self.sourceDescription = sourceDescription
         self.isVisibleInDesktopAssistant = isVisibleInDesktopAssistant
@@ -286,10 +374,17 @@ public enum SharedUsagePresentationPolicy {
             nextExpiryAt = nil
         case let .credits(balance):
             compactText = CreditFormatter.compact(balance.remaining)
-            accessibilityText = CreditFormatter.accessibilityRemaining(
-                balance.remaining,
-                language: language
-            )
+            if case .authenticatedAccountWeb = balance.provenance {
+                accessibilityText = CreditFormatter.accessibilityAvailable(
+                    balance.remaining,
+                    language: language
+                )
+            } else {
+                accessibilityText = CreditFormatter.accessibilityRemaining(
+                    balance.remaining,
+                    language: language
+                )
+            }
             displayUnit = balance.unit
             exactCreditValue = balance.remaining
             provenance = balance.provenance
@@ -525,6 +620,15 @@ public enum SharedUsagePresentationPolicy {
             selectedWindowID: selectedID,
             remaining: remaining,
             availability: availability,
+            accountCreditBreakdown: accountChannel?.accountCreditSnapshot.map {
+                SharedAccountCreditBreakdown(
+                    subscriptionRemaining: $0.subscriptionRemaining,
+                    addOnRemaining: $0.addOnRemaining,
+                    benefitGiftRemaining: $0.benefitGiftRemaining,
+                    calculatedTotalRemaining: $0.calculatedTotalRemaining,
+                    observedAt: $0.observedAt
+                )
+            },
             availabilityLifecycle: availabilityLifecycle,
             sourceDescription: availability?.sourceState == .authenticatedAccountWeb
                 ? language.workBuddyAccountWebSource

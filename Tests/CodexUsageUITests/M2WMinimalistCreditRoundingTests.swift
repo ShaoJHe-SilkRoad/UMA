@@ -7,28 +7,82 @@ struct M2WMinimalistCreditRoundingTests {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
     @Test
-    func compactFormatterUsesDeterministicHalfUpBoundaries() throws {
+    func compactFormatterUsesDeterministicTruncationAndMagnitudeUnits() throws {
         let cases: [(String, String)] = [
             ("0", "0"),
+            ("0.01", "<1"),
+            ("0.32", "<1"),
+            ("0.99", "<1"),
             ("1", "1"),
+            ("1.99", "1"),
             ("500", "500"),
             ("500.49", "500"),
-            ("500.50", "501"),
+            ("500.50", "500"),
+            ("500.99", "500"),
+            ("897.32", "897"),
             ("999.49", "999"),
-            ("999.50", "1k"),
+            ("999.50", "999"),
+            ("999.99", "999"),
             ("1000", "1k"),
+            ("1100", "1.1k"),
+            ("1170", "1.1k"),
             ("1500", "1.5k"),
             ("2049.47", "2k"),
-            ("2099.47", "2.1k"),
+            ("2099.47", "2k"),
+            ("9879", "9.8k"),
+            ("10000", "10k"),
+            ("10131.06", "10.1k"),
+            ("10231.06", "10.2k"),
+            ("10939", "10.9k"),
+            ("98405", "98.4k"),
+            ("99999.99", "99.9k"),
+            ("100000", "100k"),
             ("50000", "50k"),
-            ("999949", "999.9k"),
-            ("999950", "1M"),
+            ("859402", "859k"),
+            ("999949", "999k"),
+            ("999950", "999k"),
+            ("999999.99", "999k"),
             ("1000000", "1M"),
+            ("1100000", "1.1M"),
+            ("89235565", "89.2M"),
+            ("99999999.99", "99.9M"),
+            ("100000000", "100M"),
+            ("135980000", "135M"),
+            ("999999999.99", "999M"),
+            ("1000000000", "1B"),
+            ("1100000000", "1.1B"),
+            ("89235565000", "89.2B"),
+            ("99999999999.99", "99.9B"),
+            ("100000000000", "100B"),
+            ("135980000000", "135B"),
+            ("999999999999.99", "999B"),
         ]
 
         for (source, expected) in cases {
             let value = try #require(Decimal(string: source))
             #expect(CreditFormatter.compact(value) == expected)
+        }
+
+        #expect(
+            CreditFormatter.compact(
+                try #require(Decimal(string: "1000000000000"))
+            ) == "—"
+        )
+        #expect(
+            CreditFormatter.compact(
+                try #require(Decimal(string: "-1"))
+            ) == "—"
+        )
+        #expect(
+            CreditFormatter.compact(
+                try #require(Decimal(string: "1.001"))
+            ) == "—"
+        )
+        for (_, output) in cases {
+            #expect(output != "999.9")
+            #expect(!output.hasSuffix(".0k"))
+            #expect(!output.hasSuffix(".0M"))
+            #expect(!output.hasSuffix(".0B"))
         }
     }
 
@@ -86,14 +140,14 @@ struct M2WMinimalistCreditRoundingTests {
         )
 
         #expect(availability.exactCreditValue == exact)
-        #expect(availability.compactText == "2.1k")
+        #expect(availability.compactText == "2k")
         #expect(availability.accessibilityText == "2,099.47 Credits remaining")
         #expect(main.compactValue == "2,099.47")
         #expect(main.availableText == "2,099.47 Credits available")
         #expect(main.balanceDetail == "7,900.53 used of 10,000 active")
         #expect(main.accessibilityLabel.contains("2,099.47 Credits available"))
-        #expect(assistant.usageValue == .credits("2.1k"))
-        #expect(assistant.usageText(for: .minimalist) == "2.1k")
+        #expect(assistant.usageValue == .credits("2k"))
+        #expect(assistant.usageText(for: .minimalist) == "2k")
         #expect(assistant.usageText(for: .regular) == "2,099.47")
         #expect(assistant.toolTip == main.accessibilityLabel)
         #expect(assistant.accessibilityLabel.contains("2,099.47 Credits available"))
@@ -221,7 +275,7 @@ struct M2WMinimalistCreditRoundingTests {
         #expect(balance.total == nil)
         #expect(balance.normalizedRemainingFraction == nil)
         #expect(!balance.isExhausted)
-        #expect(assistant.usageText(for: .minimalist) == "2.1k")
+        #expect(assistant.usageText(for: .minimalist) == "2k")
         #expect(!assistant.usageText(for: .minimalist).contains("%"))
         #expect(assistant.tintFraction == nil)
         #expect(assistant.severity == .neutral)

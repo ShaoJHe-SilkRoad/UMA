@@ -334,6 +334,9 @@ struct AgentUsageChannel: Codable, Sendable, Equatable, Identifiable {
     /// Optional provider-neutral availability. Existing percentage-based
     /// connectors continue to publish rate-limit windows unchanged.
     let availability: AgentAvailabilityValue?
+    /// Sanitized WorkBuddy account-pool reconciliation. It is runtime-only:
+    /// the connector snapshot store intentionally omits it.
+    let accountCreditSnapshot: WorkBuddyAccountCreditSnapshot?
 
     var availabilitySourceState: AgentAvailabilitySourceState {
         availability?.sourceState ?? .unspecified
@@ -352,7 +355,8 @@ struct AgentUsageChannel: Codable, Sendable, Equatable, Identifiable {
         accountMetrics: AgentAccountMetrics?,
         localActivityMetrics: AgentLocalActivityMetrics?,
         safeFailure: AgentSafeFailure?,
-        availability: AgentAvailabilityValue? = nil
+        availability: AgentAvailabilityValue? = nil,
+        accountCreditSnapshot: WorkBuddyAccountCreditSnapshot? = nil
     ) {
         self.id = id
         self.sourceTier = sourceTier
@@ -367,6 +371,7 @@ struct AgentUsageChannel: Codable, Sendable, Equatable, Identifiable {
         self.localActivityMetrics = localActivityMetrics
         self.safeFailure = safeFailure
         self.availability = availability
+        self.accountCreditSnapshot = accountCreditSnapshot
     }
 }
 

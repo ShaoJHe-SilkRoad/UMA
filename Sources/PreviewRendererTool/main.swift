@@ -384,9 +384,7 @@ struct PreviewRendererTool {
             let balance: CreditBalance
             if isAccountWeb {
                 balance = try CreditBalance(
-                    validatingDecimalRemaining: Decimal(string: "2099.47")!,
-                    used: Decimal(100),
-                    total: Decimal(string: "2199.47")!,
+                    validatingDecimalRemaining: Decimal(string: "10131.06")!,
                     scope: .buddyAIUnknown,
                     observedAt: now,
                     provenance: .authenticatedAccountWeb(observedAt: now)
@@ -433,6 +431,15 @@ struct PreviewRendererTool {
             selectedWindowID: nil,
             remaining: .unavailable,
             availability: availability,
+            accountCreditBreakdown: isAccountWeb
+                ? SharedAccountCreditBreakdown(
+                    subscriptionRemaining: 9_000,
+                    addOnRemaining: 0,
+                    benefitGiftRemaining: Decimal(string: "1131.06")!,
+                    calculatedTotalRemaining: Decimal(string: "10131.06")!,
+                    observedAt: now
+                )
+                : nil,
             availabilityLifecycle: isAccountWeb ? nil : lifecycle,
             isVisibleInDesktopAssistant: true,
             severity: .neutral,

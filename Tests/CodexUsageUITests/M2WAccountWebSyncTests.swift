@@ -89,22 +89,20 @@ struct M2WAccountWebSyncTests {
     }
 
     @Test
-    func sanitizedRowsProduceExactDecimalAccountBalance() throws {
+    func sanitizedPoolsProduceExactAtomicAccountBalance() throws {
         let observedAt = Date(timeIntervalSince1970: 2_000_000_000)
-        let payload = WorkBuddyAccountWebExtractionPayload(
-            extractorVersion: 1,
-            rows: [
-                WorkBuddyAccountWebSanitizedRow(
-                    remaining: "2000",
-                    used: "100",
-                    total: "2100"
-                ),
-                WorkBuddyAccountWebSanitizedRow(
-                    remaining: "99.47",
-                    used: "0",
-                    total: "99.47"
-                )
-            ]
+        let payload = accountPayload(
+            subscription: [
+                pool(.subscriptionBase, used: "0", total: "4000"),
+                pool(.subscriptionBonus, used: "0", total: "5000")
+            ],
+            benefitGift: [
+                pool(.benefitGift, used: "668.94", total: "1500"),
+                pool(.benefitGift, used: "0", total: "100", id: "gift-1"),
+                pool(.benefitGift, used: "0", total: "100", id: "gift-2"),
+                pool(.benefitGift, used: "0", total: "100", id: "gift-3")
+            ],
+            authoritative: ["10131.06"]
         )
 
         guard case let .success(reading) = WorkBuddyAccountWebExtractor.validate(
@@ -115,9 +113,24 @@ struct M2WAccountWebSyncTests {
             return
         }
 
-        #expect(CreditDecimalCodec.canonicalString(reading.balance.remaining) == "2099.47")
-        #expect(reading.balance.used.map(CreditDecimalCodec.canonicalString) == "100")
-        #expect(reading.balance.total.map(CreditDecimalCodec.canonicalString) == "2199.47")
+        #expect(CreditDecimalCodec.canonicalString(reading.balance.remaining) == "10131.06")
+        #expect(reading.balance.used == nil)
+        #expect(reading.balance.total == nil)
+        #expect(reading.balance.normalizedRemainingFraction == nil)
+        #expect(reading.creditSnapshot.subscriptionRemaining == 9_000)
+        #expect(reading.creditSnapshot.addOnRemaining == 0)
+        #expect(
+            reading.creditSnapshot.benefitGiftRemaining
+                == Decimal(string: "1131.06")
+        )
+        #expect(
+            reading.creditSnapshot.calculatedTotalRemaining
+                == Decimal(string: "10131.06")
+        )
+        #expect(
+            reading.creditSnapshot.authoritativePageBalance
+                == Decimal(string: "10131.06")
+        )
         #expect(reading.balance.scope == .buddyAIUnknown)
         #expect(reading.balance.observedAt == observedAt)
         #expect(
@@ -133,87 +146,72 @@ struct M2WAccountWebSyncTests {
     @Test
     func malformedAmbiguousAndNoncanonicalCreditsFailClosed() {
         let now = Date()
-        let malformed = WorkBuddyAccountWebExtractionPayload(
-            extractorVersion: 1,
-            rows: [
-                WorkBuddyAccountWebSanitizedRow(
-                    remaining: "2,099.47",
-                    used: nil,
-                    total: nil
-                )
+        let malformed = accountPayload(
+            subscription: [
+                pool(.subscriptionBase, used: "0", total: "2,099.47")
             ]
         )
         #expect(
             WorkBuddyAccountWebExtractor.validate(malformed, observedAt: now)
-                == .failure(.malformedCredits)
+                == .failure(.invalidCreditPool)
         )
 
-        let duplicate = WorkBuddyAccountWebExtractionPayload(
-            extractorVersion: 1,
-            rows: [
-                WorkBuddyAccountWebSanitizedRow(
-                    remaining: "500",
-                    used: nil,
-                    total: nil
+        let duplicate = accountPayload(
+            subscription: [
+                pool(
+                    .subscriptionBase,
+                    used: "0",
+                    total: "500",
+                    id: "shared-id"
                 ),
-                WorkBuddyAccountWebSanitizedRow(
-                    remaining: "500",
-                    used: nil,
-                    total: nil
+                pool(
+                    .subscriptionBase,
+                    used: "1",
+                    total: "500",
+                    id: "shared-id"
                 )
             ]
         )
         #expect(
             WorkBuddyAccountWebExtractor.validate(duplicate, observedAt: now)
-                == .failure(.ambiguousCredits)
+                == .failure(.duplicateCreditPool)
         )
 
-        let inconsistent = WorkBuddyAccountWebExtractionPayload(
-            extractorVersion: 1,
-            rows: [
-                WorkBuddyAccountWebSanitizedRow(
-                    remaining: "2099.47",
+        let inconsistent = accountPayload(
+            subscription: [
+                pool(
+                    .subscriptionBase,
                     used: "100",
-                    total: "2000"
+                    total: "2000",
+                    displayed: "2099.47"
                 )
             ]
         )
         #expect(
             WorkBuddyAccountWebExtractor.validate(inconsistent, observedAt: now)
-                == .failure(.ambiguousCredits)
+                == .failure(.invalidCreditPool)
         )
 
-        let noncanonical = WorkBuddyAccountWebExtractionPayload(
-            extractorVersion: 1,
-            rows: [
-                WorkBuddyAccountWebSanitizedRow(
-                    remaining: "01",
-                    used: nil,
-                    total: nil
-                )
+        let noncanonical = accountPayload(
+            subscription: [
+                pool(.subscriptionBase, used: "0", total: "01")
             ]
         )
         #expect(
             WorkBuddyAccountWebExtractor.validate(noncanonical, observedAt: now)
-                == .failure(.malformedCredits)
+                == .failure(.invalidCreditPool)
         )
 
-        let excessivePrecision = WorkBuddyAccountWebExtractionPayload(
-            extractorVersion: 1,
-            rows: [
-                WorkBuddyAccountWebSanitizedRow(
-                    remaining:
-                        "0.123456789012345678901234567890123456789",
-                    used: nil,
-                    total: nil
-                )
+        let excessivePrecision = accountPayload(
+            subscription: [
+                pool(.subscriptionBase, used: "0", total: "0.123")
             ]
         )
         #expect(
             WorkBuddyAccountWebExtractor.validate(
                 excessivePrecision,
                 observedAt: now
-            ) == .failure(.malformedCredits)
+            ) == .failure(.invalidCreditPool)
         )
     }
 
@@ -273,22 +271,19 @@ struct M2WAccountWebSyncTests {
         #expect(cards[0].isVisibleInDesktopAssistant)
         #expect(cards[0].tooltipText.contains("2,099.47 Credits"))
         #expect(cards[0].tooltipText.contains("Account web sync"))
+        #expect(connector.descriptor.privacyAllowlist.contains("poolKind"))
         #expect(
-            connector.descriptor.privacyAllowlist == [
-                "remainingCredits",
-                "usedCredits",
-                "totalCredits",
-                "observedAt",
-                "extractorVersion"
-            ]
+            connector.descriptor.privacyAllowlist.contains(
+                "calculatedTotalRemainingCredits"
+            )
         )
 
         let assistant = DesktopAssistantCard(shared: cards[0], language: .english)
         #expect(assistant.sourceMark == .accountWeb)
         #expect(assistant.detailText == "Account web sync")
         #expect(assistant.regularUsageText == "2,099.47")
-        #expect(assistant.usageValue == .credits("2.1k"))
-        #expect(assistant.tintFraction != nil)
+        #expect(assistant.usageValue == .credits("2k"))
+        #expect(assistant.tintFraction == nil)
 
         let chineseCards = SharedUsagePresentationPolicy.makeCards(
             snapshots: admission.admittedSnapshots,
@@ -544,13 +539,12 @@ struct M2WAccountWebSyncTests {
         var reads = 0
         var waits: [Duration] = []
         let success = try extractionAttempt(
-            WorkBuddyAccountWebExtractionPayload(
-                extractorVersion: 1,
-                rows: [
-                    WorkBuddyAccountWebSanitizedRow(
-                        remaining: "2099.47",
-                        used: nil,
-                        total: nil
+            accountPayload(
+                subscription: [
+                    pool(
+                        .subscriptionBase,
+                        used: "0",
+                        total: "2099.47"
                     )
                 ]
             )
@@ -573,10 +567,62 @@ struct M2WAccountWebSyncTests {
     }
 
     @Test @MainActor
-    func extractionReadinessFailsClosedAfterExactAttemptLimit() async throws {
+    func extractionReadinessWaitsForAllRequiredPoolSections() async throws {
+        var reads = 0
+        var waits: [Duration] = []
+        let success = try extractionAttempt(
+            accountPayload(
+                subscription: [
+                    pool(
+                        .subscriptionBase,
+                        used: "0",
+                        total: "2099.47"
+                    )
+                ]
+            )
+        )
+
+        let result = try await WorkBuddyAccountWebExtractionReadiness.evaluate(
+            isCurrent: { true },
+            read: {
+                reads += 1
+                return reads < 3
+                    ? try extractionAttempt(failure: .incompletePoolSections)
+                    : success
+            },
+            wait: { waits.append($0) }
+        )
+
+        #expect(result == success)
+        #expect(reads == 3)
+        #expect(waits == [.milliseconds(250), .milliseconds(250)])
+    }
+
+    @Test @MainActor
+    func malformedExtractionFailsClosedWithoutAutomaticRetry() async throws {
         var reads = 0
         var waits = 0
         let failure = try extractionAttempt(failure: .malformedCredits)
+
+        let result = try await WorkBuddyAccountWebExtractionReadiness.evaluate(
+            isCurrent: { true },
+            read: {
+                reads += 1
+                return failure
+            },
+            wait: { _ in waits += 1 }
+        )
+
+        #expect(result == failure)
+        #expect(reads == 1)
+        #expect(waits == 0)
+    }
+
+    @Test @MainActor
+    func pageStabilizationFailsClosedAfterExactAttemptLimit() async throws {
+        var reads = 0
+        var waits = 0
+        let failure = try extractionAttempt(failure: .pageNotStabilized)
 
         let result = try await WorkBuddyAccountWebExtractionReadiness.evaluate(
             isCurrent: { true },
@@ -625,7 +671,7 @@ struct M2WAccountWebSyncTests {
         )
         #expect(renderer.contains("--workbuddy-account-web"))
         #expect(renderer.contains("--workbuddy-account-web-settings"))
-        #expect(renderer.contains("\"2099.47\""))
+        #expect(renderer.contains("\"10131.06\""))
         #expect(renderer.contains(".authenticatedAccountWeb(observedAt: now)"))
         #expect(renderer.contains("\"workbuddy.accountWebCredits\""))
         #expect(
@@ -754,13 +800,13 @@ struct M2WAccountWebSyncTests {
         used: String?,
         total: String?
     ) throws -> WorkBuddyAccountWebReading {
-        let payload = WorkBuddyAccountWebExtractionPayload(
-            extractorVersion: 1,
-            rows: [
-                WorkBuddyAccountWebSanitizedRow(
-                    remaining: remaining,
-                    used: used,
-                    total: total
+        let payload = accountPayload(
+            subscription: [
+                pool(
+                    .subscriptionBase,
+                    used: used ?? "0",
+                    total: total ?? remaining,
+                    displayed: remaining
                 )
             ]
         )
@@ -779,7 +825,11 @@ struct M2WAccountWebSyncTests {
     ) throws -> WorkBuddyAccountWebExtractionAttempt {
         var dictionary: [String: Any] = [
             "extractorVersion": WorkBuddyAccountWebReading.extractorVersion,
-            "rows": []
+            "discoveredSections": [],
+            "subscriptionPools": [],
+            "addOnPools": [],
+            "benefitGiftPools": [],
+            "authoritativePageBalances": []
         ]
         if let payload {
             dictionary = try #require(
@@ -797,6 +847,44 @@ struct M2WAccountWebSyncTests {
                 options: [.sortedKeys]
             ),
             failure: failure
+        )
+    }
+
+    private func accountPayload(
+        subscription: [WorkBuddyAccountWebSanitizedPool],
+        addOn: [WorkBuddyAccountWebSanitizedPool] = [],
+        benefitGift: [WorkBuddyAccountWebSanitizedPool] = [],
+        authoritative: [String] = []
+    ) -> WorkBuddyAccountWebExtractionPayload {
+        WorkBuddyAccountWebExtractionPayload(
+            extractorVersion: WorkBuddyAccountWebReading.extractorVersion,
+            discoveredSections: WorkBuddyCreditPoolSection.allCases,
+            subscriptionPools: subscription,
+            addOnPools: addOn,
+            benefitGiftPools: benefitGift,
+            authoritativePageBalances: authoritative
+        )
+    }
+
+    private func pool(
+        _ kind: WorkBuddyCreditPoolKind,
+        used: String,
+        total: String,
+        displayed: String? = nil,
+        id: String? = nil,
+        status: WorkBuddyCreditPoolSafeStatus = .available,
+        effectiveAtMilliseconds: Int64? = nil,
+        expiresAtMilliseconds: Int64? = nil
+    ) -> WorkBuddyAccountWebSanitizedPool {
+        WorkBuddyAccountWebSanitizedPool(
+            stablePageID: id,
+            kind: kind,
+            used: used,
+            total: total,
+            displayedRemaining: displayed,
+            effectiveAtMilliseconds: effectiveAtMilliseconds,
+            expiresAtMilliseconds: expiresAtMilliseconds,
+            pageStatus: status
         )
     }
 

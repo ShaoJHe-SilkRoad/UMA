@@ -1,7 +1,7 @@
 # UMA WorkBuddy Account Web Sync QA Issue Ledger
 
-Version: 1.0
-Date: 2026-07-25
+Version: 1.1
+Date: 2026-07-26
 Goal: M2WACCOUNT-G1
 
 | ID | Acceptance concern | Evidence / repair | Status |
@@ -18,15 +18,36 @@ Goal: M2WACCOUNT-G1
 | WA-010 | Main panel and Assistant could diverge. | Both surfaces consume the same admitted snapshot; exact Regular/main and compact Minimalist formatting are covered. | Automated PASS |
 | WA-011 | Package could include fixtures, records, tests, or research files. | Path-locked commit archive builder installs only the executable, icon, Info.plist, and provenance plist. | Pending commit-exact audit |
 | WA-012 | Official page value and UMA value could differ or external sessions could be changed. | Requires Human login, same-time official balance comparison, WorkBuddy.app-closed proof, Disconnect proof, and Safari/Chrome/WorkBuddy session preservation check. | Pending Human gate |
-| WA-013 | “Allow Once” could silently authorize later navigation to the same external host. | External approval is scoped to the single navigation decision; no host approval is cached, and every later external navigation requires a new Human confirmation. | Automated PASS |
-| WA-014 | The apex domain or a query-bearing page could bypass the exact official-origin and route boundary. | Only `https://www.workbuddy.cn` is admitted without confirmation; `https://workbuddy.cn` is treated as external, and extraction rejects query- or fragment-bearing variants of the exact Plan and Usage route. | Automated PASS |
+| WA-027 | “Allow Once” could silently authorize later navigation to the same external host. | External approval is scoped to the single navigation decision; no host approval is cached, and every later external navigation requires a new Human confirmation. | Automated PASS |
+| WA-028 | The apex domain or a query-bearing page could bypass the exact official-origin and route boundary. | Only `https://www.workbuddy.cn` is admitted without confirmation; `https://workbuddy.cn` is treated as external, and extraction rejects query- or fragment-bearing variants of the exact Plan and Usage route. | Automated PASS |
+
+## All-pool repair ledger
+
+| ID | First evidence | Severity | Root cause | Repair | Focused retest | Affected regression | Final status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| WA-013 Subscription-only value mistaken for account balance | UMA showed `9,000` while independent account evidence included package Credits. | Blocking | The version-1 extractor flattened whichever quota rows were initially rendered and treated their sum as the account balance. | Version 2 requires all three named sections and derives one atomic reconciled grand total. | Subscription base + bonus fixture proves `9,000.00` is only the subscription subtotal. | Main panel, both Assistant densities, Tooltip, VoiceOver. | Automated PASS; physical parity pending |
+| WA-014 Add-on packages omitted | Lower add-on section was outside the version-1 row assumption. | Major | No section discovery or bounded expansion existed. | The extractor discovers, scrolls, expands, stabilizes, and validates the add-on section separately. | Empty, single, multiple, partial, exhausted, ordering, lazy-load, expansion, and malformed cases. | Account total and expanded breakdown. | Automated PASS |
+| WA-015 Benefit/gift packages omitted | The `1,500` pool and independent `100` pools were absent from `9,000`. | Blocking | Benefit/gift rows were not modeled as first-class pools. | Benefit/gift rows now carry normalized kind, exact used/total, dates, status, and stable identity. | `668.94 / 1,500` plus three and four distinct `100` fixtures. | Exact total and compact output. | Automated PASS; current live eligibility pending |
+| WA-016 Lazy-loaded rows omitted | Lower page content appears only after scrolling or `查看全部`. | Major | Extraction ran immediately after navigation readiness. | Bounded section scrolling, section-local `查看全部`, count stabilization, and a five-second upper bound precede atomic extraction. | Readiness delay, expansion source contract, stabilized-count tests. | One-read-per-trigger and no polling. | Automated PASS |
+| WA-017 Duplicate pool row double-counted | Virtualized/expanded markup can repeat one pool. | Major | Flat values had no stable identity. | Bounded hashed page ID or normalized semantic identity rejects every repeated identity, including exact copies and conflicting collisions. | Exact duplicate, conflicting ID, and distinct same-value package fixtures. | Ordering independence and grand total. | Automated PASS |
+| WA-018 Expired or future pool incorrectly counted | Visible rows may not currently contribute. | Blocking | Version 1 had no status/effective/expiry semantics. | Explicit safe statuses and normalized effective/expiry instants exclude expired, future, historical, and unavailable pools; ambiguous status rejects the observation. | Mixed status/date fixtures including valid non-`使用中`. | Pool count and section subtotal. | Automated PASS; live status semantics pending |
+| WA-019 Page-total and pool-sum mismatch | Four visible `100` rows differed from prior app evidence by exactly `100`. | Blocking | No authoritative reconciliation existed. | Exactly one page-level semantic balance is accepted and must match within `0.01`; otherwise the observation is rejected. | Equal, `0.01`, `0.02`, exact-`100`, zero-candidate, and multiple-candidate fixtures. | Admission withdrawal and no stale/manual fallback. | Automated PASS; same-time Human comparison pending when page total absent |
+| WA-020 Obsolete compact round-half-up behavior | `2,099.47` rendered as `2.1k`. | Major | Compact formatter used round-half-up. | Exact Decimal truncation now selects k/M/B strictly by magnitude. | Full no-suffix/k/M/B boundary matrix. | Minimalist geometry and semantic value. | Automated PASS |
+| WA-021 Exact two-decimal Regular formatting | Whole values could render without `.00`. | Major | General exact formatter used zero minimum fractional digits. | Account-web main, Regular, Tooltip, VoiceOver, and breakdown use exactly two decimals. | `500.00` through `999,999,999,999.99`. | English, Simplified Chinese, accessibility. | Automated PASS |
+| WA-022 Incorrect unit prepromotion | `999.50` could become `1k`, and `999,950` could become `1M`. | Major | Rounding occurred before unit-boundary decisions. | Unit selection now uses the exact unformatted magnitude and never promotes early. | `999.99`, `999,999.99`, and `999,999,999.99`. | Minimalist compact contract. | Automated PASS |
+| WA-023 Positive sub-one Credit displayed as zero | Fractional positive Credits rounded to `0`. | Major | Integer rounding erased nonzero semantics. | Exact positive values below one render as `<1`. | `0`, `0.01`, `0.32`, and `0.99`. | Exhaustion semantics. | Automated PASS |
+| WA-024 Value above maximum accepted | Core Credit bounds exceed the account-web product limit. | Blocking | Account-web validation inherited the broader legacy manual range. | Account-web values are independently capped at `999,999,999,999.99` with at most two decimal places. | Exact maximum, above-maximum, negative, malformed, scientific, and excessive-precision cases. | Formatter and snapshot decoding. | Automated PASS |
+| WA-025 Account total denominator incorrectly derived from subscription | A pool aggregate could inherit the subscription total and show a false fraction. | Blocking | Flat `used/total` aggregation implied one common denominator. | Account grand total publishes as absolute remaining only; pool used/total remain diagnostic and produce no percent or fill. | Aggregate balance asserts nil used, nil total, nil normalized fraction. | Severity and Assistant tint. | Automated PASS |
+| WA-026 Previous/manual snapshot displayed after account-read failure | A failed account read could be mistaken for an older or manual value. | Blocking | Retention needed an explicit account-web withdrawal proof. | Connector replaces the channel with an unavailable snapshot on every failure; manual remains hidden and separate. | Expiry/failure, mismatch, disconnect, and manual-only admission cases. | Main/Assistant provider-set parity. | Automated PASS |
 
 ## Verification state
 
-After the final runtime repair, the focused account-web suite passed 16 tests,
-the full suite passed 209 tests across 29 suites, and Debug, Release, and
-strict-concurrency Release with warnings-as-errors builds passed. Final
-Light/Dark English and Simplified Chinese renderer evidence passed for the main
-panel, Settings, Regular Assistant, and Minimalist Assistant. Commit-exact
-package audit and Human physical validation remain required before this ledger
-can close.
+The version-1.1 repair passed 46 focused tests across the account-web,
+all-pool, and Minimalist suites; the full suite passed 234 tests across 30
+suites. Debug, Release, and strict-concurrency Release with warnings-as-errors
+builds passed. Light/Dark English and Simplified Chinese renderer evidence
+passed for the main panel, Regular Assistant, Minimalist Assistant, and
+increased-contrast presentation. Independent Examiner review found one
+incomplete-section readiness gap; the bounded retry repair and focused
+regression were independently rechecked as resolved. Commit-exact package
+audit and Human same-time balance comparison remain pending.

@@ -1,7 +1,7 @@
 # UMA WorkBuddy Account Web Sync Contract
 
-Version: 1.0
-Date: 2026-07-25
+Version: 1.1
+Date: 2026-07-26
 Goal: M2WACCOUNT-G1
 
 ## WorkBuddy-only exemption
@@ -71,22 +71,45 @@ The page extractor:
 
 - verifies the exact HTTPS origin and Plan and Usage path;
 - scopes queries to the Plan and Usage component;
-- reads only the bounded Credit quota rows;
-- emits only canonical Decimal strings for remaining, used, and total;
+- requires the subscription, add-on, and benefit/gift resource sections;
+- performs bounded section scrolling and section-local `查看全部` expansion;
+- waits for bounded row-count stability before one atomic extraction;
+- emits only normalized pool kind, bounded stable identity, exact used/total,
+  optional displayed remaining, normalized effective/expiry time, and safe
+  status;
 - emits no HTML, DOM tree, browser storage, identity, cookie, token, or
   credential material;
-- rejects missing, malformed, duplicated, excessive, or internally
+- rejects missing sections, malformed or ambiguous pools, conflicting
+  duplicates, excessive precision, invalid dates/status, and internally
   inconsistent rows.
 
-The connector aggregates at most eight unique base/gift rows. `CreditBalance`
-remains the exact Decimal authority.
+Every pool computes `remaining = total - used` with exact Decimal arithmetic.
+Every duplicate identity fails closed, including exact duplicate markup and
+identity collisions with different values. Expired, future, historical, and
+unavailable pools are excluded.
+Subscription, add-on, and benefit/gift subtotals are calculated independently,
+then summed into one account balance. The subscription subtotal is never treated
+as the account total.
+
+When exactly one dedicated page-level account balance exists, it must reconcile
+with the pool sum within `0.01` Credits. Multiple candidates or a larger
+difference reject the observation. Without a page-level balance, the all-pool
+sum may be admitted but requires a same-time Human comparison before program
+closeout.
+
+Account-web values use canonical Decimal strings, at most two fractional
+digits, and a maximum of `999,999,999,999.99`. The account grand total is
+absolute-only: no subscription-derived denominator, percent, proportional fill,
+or universal absolute severity threshold is inferred.
 
 ## Admission and failure
 
 A successful current read publishes one provider-reported fresh account channel
-to the main panel and Desktop Assistant. Main-panel and Regular Assistant
-details use exact Credits; Minimalist may use the accepted compact Credit
-formatter. Both surfaces derive from the same admitted snapshot.
+to the main panel and Desktop Assistant. Main panel, Regular Assistant,
+Tooltip, VoiceOver, and expanded details use thousands separators and exactly
+two decimal places. Minimalist uses exact-magnitude k/M/B selection with
+truncation, never rounding or unit prepromotion; positive values below one use
+`<1`. Both surfaces derive from the same admitted snapshot.
 
 Authentication expiry, navigation failure, timeout, extraction failure, or
 Disconnect removes WorkBuddy from both surfaces immediately. The last valid

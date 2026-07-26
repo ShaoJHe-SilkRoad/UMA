@@ -23,9 +23,19 @@ actor WorkBuddyAccountWebCreditsConnector: AgentUsageConnector {
             .explicitlyAuthorizedReadOnlyRemoteAccess
         ],
         privacyAllowlist: [
-            "remainingCredits",
-            "usedCredits",
-            "totalCredits",
+            "poolStableID",
+            "poolKind",
+            "poolUsedCredits",
+            "poolTotalCredits",
+            "poolDisplayedRemainingCredits",
+            "poolEffectiveAt",
+            "poolExpiresAt",
+            "poolSafeStatus",
+            "subscriptionRemainingCredits",
+            "addOnRemainingCredits",
+            "benefitGiftRemainingCredits",
+            "calculatedTotalRemainingCredits",
+            "authoritativePageBalanceCredits",
             "observedAt",
             "extractorVersion"
         ],
@@ -197,7 +207,8 @@ actor WorkBuddyAccountWebCreditsConnector: AgentUsageConnector {
             ),
             localActivityMetrics: nil,
             safeFailure: nil,
-            availability: .credits(balance)
+            availability: .credits(balance),
+            accountCreditSnapshot: reading.creditSnapshot
         )
         return AgentUsageSnapshot(
             id: connectorID,
@@ -237,7 +248,10 @@ actor WorkBuddyAccountWebCreditsConnector: AgentUsageConnector {
             .authorizationRequired
         case .timedOut:
             .timedOut
-        case .unexpectedPage, .malformedCredits, .ambiguousCredits:
+        case .unexpectedPage, .pageNotStabilized, .incompletePoolSections,
+             .malformedCredits, .ambiguousCredits, .invalidCreditPool,
+             .duplicateCreditPool, .ambiguousAccountBalance,
+             .accountBalanceReconciliationFailed:
             .malformedResponse
         case .invalidNavigation, .webContentUnavailable,
              .websiteDataClearFailed:

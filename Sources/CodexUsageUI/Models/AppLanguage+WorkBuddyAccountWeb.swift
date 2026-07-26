@@ -60,6 +60,34 @@ extension AppLanguage {
         self == .simplifiedChinese ? "账号网页同步" : "Account web sync"
     }
 
+    var workBuddySubscriptionRemaining: String {
+        self == .simplifiedChinese
+            ? "订阅套餐剩余"
+            : "Subscription plan remaining"
+    }
+
+    var workBuddyAddOnRemaining: String {
+        self == .simplifiedChinese
+            ? "加量包剩余"
+            : "Add-on packages remaining"
+    }
+
+    var workBuddyBenefitGiftRemaining: String {
+        self == .simplifiedChinese
+            ? "权益/赠送包剩余"
+            : "Benefit/gift packages remaining"
+    }
+
+    var workBuddyTotalAvailable: String {
+        self == .simplifiedChinese
+            ? "可用 Credits 总计"
+            : "Total available Credits"
+    }
+
+    var workBuddySupportStatus: String {
+        self == .simplifiedChinese ? "支持状态" : "Support status"
+    }
+
     var workBuddyLegacyManualRecord: String {
         self == .simplifiedChinese
             ? "旧版手动记录（单独保留，不用于 WorkBuddy 显示或网页同步回退）"
@@ -99,8 +127,17 @@ extension AppLanguage {
         case (.english, .invalidNavigation): "navigation not allowed"
         case (.english, .authenticationRequired): "sign-in required"
         case (.english, .unexpectedPage): "unexpected page"
+        case (.english, .pageNotStabilized): "usage page did not stabilize"
+        case (.english, .incompletePoolSections):
+            "required Credit sections are incomplete"
         case (.english, .malformedCredits): "invalid Credit fields"
         case (.english, .ambiguousCredits): "ambiguous Credit fields"
+        case (.english, .invalidCreditPool): "invalid Credit pool"
+        case (.english, .duplicateCreditPool): "ambiguous duplicate Credit pool"
+        case (.english, .ambiguousAccountBalance):
+            "ambiguous account balance"
+        case (.english, .accountBalanceReconciliationFailed):
+            "account balance reconciliation failed"
         case (.english, .timedOut): "request timed out"
         case (.english, .webContentUnavailable): "page unavailable"
         case (.english, .websiteDataClearFailed):
@@ -109,8 +146,18 @@ extension AppLanguage {
         case (.simplifiedChinese, .invalidNavigation): "不允许的网页导航"
         case (.simplifiedChinese, .authenticationRequired): "需要登录"
         case (.simplifiedChinese, .unexpectedPage): "页面不符合预期"
+        case (.simplifiedChinese, .pageNotStabilized): "用量页面未稳定"
+        case (.simplifiedChinese, .incompletePoolSections):
+            "Credits 资源区不完整"
         case (.simplifiedChinese, .malformedCredits): "Credits 字段无效"
         case (.simplifiedChinese, .ambiguousCredits): "Credits 字段不明确"
+        case (.simplifiedChinese, .invalidCreditPool): "Credits 资源池无效"
+        case (.simplifiedChinese, .duplicateCreditPool):
+            "Credits 资源池重复且不明确"
+        case (.simplifiedChinese, .ambiguousAccountBalance):
+            "账号 Credits 余额不明确"
+        case (.simplifiedChinese, .accountBalanceReconciliationFailed):
+            "账号余额核对失败"
         case (.simplifiedChinese, .timedOut): "请求超时"
         case (.simplifiedChinese, .webContentUnavailable): "页面不可用"
         case (.simplifiedChinese, .websiteDataClearFailed):

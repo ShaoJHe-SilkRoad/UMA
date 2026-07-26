@@ -429,12 +429,32 @@ private struct LocalLiveProviderCard: View {
                     .opacity(0.32)
                     .padding(.horizontal, 14)
                 VStack(alignment: .leading, spacing: 7) {
+                    if let snapshot = card.accountCreditBreakdown {
+                        detailRow(
+                            language.workBuddySubscriptionRemaining,
+                            value: CreditFormatter.exactTwoDecimal(
+                                snapshot.subscriptionRemaining,
+                                language: language
+                            )
+                        )
+                        detailRow(
+                            language.workBuddyAddOnRemaining,
+                            value: CreditFormatter.exactTwoDecimal(
+                                snapshot.addOnRemaining,
+                                language: language
+                            )
+                        )
+                        detailRow(
+                            language.workBuddyBenefitGiftRemaining,
+                            value: CreditFormatter.exactTwoDecimal(
+                                snapshot.benefitGiftRemaining,
+                                language: language
+                            )
+                        )
+                    }
                     detailRow(
                         language.workBuddyAvailableCredits,
-                        value: CreditFormatter.exact(
-                            balance.remaining,
-                            language: language
-                        )
+                        value: exactValue(balance.remaining)
                     )
                     if let used = balance.used {
                         detailRow(
@@ -492,8 +512,14 @@ private struct LocalLiveProviderCard: View {
         guard let balance = card.availability?.value.creditBalance else {
             return card.remaining.displayText
         }
-        let exact = CreditFormatter.exact(balance.remaining, language: language)
+        let exact = exactValue(balance.remaining)
         return language.workBuddyCreditsAvailable(exact)
+    }
+
+    private func exactValue(_ value: Decimal) -> String {
+        isAccountWebCredits
+            ? CreditFormatter.exactTwoDecimal(value, language: language)
+            : CreditFormatter.exact(value, language: language)
     }
 
     private func detailRow(_ label: String, value: String) -> some View {

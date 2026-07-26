@@ -702,6 +702,39 @@ private struct WorkBuddyAccountWebSyncSection: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .accessibilityElement(children: .combine)
+
+            if let snapshot = controller.latestCreditSnapshot {
+                VStack(alignment: .leading, spacing: 4) {
+                    accountCreditRow(
+                        language.workBuddySubscriptionRemaining,
+                        value: snapshot.subscriptionRemaining
+                    )
+                    accountCreditRow(
+                        language.workBuddyAddOnRemaining,
+                        value: snapshot.addOnRemaining
+                    )
+                    accountCreditRow(
+                        language.workBuddyBenefitGiftRemaining,
+                        value: snapshot.benefitGiftRemaining
+                    )
+                    accountCreditRow(
+                        language.workBuddyTotalAvailable,
+                        value: snapshot.calculatedTotalRemaining
+                    )
+                    Text(
+                        "\(language.workBuddySource): "
+                            + language.workBuddyAccountWebSource
+                    )
+                    Text(
+                        "\(language.workBuddySupportStatus): "
+                            + language.workBuddyExperimentalLabel
+                    )
+                    Text(language.workBuddyConfirmedAt(snapshot.observedAt))
+                }
+                .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                .foregroundStyle(.secondary)
+                .accessibilityElement(children: .combine)
+            }
         }
         .padding(9)
         .background(
@@ -709,6 +742,17 @@ private struct WorkBuddyAccountWebSyncSection: View {
                 .fill(Color.secondary.opacity(0.07))
         )
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func accountCreditRow(_ label: String, value: Decimal) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label)
+            Spacer(minLength: 8)
+            Text(
+                CreditFormatter.exactTwoDecimal(value, language: language)
+            )
+            .monospacedDigit()
+        }
     }
 }
 

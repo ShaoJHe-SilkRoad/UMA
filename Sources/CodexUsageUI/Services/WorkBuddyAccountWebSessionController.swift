@@ -26,7 +26,8 @@ enum WorkBuddyAccountWebExtractionReadiness {
             guard isCurrent() else { return nil }
             let isStillRendering =
                 result.failure == .unexpectedPage
-                    || result.failure == .malformedCredits
+                    || result.failure == .incompletePoolSections
+                    || result.failure == .pageNotStabilized
             guard isStillRendering, attempt + 1 < maximumAttempts else {
                 return result
             }
@@ -56,10 +57,13 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
     @Published public private(set) var flowState: WorkBuddyAccountWebFlowState = .idle
     @Published public private(set) var consentGranted = false
     @Published public private(set) var lastSynchronizedAt: Date?
+    @Published private(set) var latestCreditSnapshot:
+        WorkBuddyAccountCreditSnapshot?
     @Published public var sessionMode: WorkBuddyAccountWebSessionMode {
         didSet {
             guard oldValue != sessionMode else { return }
             defaults.removeObject(forKey: Self.sessionEstablishedKey)
+            latestCreditSnapshot = nil
             persistConsentIfGranted()
             releaseBrowser()
             if oldValue == .persistent && sessionMode == .nonpersistent {
@@ -87,6 +91,7 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
     private var navigationContinuation: CheckedContinuation<Void, Error>?
     private var navigationTimeoutTask: Task<Void, Never>?
     private var readGeneration: UInt64 = 0
+    private var inFlightRead: Task<WorkBuddyAccountWebReadResult, Never>?
 
     var canReadOnApplicationLaunch: Bool {
         consentGranted
@@ -151,10 +156,29 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
     }
 
     func readCurrentCredits() async -> WorkBuddyAccountWebReadResult {
+        if let inFlightRead {
+            return await inFlightRead.value
+        }
+        let task = Task { @MainActor [weak self] in
+            guard let self else {
+                return WorkBuddyAccountWebReadResult.failure(
+                    .webContentUnavailable
+                )
+            }
+            return await performCurrentCreditRead()
+        }
+        inFlightRead = task
+        let result = await task.value
+        inFlightRead = nil
+        return result
+    }
+
+    private func performCurrentCreditRead() async -> WorkBuddyAccountWebReadResult {
         guard consentGranted else {
             flowState = .consentRequired
             return .failure(.consentRequired)
         }
+        latestCreditSnapshot = nil
         readGeneration &+= 1
         let generation = readGeneration
         let browser = ensureBrowser()
@@ -231,6 +255,7 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
             switch result {
             case let .success(reading):
                 lastSynchronizedAt = reading.observedAt
+                latestCreditSnapshot = reading.creditSnapshot
                 if sessionMode == .persistent {
                     defaults.set(true, forKey: Self.sessionEstablishedKey)
                 }
@@ -261,6 +286,7 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
     func disconnectAndClearOwnedWebsiteData() async {
         releaseBrowser()
         lastSynchronizedAt = nil
+        latestCreditSnapshot = nil
         consentGranted = false
         defaults.removeObject(forKey: Self.consentKey)
         defaults.removeObject(forKey: Self.sessionEstablishedKey)

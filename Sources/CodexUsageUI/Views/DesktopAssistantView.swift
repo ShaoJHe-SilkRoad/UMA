@@ -293,7 +293,12 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
                     : nil,
                 usageValue: .credits(availability.compactText),
                 regularUsageText: availability.exactCreditValue.map {
-                    CreditFormatter.exact($0, language: language)
+                    availability.sourceState == .authenticatedAccountWeb
+                        ? CreditFormatter.exactTwoDecimal(
+                            $0,
+                            language: language
+                        )
+                        : CreditFormatter.exact($0, language: language)
                 },
                 tintFraction: availability.normalizedRemainingFraction,
                 severity: availabilitySeverity,
