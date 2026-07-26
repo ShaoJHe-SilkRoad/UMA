@@ -1,8 +1,40 @@
 import Foundation
 import Testing
+@testable import CodexUsageUI
 
 @Suite("M2WACCOUNT safe diagnostics")
 struct M2WAccountSafeDiagnosticsTests {
+    @Test
+    func diagnosticsAreFailureOnlyAndStrictlyBounded() {
+        let accepted = WorkBuddyAccountWebExtractionAttempt(
+            data: Data(),
+            failure: .pageNotStabilized,
+            safeDiagnosticCode: "T110-D110-Q1"
+        )
+        #expect(accepted.safeDiagnosticCode == "T110-D110-Q1")
+
+        for rejected in [
+            "T210-D110-Q1",
+            "T110-D110-Q2",
+            "S01-A00-B03-X00-N00-G0-account",
+            "S01-A00-B03-X00-N00-G0 9155.52"
+        ] {
+            let attempt = WorkBuddyAccountWebExtractionAttempt(
+                data: Data(),
+                failure: .pageNotStabilized,
+                safeDiagnosticCode: rejected
+            )
+            #expect(attempt.safeDiagnosticCode == nil)
+        }
+
+        let successfulAttempt = WorkBuddyAccountWebExtractionAttempt(
+            data: Data(),
+            failure: nil,
+            safeDiagnosticCode: "T110-D110-Q1"
+        )
+        #expect(successfulAttempt.safeDiagnosticCode == nil)
+    }
+
     @Test
     func trackedTaskDiagnosticsNeverRequestFullArgumentsOrEnvironmentDumps()
         throws

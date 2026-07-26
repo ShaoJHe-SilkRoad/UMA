@@ -15,9 +15,9 @@ struct WorkBuddyAccountWebExtractionAttempt: Equatable, Sendable {
     ) {
         self.data = data
         self.failure = failure
-        self.safeDiagnosticCode = Self.validatedSafeDiagnosticCode(
-            safeDiagnosticCode
-        )
+        self.safeDiagnosticCode = failure == nil
+            ? nil
+            : Self.validatedSafeDiagnosticCode(safeDiagnosticCode)
     }
 
     private static func validatedSafeDiagnosticCode(

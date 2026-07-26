@@ -103,7 +103,7 @@ enum WorkBuddyAccountWebExtractorScript {
         let best = node;
         let candidate = node.parentElement;
         for (let depth = 0;
-             candidate && depth < 5;
+             candidate && depth < 12;
              depth += 1) {
           if (candidate === section) break;
           if (pairCount(candidate.textContent) !== 1) break;
@@ -171,7 +171,9 @@ enum WorkBuddyAccountWebExtractorScript {
         }
         return best;
       };
-      for (const row of quotaRowCandidates(root)) {
+      for (const row of quotaRowCandidates(root).filter(
+        (node) => node.getClientRects().length > 0
+      )) {
         const derived = deriveSectionFromRow(row);
         if (!derived) continue;
         const existing = rowDerivedSections[derived.key];
@@ -349,22 +351,39 @@ enum WorkBuddyAccountWebExtractorScript {
       };
       const normalizedDate = (raw, endOfDay) => {
         const match = normalizedText(raw).match(
-          /(\d{4})[年\-\/.](\d{1,2})[月\-\/.](\d{1,2})/
+          /(\d{4})[年\-\/.](\d{1,2})[月\-\/.](\d{1,2})(?:日)?(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/
         );
         if (!match) return null;
         const year = match[1];
         const month = match[2].padStart(2, "0");
         const day = match[3].padStart(2, "0");
-        const clock = endOfDay ? "23:59:59" : "00:00:00";
+        const clock = match[4]
+          ? [
+              match[4].padStart(2, "0"),
+              match[5],
+              match[6] || "00"
+            ].join(":")
+          : (endOfDay ? "23:59:59" : "00:00:00");
         const epoch = Date.parse(`${year}-${month}-${day}T${clock}+08:00`);
         return Number.isSafeInteger(epoch) ? epoch : null;
       };
       const dates = (text) => {
+        const dateTimeToken =
+          "((?:\\d{4})[年\\-\\/.](?:\\d{1,2})[月\\-\\/.](?:\\d{1,2})(?:日)?" +
+          "(?:\\s+\\d{1,2}:\\d{2}(?::\\d{2})?)?)";
         const effective = text.match(
-          /(?:生效(?:时间|日期)?|effective(?:\s+from)?|starts?)\s*[:：]?\s*([^\s,，;；]+)/i
+          new RegExp(
+            "(?:生效(?:时间|日期)?|effective(?:\\s+from)?|starts?)" +
+              "\\s*[:：]?\\s*" + dateTimeToken,
+            "i"
+          )
         );
         const expiry = text.match(
-          /(?:到期(?:时间|日期)?|有效期至|expires?|expiry)\s*[:：]?\s*([^\s,，;；]+)/i
+          new RegExp(
+            "(?:到期(?:时间|日期)?|有效期至|expires?|expiry)" +
+              "\\s*[:：]?\\s*" + dateTimeToken,
+            "i"
+          )
         );
         return {
           effectiveAtMilliseconds: effective
@@ -381,7 +400,7 @@ enum WorkBuddyAccountWebExtractorScript {
         if (/未生效|待生效|not\s+yet\s+effective|future/i.test(text)) {
           matches.push("future");
         }
-        if (/不可用|已失效|invalid|unavailable/i.test(text)) {
+        if (/不可用|不可使用|无法使用|已失效|invalid|unavailable/i.test(text)) {
           matches.push("unavailable");
         }
         if (/历史|historical/i.test(text)) matches.push("historical");
@@ -407,6 +426,30 @@ enum WorkBuddyAccountWebExtractorScript {
         const bonus = /奖励|赠送|bonus/i.test(text);
         if (base === bonus) return null;
         return base ? "subscriptionBase" : "subscriptionBonus";
+      };
+      const hasDisabledMetadata = (row, section) => {
+        let candidate = row;
+        for (let depth = 0;
+             candidate && section.contains(candidate) && depth < 8;
+             depth += 1) {
+          const metadata = [
+            candidate.getAttribute("aria-disabled"),
+            candidate.getAttribute("data-disabled"),
+            candidate.getAttribute("data-status"),
+            candidate.getAttribute("data-state"),
+            candidate.getAttribute("class")
+          ].map(normalizedText).join(" ");
+          if (/(?:^|\s)(?:true|disabled|unavailable|invalid|expired)(?:\s|$)/i
+                .test(metadata)) {
+            return true;
+          }
+          if (candidate.hasAttribute &&
+              candidate.hasAttribute("disabled")) {
+            return true;
+          }
+          candidate = candidate.parentElement;
+        }
+        return false;
       };
       const extractRows = (key, kindForText, maximumCount) => {
         const output = [];
@@ -447,6 +490,10 @@ enum WorkBuddyAccountWebExtractorScript {
           const kind = kindForText(text);
           if (!kind) return { failure: "ambiguousCredits" };
           const poolDates = dates(text);
+          const disabledByMetadata = hasDisabledMetadata(
+            row,
+            sections[key]
+          );
           output.push({
             stablePageID: stablePageID(row),
             kind,
@@ -455,7 +502,9 @@ enum WorkBuddyAccountWebExtractorScript {
             displayedRemaining,
             effectiveAtMilliseconds: poolDates.effectiveAtMilliseconds,
             expiresAtMilliseconds: poolDates.expiresAtMilliseconds,
-            pageStatus: status(text, used, total)
+            pageStatus: disabledByMetadata
+              ? "unavailable"
+              : status(text, used, total)
           });
         }
         return { rows: output };
@@ -486,15 +535,18 @@ enum WorkBuddyAccountWebExtractorScript {
 
       const accountBalancePattern =
         /积分余额|当前可用总积分|可用积分|credits?\s+balance|available\s+credits?/i;
-      const accountBalanceNodes = Array.from(root.querySelectorAll(
+      const accountBalanceSelector =
         "[data-account-balance], [data-credit-balance], .credit-balance, " +
-        ".credits-balance, .plans-usage__balance, .balance-item"
-      )).filter((node) => {
+        ".credits-balance, .plans-usage__balance, .balance-item";
+      const isAccountBalanceNode = (node) => {
         if (!accountBalancePattern.test(normalizedText(node.textContent))) {
           return false;
         }
         return !Object.values(sections).some((section) => section.contains(node));
-      });
+      };
+      const accountBalanceNodes = Array.from(
+        root.querySelectorAll(accountBalanceSelector)
+      ).filter(isAccountBalanceNode);
       const authoritativePageBalances = [];
       for (const node of accountBalanceNodes) {
         const matches = normalizedText(node.textContent).match(numberToken) || [];
@@ -506,7 +558,6 @@ enum WorkBuddyAccountWebExtractorScript {
       if (new Set(authoritativePageBalances).size !== authoritativePageBalances.length) {
         return fail("ambiguousAccountBalance");
       }
-
       if (location.origin !== "https://www.workbuddy.cn" ||
           location.pathname !== "/profile/plans-usage" ||
           location.search !== "" ||

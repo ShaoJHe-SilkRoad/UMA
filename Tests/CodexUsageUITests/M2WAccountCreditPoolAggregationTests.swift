@@ -83,6 +83,76 @@ struct M2WAccountCreditPoolAggregationTests {
     }
 
     @Test
+    func currentReferenceIsDynamicFixtureAndNotRuntimeOracle() throws {
+        let reading = try success(
+            validate(
+                payload(
+                    subscription: [
+                        pool(
+                            .subscriptionBase,
+                            used: "0",
+                            total: "4000",
+                            id: "current-base"
+                        ),
+                        pool(
+                            .subscriptionBonus,
+                            used: "0",
+                            total: "4000",
+                            id: "current-bonus"
+                        )
+                    ],
+                    addOn: [
+                        pool(
+                            .addOn,
+                            used: "500",
+                            total: "1000",
+                            id: "current-addon"
+                        )
+                    ],
+                    benefitGift: [
+                        pool(
+                            .benefitGift,
+                            used: "863.1",
+                            total: "1000",
+                            id: "current-gift"
+                        )
+                    ]
+                )
+            )
+        )
+
+        #expect(reading.creditSnapshot.subscriptionRemaining == 8_000)
+        #expect(reading.creditSnapshot.addOnRemaining == 500)
+        #expect(
+            reading.creditSnapshot.benefitGiftRemaining
+                == Decimal(string: "136.90")
+        )
+        #expect(
+            reading.creditSnapshot.calculatedTotalRemaining
+                == Decimal(string: "8636.90")
+        )
+        #expect(
+            CreditFormatter.exactTwoDecimal(
+                reading.balance.remaining,
+                language: .english
+            ) == "8,636.90"
+        )
+        #expect(CreditFormatter.compact(reading.balance.remaining) == "8.6k")
+
+        for relativePath in [
+            "Sources/CodexUsageUI/Models/WorkBuddyAccountWebSync.swift",
+            "Sources/CodexUsageUI/Services/WorkBuddyAccountWebExtractorScript.swift"
+        ] {
+            let runtimeSource = try String(
+                contentsOf: packageRoot().appendingPathComponent(relativePath),
+                encoding: .utf8
+            )
+            #expect(!runtimeSource.contains("8636.90"))
+            #expect(!runtimeSource.contains("8,636.90"))
+        }
+    }
+
+    @Test
     func missingSectionAndWrongSectionKindFailClosed() {
         var missing = payload(subscription: subscription9000)
         missing = WorkBuddyAccountWebExtractionPayload(
@@ -725,7 +795,21 @@ struct M2WAccountCreditPoolAggregationTests {
         )
         #expect((recovered?["subscriptionPools"] as? [Any])?.count == 1)
         #expect((recovered?["addOnPools"] as? [Any])?.count == 1)
-        #expect((recovered?["benefitGiftPools"] as? [Any])?.count == 2)
+        #expect((recovered?["benefitGiftPools"] as? [Any])?.count == 5)
+        #expect(recovered?["safeDiagnosticCode"] == nil)
+        let recoveredData = try JSONSerialization.data(
+            withJSONObject: try #require(recovered)
+        )
+        let recoveredPayload = try JSONDecoder().decode(
+            WorkBuddyAccountWebExtractionPayload.self,
+            from: recoveredData
+        )
+        let recoveredReading = try success(validate(recoveredPayload))
+        #expect(recoveredReading.creditSnapshot.subscriptionRemaining == 9_000)
+        #expect(recoveredReading.creditSnapshot.addOnRemaining == 1_000)
+        #expect(recoveredReading.creditSnapshot.benefitGiftRemaining == 205)
+        #expect(recoveredReading.balance.remaining == 10_205)
+        #expect(recoveredReading.creditSnapshot.includedPoolCount == 4)
         #expect(exceptionText == nil)
 
         context.evaluateScript("installMultiPairBenefitWrapper();")
@@ -753,6 +837,7 @@ struct M2WAccountCreditPoolAggregationTests {
       secondaryRowSelector: "",
       headings: [],
       children: [],
+      actionButtons: [],
       getAttribute(name) { return this.attributes[name] || null; },
       getClientRects() { return this.visible ? [{}] : []; },
       scrollIntoView() { globalThis.fixtureScrollCount += 1; },
@@ -769,7 +854,7 @@ struct M2WAccountCreditPoolAggregationTests {
         return this.pageTitle || null;
       },
       querySelectorAll(selector) {
-        if (selector === "button, [role='button']") return [];
+        if (selector === "button, [role='button']") return this.actionButtons;
         if (selector === this.rowSelector) return this.rows;
         if (selector === this.secondaryRowSelector) return this.secondaryRows;
         if (selector.includes(", ") &&
@@ -821,6 +906,11 @@ struct M2WAccountCreditPoolAggregationTests {
       addOnHeading
     ];
     root.rows = [subscriptionRowHidden, subscriptionRow, addOnRow];
+    const hiddenBenefitGift = makeNode("权益赠送包 0 / 100", {}, false);
+    const hiddenBenefitGiftRow = makeNode("0 / 100", {}, false);
+    hiddenBenefitGift.parentElement = root;
+    hiddenBenefitGiftRow.parentElement = hiddenBenefitGift;
+    root.rows.push(hiddenBenefitGiftRow);
     globalThis.installBenefitGiftSection = () => {
       const benefitGift = makeNode("权益赠送包 0 / 105 使用中");
       benefitGift.rowSelector = ".plans-usage__benefit-row";
@@ -830,16 +920,58 @@ struct M2WAccountCreditPoolAggregationTests {
         "赠送包 0 / 100 使用中"
       );
       benefitGiftSecondaryRow.attributes["data-benefit-id"] = "gift-b";
+      const benefitGiftExpiredTodayOwner = makeNode(
+        "赠送包 0 / 100 使用中 到期时间： 2033-05-18 10:00:00"
+      );
+      benefitGiftExpiredTodayOwner.attributes["data-benefit-id"] =
+        "gift-expired-today";
+      const benefitGiftUnavailableRow = makeNode(
+        "赠送包 400 / 500 无法使用 到期时间： 2033-05-19 10:00:00"
+      );
+      const benefitGiftClaimAction = makeNode("领取");
+      benefitGiftClaimAction.parentElement = benefitGiftUnavailableRow;
+      benefitGiftUnavailableRow.actionButtons = [benefitGiftClaimAction];
+      benefitGiftUnavailableRow.attributes["data-benefit-id"] =
+        "gift-unavailable";
+      const benefitGiftDisabledRow = makeNode(
+        "赠送包 0 / 50 到期时间： 2033-05-19 10:00:00"
+      );
+      benefitGiftDisabledRow.attributes["data-benefit-id"] =
+        "gift-disabled";
+      benefitGiftDisabledRow.attributes["aria-disabled"] = "true";
+      const benefitGiftExpiredTodayRow = makeNode("0 / 100");
+      let benefitGiftExpiredTodayAncestor = benefitGiftExpiredTodayRow;
+      for (let depth = 0; depth < 6; depth += 1) {
+        const wrapper = makeNode("0 / 100");
+        benefitGiftExpiredTodayAncestor.parentElement = wrapper;
+        benefitGiftExpiredTodayAncestor = wrapper;
+      }
+      benefitGiftExpiredTodayAncestor.parentElement =
+        benefitGiftExpiredTodayOwner;
       benefitGift.parentElement = root;
       benefitGiftRow.parentElement = benefitGift;
       benefitGiftSecondaryRow.parentElement = benefitGift;
+      benefitGiftExpiredTodayOwner.parentElement = benefitGift;
+      benefitGiftUnavailableRow.parentElement = benefitGift;
+      benefitGiftDisabledRow.parentElement = benefitGift;
       benefitGift.rows = [benefitGiftRow];
       benefitGift.secondaryRowSelector = ".package-row";
-      benefitGift.secondaryRows = [benefitGiftSecondaryRow];
+      benefitGift.secondaryRows = [
+        benefitGiftSecondaryRow,
+        benefitGiftExpiredTodayRow,
+        benefitGiftUnavailableRow,
+        benefitGiftDisabledRow
+      ];
       benefitGift.headings = [];
       root.children.push(benefitGift);
       root.lastElementChild = benefitGift;
-      root.rows.push(benefitGiftRow, benefitGiftSecondaryRow);
+      root.rows.push(
+        benefitGiftRow,
+        benefitGiftSecondaryRow,
+        benefitGiftExpiredTodayRow,
+        benefitGiftUnavailableRow,
+        benefitGiftDisabledRow
+      );
       globalThis.fixtureBenefitGiftSection = benefitGift;
     };
     globalThis.installMultiPairBenefitWrapper = () => {
@@ -864,6 +996,9 @@ struct M2WAccountCreditPoolAggregationTests {
       readyState: "complete",
       querySelector(selector) {
         return selector === ".plans-usage" ? root : null;
+      },
+      querySelectorAll() {
+        return [];
       }
     };
     """#
