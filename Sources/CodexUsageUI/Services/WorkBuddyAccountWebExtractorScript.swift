@@ -48,36 +48,120 @@ enum WorkBuddyAccountWebExtractorScript {
         addOn: /加量包|add[\s-]*on/i,
         benefitGift: /权益赠送包|权益包|赠送包|benefit|gift/i
       };
-      const titleNodes = Array.from(root.querySelectorAll(
-        "h2, h3, h4, [role='heading'], .plans-usage__section-title, " +
-        ".section-title, .card-title"
-      ));
-      const sectionKey = (node) => {
-        const text = normalizedText(node.textContent);
-        const matches = Object.entries(sectionPatterns)
-          .filter(([, pattern]) => pattern.test(text))
-          .map(([key]) => key);
+      const matchingSectionKeys = (text) => Object.entries(sectionPatterns)
+        .filter(([, pattern]) => pattern.test(text))
+        .map(([key]) => key);
+      const semanticNodeText = (node) => normalizedText([
+        node.textContent,
+        node.getAttribute && node.getAttribute("aria-label"),
+        node.getAttribute && node.getAttribute("data-section"),
+        node.getAttribute && node.getAttribute("data-section-title")
+      ].filter(Boolean).join(" "));
+      const sectionKeyForText = (text) => {
+        const matches = matchingSectionKeys(text);
         return matches.length === 1 ? matches[0] : null;
+      };
+      const titleSelector =
+        "h1, h2, h3, h4, h5, h6, [role='heading'], [aria-level], " +
+        "[data-section], [data-section-title], " +
+        ".plans-usage__section-title, .section-title, .card-title";
+      const titleNodes = Array.from(root.querySelectorAll(titleSelector));
+      const sectionKey = (node) => {
+        return sectionKeyForText(semanticNodeText(node));
       };
       const titles = {};
       for (const node of titleNodes) {
         const key = sectionKey(node);
         if (!key) continue;
-        if (titles[key]) return fail("incompletePoolSections");
+        if (titles[key]) {
+          const existing = titles[key];
+          const duplicateIsHidden =
+            existing.getClientRects().length === 0 ||
+            node.getClientRects().length === 0;
+          if (duplicateIsHidden) {
+            if (existing.getClientRects().length === 0) titles[key] = node;
+            continue;
+          }
+          return fail("ambiguousCredits");
+        }
         titles[key] = node;
       }
-      if (!titles.subscription || !titles.addOn || !titles.benefitGift) {
+
+      const rowDerivedSections = {};
+      const deriveSectionFromRow = (row) => {
+        let candidate = row.parentElement;
+        let best = null;
+        for (let depth = 0; candidate && candidate !== root && depth < 6; depth += 1) {
+          const key = sectionKeyForText(normalizedText(candidate.textContent));
+          if (key) {
+            best = { key, container: candidate };
+          } else if (matchingSectionKeys(
+            normalizedText(candidate.textContent)
+          ).length > 1) {
+            break;
+          }
+          candidate = candidate.parentElement;
+        }
+        return best;
+      };
+      for (const row of Array.from(
+        root.querySelectorAll(".plans-usage__quota-row")
+      )) {
+        const derived = deriveSectionFromRow(row);
+        if (!derived) continue;
+        const existing = rowDerivedSections[derived.key];
+        if (existing &&
+            existing !== derived.container &&
+            !existing.contains(derived.container) &&
+            !derived.container.contains(existing)) {
+          return fail("ambiguousCredits");
+        }
+        if (!existing || derived.container.contains(existing)) {
+          rowDerivedSections[derived.key] = derived.container;
+        }
+      }
+
+      const missingTitleKeys = Object.keys(sectionPatterns).filter(
+        (key) => !titles[key] && !rowDerivedSections[key]
+      );
+      if (missingTitleKeys.length > 0) {
+        const discoveryTargets = [
+          root.firstElementChild,
+          root.lastElementChild,
+          ...Array.from(
+            root.querySelectorAll(".plans-usage__quota-row")
+          ).slice(-1)
+        ].filter(Boolean);
+        const priorStep = Number.isSafeInteger(
+          globalThis.__umaWorkBuddySectionDiscoveryStepV3
+        )
+          ? globalThis.__umaWorkBuddySectionDiscoveryStepV3
+          : 0;
+        const maximumDiscoverySteps = Math.max(2, discoveryTargets.length * 2);
+        if (priorStep < maximumDiscoverySteps) {
+          const target = discoveryTargets[
+            priorStep % Math.max(1, discoveryTargets.length)
+          ] || root;
+          target.scrollIntoView({
+            block: priorStep % 2 === 0 ? "end" : "start",
+            inline: "nearest"
+          });
+          globalThis.__umaWorkBuddySectionDiscoveryStepV3 = priorStep + 1;
+          return fail("pageNotStabilized");
+        }
         return fail("incompletePoolSections");
       }
+      delete globalThis.__umaWorkBuddySectionDiscoveryStepV3;
 
       const sectionContainer = (heading) => {
         let candidate = heading.parentElement;
         let best = candidate;
         for (let depth = 0; candidate && candidate !== root && depth < 6; depth += 1) {
-          const recognizedHeadings = Array.from(candidate.querySelectorAll(
-            "h2, h3, h4, [role='heading'], .plans-usage__section-title, " +
-            ".section-title, .card-title"
-          )).filter((node) => sectionKey(node) !== null);
+          const recognizedHeadings = Array.from(
+            candidate.querySelectorAll(titleSelector)
+          ).filter((node) =>
+            sectionKey(node) !== null && node.getClientRects().length > 0
+          );
           if (recognizedHeadings.length === 1) best = candidate;
           if (recognizedHeadings.length > 1) break;
           candidate = candidate.parentElement;
@@ -85,9 +169,15 @@ enum WorkBuddyAccountWebExtractorScript {
         return best;
       };
       const sections = {
-        subscription: sectionContainer(titles.subscription),
-        addOn: sectionContainer(titles.addOn),
-        benefitGift: sectionContainer(titles.benefitGift)
+        subscription: titles.subscription
+          ? sectionContainer(titles.subscription)
+          : rowDerivedSections.subscription,
+        addOn: titles.addOn
+          ? sectionContainer(titles.addOn)
+          : rowDerivedSections.addOn,
+        benefitGift: titles.benefitGift
+          ? sectionContainer(titles.benefitGift)
+          : rowDerivedSections.benefitGift
       };
       if (!sections.subscription || !sections.addOn || !sections.benefitGift ||
           new Set(Object.values(sections)).size !== 3) {

@@ -1,6 +1,6 @@
 # UMA WorkBuddy Account Web Sync QA Issue Ledger
 
-Version: 1.2
+Version: 1.3
 Date: 2026-07-26
 Goal: M2WACCOUNT-G1
 
@@ -21,6 +21,7 @@ Goal: M2WACCOUNT-G1
 | WA-027 | “Allow Once” could silently authorize later navigation to the same external host. | External approval is scoped to the single navigation decision; no host approval is cached, and every later external navigation requires a new Human confirmation. | Automated PASS |
 | WA-028 | The apex domain or a query-bearing page could bypass the exact official-origin and route boundary. | Only `https://www.workbuddy.cn` is admitted without confirmation; `https://workbuddy.cn` is treated as external, and extraction rejects query- or fragment-bearing variants of the exact Plan and Usage route. | Automated PASS |
 | WA-029 | A broad full-command process listing exposed an unrelated third-party bearer-like command argument in tool output. | Root cause was the diagnostic shape, not WorkBuddy: no WorkBuddy credential, cookie, identity, Git, package, temporary artifact, or screenshot exposure was found. The Founder accepted the residual risk and removed token rotation as a development gate. Future task diagnostics are argument-free and allowlisted, using only PID, parent PID when required, elapsed time, state, executable basename or approved path, and owned-child count. A focused source/script audit rejects full-argv and environment-dump commands. | Accepted nonblocking risk; prevention PASS |
+| WA-030 | Accessibility inspection of the authenticated isolated browser returned broader page text than the requested window metadata. | The account window was immediately closed without reproducing or retaining the returned content. No cookie, token, authorization header, password, QR code, payment data, package content, Git content, temporary artifact, or account screenshot was collected. All later account-window handling uses title-only close actions; app-state inspection is limited to sanitized UMA Settings after the account window closes. | Contained nonblocking incident; prevention active |
 
 ## All-pool repair ledger
 
@@ -40,16 +41,20 @@ Goal: M2WACCOUNT-G1
 | WA-024 Value above maximum accepted | Core Credit bounds exceed the account-web product limit. | Blocking | Account-web validation inherited the broader legacy manual range. | Account-web values are independently capped at `999,999,999,999.99` with at most two decimal places. | Exact maximum, above-maximum, negative, malformed, scientific, and excessive-precision cases. | Formatter and snapshot decoding. | Automated PASS |
 | WA-025 Account total denominator incorrectly derived from subscription | A pool aggregate could inherit the subscription total and show a false fraction. | Blocking | Flat `used/total` aggregation implied one common denominator. | Account grand total publishes as absolute remaining only; pool used/total remain diagnostic and produce no percent or fill. | Aggregate balance asserts nil used, nil total, nil normalized fraction. | Severity and Assistant tint. | Automated PASS |
 | WA-026 Previous/manual snapshot displayed after account-read failure | A failed account read could be mistaken for an older or manual value. | Blocking | Retention needed an explicit account-web withdrawal proof. | Connector replaces the channel with an unavailable snapshot on every failure; manual remains hidden and separate. | Expiry/failure, mismatch, disconnect, and manual-only admission cases. | Main/Assistant provider-set parity. | Automated PASS |
+| WA-031 Live section discovery rejected the official page | Human comparison reported official `10105` while UMA showed no WorkBuddy provider; sanitized Settings reported incomplete Credit sections. | Blocking | Version 2 required all three semantic headings before it scrolled, so a lower lazy-rendered section could never become discoverable. It also recognized only a narrow heading-selector set and rejected hidden responsive duplicates. | Keep all three sections mandatory, but perform a bounded root-local discovery sweep, recognize semantic heading metadata, ignore hidden responsive duplicates, and derive a section only from the bounded ancestry of an allowlisted quota row. The page-local discovery counter is cleared as soon as all sections recover; disjoint or ambiguous candidates still fail closed. | An executable JavaScriptCore fixture proves bounded discovery, hidden-duplicate tolerance, row-derived recovery, counter reset, and atomic extraction. Static privacy checks still reject broad DOM selectors. | Automated PASS; physical parity pending. |
 
 ## Verification state
 
-The version-1.2 repair passed 46 focused tests across the account-web,
-all-pool, and Minimalist suites plus the focused safe-diagnostics audit; the
-full suite passed 235 tests across 31 suites. Debug, Release, and
+The version-1.3 repair passed 44 focused tests across the account-web,
+all-pool, and safe-diagnostics suites; the full suite passed 237 tests across
+31 suites. Debug, Release, and
 strict-concurrency Release with warnings-as-errors builds passed. Light/Dark
 English and Simplified Chinese renderer evidence passed for the main panel,
 Regular Assistant, Minimalist Assistant, and increased-contrast presentation.
 Independent Examiner review found one incomplete-section readiness gap; the
 bounded retry repair and focused regression were independently rechecked as
-resolved. The pre-closeout commit-exact package passed static audit; final
-package audit and Human same-time balance comparison remain pending.
+resolved. The first staged review then found a page-local discovery-counter
+reset gap and weak runtime coverage; an explicit reset and executable
+JavaScriptCore recovery fixture resolved both findings. The pre-closeout
+commit-exact package passed static audit; final package audit and Human
+same-time balance comparison remain pending.

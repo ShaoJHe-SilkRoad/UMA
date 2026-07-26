@@ -1,4 +1,5 @@
 import Foundation
+import JavaScriptCore
 import Testing
 @testable import CodexUsageUI
 
@@ -608,6 +609,12 @@ struct M2WAccountCreditPoolAggregationTests {
             "addOnPools",
             "benefitGiftPools",
             "scrollIntoView",
+            "__umaWorkBuddySectionDiscoveryStepV3",
+            "rowDerivedSections",
+            "deriveSectionFromRow",
+            "h1, h2, h3, h4, h5, h6",
+            "[data-section-title]",
+            "getClientRects().length === 0",
             "查看全部",
             "pageNotStabilized",
             "stableObservations",
@@ -625,11 +632,183 @@ struct M2WAccountCreditPoolAggregationTests {
             "localStorage",
             "sessionStorage",
             "XMLHttpRequest",
-            "fetch("
+            "fetch(",
+            "querySelectorAll(\"*\")"
         ] {
             #expect(!script.contains(forbidden))
         }
     }
+
+    @Test
+    func sectionDiscoveryRemainsBoundedAndAllSectionsStayMandatory() throws {
+        let script = try String(
+            contentsOf: packageRoot().appendingPathComponent(
+                "Sources/CodexUsageUI/Services/WorkBuddyAccountWebExtractorScript.swift"
+            ),
+            encoding: .utf8
+        )
+
+        #expect(script.contains("const maximumDiscoverySteps = Math.max(2,"))
+        #expect(script.contains("return fail(\"incompletePoolSections\")"))
+        #expect(
+            script.contains(
+                "new Set(Object.values(sections)).size !== 3"
+            )
+        )
+
+        var missing = payload(subscription: subscription9000)
+        missing = WorkBuddyAccountWebExtractionPayload(
+            extractorVersion: missing.extractorVersion,
+            discoveredSections: [.subscription, .benefitGift],
+            subscriptionPools: missing.subscriptionPools,
+            addOnPools: [],
+            benefitGiftPools: [],
+            authoritativePageBalances: []
+        )
+        #expect(validate(missing) == .failure(.incompletePoolSections))
+    }
+
+    @Test @MainActor
+    func extractorRuntimeRecoversAndResetsBoundedDiscoveryState() throws {
+        guard let context = JSContext() else {
+            Issue.record("JavaScriptCore context unavailable")
+            return
+        }
+        var exceptionText: String?
+        context.exceptionHandler = { _, exception in
+            exceptionText = exception?.toString()
+        }
+        context.evaluateScript(Self.extractorRuntimeFixture)
+        #expect(exceptionText == nil)
+
+        let first = context.evaluateScript(
+            WorkBuddyAccountWebExtractorScript.source
+        )?.toDictionary()
+        #expect(first?["failure"] as? String == "pageNotStabilized")
+        #expect(
+            context.objectForKeyedSubscript("fixtureScrollCount")?.toInt32()
+                == 1
+        )
+        #expect(
+            context.objectForKeyedSubscript(
+                "__umaWorkBuddySectionDiscoveryStepV3"
+            )?.toInt32() == 1
+        )
+
+        context.evaluateScript("installBenefitGiftSection();")
+        let stabilizing = context.evaluateScript(
+            WorkBuddyAccountWebExtractorScript.source
+        )?.toDictionary()
+        #expect(stabilizing?["failure"] as? String == "pageNotStabilized")
+        #expect(
+            context.objectForKeyedSubscript(
+                "__umaWorkBuddySectionDiscoveryStepV3"
+            )?.isUndefined == true
+        )
+
+        let recovered = context.evaluateScript(
+            WorkBuddyAccountWebExtractorScript.source
+        )?.toDictionary()
+        #expect(recovered?["failure"] == nil)
+        #expect(
+            (recovered?["discoveredSections"] as? [String])
+                == ["subscription", "addOn", "benefitGift"]
+        )
+        #expect((recovered?["subscriptionPools"] as? [Any])?.count == 1)
+        #expect((recovered?["addOnPools"] as? [Any])?.count == 1)
+        #expect((recovered?["benefitGiftPools"] as? [Any])?.count == 1)
+        #expect(exceptionText == nil)
+    }
+
+    private static let extractorRuntimeFixture = #"""
+    globalThis.fixtureScrollCount = 0;
+    const makeNode = (text, attributes = {}, visible = true) => ({
+      textContent: text,
+      attributes,
+      visible,
+      parentElement: null,
+      rows: [],
+      headings: [],
+      children: [],
+      getAttribute(name) { return this.attributes[name] || null; },
+      getClientRects() { return this.visible ? [{}] : []; },
+      scrollIntoView() { globalThis.fixtureScrollCount += 1; },
+      contains(other) {
+        let candidate = other;
+        while (candidate) {
+          if (candidate === this) return true;
+          candidate = candidate.parentElement;
+        }
+        return false;
+      },
+      querySelector(selector) {
+        if (selector.includes("plans-usage__quota-remain")) return null;
+        return this.pageTitle || null;
+      },
+      querySelectorAll(selector) {
+        if (selector === "button, [role='button']") return [];
+        if (selector === ".plans-usage__quota-row") return this.rows;
+        if (selector.includes("data-account-balance")) return [];
+        return this.headings;
+      }
+    });
+    const pageTitle = makeNode("套餐与用量");
+    const root = makeNode("套餐与用量");
+    root.pageTitle = pageTitle;
+    const subscription = makeNode("订阅套餐 基础套餐 0 / 9000 使用中");
+    const addOn = makeNode("加量包 0 / 1000 使用中");
+    const subscriptionHeadingHidden = makeNode("订阅套餐", {}, false);
+    const subscriptionHeading = makeNode("订阅套餐");
+    const addOnHeading = makeNode("加量包");
+    const subscriptionRow = makeNode("订阅套餐 基础套餐 0 / 9000 使用中");
+    const addOnRow = makeNode("加量包 0 / 1000 使用中");
+    subscription.parentElement = root;
+    addOn.parentElement = root;
+    subscriptionHeadingHidden.parentElement = subscription;
+    subscriptionHeading.parentElement = subscription;
+    addOnHeading.parentElement = addOn;
+    subscriptionRow.parentElement = subscription;
+    addOnRow.parentElement = addOn;
+    subscription.rows = [subscriptionRow];
+    subscription.headings = [
+      subscriptionHeadingHidden,
+      subscriptionHeading
+    ];
+    addOn.rows = [addOnRow];
+    addOn.headings = [addOnHeading];
+    root.children = [subscription, addOn];
+    root.firstElementChild = subscription;
+    root.lastElementChild = addOn;
+    root.headings = [
+      subscriptionHeadingHidden,
+      subscriptionHeading,
+      addOnHeading
+    ];
+    root.rows = [subscriptionRow, addOnRow];
+    globalThis.installBenefitGiftSection = () => {
+      const benefitGift = makeNode("权益赠送包 0 / 105 使用中");
+      const benefitGiftRow = makeNode("权益赠送包 0 / 105 使用中");
+      benefitGift.parentElement = root;
+      benefitGiftRow.parentElement = benefitGift;
+      benefitGift.rows = [benefitGiftRow];
+      benefitGift.headings = [];
+      root.children.push(benefitGift);
+      root.lastElementChild = benefitGift;
+      root.rows.push(benefitGiftRow);
+    };
+    globalThis.location = {
+      origin: "https://www.workbuddy.cn",
+      pathname: "/profile/plans-usage",
+      search: "",
+      hash: ""
+    };
+    globalThis.document = {
+      readyState: "complete",
+      querySelector(selector) {
+        return selector === ".plans-usage" ? root : null;
+      }
+    };
+    """#
 
     private var subscription9000: [WorkBuddyAccountWebSanitizedPool] {
         [
