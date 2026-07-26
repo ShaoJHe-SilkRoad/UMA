@@ -703,6 +703,19 @@ private struct WorkBuddyAccountWebSyncSection: View {
             }
             .accessibilityElement(children: .combine)
 
+            if let safeDiagnosticCode = controller.safeDiagnosticCode {
+                Text(
+                    "\(language.workBuddyAccountWebSafeDiagnostic): "
+                        + safeDiagnosticCode
+                )
+                .font(UsageDesign.font(8.5, language: language))
+                .foregroundStyle(.secondary)
+                .accessibilityLabel(
+                    "\(language.workBuddyAccountWebSafeDiagnostic), "
+                        + safeDiagnosticCode
+                )
+            }
+
             if let snapshot = controller.latestCreditSnapshot {
                 VStack(alignment: .leading, spacing: 4) {
                     accountCreditRow(

@@ -5,6 +5,34 @@ import Testing
 @Suite("M2WACCOUNT-G1 WorkBuddy account web sync")
 struct M2WAccountWebSyncTests {
     @Test
+    func safeStructureDiagnosticsAcceptOnlyTheBoundedBitCode() {
+        let data = Data()
+        #expect(
+            WorkBuddyAccountWebExtractionAttempt(
+                data: data,
+                failure: .incompletePoolSections,
+                safeDiagnosticCode: "T101-D010-Q1"
+            ).safeDiagnosticCode == "T101-D010-Q1"
+        )
+        for rejected in [
+            nil,
+            "",
+            "T101-D010-Q1-extra",
+            "T102-D010-Q1",
+            "account text",
+            "T101-D010-Q1\nidentity"
+        ] {
+            #expect(
+                WorkBuddyAccountWebExtractionAttempt(
+                    data: data,
+                    failure: .incompletePoolSections,
+                    safeDiagnosticCode: rejected
+                ).safeDiagnosticCode == nil
+            )
+        }
+    }
+
+    @Test
     func officialOriginAndUsageRouteAreExact() {
         #expect(
             WorkBuddyAccountWebPolicy.usageURL.absoluteString

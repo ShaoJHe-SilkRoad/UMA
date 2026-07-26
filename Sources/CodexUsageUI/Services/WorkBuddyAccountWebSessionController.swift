@@ -6,6 +6,33 @@ import WebKit
 struct WorkBuddyAccountWebExtractionAttempt: Equatable, Sendable {
     let data: Data
     let failure: WorkBuddyAccountWebFailure?
+    let safeDiagnosticCode: String?
+
+    init(
+        data: Data,
+        failure: WorkBuddyAccountWebFailure?,
+        safeDiagnosticCode: String? = nil
+    ) {
+        self.data = data
+        self.failure = failure
+        self.safeDiagnosticCode = Self.validatedSafeDiagnosticCode(
+            safeDiagnosticCode
+        )
+    }
+
+    private static func validatedSafeDiagnosticCode(
+        _ code: String?
+    ) -> String? {
+        guard let code,
+              code.range(
+                of: "^T[01]{3}-D[01]{3}-Q[01]$",
+                options: .regularExpression
+              ) != nil
+        else {
+            return nil
+        }
+        return code
+    }
 }
 
 @MainActor
@@ -57,6 +84,7 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
     @Published public private(set) var flowState: WorkBuddyAccountWebFlowState = .idle
     @Published public private(set) var consentGranted = false
     @Published public private(set) var lastSynchronizedAt: Date?
+    @Published public private(set) var safeDiagnosticCode: String?
     @Published private(set) var latestCreditSnapshot:
         WorkBuddyAccountCreditSnapshot?
     @Published public var sessionMode: WorkBuddyAccountWebSessionMode {
@@ -64,6 +92,7 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
             guard oldValue != sessionMode else { return }
             defaults.removeObject(forKey: Self.sessionEstablishedKey)
             latestCreditSnapshot = nil
+            safeDiagnosticCode = nil
             persistConsentIfGranted()
             releaseBrowser()
             if oldValue == .persistent && sessionMode == .nonpersistent {
@@ -137,6 +166,7 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
             defaults.removeObject(forKey: Self.sessionEstablishedKey)
         }
         persistConsentIfGranted()
+        safeDiagnosticCode = nil
         flowState = .idle
     }
 
@@ -179,6 +209,7 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
             return .failure(.consentRequired)
         }
         latestCreditSnapshot = nil
+        safeDiagnosticCode = nil
         readGeneration &+= 1
         let generation = readGeneration
         let browser = ensureBrowser()
@@ -233,7 +264,9 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
                         data: data,
                         failure: (dictionary["failure"] as? String).flatMap(
                             WorkBuddyAccountWebFailure.init(rawValue:)
-                        )
+                        ),
+                        safeDiagnosticCode:
+                            dictionary["safeDiagnosticCode"] as? String
                     )
                 }
             )
@@ -241,6 +274,7 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
                 return .failure(.webContentUnavailable)
             }
             if let failure = attempt.failure {
+                safeDiagnosticCode = attempt.safeDiagnosticCode
                 flowState = .failed(failure)
                 return .failure(failure)
             }
@@ -256,6 +290,7 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
             case let .success(reading):
                 lastSynchronizedAt = reading.observedAt
                 latestCreditSnapshot = reading.creditSnapshot
+                safeDiagnosticCode = nil
                 if sessionMode == .persistent {
                     defaults.set(true, forKey: Self.sessionEstablishedKey)
                 }
@@ -287,6 +322,7 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
         releaseBrowser()
         lastSynchronizedAt = nil
         latestCreditSnapshot = nil
+        safeDiagnosticCode = nil
         consentGranted = false
         defaults.removeObject(forKey: Self.consentKey)
         defaults.removeObject(forKey: Self.sessionEstablishedKey)
@@ -328,6 +364,7 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
         )
         navigationContinuation = nil
         window?.orderOut(nil)
+        safeDiagnosticCode = nil
         flowState = .idle
     }
 

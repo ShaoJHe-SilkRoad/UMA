@@ -60,6 +60,10 @@ extension AppLanguage {
         self == .simplifiedChinese ? "账号网页同步" : "Account web sync"
     }
 
+    var workBuddyAccountWebSafeDiagnostic: String {
+        self == .simplifiedChinese ? "安全结构代码" : "Safe structure code"
+    }
+
     var workBuddySubscriptionRemaining: String {
         self == .simplifiedChinese
             ? "订阅套餐剩余"

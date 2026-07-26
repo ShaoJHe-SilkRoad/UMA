@@ -14,7 +14,11 @@ enum WorkBuddyAccountWebExtractorScript {
         benefitGiftPools: [],
         authoritativePageBalances: []
       });
-      const fail = (reason) => ({ ...empty(), failure: reason });
+      const fail = (reason, safeDiagnosticCode = null) => ({
+        ...empty(),
+        failure: reason,
+        ...(safeDiagnosticCode ? { safeDiagnosticCode } : {})
+      });
 
       if (location.origin !== "https://www.workbuddy.cn" ||
           location.pathname !== "/profile/plans-usage" ||
@@ -43,8 +47,11 @@ enum WorkBuddyAccountWebExtractorScript {
         .replace(/\u00a0/g, " ")
         .replace(/\s+/g, " ")
         .trim();
+      const pairPattern =
+        /((?:[1-9]\d{0,2}(?:[,\uFF0C]\d{3})+|(?:0|[1-9]\d*))(?:\.\d{1,2})?)\s*\/\s*((?:[1-9]\d{0,2}(?:[,\uFF0C]\d{3})+|(?:0|[1-9]\d*))(?:\.\d{1,2})?)/;
       const sectionPatterns = {
-        subscription: /订阅套餐|订阅资源|基础套餐|subscription|plan\s*credits/i,
+        subscription:
+          /订阅|基础(?:套餐|资源|额度|积分|权益|包)|套餐(?:额度|资源|积分)|subscription|plan\s*credits|included\s*credits/i,
         addOn: /加量包|add[\s-]*on/i,
         benefitGift: /权益赠送包|权益包|赠送包|benefit|gift/i
       };
@@ -65,6 +72,66 @@ enum WorkBuddyAccountWebExtractorScript {
         "h1, h2, h3, h4, h5, h6, [role='heading'], [aria-level], " +
         "[data-section], [data-section-title], " +
         ".plans-usage__section-title, .section-title, .card-title";
+      const quotaRowSelectors = [
+        ".plans-usage__quota-row",
+        ".plans-usage__resource-row",
+        ".plans-usage__package-row",
+        ".plans-usage__benefit-row",
+        ".quota-row",
+        ".quota-item",
+        ".resource-row",
+        ".resource-item",
+        ".package-row",
+        ".package-item",
+        "[data-quota-id]",
+        "[data-resource-id]",
+        "[data-package-id]",
+        "[data-benefit-id]",
+        "[data-used-credits][data-total-credits]",
+        "[role='row']",
+        "[role='listitem']",
+        "li",
+        "tr"
+      ];
+      const quotaRowSelector = quotaRowSelectors.join(", ");
+      const quotaRowCandidates = (container) =>
+        Array.from(container.querySelectorAll(quotaRowSelector));
+      const pairCount = (text) => (
+        normalizedText(text).match(new RegExp(pairPattern.source, "g")) || []
+      ).length;
+      const owningCreditRow = (node, section) => {
+        let best = node;
+        let candidate = node.parentElement;
+        for (let depth = 0;
+             candidate && depth < 5;
+             depth += 1) {
+          if (candidate === section) break;
+          if (pairCount(candidate.textContent) !== 1) break;
+          best = candidate;
+          candidate = candidate.parentElement;
+        }
+        return best;
+      };
+      const visibleCreditRows = (container) => {
+        const rows = [];
+        for (const selector of quotaRowSelectors) {
+          const candidates = Array.from(
+            container.querySelectorAll(selector)
+          ).filter((node) =>
+            node.getClientRects().length > 0 &&
+            pairCount(node.textContent) === 1
+          );
+          const outerRows = candidates.filter((node) =>
+            !candidates.some((other) =>
+              other !== node && other.contains(node)
+            )
+          ).map((node) => owningCreditRow(node, container));
+          for (const row of outerRows) {
+            if (!rows.includes(row)) rows.push(row);
+          }
+        }
+        return rows;
+      };
       const titleNodes = Array.from(root.querySelectorAll(titleSelector));
       const sectionKey = (node) => {
         return sectionKeyForText(semanticNodeText(node));
@@ -104,9 +171,7 @@ enum WorkBuddyAccountWebExtractorScript {
         }
         return best;
       };
-      for (const row of Array.from(
-        root.querySelectorAll(".plans-usage__quota-row")
-      )) {
+      for (const row of quotaRowCandidates(root)) {
         const derived = deriveSectionFromRow(row);
         if (!derived) continue;
         const existing = rowDerivedSections[derived.key];
@@ -124,13 +189,24 @@ enum WorkBuddyAccountWebExtractorScript {
       const missingTitleKeys = Object.keys(sectionPatterns).filter(
         (key) => !titles[key] && !rowDerivedSections[key]
       );
+      const safeDiagnosticCode = () => {
+        const bit = (value) => value ? "1" : "0";
+        return "T" +
+          bit(Boolean(titles.subscription)) +
+          bit(Boolean(titles.addOn)) +
+          bit(Boolean(titles.benefitGift)) +
+          "-D" +
+          bit(Boolean(rowDerivedSections.subscription)) +
+          bit(Boolean(rowDerivedSections.addOn)) +
+          bit(Boolean(rowDerivedSections.benefitGift)) +
+          "-Q" +
+          bit(quotaRowCandidates(root).length > 0);
+      };
       if (missingTitleKeys.length > 0) {
         const discoveryTargets = [
           root.firstElementChild,
           root.lastElementChild,
-          ...Array.from(
-            root.querySelectorAll(".plans-usage__quota-row")
-          ).slice(-1)
+          ...quotaRowCandidates(root).slice(-1)
         ].filter(Boolean);
         const priorStep = Number.isSafeInteger(
           globalThis.__umaWorkBuddySectionDiscoveryStepV3
@@ -147,9 +223,9 @@ enum WorkBuddyAccountWebExtractorScript {
             inline: "nearest"
           });
           globalThis.__umaWorkBuddySectionDiscoveryStepV3 = priorStep + 1;
-          return fail("pageNotStabilized");
+          return fail("pageNotStabilized", safeDiagnosticCode());
         }
-        return fail("incompletePoolSections");
+        return fail("incompletePoolSections", safeDiagnosticCode());
       }
       delete globalThis.__umaWorkBuddySectionDiscoveryStepV3;
 
@@ -181,7 +257,7 @@ enum WorkBuddyAccountWebExtractorScript {
       };
       if (!sections.subscription || !sections.addOn || !sections.benefitGift ||
           new Set(Object.values(sections)).size !== 3) {
-        return fail("incompletePoolSections");
+        return fail("incompletePoolSections", safeDiagnosticCode());
       }
 
       const expandAndCount = (key) => {
@@ -201,7 +277,7 @@ enum WorkBuddyAccountWebExtractorScript {
         }
         return {
           expanded: false,
-          count: section.querySelectorAll(".plans-usage__quota-row").length
+          count: visibleCreditRows(section).length
         };
       };
 
@@ -240,8 +316,10 @@ enum WorkBuddyAccountWebExtractorScript {
       };
       const numberToken =
         /(?:[1-9]\d{0,2}(?:[,\uFF0C]\d{3})+|(?:0|[1-9]\d*))(?:\.\d{1,2})?/g;
-      const pairPattern =
-        /((?:[1-9]\d{0,2}(?:[,\uFF0C]\d{3})+|(?:0|[1-9]\d*))(?:\.\d{1,2})?)\s*\/\s*((?:[1-9]\d{0,2}(?:[,\uFF0C]\d{3})+|(?:0|[1-9]\d*))(?:\.\d{1,2})?)/;
+      const explicitEmptyPattern =
+        /暂无(?:可用)?|无(?:可用)?(?:额度|积分|资源|套餐|权益|加量包)|none|no\s+(?:available\s+)?(?:credits?|packages?|resources?)/i;
+      const sectionIsExplicitlyEmpty = (key) =>
+        explicitEmptyPattern.test(normalizedText(sections[key].textContent));
 
       const hash = (raw) => {
         let value = 2166136261;
@@ -252,14 +330,22 @@ enum WorkBuddyAccountWebExtractorScript {
         return `pool-${(value >>> 0).toString(16).padStart(8, "0")}`;
       };
       const stablePageID = (row) => {
-        const raw = [
-          row.getAttribute("data-id"),
-          row.getAttribute("data-package-id"),
-          row.getAttribute("data-resource-id"),
-          row.getAttribute("data-quota-id"),
-          row.getAttribute("data-benefit-id")
-        ].find((value) => value && value.length <= 128);
-        return raw ? hash(raw) : null;
+        let candidate = row;
+        for (let depth = 0; candidate && depth < 5; depth += 1) {
+          const raw = [
+            candidate.getAttribute("data-id"),
+            candidate.getAttribute("data-package-id"),
+            candidate.getAttribute("data-resource-id"),
+            candidate.getAttribute("data-quota-id"),
+            candidate.getAttribute("data-benefit-id")
+          ].find((value) => value && value.length <= 128);
+          if (raw) return hash(raw);
+          candidate = candidate.parentElement;
+        }
+        const semanticRow = normalizedText(row.textContent);
+        return semanticRow.length > 0 && semanticRow.length <= 1_024
+          ? hash(semanticRow)
+          : null;
       };
       const normalizedDate = (raw, endOfDay) => {
         const match = normalizedText(raw).match(
@@ -324,9 +410,15 @@ enum WorkBuddyAccountWebExtractorScript {
       };
       const extractRows = (key, kindForText, maximumCount) => {
         const output = [];
-        const rows = Array.from(
-          sections[key].querySelectorAll(".plans-usage__quota-row")
+        const rows = visibleCreditRows(sections[key]);
+        const visibleCandidates = quotaRowCandidates(sections[key]).filter(
+          (node) => node.getClientRects().length > 0
         );
+        if (visibleCandidates.length > 0 &&
+            rows.length === 0 &&
+            !sectionIsExplicitlyEmpty(key)) {
+          return { failure: "malformedCredits" };
+        }
         if (rows.length > maximumCount) return { failure: "malformedCredits" };
         for (const row of rows) {
           const text = normalizedText(row.textContent);
@@ -385,6 +477,11 @@ enum WorkBuddyAccountWebExtractorScript {
       if (extractionFailure) return fail(extractionFailure.failure);
       if (subscription.rows.length === 0) {
         return fail("incompletePoolSections");
+      }
+      if ((addOn.rows.length === 0 && !sectionIsExplicitlyEmpty("addOn")) ||
+          (benefitGift.rows.length === 0 &&
+            !sectionIsExplicitlyEmpty("benefitGift"))) {
+        return fail("incompletePoolSections", safeDiagnosticCode());
       }
 
       const accountBalancePattern =

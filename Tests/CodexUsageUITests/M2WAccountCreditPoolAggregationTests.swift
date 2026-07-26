@@ -612,12 +612,20 @@ struct M2WAccountCreditPoolAggregationTests {
             "__umaWorkBuddySectionDiscoveryStepV3",
             "rowDerivedSections",
             "deriveSectionFromRow",
+            "quotaRowSelector",
+            "quotaRowSelectors",
+            "visibleCreditRows",
+            "owningCreditRow",
+            "pairCount",
+            ".plans-usage__benefit-row",
+            "[data-benefit-id]",
             "h1, h2, h3, h4, h5, h6",
             "[data-section-title]",
             "getClientRects().length === 0",
             "查看全部",
             "pageNotStabilized",
             "stableObservations",
+            "sectionIsExplicitlyEmpty",
             "authoritativePageBalances",
             "location.pathname !== \"/profile/plans-usage\"",
             "(?:^|[^不])可用"
@@ -685,6 +693,7 @@ struct M2WAccountCreditPoolAggregationTests {
             WorkBuddyAccountWebExtractorScript.source
         )?.toDictionary()
         #expect(first?["failure"] as? String == "pageNotStabilized")
+        #expect(first?["safeDiagnosticCode"] as? String == "T110-D110-Q1")
         #expect(
             context.objectForKeyedSubscript("fixtureScrollCount")?.toInt32()
                 == 1
@@ -716,7 +725,18 @@ struct M2WAccountCreditPoolAggregationTests {
         )
         #expect((recovered?["subscriptionPools"] as? [Any])?.count == 1)
         #expect((recovered?["addOnPools"] as? [Any])?.count == 1)
-        #expect((recovered?["benefitGiftPools"] as? [Any])?.count == 1)
+        #expect((recovered?["benefitGiftPools"] as? [Any])?.count == 2)
+        #expect(exceptionText == nil)
+
+        context.evaluateScript("installMultiPairBenefitWrapper();")
+        let restabilizing = context.evaluateScript(
+            WorkBuddyAccountWebExtractorScript.source
+        )?.toDictionary()
+        #expect(restabilizing?["failure"] as? String == "pageNotStabilized")
+        let rejectedWrapper = context.evaluateScript(
+            WorkBuddyAccountWebExtractorScript.source
+        )?.toDictionary()
+        #expect(rejectedWrapper?["failure"] as? String == "malformedCredits")
         #expect(exceptionText == nil)
     }
 
@@ -728,6 +748,9 @@ struct M2WAccountCreditPoolAggregationTests {
       visible,
       parentElement: null,
       rows: [],
+      rowSelector: ".plans-usage__quota-row",
+      secondaryRows: [],
+      secondaryRowSelector: "",
       headings: [],
       children: [],
       getAttribute(name) { return this.attributes[name] || null; },
@@ -747,7 +770,12 @@ struct M2WAccountCreditPoolAggregationTests {
       },
       querySelectorAll(selector) {
         if (selector === "button, [role='button']") return [];
-        if (selector === ".plans-usage__quota-row") return this.rows;
+        if (selector === this.rowSelector) return this.rows;
+        if (selector === this.secondaryRowSelector) return this.secondaryRows;
+        if (selector.includes(", ") &&
+            selector.includes(this.rowSelector)) {
+          return this.rows.concat(this.secondaryRows);
+        }
         if (selector.includes("data-account-balance")) return [];
         return this.headings;
       }
@@ -755,21 +783,29 @@ struct M2WAccountCreditPoolAggregationTests {
     const pageTitle = makeNode("套餐与用量");
     const root = makeNode("套餐与用量");
     root.pageTitle = pageTitle;
-    const subscription = makeNode("订阅套餐 基础套餐 0 / 9000 使用中");
+    const subscription = makeNode("套餐额度 基础 0 / 9000 使用中");
     const addOn = makeNode("加量包 0 / 1000 使用中");
-    const subscriptionHeadingHidden = makeNode("订阅套餐", {}, false);
-    const subscriptionHeading = makeNode("订阅套餐");
+    addOn.rowSelector = ".resource-row";
+    const subscriptionHeadingHidden = makeNode("套餐额度", {}, false);
+    const subscriptionHeading = makeNode("套餐额度");
     const addOnHeading = makeNode("加量包");
-    const subscriptionRow = makeNode("订阅套餐 基础套餐 0 / 9000 使用中");
+    const subscriptionRowHidden = makeNode(
+      "套餐额度 基础 0 / 9000 使用中",
+      {},
+      false
+    );
+    const subscriptionRow = makeNode("套餐额度 基础 0 / 9000 使用中");
     const addOnRow = makeNode("加量包 0 / 1000 使用中");
+    addOnRow.attributes["data-resource-id"] = "addon-a";
     subscription.parentElement = root;
     addOn.parentElement = root;
     subscriptionHeadingHidden.parentElement = subscription;
     subscriptionHeading.parentElement = subscription;
     addOnHeading.parentElement = addOn;
+    subscriptionRowHidden.parentElement = subscription;
     subscriptionRow.parentElement = subscription;
     addOnRow.parentElement = addOn;
-    subscription.rows = [subscriptionRow];
+    subscription.rows = [subscriptionRowHidden, subscriptionRow];
     subscription.headings = [
       subscriptionHeadingHidden,
       subscriptionHeading
@@ -784,17 +820,39 @@ struct M2WAccountCreditPoolAggregationTests {
       subscriptionHeading,
       addOnHeading
     ];
-    root.rows = [subscriptionRow, addOnRow];
+    root.rows = [subscriptionRowHidden, subscriptionRow, addOnRow];
     globalThis.installBenefitGiftSection = () => {
       const benefitGift = makeNode("权益赠送包 0 / 105 使用中");
+      benefitGift.rowSelector = ".plans-usage__benefit-row";
       const benefitGiftRow = makeNode("权益赠送包 0 / 105 使用中");
+      benefitGiftRow.attributes["data-benefit-id"] = "gift-a";
+      const benefitGiftSecondaryRow = makeNode(
+        "赠送包 0 / 100 使用中"
+      );
+      benefitGiftSecondaryRow.attributes["data-benefit-id"] = "gift-b";
       benefitGift.parentElement = root;
       benefitGiftRow.parentElement = benefitGift;
+      benefitGiftSecondaryRow.parentElement = benefitGift;
       benefitGift.rows = [benefitGiftRow];
+      benefitGift.secondaryRowSelector = ".package-row";
+      benefitGift.secondaryRows = [benefitGiftSecondaryRow];
       benefitGift.headings = [];
       root.children.push(benefitGift);
       root.lastElementChild = benefitGift;
-      root.rows.push(benefitGiftRow);
+      root.rows.push(benefitGiftRow, benefitGiftSecondaryRow);
+      globalThis.fixtureBenefitGiftSection = benefitGift;
+    };
+    globalThis.installMultiPairBenefitWrapper = () => {
+      const wrapper = makeNode(
+        "权益赠送包 0 / 100 使用中 赠送包 0 / 200 使用中"
+      );
+      wrapper.parentElement = globalThis.fixtureBenefitGiftSection;
+      globalThis.fixtureBenefitGiftSection.rows = [];
+      globalThis.fixtureBenefitGiftSection.secondaryRows = [wrapper];
+      root.rows = root.rows.filter(
+        (row) => row.parentElement !== globalThis.fixtureBenefitGiftSection
+      );
+      root.rows.push(wrapper);
     };
     globalThis.location = {
       origin: "https://www.workbuddy.cn",
