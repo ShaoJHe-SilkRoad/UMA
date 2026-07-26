@@ -18,6 +18,7 @@ public struct UsagePanelView: View {
     private let localAccessConfirmationAction: CodexLocalAccessConfirmationAction?
     private let workBuddySettings: WorkBuddySettingsModel?
     private let workBuddyLogin: WorkBuddyLoginCoordinator?
+    private let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
     private let appearanceOverride: UsagePanelAppearanceOverride?
     private let renderedHeightOverride: CGFloat?
     private let cardVisibilityOverride: UsagePanelCardVisibility?
@@ -32,6 +33,7 @@ public struct UsagePanelView: View {
         localAccessConfirmationAction: CodexLocalAccessConfirmationAction? = nil,
         workBuddySettings: WorkBuddySettingsModel? = nil,
         workBuddyLogin: WorkBuddyLoginCoordinator? = nil,
+        workBuddyAccountWebSync: WorkBuddyAccountWebSessionController? = nil,
         appearanceOverride: UsagePanelAppearanceOverride? = nil,
         renderedHeightOverride: CGFloat? = nil,
         cardVisibilityOverride: UsagePanelCardVisibility? = nil
@@ -43,12 +45,14 @@ public struct UsagePanelView: View {
         self.localAccessConfirmationAction = localAccessConfirmationAction
         self.workBuddySettings = workBuddySettings
         self.workBuddyLogin = workBuddyLogin
+        self.workBuddyAccountWebSync = workBuddyAccountWebSync
         self.appearanceOverride = appearanceOverride
         self.renderedHeightOverride = renderedHeightOverride
         self.cardVisibilityOverride = cardVisibilityOverride
         _isShowingSettings = State(initialValue: settingsInitiallyPresented)
         _settingsDestination = State(
-            initialValue: settingsInitiallyPresented && workBuddyLogin != nil
+            initialValue: settingsInitiallyPresented
+                && (workBuddyLogin != nil || workBuddyAccountWebSync != nil)
                 ? .workBuddy
                 : nil
         )
@@ -127,7 +131,8 @@ public struct UsagePanelView: View {
                         LocalLiveProviderCard(
                             card: card,
                             language: store.language,
-                            tuning: tuning
+                            tuning: tuning,
+                            isExpanded: expansionBinding(for: card.id)
                         )
                     }
                     if showRecentTasks {
@@ -146,7 +151,8 @@ public struct UsagePanelView: View {
                         LocalLiveProviderCard(
                             card: card,
                             language: store.language,
-                            tuning: tuning
+                            tuning: tuning,
+                            isExpanded: expansionBinding(for: card.id)
                         )
                     }
                 } else {
@@ -239,12 +245,19 @@ public struct UsagePanelView: View {
                         ),
                         workBuddySettings: workBuddySettings,
                         workBuddyLogin: workBuddyLogin,
+                        workBuddyAccountWebSync: workBuddyAccountWebSync,
                         providerLoginOptions: store.providerLoginOptions,
                         destination: settingsDestination,
                         tuning: tuning,
                         maximumHeight: max(240, displayedHeight - 124),
                         checkAgain: {
                             Task { await store.checkLocalSessionAgain() }
+                        },
+                        syncWorkBuddyAccount: {
+                            Task { await store.syncWorkBuddyAccountNow() }
+                        },
+                        disconnectWorkBuddyAccount: {
+                            Task { await store.disconnectWorkBuddyAccount() }
                         },
                         close: {
                             isShowingSettings = false
@@ -374,20 +387,89 @@ private struct LocalLiveProviderCard: View {
     let card: SharedUsageCardPresentation
     let language: AppLanguage
     let tuning: GlassTuning
+    @Binding var isExpanded: Bool
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "circle.fill")
-                .font(.system(size: 8))
-                .foregroundStyle(.green)
-            Text(card.providerName)
-                .font(UsageDesign.font(13, weight: .semibold, language: language))
-            Spacer()
-            Text(card.availability?.compactText ?? card.remaining.displayText)
-                .font(.system(size: 13, weight: .medium, design: .rounded))
-                .monospacedDigit()
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                if card.availability?.displayUnit == .credits {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "circle.fill")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.green)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(card.providerName)
+                            .font(UsageDesign.font(13, weight: .semibold, language: language))
+                        if isAccountWebCredits {
+                            Text(language.workBuddyAccountWebSource)
+                                .font(UsageDesign.font(9, language: language))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Text(primaryValue)
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .monospacedDigit()
+                    if card.availability?.displayUnit == .credits {
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(14)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded, let balance = card.availability?.value.creditBalance {
+                Divider()
+                    .opacity(0.32)
+                    .padding(.horizontal, 14)
+                VStack(alignment: .leading, spacing: 7) {
+                    detailRow(
+                        language.workBuddyAvailableCredits,
+                        value: CreditFormatter.exact(
+                            balance.remaining,
+                            language: language
+                        )
+                    )
+                    if let used = balance.used {
+                        detailRow(
+                            language.workBuddyCompanionName(.used),
+                            value: CreditFormatter.exact(used, language: language)
+                        )
+                    }
+                    if let total = balance.total {
+                        detailRow(
+                            language.workBuddyCompanionName(.total),
+                            value: CreditFormatter.exact(total, language: language)
+                        )
+                    }
+                    detailRow(
+                        language.workBuddySource,
+                        value: isAccountWebCredits
+                            ? language.workBuddyAccountWebSource
+                            : (card.availability?.sourceState == .officialStructured
+                                ? "Official structured source"
+                                : "Provider source")
+                    )
+                    detailRow(
+                        language.workBuddyScope,
+                        value: language.workBuddySharedWithCodeBuddy
+                    )
+                    detailRow(
+                        language.workBuddyLastConfirmed,
+                        value: language.workBuddyConfirmedAt(balance.observedAt)
+                    )
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
-        .padding(14)
         .background {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(.thinMaterial)
@@ -399,6 +481,30 @@ private struct LocalLiveProviderCard: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(card.accessibilityLabel)
+        .animation(.easeInOut(duration: 0.18), value: isExpanded)
+    }
+
+    private var isAccountWebCredits: Bool {
+        card.availability?.sourceState == .authenticatedAccountWeb
+    }
+
+    private var primaryValue: String {
+        guard let balance = card.availability?.value.creditBalance else {
+            return card.remaining.displayText
+        }
+        let exact = CreditFormatter.exact(balance.remaining, language: language)
+        return language.workBuddyCreditsAvailable(exact)
+    }
+
+    private func detailRow(_ label: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Text(value)
+                .multilineTextAlignment(.trailing)
+        }
+        .font(UsageDesign.font(10, weight: .medium, language: language))
     }
 }
 

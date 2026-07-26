@@ -148,6 +148,7 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
     public let remaining: SharedRemainingValue
     public let availability: SharedAvailabilityPresentation?
     public let availabilityLifecycle: SharedAvailabilityLifecycle?
+    public let sourceDescription: String?
     public let isVisibleInDesktopAssistant: Bool
     public let severity: SharedUsageSeverity
     public let isRetainingLastValidValue: Bool
@@ -164,6 +165,7 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
         remaining: SharedRemainingValue,
         availability: SharedAvailabilityPresentation? = nil,
         availabilityLifecycle: SharedAvailabilityLifecycle? = nil,
+        sourceDescription: String? = nil,
         isVisibleInDesktopAssistant: Bool = true,
         severity: SharedUsageSeverity,
         isRetainingLastValidValue: Bool = false,
@@ -179,6 +181,7 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
         self.remaining = remaining
         self.availability = availability
         self.availabilityLifecycle = availabilityLifecycle
+        self.sourceDescription = sourceDescription
         self.isVisibleInDesktopAssistant = isVisibleInDesktopAssistant
         self.severity = severity
         self.isRetainingLastValidValue = isRetainingLastValidValue
@@ -196,6 +199,11 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
 
     public var tooltipText: String {
         if let availability {
+            if availability.sourceState == .authenticatedAccountWeb {
+                return "\(providerName), \(connectionStatus.accessibilityText), "
+                    + "\(availability.accessibilityText), "
+                    + "\(sourceDescription ?? "Account web sync")."
+            }
             return availability.accessibilityText
         }
         let window = selectedWindow?.accessibilityLabel ?? "usage window unavailable"
@@ -401,7 +409,8 @@ public enum SharedUsagePresentationPolicy {
               account.freshness == .fresh,
               account.safeFailure == nil
         else { return false }
-        if account.availabilitySourceState == .officialStructured {
+        if account.availabilitySourceState == .officialStructured
+            || account.availabilitySourceState == .authenticatedAccountWeb {
             return true
         }
         return !account.rateLimitWindows.isEmpty
@@ -517,6 +526,9 @@ public enum SharedUsagePresentationPolicy {
             remaining: remaining,
             availability: availability,
             availabilityLifecycle: availabilityLifecycle,
+            sourceDescription: availability?.sourceState == .authenticatedAccountWeb
+                ? language.workBuddyAccountWebSource
+                : nil,
             isVisibleInDesktopAssistant: !snapshot.capabilities.contains(
                 .hiddenFromDesktopAssistant
             ),

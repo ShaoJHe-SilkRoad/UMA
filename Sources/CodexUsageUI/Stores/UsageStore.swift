@@ -236,6 +236,18 @@ public final class UsageStore: ObservableObject {
         await performEligibilityScan(trigger: .checkAgain)
     }
 
+    public func syncWorkBuddyAccountNow() async {
+        await performEligibilityScan(trigger: .syncNow)
+    }
+
+    public func disconnectWorkBuddyAccount() async {
+        guard !previewOnly, let registry else { return }
+        try? await registry.perform(
+            .disconnect,
+            for: WorkBuddyAccountWebCreditsConnector.connectorID
+        )
+    }
+
     public func cancelLocalSessionReconciliation() async {
         await disconnectPrimary(clearConsent: false)
     }

@@ -166,18 +166,20 @@ public enum CreditPlanTier: String, Codable, Equatable, Sendable {
 public enum AvailabilityProvenance: Codable, Equatable, Sendable {
     case manualConfirmed(at: Date)
     case officialStructured(observedAt: Date)
+    case authenticatedAccountWeb(observedAt: Date)
 
     public var observedAt: Date {
         switch self {
         case let .manualConfirmed(at): at
         case let .officialStructured(observedAt): observedAt
+        case let .authenticatedAccountWeb(observedAt): observedAt
         }
     }
 
     public var isLiveStructuredSource: Bool {
         switch self {
         case .manualConfirmed: false
-        case .officialStructured: true
+        case .officialStructured, .authenticatedAccountWeb: true
         }
     }
 }
@@ -185,6 +187,7 @@ public enum AvailabilityProvenance: Codable, Equatable, Sendable {
 public enum AgentAvailabilitySourceState: String, Codable, Equatable, Sendable {
     case manualConfirmed
     case officialStructured
+    case authenticatedAccountWeb
     case unspecified
 }
 
@@ -581,6 +584,7 @@ public enum AgentAvailabilityValue: Codable, Equatable, Sendable {
         switch balance.provenance {
         case .manualConfirmed: return .manualConfirmed
         case .officialStructured: return .officialStructured
+        case .authenticatedAccountWeb: return .authenticatedAccountWeb
         }
     }
 

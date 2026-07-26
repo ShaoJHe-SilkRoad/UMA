@@ -73,6 +73,7 @@ enum AgentSourceTier: String, Codable, CaseIterable, Sendable {
 /// ineligible for production provider surfaces.
 enum ProviderLocalSourceClass: String, Codable, Sendable {
     case admittedStructuredLocal
+    case authenticatedAccountWeb
     case manualOnly
     case unsupported
 }
@@ -85,11 +86,13 @@ enum ProviderRuntimeRequirement: String, Codable, Sendable {
 enum ProviderAuthenticationMethod: String, Codable, Sendable {
     case existingLocalSession
     case officialApplicationOwnedSession
+    case umaOwnedAuthenticatedAccountWebSession
     case none
 }
 
 enum ProviderUsageReadContract: String, Codable, Sendable {
     case currentStructuredLocalRead
+    case currentAuthenticatedAccountWebRead
     case none
 }
 
@@ -241,10 +244,20 @@ struct AgentConnectorDescriptor: Codable, Sendable, Equatable {
         self.expectedRuntime = expectedRuntime
         self.localSourceClass = resolvedLocalSourceClass
         self.authenticationMethod = authenticationMethod
-        self.usageReadContract = usageReadContract
-            ?? (resolvedLocalSourceClass == .admittedStructuredLocal
-                ? .currentStructuredLocalRead
-                : .none)
+        let resolvedUsageReadContract: ProviderUsageReadContract
+        if let usageReadContract {
+            resolvedUsageReadContract = usageReadContract
+        } else {
+            resolvedUsageReadContract = switch resolvedLocalSourceClass {
+            case .admittedStructuredLocal:
+                .currentStructuredLocalRead
+            case .authenticatedAccountWeb:
+                .currentAuthenticatedAccountWebRead
+            case .manualOnly, .unsupported:
+                .none
+            }
+        }
+        self.usageReadContract = resolvedUsageReadContract
         self.loginAssistance = loginAssistance
         self.isRegisteredChineseAgent = isRegisteredChineseAgent
         self.officialLoginApplicationURL = officialLoginApplicationURL
@@ -381,6 +394,7 @@ struct AgentUsageSnapshot: Codable, Sendable, Equatable, Identifiable {
 protocol AgentUsageConnector: Sendable {
     var id: AgentConnectorID { get }
     var descriptor: AgentConnectorDescriptor { get }
+    func permitsRead(for trigger: ProviderEligibilityScanTrigger) async -> Bool
     func probe() async -> AgentConnectorProbe
     func start() async
     func refresh() async
@@ -392,6 +406,10 @@ protocol AgentUsageConnector: Sendable {
 }
 
 extension AgentUsageConnector {
+    func permitsRead(for trigger: ProviderEligibilityScanTrigger) async -> Bool {
+        true
+    }
+
     /// Existing adapters retain their one refresh implementation until they
     /// opt into source-aware trigger attribution.
     func refresh(trigger: CodexRefreshTrigger) async {

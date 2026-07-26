@@ -120,7 +120,11 @@ struct PreviewRendererTool {
             )
             let tuning = GlassTuning.final
             let expandedProviderIDs: Set<String> = arguments.contains("--workbuddy-expanded")
-                ? ["workbuddy.manualAvailability"]
+                ? [
+                    arguments.contains("--workbuddy-account-web")
+                        ? "workbuddy.accountWebCredits"
+                        : "workbuddy.manualAvailability"
+                ]
                 : []
             let appearanceOverride = UsagePanelAppearanceOverride(
                 reduceTransparency: reduceTransparency,
@@ -144,9 +148,12 @@ struct PreviewRendererTool {
                     ) ? .unverifiable : .trusted
                 )
                 : nil
-            let workBuddySettings = workBuddyLogin == nil
-                ? nil
-                : WorkBuddySettingsModel.preview()
+            let accountWebSync = arguments.contains(
+                "--workbuddy-account-web-settings"
+            ) ? WorkBuddyAccountWebSessionController() : nil
+            let workBuddySettings = workBuddyLogin != nil || accountWebSync != nil
+                ? WorkBuddySettingsModel.preview()
+                : nil
             let panelHeight = measuredPanelHeight(
                 store: store,
                 tuning: tuning,
@@ -154,6 +161,7 @@ struct PreviewRendererTool {
                 expandedProviderIDs: expandedProviderIDs,
                 workBuddySettings: workBuddySettings,
                 workBuddyLogin: workBuddyLogin,
+                workBuddyAccountWebSync: accountWebSync,
                 appearanceOverride: appearanceOverride,
                 cardVisibilityOverride: cardVisibilityOverride
             )
@@ -171,6 +179,7 @@ struct PreviewRendererTool {
                     expandedProviderIDs: expandedProviderIDs,
                     workBuddySettings: workBuddySettings,
                     workBuddyLogin: workBuddyLogin,
+                    workBuddyAccountWebSync: accountWebSync,
                     appearanceOverride: appearanceOverride,
                     renderedHeightOverride: panelHeight,
                     cardVisibilityOverride: cardVisibilityOverride
@@ -190,7 +199,7 @@ struct PreviewRendererTool {
             defer: false
         )
         window.contentView = host
-        window.title = "UMA M2WADBG-R3 Review Candidate"
+        window.title = "UMA M2WACCOUNT-G1 Review Candidate"
         host.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
         if interactive {
@@ -244,6 +253,7 @@ struct PreviewRendererTool {
         expandedProviderIDs: Set<String>,
         workBuddySettings: WorkBuddySettingsModel?,
         workBuddyLogin: WorkBuddyLoginCoordinator?,
+        workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?,
         appearanceOverride: UsagePanelAppearanceOverride,
         cardVisibilityOverride: UsagePanelCardVisibility?
     ) -> CGFloat {
@@ -258,6 +268,7 @@ struct PreviewRendererTool {
                 onHeightChange: { measurement.height = $0 },
                 workBuddySettings: workBuddySettings,
                 workBuddyLogin: workBuddyLogin,
+                workBuddyAccountWebSync: workBuddyAccountWebSync,
                 appearanceOverride: appearanceOverride,
                 cardVisibilityOverride: cardVisibilityOverride
             )
@@ -369,25 +380,41 @@ struct PreviewRendererTool {
             } else {
                 .personal
             }
-            let balance = try CreditBalance(
-                validatingRemaining: remaining,
-                used: used,
-                total: total,
-                scope: scope,
-                planTier: planTier,
-                nextExpiryAt: now.addingTimeInterval(86_400),
-                observedAt: now,
-                provenance: .manualConfirmed(at: now)
-            )
+            let isAccountWeb = arguments.contains("--workbuddy-account-web")
+            let balance: CreditBalance
+            if isAccountWeb {
+                balance = try CreditBalance(
+                    validatingDecimalRemaining: Decimal(string: "2099.47")!,
+                    used: Decimal(100),
+                    total: Decimal(string: "2199.47")!,
+                    scope: .buddyAIUnknown,
+                    observedAt: now,
+                    provenance: .authenticatedAccountWeb(observedAt: now)
+                )
+            } else {
+                balance = try CreditBalance(
+                    validatingRemaining: remaining,
+                    used: used,
+                    total: total,
+                    scope: scope,
+                    planTier: planTier,
+                    nextExpiryAt: now.addingTimeInterval(86_400),
+                    observedAt: now,
+                    provenance: .manualConfirmed(at: now)
+                )
+            }
             availability = SharedUsagePresentationPolicy.makeAvailabilityPresentation(
                 value: .credits(balance),
                 language: language
             )
         }
+        let isAccountWeb = arguments.contains("--workbuddy-account-web")
         return SharedUsageCardPresentation(
-            id: "workbuddy.manualAvailability",
+            id: isAccountWeb
+                ? "workbuddy.accountWebCredits"
+                : "workbuddy.manualAvailability",
             providerName: "WorkBuddy",
-            planLabel: lifecycle == .configured
+            planLabel: lifecycle == .configured && !isAccountWeb
                 ? {
                     if arguments.contains("--workbuddy-enterprise") {
                         return WorkBuddyPlanTier.enterprise.rawValue
@@ -400,13 +427,13 @@ struct PreviewRendererTool {
                         : WorkBuddyPlanTier.experience.rawValue
                 }()
                 : nil,
-            connectionStatus: .disconnected,
-            freshness: .unavailable,
+            connectionStatus: isAccountWeb ? .connected : .disconnected,
+            freshness: isAccountWeb ? .fresh : .unavailable,
             windows: [],
             selectedWindowID: nil,
             remaining: .unavailable,
             availability: availability,
-            availabilityLifecycle: lifecycle,
+            availabilityLifecycle: isAccountWeb ? nil : lifecycle,
             isVisibleInDesktopAssistant: true,
             severity: .neutral,
             capturedAt: now

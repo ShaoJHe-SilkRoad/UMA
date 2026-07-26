@@ -89,8 +89,7 @@ actor AgentConnectorRegistry {
             guard let connector = connectors[id] else { continue }
             if admittedIDs.contains(id) {
                 listen(to: connector)
-            } else if connector.descriptor.localSourceClass
-                        == .admittedStructuredLocal,
+            } else if connector.descriptor.hasSurfaceAdmissibleReadContract,
                       !excludedProviderIDs.contains(id)
                         || previouslyAdmittedIDs.contains(id) {
                 await connector.stop()
@@ -198,9 +197,7 @@ actor AgentConnectorRegistry {
 
     private func receive(_ snapshot: AgentUsageSnapshot) async {
         guard let connector = connectors[snapshot.id] else { return }
-        guard connector.descriptor.localSourceClass
-                == .admittedStructuredLocal
-        else {
+        guard connector.descriptor.hasSurfaceAdmissibleReadContract else {
             latest[snapshot.id] = nil
             return
         }

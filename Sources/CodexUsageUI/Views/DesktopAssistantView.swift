@@ -101,6 +101,7 @@ public enum DesktopAssistantUsageValue: Equatable, Sendable {
 
 public enum DesktopAssistantSourceMark: Equatable, Sendable {
     case connection
+    case accountWeb
     case manual
 }
 
@@ -282,9 +283,14 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
                 providerName: card.providerName,
                 planLabel: card.planLabel,
                 connectionState: connectionState,
-                sourceMark: .connection,
+                sourceMark: availability.sourceState == .authenticatedAccountWeb
+                    ? .accountWeb
+                    : .connection,
                 selectedWindowShortLabel: "",
                 selectedWindowAccessibilityLabel: "",
+                detailText: availability.sourceState == .authenticatedAccountWeb
+                    ? language.workBuddyAccountWebSource
+                    : nil,
                 usageValue: .credits(availability.compactText),
                 regularUsageText: availability.exactCreditValue.map {
                     CreditFormatter.exact($0, language: language)
@@ -391,10 +397,13 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         case (.simplifiedChinese, true): "，数据已过期"
         default: ""
         }
+        let provenance = availability.sourceState == .authenticatedAccountWeb
+            ? (language == .simplifiedChinese ? "，账号网页同步" : ", Account web sync")
+            : ""
         if language == .simplifiedChinese {
-            return "\(providerName)，\(status)，\(availability.accessibilityText)\(stale)。"
+            return "\(providerName)，\(status)，\(availability.accessibilityText)\(provenance)\(stale)。"
         }
-        return "\(providerName), \(status), \(availability.accessibilityText)\(stale)."
+        return "\(providerName), \(status), \(availability.accessibilityText)\(provenance)\(stale)."
     }
 }
 
@@ -579,9 +588,14 @@ private struct DesktopAssistantCardView: View {
                         ? card.selectedWindowShortLabel
                         : "\(card.selectedWindowShortLabel) · \(card.resetText)")
                 )
-                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .font(.system(
+                    size: card.sourceMark == .accountWeb ? 8.2 : 9,
+                    weight: .medium,
+                    design: .rounded
+                ))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .minimumScaleFactor(card.sourceMark == .accountWeb ? 0.85 : 1)
                 .truncationMode(.tail)
             }
             Spacer(minLength: 4)
@@ -612,6 +626,16 @@ private struct DesktopAssistantCardView: View {
                     .stroke(connectionColor, lineWidth: 1.5)
                 Text("C")
                     .font(.system(size: diameter * 0.56, weight: .semibold, design: .rounded))
+                    .foregroundStyle(connectionColor)
+            }
+            .frame(width: diameter, height: diameter)
+            .accessibilityHidden(true)
+        case .accountWeb:
+            ZStack {
+                Circle()
+                    .stroke(connectionColor, lineWidth: 1.5)
+                Text("W")
+                    .font(.system(size: diameter * 0.52, weight: .semibold, design: .rounded))
                     .foregroundStyle(connectionColor)
             }
             .frame(width: diameter, height: diameter)

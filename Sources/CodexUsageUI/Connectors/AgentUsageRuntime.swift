@@ -34,6 +34,7 @@ public struct UsageMonitorRuntime {
     public let store: UsageStore
     public let workBuddySettings: WorkBuddySettingsModel
     public let workBuddyLogin: WorkBuddyLoginCoordinator
+    public let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController
 
     public static func live(
         workBuddyStoreURL: URL? = nil,
@@ -44,10 +45,25 @@ public struct UsageMonitorRuntime {
         } ?? WorkBuddyManualAvailabilityStore()
         let manualSource = ManualWorkBuddyAvailabilitySource(store: manualStore)
         let workBuddyConnector = WorkBuddyAvailabilityConnector(source: manualSource)
+        let accountWebSync = WorkBuddyAccountWebSessionController()
+        let accountWebConnector = WorkBuddyAccountWebCreditsConnector(
+            hasConsent: { @MainActor in
+                accountWebSync.consentGranted
+            },
+            canReadOnApplicationLaunch: { @MainActor in
+                accountWebSync.canReadOnApplicationLaunch
+            },
+            reader: { @MainActor in
+                await accountWebSync.readCurrentCredits()
+            },
+            disconnectOwnedSession: { @MainActor in
+                await accountWebSync.disconnectAndClearOwnedWebsiteData()
+            }
+        )
         let registry = AgentUsageRuntime.makeCodexRegistry(
             snapshotStore: snapshotStoreURL.map { AgentConnectorSnapshotStore(url: $0) }
                 ?? AgentConnectorSnapshotStore(),
-            additionalConnectors: [workBuddyConnector]
+            additionalConnectors: [workBuddyConnector, accountWebConnector]
         )
         let usageStore = UsageStore(
             registry: registry,
@@ -59,7 +75,8 @@ public struct UsageMonitorRuntime {
         return UsageMonitorRuntime(
             store: usageStore,
             workBuddySettings: settings,
-            workBuddyLogin: login
+            workBuddyLogin: login,
+            workBuddyAccountWebSync: accountWebSync
         )
     }
 

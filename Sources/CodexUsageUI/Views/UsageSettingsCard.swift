@@ -11,11 +11,14 @@ struct UsageSettingsCard: View {
     @Binding var language: AppLanguage
     let workBuddySettings: WorkBuddySettingsModel?
     let workBuddyLogin: WorkBuddyLoginCoordinator?
+    let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
     let providerLoginOptions: [ProviderLoginOption]
     let destination: UsageSettingsDestination?
     let tuning: GlassTuning
     let maximumHeight: CGFloat
     let checkAgain: () -> Void
+    let syncWorkBuddyAccount: () -> Void
+    let disconnectWorkBuddyAccount: () -> Void
     let close: () -> Void
 
     @State private var launchAtLoginState = LaunchAtLoginService.state
@@ -49,7 +52,7 @@ struct UsageSettingsCard: View {
 
     @ViewBuilder
     private var adaptiveContent: some View {
-        if workBuddyLogin != nil {
+        if workBuddyLogin != nil || workBuddyAccountWebSync != nil {
             ScrollView(.vertical) {
                 settingsContent
                     .frame(width: 278, alignment: .leading)
@@ -139,8 +142,12 @@ struct UsageSettingsCard: View {
                 WorkBuddySettingsSection(
                     model: workBuddySettings,
                     login: workBuddyLogin,
+                    accountWebSync: workBuddyAccountWebSync,
                     language: language,
-                    expandOnAppear: destination == .workBuddy
+                    expandOnAppear: destination == .workBuddy,
+                    checkAgain: checkAgain,
+                    syncNow: syncWorkBuddyAccount,
+                    disconnectAccount: disconnectWorkBuddyAccount
                 )
 
                 Divider()
@@ -241,22 +248,34 @@ struct UsageSettingsCard: View {
 private struct WorkBuddySettingsSection: View {
     @ObservedObject var model: WorkBuddySettingsModel
     let login: WorkBuddyLoginCoordinator?
+    let accountWebSync: WorkBuddyAccountWebSessionController?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let language: AppLanguage
     let expandOnAppear: Bool
     @State private var isExpanded = false
     @State private var clearIsArmed = false
+    let checkAgain: () -> Void
+    let syncNow: () -> Void
+    let disconnectAccount: () -> Void
 
     init(
         model: WorkBuddySettingsModel,
         login: WorkBuddyLoginCoordinator?,
+        accountWebSync: WorkBuddyAccountWebSessionController?,
         language: AppLanguage,
-        expandOnAppear: Bool
+        expandOnAppear: Bool,
+        checkAgain: @escaping () -> Void,
+        syncNow: @escaping () -> Void,
+        disconnectAccount: @escaping () -> Void
     ) {
         self.model = model
         self.login = login
+        self.accountWebSync = accountWebSync
         self.language = language
         self.expandOnAppear = expandOnAppear
+        self.checkAgain = checkAgain
+        self.syncNow = syncNow
+        self.disconnectAccount = disconnectAccount
         _isExpanded = State(initialValue: expandOnAppear)
     }
 
@@ -283,7 +302,18 @@ private struct WorkBuddySettingsSection: View {
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 9) {
-                    if let login {
+                    if let accountWebSync {
+                        WorkBuddyAccountWebSyncSection(
+                            controller: accountWebSync,
+                            language: language,
+                            checkAgain: checkAgain,
+                            syncNow: syncNow,
+                            disconnectAccount: disconnectAccount
+                        )
+
+                        Divider()
+                            .opacity(0.35)
+                    } else if let login {
                         WorkBuddyLoginAssistanceSection(
                             coordinator: login,
                             language: language
@@ -292,6 +322,11 @@ private struct WorkBuddySettingsSection: View {
                         Divider()
                             .opacity(0.35)
                     }
+
+                    Text(language.workBuddyLegacyManualRecord)
+                        .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     SettingsToggleRow(
                         title: language.workBuddyEnable,
@@ -557,6 +592,123 @@ private struct WorkBuddySettingsSection: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.08)))
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct WorkBuddyAccountWebSyncSection: View {
+    @ObservedObject var controller: WorkBuddyAccountWebSessionController
+    let language: AppLanguage
+    let checkAgain: () -> Void
+    let syncNow: () -> Void
+    let disconnectAccount: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Label(
+                    language.workBuddyAccountWebTitle,
+                    systemImage: "safari"
+                )
+                .font(UsageDesign.font(12, weight: .semibold, language: language))
+                Spacer()
+                Text(language.workBuddyExperimentalLabel)
+                    .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.orange)
+            }
+
+            Text(language.workBuddyAccountWebDisclosure)
+                .font(UsageDesign.font(9.5, language: language))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            WorkBuddyLoginConfirmationRow(
+                title: language.workBuddyAccountWebConsent,
+                isOn: controller.consentGranted,
+                language: language,
+                action: {
+                    if controller.consentGranted {
+                        disconnectAccount()
+                    } else {
+                        controller.grantConsent()
+                    }
+                }
+            )
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(language.workBuddyAccountWebSessionChoice)
+                    .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                    .foregroundStyle(.secondary)
+                Picker(
+                    "",
+                    selection: $controller.sessionMode
+                ) {
+                    ForEach(WorkBuddyAccountWebSessionMode.allCases) { mode in
+                        Text(language.workBuddyAccountWebSessionMode(mode)).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .disabled(!controller.consentGranted)
+                .accessibilityLabel(language.workBuddyAccountWebSessionChoice)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Button(language.workBuddyAccountWebConnect) {
+                    controller.connect()
+                }
+                .disabled(!controller.consentGranted)
+
+                Button(language.workBuddyAccountWebSyncNow, action: syncNow)
+                    .disabled(
+                        !controller.consentGranted
+                            || controller.flowState == .synchronizing
+                    )
+            }
+            .buttonStyle(.bordered)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Button(language.workBuddyAccountWebOpenUsage) {
+                    controller.openAccountUsage()
+                }
+                .disabled(!controller.consentGranted)
+
+                Button(language.checkAgain, action: checkAgain)
+                    .disabled(!controller.consentGranted)
+            }
+            .buttonStyle(.bordered)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Button(language.workBuddyCancelLogin, role: .cancel) {
+                    controller.cancel()
+                }
+                Button(
+                    language.workBuddyAccountWebDisconnect,
+                    role: .destructive,
+                    action: disconnectAccount
+                )
+                .disabled(!controller.consentGranted)
+            }
+            .buttonStyle(.borderless)
+
+            HStack(spacing: 6) {
+                if controller.flowState == .opening
+                    || controller.flowState == .synchronizing {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+                Text(language.workBuddyAccountWebState(controller.flowState))
+                    .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+        }
+        .padding(9)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.secondary.opacity(0.07))
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

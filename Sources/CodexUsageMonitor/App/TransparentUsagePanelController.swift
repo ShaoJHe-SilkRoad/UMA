@@ -36,6 +36,7 @@ final class TransparentUsagePanelController {
     private let store: UsageStore
     private let workBuddySettings: WorkBuddySettingsModel
     private let workBuddyLogin: WorkBuddyLoginCoordinator
+    private let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController
     private weak var statusItem: NSStatusItem?
     private let visibilityDidChange: (Bool) -> Void
     private var globalEventMonitor: Any?
@@ -46,11 +47,13 @@ final class TransparentUsagePanelController {
         statusItem: NSStatusItem,
         workBuddySettings: WorkBuddySettingsModel,
         workBuddyLogin: WorkBuddyLoginCoordinator,
+        workBuddyAccountWebSync: WorkBuddyAccountWebSessionController,
         visibilityDidChange: @escaping (Bool) -> Void
     ) {
         self.store = store
         self.workBuddySettings = workBuddySettings
         self.workBuddyLogin = workBuddyLogin
+        self.workBuddyAccountWebSync = workBuddyAccountWebSync
         self.statusItem = statusItem
         self.visibilityDidChange = visibilityDidChange
         tuning = .final
@@ -65,6 +68,7 @@ final class TransparentUsagePanelController {
             store: store,
             workBuddySettings: workBuddySettings,
             workBuddyLogin: workBuddyLogin,
+            workBuddyAccountWebSync: workBuddyAccountWebSync,
             expandedProviderIDs: []
         )
     }
@@ -81,6 +85,7 @@ final class TransparentUsagePanelController {
             store: store,
             workBuddySettings: workBuddySettings,
             workBuddyLogin: workBuddyLogin,
+            workBuddyAccountWebSync: workBuddyAccountWebSync,
             expandedProviderIDs: request.expandedProviderIDs
         )
         show()
@@ -106,6 +111,7 @@ final class TransparentUsagePanelController {
         store: UsageStore,
         workBuddySettings: WorkBuddySettingsModel,
         workBuddyLogin: WorkBuddyLoginCoordinator,
+        workBuddyAccountWebSync: WorkBuddyAccountWebSessionController,
         expandedProviderIDs: Set<String>
     ) {
         panel.level = .popUpMenu
@@ -140,7 +146,8 @@ final class TransparentUsagePanelController {
                 },
                 localAccessConfirmationAction: NativeLocalCodexAccessConfirmation.action(for: store),
                 workBuddySettings: workBuddySettings,
-                workBuddyLogin: workBuddyLogin
+                workBuddyLogin: workBuddyLogin,
+                workBuddyAccountWebSync: workBuddyAccountWebSync
             )
         )
         hostingView.frame = NSRect(x: 0, y: 0, width: Layout.width, height: Layout.height)

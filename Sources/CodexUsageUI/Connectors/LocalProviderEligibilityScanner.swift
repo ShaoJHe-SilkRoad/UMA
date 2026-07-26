@@ -4,6 +4,7 @@ enum ProviderEligibilityScanTrigger: String, CaseIterable, Hashable, Sendable {
     case applicationLaunch
     case manualRefresh
     case checkAgain
+    case syncNow
 }
 
 struct LocalLiveProviderSnapshot: Sendable, Equatable {
@@ -139,7 +140,7 @@ actor LocalProviderEligibilityScanner {
             if excludedProviderIDs.contains(candidate.descriptor.id) {
                 admission = .hiddenNotAuthenticated
             } else {
-                admission = await evaluate(candidate)
+                admission = await evaluate(candidate, trigger: trigger)
             }
             records.append(
                 ProviderSurfaceAdmissionRecord(
@@ -162,15 +163,17 @@ actor LocalProviderEligibilityScanner {
     }
 
     private static func evaluate(
-        _ candidate: RegisteredProviderCandidate
+        _ candidate: RegisteredProviderCandidate,
+        trigger: ProviderEligibilityScanTrigger
     ) async -> ProviderSurfaceAdmission {
         let descriptor = candidate.descriptor
-        guard descriptor.localSourceClass == .admittedStructuredLocal,
-              descriptor.usageReadContract == .currentStructuredLocalRead
-        else {
+        guard descriptor.hasSurfaceAdmissibleReadContract else {
             return descriptor.localSourceClass == .unsupported
                 ? .hiddenUnsupported
                 : .hiddenNoAdmittedLocalSource
+        }
+        guard await candidate.connector.permitsRead(for: trigger) else {
+            return .hiddenNotAuthenticated
         }
 
         let probe = await candidate.connector.probe()
@@ -219,8 +222,7 @@ actor LocalProviderEligibilityScanner {
             break
         }
 
-        guard descriptor.localSourceClass == .admittedStructuredLocal,
-              descriptor.usageReadContract == .currentStructuredLocalRead,
+        guard descriptor.hasSurfaceAdmissibleReadContract,
               snapshot.safeFailure == nil,
               snapshot.freshness == .fresh,
               let account = snapshot.channels.first(where: { $0.id == .account }),
@@ -238,7 +240,8 @@ actor LocalProviderEligibilityScanner {
     private static func validatesCurrentUsage(
         _ channel: AgentUsageChannel
     ) -> Bool {
-        if channel.availabilitySourceState == .officialStructured {
+        if channel.availabilitySourceState == .officialStructured
+            || channel.availabilitySourceState == .authenticatedAccountWeb {
             return true
         }
         if channel.rateLimitWindows.isEmpty {
@@ -269,5 +272,17 @@ actor LocalProviderEligibilityScanner {
             )
         }
         return nil
+    }
+}
+
+extension AgentConnectorDescriptor {
+    var hasSurfaceAdmissibleReadContract: Bool {
+        switch (localSourceClass, usageReadContract) {
+        case (.admittedStructuredLocal, .currentStructuredLocalRead),
+             (.authenticatedAccountWeb, .currentAuthenticatedAccountWebRead):
+            true
+        default:
+            false
+        }
     }
 }

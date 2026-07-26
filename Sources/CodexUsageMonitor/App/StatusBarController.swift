@@ -6,6 +6,7 @@ import Combine
 final class StatusBarController: NSObject {
     private let store: UsageStore
     private let workBuddyLogin: WorkBuddyLoginCoordinator
+    private let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController
     private let statusItem: NSStatusItem
     private var panelController: TransparentUsagePanelController!
     private var assistantController: DesktopAssistantPanelController!
@@ -14,10 +15,12 @@ final class StatusBarController: NSObject {
     init(
         store: UsageStore,
         workBuddySettings: WorkBuddySettingsModel,
-        workBuddyLogin: WorkBuddyLoginCoordinator
+        workBuddyLogin: WorkBuddyLoginCoordinator,
+        workBuddyAccountWebSync: WorkBuddyAccountWebSessionController
     ) {
         self.store = store
         self.workBuddyLogin = workBuddyLogin
+        self.workBuddyAccountWebSync = workBuddyAccountWebSync
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
@@ -26,6 +29,7 @@ final class StatusBarController: NSObject {
             statusItem: statusItem,
             workBuddySettings: workBuddySettings,
             workBuddyLogin: workBuddyLogin,
+            workBuddyAccountWebSync: workBuddyAccountWebSync,
             visibilityDidChange: { [weak self] isVisible in
                 self?.statusItem.button?.highlight(isVisible)
                 self?.store.setPanelVisible(isVisible)
@@ -44,6 +48,7 @@ final class StatusBarController: NSObject {
     func tearDown() {
         panelController.tearDown()
         workBuddyLogin.tearDown()
+        workBuddyAccountWebSync.tearDown()
         assistantController.tearDown()
         storeObserver?.cancel()
         NSStatusBar.system.removeStatusItem(statusItem)
