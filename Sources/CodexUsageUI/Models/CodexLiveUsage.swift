@@ -180,6 +180,7 @@ extension UsageSnapshot {
                 id: window.id,
                 title: language.quotaTitle(durationMinutes: window.windowDurationMinutes, index: index),
                 remainingPercent: remaining,
+                isFiveHour: window.kind == .fiveHour,
                 isUnlimited: window.kind == .fiveHour
                     && (window.creditsUnlimited == true || live.rateLimits.creditsUnlimited == true),
                 resetText: language.resetDescription(for: window.resetsAt, now: now)
@@ -194,6 +195,7 @@ extension UsageSnapshot {
                     id: "provider.unlimited-five-hour",
                     title: language.quotaTitle(durationMinutes: 300, index: 0),
                     remainingPercent: 100,
+                    isFiveHour: true,
                     isUnlimited: true,
                     resetText: language.resetDescription(for: nil, now: now)
                 ),

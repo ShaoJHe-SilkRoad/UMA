@@ -36,6 +36,7 @@ public struct UsagePanelView: View {
     @State private var providerExpansion: MainPanelProviderExpansionState
     @State private var settingsDestination: UsageSettingsDestination?
     @State private var measuredContentHeight: CGFloat?
+    @State private var measuredSettingsCardHeight: CGFloat?
 
     let tuning: GlassTuning
     private let preferencesEnabled: Bool
@@ -53,6 +54,7 @@ public struct UsagePanelView: View {
         tuning: GlassTuning,
         preferencesEnabled: Bool = true,
         settingsInitiallyPresented: Bool = false,
+        settingsDestinationProviderID: String? = nil,
         expandedProviderIDs: Set<String> = [],
         navigation: UsagePanelNavigationCoordinator? = nil,
         onHeightChange: ((CGFloat) -> Void)? = nil,
@@ -79,7 +81,13 @@ public struct UsagePanelView: View {
         self.renderedHeightOverride = renderedHeightOverride
         self.cardVisibilityOverride = cardVisibilityOverride
         _isShowingSettings = State(initialValue: settingsInitiallyPresented)
-        _settingsDestination = State(initialValue: nil)
+        _settingsDestination = State(
+            initialValue: settingsDestinationProviderID.map {
+                $0 == AgentPreferenceRecord.workBuddyProviderID.rawValue
+                    ? .workBuddy
+                    : .agent($0)
+            }
+        )
         _providerExpansion = State(
             initialValue: MainPanelProviderExpansionState(
                 expandedProviderIDs: expandedProviderIDs
@@ -126,9 +134,13 @@ public struct UsagePanelView: View {
     }
 
     private var displayedHeight: CGFloat {
-        isShowingSettings
-            ? max(preferredHeight, UsagePanelMetrics.settingsMinimumHeight)
-            : preferredHeight
+        guard isShowingSettings else { return preferredHeight }
+        guard let measuredSettingsCardHeight else {
+            return UsagePanelMetrics.settingsMinimumHeight
+        }
+        return UsageSettingsSizing.panelHeight(
+            cardHeight: measuredSettingsCardHeight
+        )
     }
 
     private var visibleProviderIDs: [String] {
@@ -198,7 +210,13 @@ public struct UsagePanelView: View {
                         },
                         destination: settingsDestination,
                         tuning: tuning,
-                        maximumHeight: max(240, displayedHeight - 124),
+                        maximumHeight:
+                            UsagePanelMetrics.height
+                                - UsageSettingsSizing.panelTopOffset
+                                - UsageSettingsSizing.panelBottomInset,
+                        onResolvedHeightChange: {
+                            measuredSettingsCardHeight = $0
+                        },
                         checkAgain: {
                             Task { await store.checkLocalSessionAgain() }
                         },
@@ -213,7 +231,7 @@ public struct UsagePanelView: View {
                             settingsDestination = nil
                         }
                     )
-                    .padding(.top, 96)
+                    .padding(.top, UsageSettingsSizing.panelTopOffset)
                     .padding(.trailing, 16)
                     .transition(
                         usesReduceMotion
@@ -230,7 +248,7 @@ public struct UsagePanelView: View {
         )
         .animation(
             usesReduceMotion ? nil : .easeInOut(duration: 0.18),
-            value: preferredHeight
+            value: displayedHeight
         )
         .onAppear {
             applyNavigation(navigation.providerSelection)
@@ -244,6 +262,11 @@ public struct UsagePanelView: View {
         }
         .onChange(of: displayedHeight) { _, newHeight in
             onHeightChange?(newHeight)
+        }
+        .onChange(of: isShowingSettings) { _, isShowing in
+            if !isShowing {
+                measuredSettingsCardHeight = nil
+            }
         }
         .environment(\.usagePanelAppearanceOverride, appearanceOverride)
     }
@@ -765,18 +788,24 @@ private struct APICostEstimateCard: View {
     let tuning: GlassTuning
     var showsBackground = true
 
+    private var displayableEstimate: APICostEstimateSnapshot? {
+        APICostVisualPolicy.displayableEstimate(estimate)
+    }
+
     private var sevenDayValue: String {
-        guard let estimate else { return "—" }
+        guard let estimate = displayableEstimate else { return "—" }
         return Self.currency(estimate.sevenDayUSD)
     }
 
     private var lifetimeValue: String {
-        guard let value = estimate?.lifetimeUSD else { return "—" }
+        guard let value = displayableEstimate?.lifetimeUSD else { return "—" }
         return Self.currency(value)
     }
 
     private var modelText: String {
-        guard let names = estimate?.modelNames, !names.isEmpty else { return language.noPricedModel }
+        guard let names = displayableEstimate?.modelNames, !names.isEmpty else {
+            return language.noPricedModel
+        }
         return names.joined(separator: " · ")
     }
 
@@ -826,7 +855,11 @@ private struct APICostEstimateCard: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
                 Spacer(minLength: 8)
-                Text(language.pricedCoverage(estimate?.coveragePercent ?? 0))
+                Text(
+                    language.pricedCoverage(
+                        displayableEstimate?.coveragePercent ?? 0
+                    )
+                )
                     .font(AppTypography.numericFont(10.5, weight: .medium))
                     .lineLimit(1)
             }
@@ -856,6 +889,15 @@ private struct APICostEstimateCard: View {
             return String(format: "$%.2fK", value / 1_000)
         }
         return String(format: "$%.2f", value)
+    }
+}
+
+enum APICostVisualPolicy {
+    static func displayableEstimate(
+        _ estimate: APICostEstimateSnapshot?
+    ) -> APICostEstimateSnapshot? {
+        guard let estimate, estimate.coveragePercent > 0 else { return nil }
+        return estimate
     }
 }
 
@@ -1015,7 +1057,10 @@ private struct UsageSummaryCard: View {
                     QuotaRow(
                         period: period,
                         language: language,
-                        isPrimary: period.id == selectedWindowID
+                        isPrimary: UsageQuotaVisualPolicy.isPrimary(
+                            period: period,
+                            selectedWindowID: selectedWindowID
+                        )
                     )
                     if index < snapshot.periods.count - 1 {
                         Divider()
@@ -1047,6 +1092,16 @@ private struct UsageSummaryCard: View {
                 GlassCardBackground(tuning: tuning)
             }
         }
+    }
+}
+
+enum UsageQuotaVisualPolicy {
+    static func isPrimary(
+        period: UsagePeriod,
+        selectedWindowID: String?
+    ) -> Bool {
+        guard period.id == selectedWindowID else { return false }
+        return !(period.isFiveHour == true && period.isUnlimited)
     }
 }
 

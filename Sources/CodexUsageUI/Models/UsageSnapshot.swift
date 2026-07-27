@@ -4,6 +4,9 @@ struct UsagePeriod: Identifiable, Codable, Sendable {
     let id: String
     let title: String
     var remainingPercent: Int
+    /// Optional for compatibility with snapshots encoded before G2 recorded
+    /// the provider window kind in this presentation model.
+    var isFiveHour: Bool? = nil
     /// A special provider-granted five-hour credit window. The bar remains
     /// visible, but the numeric status must not imply an ordinary quota.
     var isUnlimited = false
@@ -106,6 +109,7 @@ struct UsageSnapshot: Codable, Sendable {
                     id: "five-hour",
                     title: language.quotaTitle(durationMinutes: 300, index: 0),
                     remainingPercent: 78,
+                    isFiveHour: true,
                     resetText: language == .simplifiedChinese
                         ? "重置 3 小时后 (7月12日 18:41)"
                         : "Resets in 3 hr (Jul 12, 18:41)"
@@ -114,6 +118,7 @@ struct UsageSnapshot: Codable, Sendable {
                     id: "seven-day",
                     title: language.quotaTitle(durationMinutes: 10_080, index: 1),
                     remainingPercent: 72,
+                    isFiveHour: false,
                     resetText: language == .simplifiedChinese
                         ? "重置 5 天后 (7月18日 14:45)"
                         : "Resets in 5 days (Jul 18, 14:45)"
@@ -183,6 +188,7 @@ extension UsageSnapshot {
                 id: window.id,
                 title: language.quotaTitle(durationMinutes: window.kind == .fiveHour ? 300 : (window.kind == .sevenDay ? 10_080 : nil), index: index),
                 remainingPercent: remainingPercent,
+                isFiveHour: window.kind == .fiveHour,
                 isUnlimited: window.isUnlimited,
                 resetText: language.resetDescription(for: window.resetsAt, now: now)
             )

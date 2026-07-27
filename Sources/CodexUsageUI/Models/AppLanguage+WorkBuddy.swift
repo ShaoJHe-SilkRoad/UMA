@@ -196,6 +196,21 @@ extension AppLanguage {
         }
     }
 
+    func workBuddyCompanionCompactName(
+        _ field: WorkBuddyCreditCompanionField
+    ) -> String {
+        switch (self, field) {
+        case (.english, .none): "Available"
+        case (.english, .used): "Used"
+        case (.english, .total): "Total"
+        case (.english, .usedAndTotal): "Both"
+        case (.simplifiedChinese, .none): "可用"
+        case (.simplifiedChinese, .used): "已用"
+        case (.simplifiedChinese, .total): "总额"
+        case (.simplifiedChinese, .usedAndTotal): "两者"
+        }
+    }
+
     var workBuddyNextExpiry: String {
         self == .simplifiedChinese ? "下次到期（可选）" : "Next expiry (optional)"
     }

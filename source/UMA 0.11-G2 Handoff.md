@@ -76,3 +76,36 @@ privacy, and selection behavior.
 
 G1 does not authorize G2 implementation, Desktop installation, push, tag,
 release, notarization, deployment, or publication.
+
+## Current G2 delivery state
+
+Committed G2 visual base:
+
+- commit: `6280e4b6e70eee15f8b9f40e43d1da01cb49be8e`
+- tree: `6502253faf36899d940aca9b41112cdc334a9d44`
+
+The literal completion audit produced one bounded repair set after that commit.
+Its source-state provenance, render matrix, physical evidence, and build logs
+are recorded under `/private/tmp/uma-g2-final-evidence`. The repair set must not
+be staged, amended, or committed without a new explicit Git delivery
+authorization because G2's original one-commit authority has already been
+consumed.
+
+The current repair set contains 16 tracked files: nine product/renderer files,
+three focused test files, and four G2/DBG records. The additional product file
+is the account-web controller's bounded failed-state preview factory; it does
+not change production synchronization behavior.
+
+The renderer entry point now catches and sanitizes every startup/render error,
+creates the default output parent before atomic writes, and preserves
+interactive `NSApp.run()` lifetime. This closes the exact review-app startup
+crash without changing production application lifecycle.
+
+Literal physical focus proof is complete. Full Keyboard Access was temporarily
+enabled for bounded Tab traversal and restored to its original off/mode 0
+state. VoiceOver was temporarily enabled, visibly focused on the candidate's
+Show Settings action, captured, and restored to its original off state.
+
+After any authorized repair commit, the exact final commit and tree must be
+recorded in the external final thread-sync report. A tracked file cannot embed
+the SHA of the same commit that contains it.

@@ -74,6 +74,35 @@ public enum UsagePanelMetrics {
     }
 }
 
+enum UsageSettingsSizing {
+    static let cardHorizontalPadding: CGFloat = 14
+    static let cardVerticalPadding: CGFloat = 14
+    static let panelTopOffset: CGFloat = UsagePanelMetrics.headerHeight + 12
+    static let panelBottomInset: CGFloat = 16
+    static let minimumViewportHeight: CGFloat = 120
+
+    static func cardHeight(
+        contentHeight: CGFloat?,
+        maximumHeight: CGFloat
+    ) -> CGFloat {
+        let availableViewport = max(
+            0,
+            maximumHeight - (cardVerticalPadding * 2)
+        )
+        let naturalViewport = max(
+            minimumViewportHeight,
+            contentHeight ?? availableViewport
+        )
+        return min(maximumHeight, naturalViewport + (cardVerticalPadding * 2))
+    }
+
+    static func panelHeight(cardHeight: CGFloat) -> CGFloat {
+        UsagePanelMetrics.resolvedContentHeight(
+            panelTopOffset + cardHeight + panelBottomInset
+        )
+    }
+}
+
 enum AppTypographyFamily: Equatable {
     case serif
     case system
@@ -172,6 +201,21 @@ enum AppTypographyRole {
 /// identity and native CJK cascade. Exact values stay in system tabular sans;
 /// SF Mono remains restricted to technical content.
 public enum AppTypography {
+    /// PreviewRendererTool uses this to exercise large-text layout without
+    /// mutating the user's system accessibility preferences. Production UMA
+    /// cannot activate the override.
+    nonisolated(unsafe) private static var previewPointSizeScale: CGFloat = 1
+
+    public static func configurePreviewPointSizeScale(_ scale: CGFloat) {
+        let processName = ProcessInfo.processInfo.processName
+        guard processName == "PreviewRendererTool"
+                || processName == "UMA-G2-Review"
+        else {
+            return
+        }
+        previewPointSizeScale = min(1.5, max(1, scale))
+    }
+
     static func font(
         _ role: AppTypographyRole,
         language: AppLanguage = .english
@@ -193,14 +237,22 @@ public enum AppTypography {
         language _: AppLanguage = .simplifiedChinese,
         design: Font.Design = .serif
     ) -> Font {
-        .system(size: size, weight: weight, design: design)
+        .system(
+            size: size * previewPointSizeScale,
+            weight: weight,
+            design: design
+        )
     }
 
     static func systemFont(
         _ size: CGFloat,
         weight: Font.Weight = .regular
     ) -> Font {
-        .system(size: size, weight: weight, design: .default)
+        .system(
+            size: size * previewPointSizeScale,
+            weight: weight,
+            design: .default
+        )
     }
 
     static func numericFont(
@@ -214,7 +266,11 @@ public enum AppTypography {
         _ size: CGFloat,
         weight: Font.Weight = .regular
     ) -> Font {
-        .system(size: size, weight: weight, design: .monospaced)
+        .system(
+            size: size * previewPointSizeScale,
+            weight: weight,
+            design: .monospaced
+        )
     }
 
     static func nsFont(_ role: AppTypographyRole) -> NSFont {

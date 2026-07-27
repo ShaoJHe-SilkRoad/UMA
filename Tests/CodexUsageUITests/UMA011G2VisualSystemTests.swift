@@ -105,6 +105,113 @@ struct UMA011G2VisualSystemTests {
         #expect(!card.contains("AppTypography.font(17, weight: .bold"))
     }
 
+    @Test("Unlimited five-hour detail never regains dominant styling")
+    func unlimitedFiveHourDeemphasis() throws {
+        let fiveHour = UsagePeriod(
+            id: "provider.unlimited-five-hour",
+            title: "5-Hour Limit",
+            remainingPercent: 100,
+            isFiveHour: true,
+            isUnlimited: true,
+            resetText: "—"
+        )
+        let sevenDay = UsagePeriod(
+            id: "seven-day",
+            title: "7-Day Limit",
+            remainingPercent: 71,
+            isFiveHour: false,
+            resetText: "Resets later"
+        )
+
+        #expect(
+            !UsageQuotaVisualPolicy.isPrimary(
+                period: fiveHour,
+                selectedWindowID: fiveHour.id
+            )
+        )
+        #expect(
+            UsageQuotaVisualPolicy.isPrimary(
+                period: sevenDay,
+                selectedWindowID: sevenDay.id
+            )
+        )
+
+        let legacyJSON = Data(
+            """
+            {"id":"legacy","title":"Legacy","remainingPercent":42,"isUnlimited":false,"resetText":"—"}
+            """.utf8
+        )
+        let legacy = try JSONDecoder().decode(UsagePeriod.self, from: legacyJSON)
+        #expect(legacy.isFiveHour == nil)
+    }
+
+    @Test("Zero-priced Token Cost fails closed without fabricating zero dollars")
+    func tokenCostRequiresPricedCoverage() {
+        let zeroCoverage = APICostEstimateSnapshot(
+            sevenDayUSD: 0,
+            lifetimeUSD: 0,
+            coveragePercent: 0,
+            modelNames: []
+        )
+        let priced = APICostEstimateSnapshot(
+            sevenDayUSD: 12.34,
+            lifetimeUSD: 56.78,
+            coveragePercent: 1,
+            modelNames: ["GPT-5.6"]
+        )
+
+        #expect(APICostVisualPolicy.displayableEstimate(nil) == nil)
+        #expect(
+            APICostVisualPolicy.displayableEstimate(zeroCoverage) == nil
+        )
+        #expect(
+            APICostVisualPolicy.displayableEstimate(priced)?.sevenDayUSD
+                == 12.34
+        )
+    }
+
+    @Test("Settings shrink to content and cap long content at panel height")
+    func naturalSettingsSizing() {
+        let maximumCardHeight =
+            UsagePanelMetrics.height
+                - UsageSettingsSizing.panelTopOffset
+                - UsageSettingsSizing.panelBottomInset
+        let compactCard = UsageSettingsSizing.cardHeight(
+            contentHeight: 210,
+            maximumHeight: maximumCardHeight
+        )
+        let longCard = UsageSettingsSizing.cardHeight(
+            contentHeight: 2_000,
+            maximumHeight: maximumCardHeight
+        )
+
+        #expect(compactCard == 238)
+        #expect(
+            UsageSettingsSizing.panelHeight(cardHeight: compactCard)
+                == 330
+        )
+        #expect(longCard == maximumCardHeight)
+        #expect(
+            UsageSettingsSizing.panelHeight(cardHeight: longCard)
+                == UsagePanelMetrics.height
+        )
+    }
+
+    @Test("Compact WorkBuddy entry-mode labels fit the fixed Settings width")
+    func compactWorkBuddyEntryModeLabels() {
+        #expect(
+            WorkBuddyCreditCompanionField.allCases.map {
+                AppLanguage.english.workBuddyCompanionCompactName($0)
+            } == ["Available", "Used", "Total", "Both"]
+        )
+        #expect(
+            WorkBuddyCreditCompanionField.allCases.map {
+                AppLanguage.simplifiedChinese
+                    .workBuddyCompanionCompactName($0)
+            } == ["可用", "已用", "总额", "两者"]
+        )
+    }
+
     @Test("Medium glass uses one inset contour and restrained edge mass")
     func glassAndContourContract() throws {
         let design = try source("Sources/CodexUsageUI/Support/DesignSystem.swift")
@@ -189,7 +296,11 @@ struct UMA011G2VisualSystemTests {
         #expect(cost.contains("AppTypography.numericFont(15, weight: .bold)"))
         #expect(cost.occurrenceCount(of: ".minimumScaleFactor(") >= 3)
         #expect(cost.contains(".lineLimit(1)"))
-        #expect(cost.contains("guard let estimate else { return \"—\" }"))
+        #expect(
+            cost.contains(
+                "guard let estimate = displayableEstimate else { return \"—\" }"
+            )
+        )
     }
 
     @Test("Assistant geometry and Minimalist content remain frozen")
@@ -236,12 +347,64 @@ struct UMA011G2VisualSystemTests {
     func rendererMatrixContract() throws {
         let renderer = try source("Sources/PreviewRendererTool/main.swift")
 
+        #expect(renderer.contains("static func main() async {"))
+        #expect(!renderer.contains("static func main() async throws"))
+        #expect(renderer.contains("try await run()"))
+        #expect(renderer.contains("startupDiagnostic(for: error)"))
+        #expect(!renderer.contains("\\(error)"))
+        #expect(!renderer.contains("localizedDescription"))
+        #expect(
+            renderer.contains(
+                "FileManager.default.createDirectory("
+            )
+        )
+        #expect(
+            renderer.contains(
+                "at: outputURL.deletingLastPathComponent()"
+            )
+        )
+        #expect(renderer.contains("NSApp.run()"))
         #expect(renderer.contains("--synthetic-providers="))
         #expect(renderer.contains("--all-expanded"))
         #expect(renderer.contains("--workbuddy-only"))
+        #expect(renderer.contains("--workbuddy-value="))
+        #expect(renderer.contains("--wallpaper="))
+        #expect(renderer.contains("--large-text"))
+        #expect(
+            renderer.contains(
+                "AppTypography.configurePreviewPointSizeScale("
+            )
+        )
+        #expect(renderer.contains("percent: percent"))
+        #expect(renderer.contains("--settings-agent="))
+        #expect(renderer.contains("--workbuddy-account-web-failed"))
+        #expect(
+            renderer.contains(
+                "renderedHeightOverride: interactive ? nil : panelHeight"
+            )
+        )
+        #expect(renderer.contains("Let that bounded layout cycle"))
+        #expect(renderer.contains("interactiveHeightUpdate"))
         #expect(renderer.contains("makeSyntheticCards("))
         #expect(renderer.contains("DesktopAssistantMetrics.stackSize("))
         #expect(renderer.contains("UMA 0.11-G2 Visual Review Candidate"))
+
+        let store = try source("Sources/CodexUsageUI/Stores/UsageStore.swift")
+        #expect(
+            store.contains(
+                "PreviewRenderer.AgentSettings.\\(UUID().uuidString)"
+            )
+        )
+
+        let accountWeb = try source(
+            "Sources/CodexUsageUI/Services/WorkBuddyAccountWebSessionController.swift"
+        )
+        #expect(accountWeb.contains("public static func previewFailed("))
+        #expect(
+            accountWeb.contains(
+                "preview.account-web.\\(UUID().uuidString)"
+            )
+        )
     }
 
     private func source(_ relativePath: String) throws -> String {

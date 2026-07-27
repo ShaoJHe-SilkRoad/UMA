@@ -160,7 +160,8 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
         observedAt: Date = Date()
     ) -> WorkBuddyAccountWebSessionController {
         let defaults = UserDefaults(
-            suiteName: "com.kevinchen.uma.preview.account-web"
+            suiteName:
+                "com.kevinchen.uma.preview.account-web.\(UUID().uuidString)"
         )!
         let controller = WorkBuddyAccountWebSessionController(
             defaults: defaults,
@@ -174,6 +175,19 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
         controller.nextAutoRefreshAt = autoRefreshEnabled
             ? observedAt.addingTimeInterval(60)
             : nil
+        return controller
+    }
+
+    public static func previewFailed(
+        failure: WorkBuddyAccountWebFailure = .malformedCredits
+    ) -> WorkBuddyAccountWebSessionController {
+        let defaults = UserDefaults(
+            suiteName:
+                "com.kevinchen.uma.preview.account-web.failed.\(UUID().uuidString)"
+        )!
+        let controller = WorkBuddyAccountWebSessionController(defaults: defaults)
+        controller.consentGranted = true
+        controller.flowState = .failed(failure)
         return controller
     }
 

@@ -19,6 +19,7 @@ struct UsageSettingsCard: View {
     let destination: UsageSettingsDestination?
     let tuning: GlassTuning
     let maximumHeight: CGFloat
+    let onResolvedHeightChange: (CGFloat) -> Void
     let checkAgain: () -> Void
     let syncWorkBuddyAccount: () -> Void
     let disconnectWorkBuddyAccount: () -> Void
@@ -27,6 +28,7 @@ struct UsageSettingsCard: View {
     @State private var launchAtLoginState = LaunchAtLoginService.state
     @State private var launchAtLoginError: String?
     @State private var selectedAgentID: String?
+    @State private var measuredContentHeight: CGFloat?
     @AppStorage(DesktopAssistantPreferences.Keys.isEnabled)
     private var assistantEnabled = true
     @AppStorage(DesktopAssistantPreferences.Keys.isAlwaysOnTop)
@@ -34,15 +36,29 @@ struct UsageSettingsCard: View {
     @AppStorage(DesktopAssistantPreferences.Keys.density)
     private var assistantDensityRaw = DesktopAssistantDensity.automatic.rawValue
 
+    private var resolvedCardHeight: CGFloat {
+        UsageSettingsSizing.cardHeight(
+            contentHeight: measuredContentHeight,
+            maximumHeight: maximumHeight
+        )
+    }
+
+    private var resolvedViewportHeight: CGFloat {
+        max(
+            0,
+            resolvedCardHeight - (UsageSettingsSizing.cardVerticalPadding * 2)
+        )
+    }
+
     var body: some View {
         adaptiveContent
             .frame(
                 width: 278,
-                height: max(0, maximumHeight - 28),
+                height: resolvedViewportHeight,
                 alignment: .top
             )
-            .padding(14)
-            .frame(width: 306, height: maximumHeight)
+            .padding(UsageSettingsSizing.cardVerticalPadding)
+            .frame(width: 306, height: resolvedCardHeight)
             .background {
                 GlassCardBackground(
                     tuning: tuning,
@@ -51,6 +67,10 @@ struct UsageSettingsCard: View {
             }
             .onAppear {
                 launchAtLoginState = LaunchAtLoginService.state
+                onResolvedHeightChange(resolvedCardHeight)
+            }
+            .onChange(of: resolvedCardHeight) { _, height in
+                onResolvedHeightChange(height)
             }
     }
 
@@ -90,6 +110,18 @@ struct UsageSettingsCard: View {
             } else {
                 globalSettingsContent
             }
+        }
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: SettingsContentHeightPreferenceKey.self,
+                    value: proxy.size.height
+                )
+            }
+        }
+        .onPreferenceChange(SettingsContentHeightPreferenceKey.self) { height in
+            guard height > 0 else { return }
+            measuredContentHeight = ceil(height)
         }
         .onAppear {
             guard selectedAgentID == nil else { return }
@@ -628,11 +660,18 @@ private struct WorkBuddySettingsSection: View {
                         selection: $model.draft.companionField
                     ) {
                         ForEach(WorkBuddyCreditCompanionField.allCases) {
-                            Text(language.workBuddyCompanionName($0)).tag($0)
+                            Text(language.workBuddyCompanionCompactName($0))
+                                .tag($0)
                         }
                     }
                     .pickerStyle(.segmented)
+                    .labelsHidden()
                     .disabled(!model.isEnabled)
+                    .accessibilityLabel(
+                        language.workBuddyCompanionName(
+                            model.draft.companionField
+                        )
+                    )
 
                     if model.draft.companionField != .none {
                         TextField(
@@ -1428,6 +1467,14 @@ private struct SettingsToggleRow: View {
             isOn ? language.enabledAccessibilityValue : language.disabledAccessibilityValue
         )
         .animation(.easeInOut(duration: 0.16), value: isOn)
+    }
+}
+
+private struct SettingsContentHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

@@ -64,7 +64,8 @@ public final class UsageStore: ObservableObject {
         scenario: CodexPreviewScenario = .ready,
         language: AppLanguage = .simplifiedChinese,
         presentationCards: [SharedUsageCardPresentation] = [],
-        chineseLoginProviderName: String? = nil
+        chineseLoginProviderName: String? = nil,
+        includesAgentSettings: Bool = false
     ) -> UsageStore {
         let loginOptions: [ProviderLoginOption]
         if let chineseLoginProviderName,
@@ -87,6 +88,16 @@ public final class UsageStore: ObservableObject {
             registry: nil,
             primaryConnectorID: nil,
             consentDefaults: nil,
+            agentSettings: includesAgentSettings
+                ? AgentSettingsCoordinator(
+                    store: AgentPreferenceStore(
+                        defaults: UserDefaults(
+                            suiteName:
+                                "com.kevinchen.UMA.PreviewRenderer.AgentSettings.\(UUID().uuidString)"
+                        )!
+                    )
+                )
+                : nil,
             previewScenario: scenario,
             previewPresentationCards: presentationCards,
             previewLoginOptions: loginOptions
@@ -118,7 +129,7 @@ public final class UsageStore: ObservableObject {
         self.allowsLaunchScan = autoRefresh
         self.consentDefaults = consentDefaults
         self.agentSettings = previewOnly
-            ? nil
+            ? agentSettings
             : (
                 agentSettings
                     ?? AgentSettingsCoordinator(

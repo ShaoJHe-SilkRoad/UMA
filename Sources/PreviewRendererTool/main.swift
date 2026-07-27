@@ -1,12 +1,25 @@
 import AppKit
 import CodexUsageUI
+import Darwin
 import Foundation
 import SwiftUI
 
 @main
 @MainActor
 struct PreviewRendererTool {
-    static func main() async throws {
+    static func main() async {
+        do {
+            try await run()
+        } catch {
+            let diagnostic = startupDiagnostic(for: error)
+            FileHandle.standardError.write(
+                Data("PreviewRendererTool failed: \(diagnostic)\n".utf8)
+            )
+            Darwin.exit(EXIT_FAILURE)
+        }
+    }
+
+    private static func run() async throws {
         _ = NSApplication.shared
 
         let arguments = Array(CommandLine.arguments.dropFirst())
@@ -21,26 +34,34 @@ struct PreviewRendererTool {
         let isDark = arguments.contains("--dark")
         let reduceTransparency = arguments.contains("--reduce-transparency")
         let increaseContrast = arguments.contains("--increase-contrast")
-        let background = LinearGradient(
-            colors: [
-                Color(red: 0.72, green: 0.84, blue: 0.96),
-                Color(red: 0.34, green: 0.45, blue: 0.58)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
+        let wallpaperStyle = arguments
+            .first(where: { $0.hasPrefix("--wallpaper=") })
+            .flatMap {
+                PreviewWallpaperStyle(
+                    rawValue: String($0.dropFirst("--wallpaper=".count))
+                )
+            }
+            ?? .colorful
+        let background = PreviewWallpaper(style: wallpaperStyle)
+        let dynamicTypeSize: DynamicTypeSize = arguments.contains("--large-text")
+            ? .accessibility1
+            : .medium
+        AppTypography.configurePreviewPointSizeScale(
+            arguments.contains("--large-text") ? 1.35 : 1
         )
+        let percent = arguments
+            .first(where: { $0.hasPrefix("--percent=") })
+            .flatMap { Double($0.dropFirst("--percent=".count)) }
+            ?? 44
 
         let content: AnyView
         let renderSize: CGSize
+        var interactiveHeightUpdate: ((CGFloat) -> Void)?
         if arguments.contains("--assistant-regular")
             || arguments.contains("--assistant-minimalist") {
             let density: DesktopAssistantResolvedDensity = arguments.contains("--assistant-minimalist")
                 ? .minimalist
                 : .regular
-            let percent = arguments
-                .first(where: { $0.hasPrefix("--percent=") })
-                .flatMap { Double($0.dropFirst("--percent=".count)) }
-                ?? 44
             let shared = makeCodexCard(
                 arguments: arguments,
                 language: language,
@@ -88,6 +109,7 @@ struct PreviewRendererTool {
                 }
                 .frame(width: size.width, height: size.height)
                 .environment(\.colorScheme, isDark ? ColorScheme.dark : ColorScheme.light)
+                .environment(\.dynamicTypeSize, dynamicTypeSize)
             )
         } else {
             let workBuddyCard = try makeWorkBuddyCard(
@@ -101,6 +123,7 @@ struct PreviewRendererTool {
                 ? makeCodexCard(
                     arguments: arguments,
                     language: language,
+                    percent: percent,
                     scenario: previewScenario
                 )
                 : nil
@@ -116,7 +139,8 @@ struct PreviewRendererTool {
                 presentationCards: extraCards,
                 chineseLoginProviderName: arguments.contains(
                     "--chinese-login-option"
-                ) ? "Kimi" : nil
+                ) ? "Kimi" : nil,
+                includesAgentSettings: showsSettings || interactive
             )
             let tuning = GlassTuning.final
             let expandedProviderIDs: Set<String>
@@ -143,6 +167,11 @@ struct PreviewRendererTool {
                     showAPICost: false
                 )
                 : nil
+            let settingsDestinationProviderID = arguments
+                .first(where: { $0.hasPrefix("--settings-agent=") })
+                .map {
+                    String($0.dropFirst("--settings-agent=".count))
+                }
             let workBuddyLogin = (
                 arguments.contains("--workbuddy-login")
                     || arguments.contains("--workbuddy-login-unverified")
@@ -156,12 +185,16 @@ struct PreviewRendererTool {
             let accountWebSync = arguments.contains(
                 "--workbuddy-account-web-settings"
             ) ? (
-                arguments.contains("--workbuddy-account-web-connected")
-                    ? WorkBuddyAccountWebSessionController.previewConnected(
-                        autoRefreshEnabled:
-                            !arguments.contains("--workbuddy-manual-only")
+                arguments.contains("--workbuddy-account-web-failed")
+                    ? WorkBuddyAccountWebSessionController.previewFailed()
+                    : (
+                        arguments.contains("--workbuddy-account-web-connected")
+                            ? WorkBuddyAccountWebSessionController.previewConnected(
+                                autoRefreshEnabled:
+                                    !arguments.contains("--workbuddy-manual-only")
+                            )
+                            : WorkBuddyAccountWebSessionController()
                     )
-                    : WorkBuddyAccountWebSessionController()
             ) : nil
             let workBuddySettings = workBuddyLogin != nil || accountWebSync != nil
                 ? WorkBuddySettingsModel.preview()
@@ -170,6 +203,8 @@ struct PreviewRendererTool {
                 store: store,
                 tuning: tuning,
                 showsSettings: showsSettings,
+                settingsDestinationProviderID:
+                    settingsDestinationProviderID,
                 expandedProviderIDs: expandedProviderIDs,
                 workBuddySettings: workBuddySettings,
                 workBuddyLogin: workBuddyLogin,
@@ -188,17 +223,27 @@ struct PreviewRendererTool {
                     tuning: tuning,
                     preferencesEnabled: false,
                     settingsInitiallyPresented: showsSettings,
+                    settingsDestinationProviderID:
+                        settingsDestinationProviderID,
                     expandedProviderIDs: expandedProviderIDs,
+                    onHeightChange: { height in
+                        guard interactive else { return }
+                        interactiveHeightUpdate?(height)
+                    },
                     workBuddySettings: workBuddySettings,
                     workBuddyLogin: workBuddyLogin,
                     workBuddyAccountWebSync: accountWebSync,
                     appearanceOverride: appearanceOverride,
-                    renderedHeightOverride: panelHeight,
+                    renderedHeightOverride: interactive ? nil : panelHeight,
                     cardVisibilityOverride: cardVisibilityOverride
                 )
             }
-            .frame(width: UsagePanelMetrics.width, height: panelHeight)
+            .frame(
+                width: UsagePanelMetrics.width,
+                height: interactive ? nil : panelHeight
+            )
             .environment(\.colorScheme, isDark ? ColorScheme.dark : ColorScheme.light)
+            .environment(\.dynamicTypeSize, dynamicTypeSize)
             )
         }
 
@@ -212,13 +257,36 @@ struct PreviewRendererTool {
         )
         window.contentView = host
         window.title = "UMA 0.11-G2 Visual Review Candidate"
-        host.layoutSubtreeIfNeeded()
-        window.displayIfNeeded()
         if interactive {
+            interactiveHeightUpdate = { height in
+                let contentSize = CGSize(
+                    width: UsagePanelMetrics.width,
+                    height: height
+                )
+                let oldTop = window.frame.maxY
+                var frame = window.frameRect(
+                    forContentRect: CGRect(origin: .zero, size: contentSize)
+                )
+                frame.origin = CGPoint(
+                    x: window.frame.origin.x,
+                    y: oldTop - frame.height
+                )
+                window.setFrame(frame, display: true, animate: true)
+            }
+            host.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             NSApp.run()
             return
+        }
+        // Settings destinations and natural-height cards resolve through
+        // onAppear and preference propagation. Let that bounded layout cycle
+        // settle before capturing so evidence reflects the final hierarchy.
+        for _ in 0..<30 {
+            host.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            try await Task.sleep(for: .milliseconds(10))
         }
         guard let bitmap = NSBitmapImageRep(
             bitmapDataPlanes: nil,
@@ -240,7 +308,26 @@ struct PreviewRendererTool {
             throw PreviewError.renderFailed
         }
 
-        try png.write(to: URL(fileURLWithPath: outputPath), options: .atomic)
+        let outputURL = URL(fileURLWithPath: outputPath).standardizedFileURL
+        try FileManager.default.createDirectory(
+            at: outputURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try png.write(to: outputURL, options: .atomic)
+    }
+
+    private static func startupDiagnostic(for error: Error) -> String {
+        if let previewError = error as? PreviewError {
+            switch previewError {
+            case .renderFailed:
+                return "render-failed"
+            case .invalidScenario:
+                return "invalid-scenario"
+            }
+        }
+
+        let cocoaError = error as NSError
+        return "startup-error domain=\(cocoaError.domain) code=\(cocoaError.code)"
     }
 
     private static func codexPreviewScenario(
@@ -300,7 +387,13 @@ struct PreviewRendererTool {
         )
         return SharedUsageCardPresentation(
             id: "codex.local",
-            providerName: "Codex",
+            providerName: arguments.contains("--long-copy")
+                ? (
+                    language == .english
+                        ? "Codex Extended Local Provider"
+                        : "Codex 扩展本机服务提供商"
+                )
+                : "Codex",
             planLabel: "PRO",
             connectionStatus: arguments.contains("--failed")
                 ? .failed
@@ -321,6 +414,7 @@ struct PreviewRendererTool {
         store: UsageStore,
         tuning: GlassTuning,
         showsSettings: Bool,
+        settingsDestinationProviderID: String?,
         expandedProviderIDs: Set<String>,
         workBuddySettings: WorkBuddySettingsModel?,
         workBuddyLogin: WorkBuddyLoginCoordinator?,
@@ -335,6 +429,7 @@ struct PreviewRendererTool {
                 tuning: tuning,
                 preferencesEnabled: false,
                 settingsInitiallyPresented: showsSettings,
+                settingsDestinationProviderID: settingsDestinationProviderID,
                 expandedProviderIDs: expandedProviderIDs,
                 onHeightChange: { measurement.height = $0 },
                 workBuddySettings: workBuddySettings,
@@ -460,6 +555,24 @@ struct PreviewRendererTool {
                     observedAt: now,
                     provenance: .authenticatedAccountWeb(observedAt: now)
                 )
+            } else if let customValue = arguments
+                .first(where: { $0.hasPrefix("--workbuddy-value=") })
+                .flatMap({
+                    Decimal(
+                        string: String(
+                            $0.dropFirst("--workbuddy-value=".count)
+                        ),
+                        locale: Locale(identifier: "en_US_POSIX")
+                    )
+                }) {
+                balance = try CreditBalance(
+                    validatingDecimalRemaining: customValue,
+                    scope: scope,
+                    planTier: planTier,
+                    nextExpiryAt: now.addingTimeInterval(86_400),
+                    observedAt: now,
+                    provenance: .manualConfirmed(at: now)
+                )
             } else {
                 balance = try CreditBalance(
                     validatingRemaining: remaining,
@@ -482,7 +595,13 @@ struct PreviewRendererTool {
             id: isAccountWeb
                 ? "workbuddy.accountWebCredits"
                 : "workbuddy.manualAvailability",
-            providerName: "WorkBuddy",
+            providerName: arguments.contains("--long-copy")
+                ? (
+                    language == .english
+                        ? "WorkBuddy Extended Credit Provider"
+                        : "WorkBuddy 扩展额度服务提供商"
+                )
+                : "WorkBuddy",
             planLabel: lifecycle == .configured && !isAccountWeb
                 ? {
                     if arguments.contains("--workbuddy-enterprise") {
@@ -589,4 +708,67 @@ private final class PanelHeightMeasurement {
 private enum PreviewError: Error {
     case renderFailed
     case invalidScenario
+}
+
+private enum PreviewWallpaperStyle: String {
+    case bright
+    case dark
+    case colorful
+    case photographic
+    case flat
+}
+
+private struct PreviewWallpaper: View {
+    let style: PreviewWallpaperStyle
+
+    var body: some View {
+        switch style {
+        case .bright:
+            LinearGradient(
+                colors: [.white, Color(red: 0.66, green: 0.90, blue: 0.98)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        case .dark:
+            LinearGradient(
+                colors: [
+                    Color(red: 0.05, green: 0.08, blue: 0.14),
+                    Color(red: 0.16, green: 0.12, blue: 0.23)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        case .colorful:
+            LinearGradient(
+                colors: [
+                    Color(red: 0.72, green: 0.84, blue: 0.96),
+                    Color(red: 0.34, green: 0.45, blue: 0.58)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        case .photographic:
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.13, green: 0.22, blue: 0.34),
+                        Color(red: 0.76, green: 0.48, blue: 0.30),
+                        Color(red: 0.18, green: 0.42, blue: 0.37)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                Circle()
+                    .fill(Color.orange.opacity(0.62))
+                    .frame(width: 180, height: 180)
+                    .offset(x: 110, y: -150)
+                Ellipse()
+                    .fill(Color.black.opacity(0.32))
+                    .frame(width: 420, height: 170)
+                    .offset(x: -90, y: 220)
+            }
+        case .flat:
+            Color(red: 0.42, green: 0.49, blue: 0.55)
+        }
+    }
 }

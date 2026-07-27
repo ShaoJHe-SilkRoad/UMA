@@ -6,9 +6,10 @@ Date: 2026-07-27
 
 G2 delivers compact equal provider cards, one contour owner per component,
 medium public-macOS glass, header-only Settings backing, attached expanded
-details, a de-emphasized nonselected Codex five-hour row, explicit Token Cost
-layout protection, centralized serif-led labels, tabular exact values, native
-CJK fallback, and unchanged Assistant geometry.
+details, a de-emphasized nonselected or unlimited Codex five-hour row,
+fail-closed zero-priced Token Cost handling plus large-value layout protection,
+centralized serif-led labels, tabular exact values, native CJK fallback,
+natural Settings sizing, and unchanged Assistant geometry.
 
 The tracked handoff cannot contain the SHA of the one commit that contains
 itself. Resolve the exact final commit and tree from the clean G2 worktree:
@@ -53,11 +54,17 @@ UMA has no Claude application dependency.
 
 ## Verification baseline
 
-- Post-review G2 plus WorkBuddy focused matrix: 26/26 PASS.
-- Affected G1/G2/stability: 46/46 PASS.
-- Full suite: 300/300 PASS across 37 suites.
+- Focused UMA 0.11 matrix: 39/39 PASS across 4 suites.
+- Full suite: 304/304 PASS across 37 suites.
 - Debug, Release, and strict-concurrency warnings-as-errors Release: PASS.
-- Physical synthetic review and deterministic matrix: PASS.
+- The deterministic matrix contains 61 images across provider/state,
+  appearance, language, Settings, and Assistant variants.
+- Physical synthetic review proves bounded disclosure/Settings scrolling,
+  native material hosting, transient keyboard focus, visible VoiceOver focus,
+  and exact restoration of both accessibility features to off.
+- The review renderer creates its default output parent, catches every
+  startup/render failure at its nonthrowing async entry point, emits only a
+  bounded diagnostic, and keeps interactive review windows in `NSApp.run()`.
 
 ## Required DBG matrix
 

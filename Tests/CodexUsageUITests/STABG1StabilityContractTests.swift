@@ -121,7 +121,8 @@ struct STABG1StabilityContractTests {
         )
         #expect(!settings.contains("ViewThatFits"))
         #expect(settings.occurrenceCount(of: "ScrollView(.vertical)") == 1)
-        #expect(settings.contains("height: max(0, maximumHeight - 28)"))
+        #expect(settings.contains("height: resolvedViewportHeight"))
+        #expect(settings.contains("SettingsContentHeightPreferenceKey"))
         #expect(settings.contains("usage.settings.scroll"))
         #expect(settings.contains(".scrollBounceBehavior(.basedOnSize)"))
     }
