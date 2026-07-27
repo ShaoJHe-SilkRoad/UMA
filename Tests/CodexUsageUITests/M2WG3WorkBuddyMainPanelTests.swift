@@ -363,8 +363,13 @@ struct M2WG3WorkBuddyMainPanelTests {
         #expect(card.contains("workBuddyClearInSettingsHint"))
         #expect(!card.contains("settings?.clear"))
         #expect(card.contains("accessibilityReduceMotion"))
-        #expect(card.contains("accessibilityReduceTransparency"))
-        #expect(card.contains("colorSchemeContrast"))
+        #expect(card.contains("GlassCardBackground"))
+        #expect(!card.contains(".overlay {\n                if usesIncreaseContrast"))
+        #expect(
+            settings.components(separatedBy: "ScrollView(.vertical)").count - 1 == 1
+        )
+        #expect(settings.contains(".scrollBounceBehavior(.basedOnSize)"))
+        #expect(settings.contains("usage.settings.scroll"))
         #expect(panel.contains("usesReduceMotion ? nil"))
         #expect(settings.contains("workBuddyConfirmClear"))
         #expect(settings.contains("clearIsArmed"))

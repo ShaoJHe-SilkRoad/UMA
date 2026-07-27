@@ -3,8 +3,6 @@ import SwiftUI
 
 struct WorkBuddyMainPanelCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     let card: SharedUsageCardPresentation
     let language: AppLanguage
@@ -56,19 +54,10 @@ struct WorkBuddyMainPanelCard: View {
                 }
             }
             .background {
-                if usesReduceTransparency {
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(Color(nsColor: .windowBackgroundColor).opacity(0.97))
-                } else {
-                    GlassCardBackground(tuning: tuning)
-                }
-            }
-            .overlay {
-                if usesIncreaseContrast {
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(Color.primary.opacity(0.62), lineWidth: 1.2)
-                        .allowsHitTesting(false)
-                }
+                GlassCardBackground(
+                    tuning: tuning,
+                    appearanceOverride: appearanceOverride
+                )
             }
             .animation(
                 usesReduceMotion ? nil : .easeInOut(duration: 0.18),
@@ -89,17 +78,17 @@ struct WorkBuddyMainPanelCard: View {
                     .layoutPriority(2)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(presentation.providerName)
-                        .font(UsageDesign.font(15, weight: .bold, language: language))
+                        .font(AppTypography.font(15, weight: .bold, language: language))
                         .lineLimit(1)
                     Text(presentation.scopeTitle)
-                        .font(UsageDesign.font(10.5, weight: .medium, language: language))
+                        .font(AppTypography.font(10.5, weight: .medium, language: language))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     Label(
                         presentation.compactManualStatus,
                         systemImage: "hand.raised.fill"
                     )
-                        .font(UsageDesign.font(9.5, language: language))
+                        .font(AppTypography.font(9.5, language: language))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -107,13 +96,13 @@ struct WorkBuddyMainPanelCard: View {
                 Spacer(minLength: 6)
                 VStack(alignment: .trailing, spacing: 3) {
                     Text(presentation.compactValue)
-                        .font(UsageDesign.font(19, weight: .bold, language: language))
+                        .font(AppTypography.font(19, weight: .bold, language: language))
                         .monospacedDigit()
                     Label(
                         presentation.severityText,
                         systemImage: severitySymbol(presentation.severity)
                     )
-                    .font(UsageDesign.font(8.5, weight: .medium, language: language))
+                    .font(AppTypography.font(8.5, weight: .medium, language: language))
                     .foregroundStyle(severityColor(presentation.severity))
                     .lineLimit(1)
                 }
@@ -151,12 +140,12 @@ struct WorkBuddyMainPanelCard: View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(presentation.availableText)
-                    .font(UsageDesign.font(17, weight: .bold, language: language))
+                    .font(AppTypography.font(17, weight: .bold, language: language))
                     .foregroundStyle(severityColor(presentation.severity))
                     .fixedSize(horizontal: false, vertical: true)
                 if let balanceDetail = presentation.balanceDetail {
                     Text(balanceDetail)
-                        .font(UsageDesign.font(11, weight: .medium, language: language))
+                        .font(AppTypography.font(11, weight: .medium, language: language))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -193,7 +182,7 @@ struct WorkBuddyMainPanelCard: View {
             }
 
             Text(presentation.limitationText)
-                .font(UsageDesign.font(9.5, language: language))
+                .font(AppTypography.font(9.5, language: language))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -226,14 +215,6 @@ struct WorkBuddyMainPanelCard: View {
         appearanceOverride?.reduceMotion ?? reduceMotion
     }
 
-    private var usesReduceTransparency: Bool {
-        appearanceOverride?.reduceTransparency ?? reduceTransparency
-    }
-
-    private var usesIncreaseContrast: Bool {
-        appearanceOverride?.increaseContrast ?? (colorSchemeContrast == .increased)
-    }
-
     private func detailRow(_ label: String, value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(label)
@@ -242,7 +223,7 @@ struct WorkBuddyMainPanelCard: View {
             Text(value)
                 .multilineTextAlignment(.trailing)
         }
-        .font(UsageDesign.font(10, weight: .medium, language: language))
+        .font(AppTypography.font(10, weight: .medium, language: language))
         .accessibilityElement(children: .combine)
     }
 

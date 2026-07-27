@@ -545,7 +545,9 @@ private struct DesktopAssistantCardView: View {
             RoundedRectangle(cornerRadius: radius, style: .continuous)
                 .stroke(
                     Color.primary.opacity(hasIncreasedContrast ? 0.56 : 0.22),
-                    lineWidth: hasIncreasedContrast ? 1 : 0.75
+                    lineWidth: AppBorders.assistantLineWidth(
+                        increaseContrast: hasIncreasedContrast
+                    )
                 )
                 .allowsHitTesting(false)
         }
@@ -572,17 +574,20 @@ private struct DesktopAssistantCardView: View {
     }
 
     private var regularContent: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             sourceMark(diameter: 24)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     Text(card.providerName)
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .font(AppTypography.font(.assistantProvider))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                        .layoutPriority(1)
                     if card.sourceMark == .connection,
                        let planLabel = card.planLabel,
                        !planLabel.isEmpty {
                         Text(planLabel)
-                            .font(.system(size: 8.5, weight: .medium, design: .rounded))
+                            .font(AppTypography.font(.assistantPlan))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -593,29 +598,27 @@ private struct DesktopAssistantCardView: View {
                         ? card.selectedWindowShortLabel
                         : "\(card.selectedWindowShortLabel) · \(card.resetText)")
                 )
-                .font(.system(
-                    size: card.sourceMark == .accountWeb ? 8.2 : 9,
-                    weight: .medium,
-                    design: .rounded
-                ))
+                .font(
+                    AppTypography.font(
+                        card.sourceMark == .accountWeb
+                            ? .assistantAccountDetail
+                            : .assistantDetail
+                    )
+                )
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(card.sourceMark == .accountWeb ? 0.85 : 1)
                 .truncationMode(.tail)
             }
-            Spacer(minLength: 4)
+            Spacer(minLength: 2)
             valueLabel
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 10)
     }
 
     private var valueLabel: some View {
         Text(card.usageText(for: density))
-            .font(.system(
-                size: DesktopAssistantMetrics.percentageFontSize,
-                weight: .medium,
-                design: .rounded
-            ))
+            .font(AppTypography.font(.assistantValue))
             .monospacedDigit()
             .foregroundStyle(valueColor)
             .lineLimit(1)
@@ -630,7 +633,7 @@ private struct DesktopAssistantCardView: View {
                 Circle()
                     .stroke(connectionColor, lineWidth: 1.5)
                 Text("C")
-                    .font(.system(size: diameter * 0.56, weight: .semibold, design: .rounded))
+                    .font(AppTypography.font(diameter * 0.56, weight: .semibold))
                     .foregroundStyle(connectionColor)
             }
             .frame(width: diameter, height: diameter)
@@ -640,7 +643,7 @@ private struct DesktopAssistantCardView: View {
                 Circle()
                     .stroke(connectionColor, lineWidth: 1.5)
                 Text("W")
-                    .font(.system(size: diameter * 0.52, weight: .semibold, design: .rounded))
+                    .font(AppTypography.font(diameter * 0.52, weight: .semibold))
                     .foregroundStyle(connectionColor)
             }
             .frame(width: diameter, height: diameter)
@@ -653,7 +656,7 @@ private struct DesktopAssistantCardView: View {
                         style: StrokeStyle(lineWidth: 1.5, dash: [2, 1.5])
                     )
                 Text("M")
-                    .font(.system(size: diameter * 0.50, weight: .semibold, design: .rounded))
+                    .font(AppTypography.font(diameter * 0.50, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
             .frame(width: diameter, height: diameter)

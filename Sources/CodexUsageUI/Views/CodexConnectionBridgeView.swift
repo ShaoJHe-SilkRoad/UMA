@@ -19,7 +19,7 @@ struct CodexConnectionBridgeView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(presentation.title)
-                        .font(UsageDesign.font(20, weight: .bold, language: language))
+                        .font(AppTypography.font(20, weight: .bold, language: language))
                     if presentation.showsProgress {
                         ProgressView()
                             .controlSize(.small)
@@ -29,7 +29,7 @@ struct CodexConnectionBridgeView: View {
             }
 
             Text(presentation.body)
-                .font(UsageDesign.font(13, language: language))
+                .font(AppTypography.font(13, language: language))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 

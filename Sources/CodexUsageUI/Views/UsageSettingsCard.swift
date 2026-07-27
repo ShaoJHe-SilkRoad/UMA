@@ -32,43 +32,33 @@ struct UsageSettingsCard: View {
 
     var body: some View {
         adaptiveContent
-        .padding(14)
-        .frame(width: 306)
-        .frame(maxHeight: maximumHeight)
-        .background {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(.regularMaterial)
-            GlassCardBackground(tuning: tuning)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.white.opacity(0.28), lineWidth: 0.8)
-        }
-        .shadow(color: Color.black.opacity(0.14), radius: 14, y: 8)
-        .onAppear {
-            launchAtLoginState = LaunchAtLoginService.state
-        }
+            .frame(
+                width: 278,
+                height: max(0, maximumHeight - 28),
+                alignment: .top
+            )
+            .padding(14)
+            .frame(width: 306, height: maximumHeight)
+            .background {
+                GlassCardBackground(
+                    tuning: tuning,
+                    readabilityFillOpacity: 0.72
+                )
+            }
+            .onAppear {
+                launchAtLoginState = LaunchAtLoginService.state
+            }
     }
 
-    @ViewBuilder
     private var adaptiveContent: some View {
-        if workBuddyLogin != nil || workBuddyAccountWebSync != nil {
-            ScrollView(.vertical) {
-                settingsContent
-                    .frame(width: 278, alignment: .leading)
-            }
-            .scrollIndicators(.automatic)
-            .accessibilityLabel(language.settingsTitle)
-        } else {
-            ViewThatFits(in: .vertical) {
-                settingsContent
-                ScrollView(.vertical) {
-                    settingsContent
-                }
-                .scrollIndicators(.automatic)
-                .accessibilityLabel(language.settingsTitle)
-            }
+        ScrollView(.vertical) {
+            settingsContent
+                .frame(width: 278, alignment: .leading)
         }
+        .scrollIndicators(.automatic)
+        .scrollBounceBehavior(.basedOnSize)
+        .accessibilityLabel(language.settingsTitle)
+        .accessibilityIdentifier("usage.settings.scroll")
     }
 
     private var settingsContent: some View {
@@ -77,7 +67,7 @@ struct UsageSettingsCard: View {
                 Image(systemName: "gearshape.fill")
                     .foregroundStyle(UsageDesign.blue)
                 Text(language.settingsTitle)
-                    .font(UsageDesign.font(15, weight: .bold, language: language))
+                    .font(AppTypography.font(15, weight: .bold, language: language))
                 Spacer()
                 Button(language.showAll) {
                     showUsageSummary = true
@@ -85,7 +75,7 @@ struct UsageSettingsCard: View {
                     showAPICost = true
                 }
                 .buttonStyle(.plain)
-                .font(UsageDesign.font(10.5, weight: .medium, language: language))
+                .font(AppTypography.font(10.5, weight: .medium, language: language))
                 .foregroundStyle(UsageDesign.blue)
 
                 Button(action: close) {
@@ -101,7 +91,7 @@ struct UsageSettingsCard: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(language.cardsSection)
-                    .font(UsageDesign.font(10.5, weight: .medium, language: language))
+                    .font(AppTypography.font(10.5, weight: .medium, language: language))
                     .foregroundStyle(.secondary)
 
                 SettingsToggleRow(
@@ -156,7 +146,7 @@ struct UsageSettingsCard: View {
 
             VStack(alignment: .leading, spacing: 7) {
                 Text(language.desktopAssistantSection)
-                    .font(UsageDesign.font(10.5, weight: .medium, language: language))
+                    .font(AppTypography.font(10.5, weight: .medium, language: language))
                     .foregroundStyle(.secondary)
 
                 SettingsToggleRow(
@@ -193,7 +183,7 @@ struct UsageSettingsCard: View {
 
             VStack(alignment: .leading, spacing: 7) {
                 Text(language.generalSection)
-                    .font(UsageDesign.font(10.5, weight: .medium, language: language))
+                    .font(AppTypography.font(10.5, weight: .medium, language: language))
                     .foregroundStyle(.secondary)
 
                 LanguageSettingRow(language: $language)
@@ -215,13 +205,13 @@ struct UsageSettingsCard: View {
                         .buttonStyle(.plain)
                         .foregroundStyle(UsageDesign.blue)
                     }
-                    .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                    .font(AppTypography.font(9.5, weight: .medium, language: language))
                     .foregroundStyle(.secondary)
                 }
 
                 if let launchAtLoginError {
                     Text(launchAtLoginError)
-                        .font(UsageDesign.font(9.5, language: language))
+                        .font(AppTypography.font(9.5, language: language))
                         .foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -286,7 +276,7 @@ private struct WorkBuddySettingsSection: View {
             } label: {
                 HStack {
                     Label(language.workBuddySection, systemImage: "w.circle")
-                        .font(UsageDesign.font(12.5, weight: .semibold, language: language))
+                        .font(AppTypography.font(12.5, weight: .semibold, language: language))
                     Spacer()
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                         .font(.system(size: 9, weight: .semibold))
@@ -324,7 +314,7 @@ private struct WorkBuddySettingsSection: View {
                     }
 
                     Text(language.workBuddyLegacyManualRecord)
-                        .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                        .font(AppTypography.font(9.5, weight: .medium, language: language))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -367,7 +357,7 @@ private struct WorkBuddySettingsSection: View {
 
                     if let suggestion = model.selectedTierSuggestion {
                         Text(language.workBuddySuggestion(suggestion))
-                            .font(UsageDesign.font(9, language: language))
+                            .font(AppTypography.font(9, language: language))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                         Button(language.workBuddyUseSuggestion) {
@@ -447,7 +437,7 @@ private struct WorkBuddySettingsSection: View {
 
                     if let validationError = model.validationError {
                         Text(language.workBuddyValidationMessage(validationError))
-                            .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                            .font(AppTypography.font(9.5, weight: .medium, language: language))
                             .foregroundStyle(.red)
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityLabel(language.workBuddyValidationMessage(validationError))
@@ -455,12 +445,12 @@ private struct WorkBuddySettingsSection: View {
 
                     if model.lifecycle == .invalidSavedData {
                         Text(language.workBuddyInvalidSavedData)
-                            .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                            .font(AppTypography.font(9.5, weight: .medium, language: language))
                             .foregroundStyle(.red)
                             .fixedSize(horizontal: false, vertical: true)
                     } else if !model.isEnabled || model.savedObservation == nil {
                         Text(language.workBuddyNotConfigured)
-                            .font(UsageDesign.font(9.5, language: language))
+                            .font(AppTypography.font(9.5, language: language))
                             .foregroundStyle(.secondary)
                     }
 
@@ -518,7 +508,7 @@ private struct WorkBuddySettingsSection: View {
 
                     if let statusMessage = model.statusMessage {
                         Text(language.workBuddyStatusMessage(statusMessage))
-                            .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                            .font(AppTypography.font(9.5, weight: .medium, language: language))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityLabel(language.workBuddyStatusMessage(statusMessage))
@@ -559,7 +549,7 @@ private struct WorkBuddySettingsSection: View {
             Spacer()
             Text(value)
         }
-        .font(UsageDesign.font(10, weight: .medium, language: language))
+        .font(AppTypography.font(10, weight: .medium, language: language))
         .accessibilityElement(children: .combine)
     }
 
@@ -567,7 +557,7 @@ private struct WorkBuddySettingsSection: View {
         let balance = preview.observation.balance
         return VStack(alignment: .leading, spacing: 3) {
             Text(language.workBuddyManualSnapshot)
-                .font(UsageDesign.font(10.5, weight: .semibold, language: language))
+                .font(AppTypography.font(10.5, weight: .semibold, language: language))
             Text("\(CreditFormatter.exact(balance.remaining, language: language)) Credits")
             if let used = balance.used {
                 Text("\(language.workBuddyCompanionName(.used)): \(CreditFormatter.exact(used, language: language))")
@@ -586,7 +576,7 @@ private struct WorkBuddySettingsSection: View {
             Text(language.workBuddySharedWithCodeBuddy)
             Text(language.workBuddyManualSnapshot)
         }
-        .font(UsageDesign.font(9.5, language: language))
+        .font(AppTypography.font(9.5, language: language))
         .foregroundStyle(.secondary)
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -611,10 +601,10 @@ private struct WorkBuddyAccountWebSyncSection: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(language.workBuddySection)
                     Text(language.workBuddyAccountWebSubtitle)
-                        .font(UsageDesign.font(9, language: language))
+                        .font(AppTypography.font(9, language: language))
                         .foregroundStyle(.secondary)
                 }
-                .font(UsageDesign.font(12, weight: .semibold, language: language))
+                .font(AppTypography.font(12, weight: .semibold, language: language))
                 Spacer()
             }
 
@@ -640,11 +630,11 @@ private struct WorkBuddyAccountWebSyncSection: View {
     private var firstConnectionContent: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(language.workBuddyAccountWebState(.idle))
-                .font(UsageDesign.font(10, weight: .medium, language: language))
+                .font(AppTypography.font(10, weight: .medium, language: language))
                 .foregroundStyle(.secondary)
 
             Text(language.workBuddyAccountWebDisclosure)
-                .font(UsageDesign.font(9.5, language: language))
+                .font(AppTypography.font(9.5, language: language))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -672,7 +662,7 @@ private struct WorkBuddyAccountWebSyncSection: View {
             connectedContent
         case .signInRequired:
             Text(language.workBuddyAccountSignInRequired)
-                .font(UsageDesign.font(10, weight: .medium, language: language))
+                .font(AppTypography.font(10, weight: .medium, language: language))
             Button(language.workBuddyAccountSignInAgain) {
                 controller.connect()
             }
@@ -680,7 +670,7 @@ private struct WorkBuddyAccountWebSyncSection: View {
             secondaryActions
         case .failed:
             Text(language.workBuddyAccountCouldNotReadCredits)
-                .font(UsageDesign.font(10, weight: .medium, language: language))
+                .font(AppTypography.font(10, weight: .medium, language: language))
             Button(language.workBuddyAccountSyncAgain, action: syncNow)
                 .buttonStyle(.bordered)
             if controller.lastSynchronizedAt != nil {
@@ -692,7 +682,7 @@ private struct WorkBuddyAccountWebSyncSection: View {
                 ProgressView()
                     .controlSize(.small)
                 Text(language.workBuddyAccountWebState(controller.flowState))
-                    .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                    .font(AppTypography.font(9.5, weight: .medium, language: language))
             }
             Button(language.checkAgain, action: checkAgain)
                 .buttonStyle(.bordered)
@@ -702,7 +692,7 @@ private struct WorkBuddyAccountWebSyncSection: View {
             .buttonStyle(.borderless)
         case .idle, .consentRequired:
             Text(language.workBuddyAccountWebState(.idle))
-                .font(UsageDesign.font(10, weight: .medium, language: language))
+                .font(AppTypography.font(10, weight: .medium, language: language))
                 .foregroundStyle(.secondary)
             sessionChoice
             Button(language.workBuddyAccountWebConnect) {
@@ -716,7 +706,7 @@ private struct WorkBuddyAccountWebSyncSection: View {
         VStack(alignment: .leading, spacing: 7) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(language.workBuddyAccountWebState(.connected))
-                    .font(UsageDesign.font(10.5, weight: .semibold, language: language))
+                    .font(AppTypography.font(10.5, weight: .semibold, language: language))
                 if let lastSynchronizedAt = controller.lastSynchronizedAt {
                     TimelineView(.periodic(from: .now, by: 30)) { context in
                         Text(
@@ -726,7 +716,7 @@ private struct WorkBuddyAccountWebSyncSection: View {
                             )
                         )
                     }
-                    .font(UsageDesign.font(9.5, language: language))
+                    .font(AppTypography.font(9.5, language: language))
                     .foregroundStyle(.secondary)
                 }
             }
@@ -749,13 +739,13 @@ private struct WorkBuddyAccountWebSyncSection: View {
             )
             .toggleStyle(.switch)
             .tint(UsageDesign.blue)
-            .font(UsageDesign.font(10, weight: .medium, language: language))
+            .font(AppTypography.font(10, weight: .medium, language: language))
             Text(
                 controller.autoRefreshEnabled
                     ? language.workBuddyAccountEveryMinute
                     : language.workBuddyAccountManualOnly
             )
-            .font(UsageDesign.font(9, language: language))
+            .font(AppTypography.font(9, language: language))
             .foregroundStyle(.secondary)
             if controller.autoRefreshEnabled,
                let nextRefreshAt = controller.nextAutoRefreshAt {
@@ -772,7 +762,7 @@ private struct WorkBuddyAccountWebSyncSection: View {
                         )
                     )
                 }
-                .font(UsageDesign.font(9, language: language))
+                .font(AppTypography.font(9, language: language))
                 .foregroundStyle(.secondary)
             }
         }
@@ -807,7 +797,7 @@ private struct WorkBuddyAccountWebSyncSection: View {
     private var sessionChoice: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(language.workBuddyAccountWebSessionChoice)
-                .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                .font(AppTypography.font(9.5, weight: .medium, language: language))
                 .foregroundStyle(.secondary)
             Picker("", selection: $controller.sessionMode) {
                 ForEach(WorkBuddyAccountWebSessionMode.allCases) { mode in
@@ -825,7 +815,7 @@ private struct WorkBuddyAccountWebSyncSection: View {
             Divider()
                 .opacity(0.35)
             Text(language.workBuddyAccountWebDisclosure)
-                .font(UsageDesign.font(9, language: language))
+                .font(AppTypography.font(9, language: language))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             sessionChoice
@@ -834,7 +824,7 @@ private struct WorkBuddyAccountWebSyncSection: View {
                     "\(language.workBuddyAccountWebSafeDiagnostic): "
                         + safeDiagnosticCode
                 )
-                .font(UsageDesign.font(8.5, language: language))
+                .font(AppTypography.font(8.5, language: language))
                 .foregroundStyle(.secondary)
             }
             if let snapshot = controller.latestCreditSnapshot {
@@ -857,7 +847,7 @@ private struct WorkBuddyAccountWebSyncSection: View {
                     )
                     Text(language.workBuddyConfirmedAt(snapshot.observedAt))
                 }
-                .font(UsageDesign.font(9, weight: .medium, language: language))
+                .font(AppTypography.font(9, weight: .medium, language: language))
                 .foregroundStyle(.secondary)
                 .accessibilityElement(children: .combine)
             }
@@ -890,10 +880,10 @@ private struct WorkBuddyLoginAssistanceSection: View {
                 language.workBuddyLoginForDataSync,
                 systemImage: "person.crop.circle.badge.checkmark"
             )
-            .font(UsageDesign.font(12, weight: .semibold, language: language))
+            .font(AppTypography.font(12, weight: .semibold, language: language))
 
             Text(language.workBuddyLoginPrivacySummary)
-                .font(UsageDesign.font(9.5, language: language))
+                .font(AppTypography.font(9.5, language: language))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -912,7 +902,7 @@ private struct WorkBuddyLoginAssistanceSection: View {
                     return false
                 }() {
                 Text(language.workBuddyAccountType)
-                    .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                    .font(AppTypography.font(9.5, weight: .medium, language: language))
                     .foregroundStyle(.secondary)
 
                 Picker("", selection: $coordinator.accountMode) {
@@ -926,7 +916,7 @@ private struct WorkBuddyLoginAssistanceSection: View {
                 .accessibilityHint(language.workBuddyAccountModeHint)
 
                 Text(language.workBuddyAccountModeHint)
-                    .font(UsageDesign.font(9, language: language))
+                    .font(AppTypography.font(9, language: language))
                     .foregroundStyle(.secondary)
 
                 WorkBuddyLoginConfirmationRow(
@@ -943,7 +933,7 @@ private struct WorkBuddyLoginAssistanceSection: View {
                 if coordinator.installation.application?
                     .signatureTrust.requiresOfficialInstallConfirmation == true {
                     Text(language.workBuddyOfficialInstallWarning)
-                        .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                        .font(AppTypography.font(9.5, weight: .medium, language: language))
                         .foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityLabel(language.workBuddyOfficialInstallWarning)
@@ -962,7 +952,7 @@ private struct WorkBuddyLoginAssistanceSection: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(language.workBuddyLoginStepsTitle)
-                        .font(UsageDesign.font(10, weight: .semibold, language: language))
+                        .font(AppTypography.font(10, weight: .semibold, language: language))
                     ForEach(
                         Array(
                             language.workBuddyLoginSteps(
@@ -974,7 +964,7 @@ private struct WorkBuddyLoginAssistanceSection: View {
                         Text("\(index + 1). \(step)")
                     }
                 }
-                .font(UsageDesign.font(9.5, language: language))
+                .font(AppTypography.font(9.5, language: language))
                 .foregroundStyle(.secondary)
                 .accessibilityElement(children: .combine)
 
@@ -1094,13 +1084,13 @@ private struct ProviderLoginAssistanceSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(language.localLiveProvidersSection)
-                .font(UsageDesign.font(10.5, weight: .medium, language: language))
+                .font(AppTypography.font(10.5, weight: .medium, language: language))
                 .foregroundStyle(.secondary)
 
             ForEach(options) { option in
                 VStack(alignment: .leading, spacing: 7) {
                     Label(option.providerName, systemImage: "person.crop.circle.badge.checkmark")
-                        .font(UsageDesign.font(12.5, weight: .semibold, language: language))
+                        .font(AppTypography.font(12.5, weight: .semibold, language: language))
 
                     Link(destination: option.officialApplicationURL) {
                         Label(language.loginForDataSync, systemImage: "arrow.up.forward.app")
@@ -1129,7 +1119,7 @@ private struct AssistantDensitySettingRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Label(language.desktopAssistantDensity, systemImage: "rectangle.3.group")
-                .font(UsageDesign.font(12.5, weight: .medium, language: language))
+                .font(AppTypography.font(12.5, weight: .medium, language: language))
 
             HStack(spacing: 4) {
                 ForEach(DesktopAssistantDensity.allCases, id: \.rawValue) { density in
@@ -1137,7 +1127,7 @@ private struct AssistantDensitySettingRow: View {
                         selection = density
                     } label: {
                         Text(language.desktopAssistantDensityName(density))
-                            .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                            .font(AppTypography.font(9.5, weight: .medium, language: language))
                             .foregroundStyle(selection == density ? Color.white : Color.secondary)
                             .frame(maxWidth: .infinity)
                             .frame(height: 22)
@@ -1170,7 +1160,7 @@ private struct SettingsToggleRow: View {
         } label: {
             HStack(spacing: 8) {
                 Label(title, systemImage: systemImage)
-                    .font(UsageDesign.font(12.5, weight: .medium, language: language))
+                    .font(AppTypography.font(12.5, weight: .medium, language: language))
                 Spacer()
                 ZStack {
                     Capsule()
@@ -1200,7 +1190,7 @@ private struct LanguageSettingRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Label(language.languageSetting, systemImage: "globe")
-                .font(UsageDesign.font(12.5, weight: .medium, language: language))
+                .font(AppTypography.font(12.5, weight: .medium, language: language))
             Spacer(minLength: 6)
             HStack(spacing: 3) {
                 ForEach(AppLanguage.allCases) { option in
@@ -1208,7 +1198,7 @@ private struct LanguageSettingRow: View {
                         language = option
                     } label: {
                         Text(option.displayName)
-                            .font(UsageDesign.font(9.5, weight: .medium, language: option))
+                            .font(AppTypography.font(9.5, weight: .medium, language: option))
                             .foregroundStyle(language == option ? Color.white : Color.secondary)
                             .padding(.horizontal, 7)
                             .frame(height: 22)

@@ -16,6 +16,7 @@ final class DesktopAssistantPanelController {
     private let onSelectProvider: ((String) -> Void)?
     private var preferences: DesktopAssistantPreferences
     private var cards: [DesktopAssistantCard] = []
+    private var renderedDensity: DesktopAssistantResolvedDensity?
     private var moveObserver: NSObjectProtocol?
     private var screenObserver: NSObjectProtocol?
     private var defaultsObserver: NSObjectProtocol?
@@ -51,16 +52,23 @@ final class DesktopAssistantPanelController {
     var density: DesktopAssistantDensity { preferences.density }
 
     func update(cards: [DesktopAssistantCard]) {
+        let cardsChanged = cards != self.cards
+        let previousCount = self.cards.count
         self.cards = cards
         let resolvedDensity = preferences.density.resolvedDensity(
             visibleProviderCount: cards.count
         )
-        installContent(density: resolvedDensity)
-        repairFrame(for: resolvedDensity, preserveSavedPosition: true)
+        let densityChanged = renderedDensity != resolvedDensity
+        if cardsChanged || densityChanged {
+            installContent(density: resolvedDensity)
+        }
+        if densityChanged || previousCount != cards.count {
+            repairFrame(for: resolvedDensity, preserveSavedPosition: true)
+        }
         if preferences.isEnabled, shouldBeVisible, !cards.isEmpty {
-            show()
+            if !panel.isVisible { show() }
         } else {
-            hide(savePosition: false)
+            if panel.isVisible { hide(savePosition: false) }
         }
     }
 
@@ -133,6 +141,7 @@ final class DesktopAssistantPanelController {
     }
 
     private func installContent(density: DesktopAssistantResolvedDensity) {
+        renderedDensity = density
         let hostingView = NSHostingView(
             rootView: DesktopAssistantView(
                 cards: cards,
@@ -152,6 +161,7 @@ final class DesktopAssistantPanelController {
     }
 
     private func show() {
+        guard !panel.isVisible else { return }
         let resolvedDensity = preferences.density.resolvedDensity(
             visibleProviderCount: cards.count
         )
@@ -160,6 +170,7 @@ final class DesktopAssistantPanelController {
     }
 
     private func hide(savePosition: Bool = true) {
+        guard panel.isVisible else { return }
         if savePosition {
             saveCurrentPosition()
         }
@@ -229,9 +240,9 @@ final class DesktopAssistantPanelController {
         }
 
         if updated.isEnabled, shouldBeVisible, !cards.isEmpty {
-            show()
+            if !panel.isVisible { show() }
         } else {
-            hide(savePosition: false)
+            if panel.isVisible { hide(savePosition: false) }
         }
     }
 
@@ -261,8 +272,10 @@ final class DesktopAssistantPanelController {
             )
         }
         let proposed = NSRect(origin: origin, size: targetSize)
+        let targetFrame = clamped(proposed, to: visible)
+        guard !NSEqualRects(panel.frame, targetFrame) else { return }
         isApplyingFrame = true
-        panel.setFrame(clamped(proposed, to: visible), display: panel.isVisible)
+        panel.setFrame(targetFrame, display: panel.isVisible)
         isApplyingFrame = false
     }
 

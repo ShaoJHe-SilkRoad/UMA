@@ -43,8 +43,11 @@ other providers remain governed by the local-live admission contract.
 - Failure, expiry, or Disconnect withdraws both surfaces immediately.
 - Account-web snapshots are never restored.
 - The legacy manual source remains manual-only and cannot become a fallback.
-- Account-web reads are restricted to launch, Manual Refresh, Sync Now, and
-  Check Again; no polling is introduced.
+- Account-web reads are restricted to launch, Manual Refresh, Sync Now,
+  Check Again, and the accepted WorkBuddy-owned default-on Auto Refresh lane.
+  Scheduled reads occur no sooner than 60 seconds after the prior read
+  completes, with one timer, one WebView, one in-flight read, no catch-up, and
+  no view- or Assistant-triggered multiplication.
 
 ## Superseded WorkBuddy rule
 

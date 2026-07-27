@@ -25,7 +25,7 @@ struct UsagePanelNavigationRequest: Equatable {
 final class TransparentUsagePanelController {
     private enum Layout {
         static let width = UsagePanelMetrics.width
-        static let height = UsagePanelMetrics.height
+        static let initialHeight = UsagePanelMetrics.minimumHeight
         static let cornerRadius: CGFloat = 28
         static let statusBarGap: CGFloat = 8
         static let screenMargin: CGFloat = 8
@@ -39,6 +39,7 @@ final class TransparentUsagePanelController {
     private let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController
     private weak var statusItem: NSStatusItem?
     private let visibilityDidChange: (Bool) -> Void
+    private let navigation = UsagePanelNavigationCoordinator()
     private var globalEventMonitor: Any?
     private var localEventMonitor: Any?
 
@@ -58,7 +59,12 @@ final class TransparentUsagePanelController {
         self.visibilityDidChange = visibilityDidChange
         tuning = .final
         panel = TransparentUsagePanel(
-            contentRect: NSRect(x: 0, y: 0, width: Layout.width, height: Layout.height),
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: Layout.width,
+                height: Layout.initialHeight
+            ),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -81,13 +87,9 @@ final class TransparentUsagePanelController {
         let request = UsagePanelNavigationRequest.assistantSelection(
             providerID: providerID
         )
-        configurePanel(
-            store: store,
-            workBuddySettings: workBuddySettings,
-            workBuddyLogin: workBuddyLogin,
-            workBuddyAccountWebSync: workBuddyAccountWebSync,
-            expandedProviderIDs: request.expandedProviderIDs
-        )
+        for expandedProviderID in request.expandedProviderIDs {
+            navigation.selectProvider(expandedProviderID)
+        }
         show()
     }
 
@@ -127,18 +129,23 @@ final class TransparentUsagePanelController {
         panel.isReleasedWhenClosed = false
 
         let rootView = AdaptivePanelMaterialHostView(
-            frame: NSRect(x: 0, y: 0, width: Layout.width, height: Layout.height),
+            frame: NSRect(
+                x: 0,
+                y: 0,
+                width: Layout.width,
+                height: Layout.initialHeight
+            ),
             cornerRadius: Layout.cornerRadius,
             // Keep the exact established macOS 14–25 material intensity
             // without coupling the frozen panel geometry to M1-G3 tuning WIP.
             fallbackMaterialOpacity: 0.44
         )
 
-        let hostingView = NSHostingView(
-            rootView: UsagePanelView(
+        let panelView = UsagePanelView(
                 store: store,
                 tuning: tuning,
                 expandedProviderIDs: expandedProviderIDs,
+                navigation: navigation,
                 onHeightChange: { [weak self] height in
                     DispatchQueue.main.async { [weak self] in
                         self?.resizePanel(to: height)
@@ -149,8 +156,16 @@ final class TransparentUsagePanelController {
                 workBuddyLogin: workBuddyLogin,
                 workBuddyAccountWebSync: workBuddyAccountWebSync
             )
+            .usagePanelOuterContourOwnedByNativeHost()
+        let hostingView = NSHostingView(
+            rootView: panelView
         )
-        hostingView.frame = NSRect(x: 0, y: 0, width: Layout.width, height: Layout.height)
+        hostingView.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: Layout.width,
+            height: Layout.initialHeight
+        )
         hostingView.autoresizingMask = [.width, .height]
         hostingView.wantsLayer = true
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor

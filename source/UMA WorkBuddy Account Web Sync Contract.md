@@ -61,10 +61,15 @@ Account-page reads are permitted only for:
 - application launch when valid consent and an isolated session already exist;
 - shared Manual Refresh;
 - Sync Now;
-- Check Again.
+- Check Again;
+- the WorkBuddy-owned Auto Refresh scheduler when enabled, no sooner than
+  60 seconds after the prior read completes.
 
-There is no timer, background polling, visibility-triggered read,
-Desktop-Assistant-triggered read, or render-triggered read. Concurrent scans are
+Auto Refresh defaults on and owns exactly one timer, one WebView, and one
+in-flight read. It performs no catch-up burst. Manual actions reset its next
+deadline; Manual only cancels scheduled reads; authentication expiry and
+Disconnect suspend or cancel it. There is no visibility-triggered,
+Desktop-Assistant-triggered, or render-triggered read. Concurrent scans are
 coalesced by the existing shared eligibility scanner.
 
 The page extractor:

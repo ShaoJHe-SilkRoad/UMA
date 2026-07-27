@@ -55,4 +55,8 @@ manual WorkBuddy record is not read, changed, or deleted by either operation.
 ## Read cadence
 
 Reads occur only on application launch with prior consent/session, shared
-Manual Refresh, Sync Now, or Check Again. There is no background polling.
+Manual Refresh, Sync Now, Check Again, or the accepted WorkBuddy-owned Auto
+Refresh lane can initiate a read. Auto Refresh defaults on, runs no sooner than
+60 seconds after the prior read completes, and owns at most one timer, one
+WebView, and one in-flight read. It never reads because a panel or Assistant is
+rendered or shown.

@@ -1,9 +1,34 @@
 import AppKit
 import SwiftUI
 
+@MainActor
+public final class UsagePanelNavigationCoordinator: ObservableObject {
+    public struct ProviderSelection: Equatable, Sendable {
+        public let providerID: String
+        public let revision: UInt64
+    }
+
+    @Published public private(set) var providerSelection: ProviderSelection?
+    private var revision: UInt64 = 0
+
+    public init() {}
+
+    public func selectProvider(_ providerID: String) {
+        revision &+= 1
+        providerSelection = ProviderSelection(
+            providerID: providerID,
+            revision: revision
+        )
+    }
+}
+
 public struct UsagePanelView: View {
     @ObservedObject var store: UsageStore
+    @ObservedObject private var navigation: UsagePanelNavigationCoordinator
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.usagePanelOuterContourOwner) private var outerContourOwner
     @AppStorage("display.showUsageSummaryCard") private var storedShowUsageSummary = true
     @AppStorage("display.showRecentTasksCard") private var storedShowRecentTasks = false
     @AppStorage("display.showAPICostCard") private var storedShowAPICost = false
@@ -29,6 +54,7 @@ public struct UsagePanelView: View {
         preferencesEnabled: Bool = true,
         settingsInitiallyPresented: Bool = false,
         expandedProviderIDs: Set<String> = [],
+        navigation: UsagePanelNavigationCoordinator? = nil,
         onHeightChange: ((CGFloat) -> Void)? = nil,
         localAccessConfirmationAction: CodexLocalAccessConfirmationAction? = nil,
         workBuddySettings: WorkBuddySettingsModel? = nil,
@@ -39,6 +65,9 @@ public struct UsagePanelView: View {
         cardVisibilityOverride: UsagePanelCardVisibility? = nil
     ) {
         self.store = store
+        _navigation = ObservedObject(
+            wrappedValue: navigation ?? UsagePanelNavigationCoordinator()
+        )
         self.tuning = tuning
         self.preferencesEnabled = preferencesEnabled
         self.onHeightChange = onHeightChange
@@ -114,96 +143,44 @@ public struct UsagePanelView: View {
     }
 
     public var body: some View {
-        ScrollView(.vertical) {
-            VStack(spacing: UsagePanelMetrics.cardSpacing) {
-                if presentation.showsRealData {
-                    HeaderView(
-                        store: store,
-                        recovery: retainedSnapshotRecovery,
-                        tuning: tuning,
-                        isShowingSettings: $isShowingSettings,
-                        perform: perform
-                    )
-                    if showUsageSummary {
-                        UsageSummaryCard(snapshot: store.snapshot, language: store.language, tuning: tuning)
-                    }
-                    ForEach(additionalProviderCards) { card in
-                        LocalLiveProviderCard(
-                            card: card,
-                            language: store.language,
-                            tuning: tuning,
-                            isExpanded: expansionBinding(for: card.id)
-                        )
-                    }
-                    if showRecentTasks {
-                        RecentTasksCard(tasks: store.snapshot.recentTasks, language: store.language, tuning: tuning)
-                    }
-                    if showAPICost {
-                        APICostEstimateCard(
-                            estimate: store.snapshot.apiCostEstimate,
-                            language: store.language,
-                            tuning: tuning
-                        )
-                    }
-                    FooterView(snapshot: store.snapshot, language: store.language)
-                } else if !store.presentationCards.isEmpty {
-                    ForEach(store.presentationCards) { card in
-                        LocalLiveProviderCard(
-                            card: card,
-                            language: store.language,
-                            tuning: tuning,
-                            isExpanded: expansionBinding(for: card.id)
-                        )
-                    }
-                } else {
-                    LocalLiveEmptyStateView(
-                        language: store.language,
-                        isRefreshing: store.isRefreshing,
-                        refresh: refreshFromEmptyState
-                    )
+        Group {
+            if isShowingSettings {
+                panelContent
+                    .frame(maxHeight: displayedHeight, alignment: .top)
+                    .clipped()
+                    .opacity(0.14)
+                    .allowsHitTesting(false)
+            } else {
+                ScrollView(.vertical) {
+                    panelContent
                 }
-            }
-            .padding(.horizontal, UsagePanelMetrics.outerHorizontalInset)
-            .padding(.top, UsagePanelMetrics.outerTopInset)
-            .padding(.bottom, UsagePanelMetrics.outerBottomInset)
-            .background {
-                GeometryReader { proxy in
-                    Color.clear.preference(
-                        key: UsagePanelContentHeightPreferenceKey.self,
-                        value: proxy.size.height
-                    )
-                }
-            }
-            .onPreferenceChange(UsagePanelContentHeightPreferenceKey.self) { height in
-                guard renderedHeightOverride == nil, height > 0 else { return }
-                if measuredContentHeight.map({ abs($0 - height) > 0.5 }) ?? true {
-                    measuredContentHeight = height
-                }
+                .scrollIndicators(.automatic)
+                .scrollBounceBehavior(.basedOnSize)
             }
         }
-        .scrollIndicators(.automatic)
-        .scrollBounceBehavior(.basedOnSize)
         .frame(width: UsagePanelMetrics.width, height: displayedHeight)
         .background {
             BalancedPanelTint(tuning: tuning)
                 .ignoresSafeArea()
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
+            if outerContourOwner == .swiftUI {
+                RoundedRectangle(
+                    cornerRadius: AppGlass.panelCornerRadius,
+                    style: .continuous
+                )
                 .stroke(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.38),
-                            Color.white.opacity(0.08),
-                            Color.black.opacity(0.12)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+                    AppBorders.panelStroke(
+                        colorScheme: colorScheme,
+                        increaseContrast: usesIncreasedContrast
                     ),
-                    lineWidth: 0.8
+                    lineWidth: AppBorders.panelLineWidth(
+                        increaseContrast: usesIncreasedContrast
+                    )
                 )
                 .padding(0.4)
                 .allowsHitTesting(false)
+            }
         }
         .overlay(alignment: .topTrailing) {
             ZStack(alignment: .topTrailing) {
@@ -284,10 +261,91 @@ public struct UsagePanelView: View {
             value: preferredHeight
         )
         .onAppear {
+            applyNavigation(navigation.providerSelection)
             onHeightChange?(displayedHeight)
+        }
+        .onChange(of: navigation.providerSelection) { _, selection in
+            applyNavigation(selection)
         }
         .onChange(of: displayedHeight) { _, newHeight in
             onHeightChange?(newHeight)
+        }
+        .environment(\.usagePanelAppearanceOverride, appearanceOverride)
+    }
+
+    private var panelContent: some View {
+        VStack(spacing: UsagePanelMetrics.cardSpacing) {
+            if presentation.showsRealData {
+                HeaderView(
+                    store: store,
+                    recovery: retainedSnapshotRecovery,
+                    tuning: tuning,
+                    isShowingSettings: $isShowingSettings,
+                    perform: perform
+                )
+                if showUsageSummary {
+                    UsageSummaryCard(
+                        snapshot: store.snapshot,
+                        language: store.language,
+                        tuning: tuning
+                    )
+                }
+                ForEach(additionalProviderCards) { card in
+                    LocalLiveProviderCard(
+                        card: card,
+                        language: store.language,
+                        tuning: tuning,
+                        isExpanded: expansionBinding(for: card.id)
+                    )
+                }
+                if showRecentTasks {
+                    RecentTasksCard(
+                        tasks: store.snapshot.recentTasks,
+                        language: store.language,
+                        tuning: tuning
+                    )
+                }
+                if showAPICost {
+                    APICostEstimateCard(
+                        estimate: store.snapshot.apiCostEstimate,
+                        language: store.language,
+                        tuning: tuning
+                    )
+                }
+                FooterView(snapshot: store.snapshot, language: store.language)
+            } else if !store.presentationCards.isEmpty {
+                ForEach(store.presentationCards) { card in
+                    LocalLiveProviderCard(
+                        card: card,
+                        language: store.language,
+                        tuning: tuning,
+                        isExpanded: expansionBinding(for: card.id)
+                    )
+                }
+            } else {
+                LocalLiveEmptyStateView(
+                    language: store.language,
+                    isRefreshing: store.isRefreshing,
+                    refresh: refreshFromEmptyState
+                )
+            }
+        }
+        .padding(.horizontal, UsagePanelMetrics.outerHorizontalInset)
+        .padding(.top, UsagePanelMetrics.outerTopInset)
+        .padding(.bottom, UsagePanelMetrics.outerBottomInset)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: UsagePanelContentHeightPreferenceKey.self,
+                    value: proxy.size.height
+                )
+            }
+        }
+        .onPreferenceChange(UsagePanelContentHeightPreferenceKey.self) { height in
+            guard renderedHeightOverride == nil, height > 0 else { return }
+            if measuredContentHeight.map({ abs($0 - height) > 0.5 }) ?? true {
+                measuredContentHeight = height
+            }
         }
     }
 
@@ -298,6 +356,13 @@ public struct UsagePanelView: View {
                 providerExpansion.setExpanded(expanded, providerID: id)
             }
         )
+    }
+
+    private func applyNavigation(
+        _ selection: UsagePanelNavigationCoordinator.ProviderSelection?
+    ) {
+        guard let selection else { return }
+        providerExpansion.setExpanded(true, providerID: selection.providerID)
     }
 
     private func openWorkBuddySettings() {
@@ -318,6 +383,10 @@ public struct UsagePanelView: View {
 
     private var usesReduceMotion: Bool {
         appearanceOverride?.reduceMotion ?? reduceMotion
+    }
+
+    private var usesIncreasedContrast: Bool {
+        appearanceOverride?.increaseContrast ?? (colorSchemeContrast == .increased)
     }
 
     @MainActor
@@ -355,10 +424,10 @@ private struct LocalLiveEmptyStateView: View {
                 .foregroundStyle(UsageDesign.blue)
                 .accessibilityHidden(true)
             Text(language.noLocalLiveAgentsTitle)
-                .font(UsageDesign.font(13, weight: .semibold, language: language))
+                .font(AppTypography.font(13, weight: .semibold, language: language))
                 .multilineTextAlignment(.center)
             Text(language.noLocalLiveAgentsGuidance)
-                .font(UsageDesign.font(10.5, language: language))
+                .font(AppTypography.font(10.5, language: language))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -373,12 +442,7 @@ private struct LocalLiveEmptyStateView: View {
         .padding(.vertical, 24)
         .padding(.horizontal, 20)
         .background {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(.thinMaterial)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.white.opacity(0.22), lineWidth: 0.7)
+            GlassCardBackground(tuning: .final, cornerRadius: 22)
         }
     }
 }
@@ -402,16 +466,16 @@ private struct LocalLiveProviderCard: View {
                         .foregroundStyle(.green)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(card.providerName)
-                            .font(UsageDesign.font(13, weight: .semibold, language: language))
+                            .font(AppTypography.font(13, weight: .semibold, language: language))
                         if isAccountWebCredits {
                             Text(language.workBuddyAccountWebSource)
-                                .font(UsageDesign.font(9, language: language))
+                                .font(AppTypography.font(9, language: language))
                                 .foregroundStyle(.secondary)
                         }
                     }
                     Spacer()
                     Text(primaryValue)
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .font(AppTypography.font(.regularValue, language: language))
                         .monospacedDigit()
                     if card.availability?.displayUnit == .credits {
                         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
@@ -491,13 +555,7 @@ private struct LocalLiveProviderCard: View {
             }
         }
         .background {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(.thinMaterial)
             GlassCardBackground(tuning: tuning)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.white.opacity(0.22), lineWidth: 0.7)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(card.accessibilityLabel)
@@ -530,7 +588,7 @@ private struct LocalLiveProviderCard: View {
             Text(value)
                 .multilineTextAlignment(.trailing)
         }
-        .font(UsageDesign.font(10, weight: .medium, language: language))
+        .font(AppTypography.font(10, weight: .medium, language: language))
     }
 }
 
@@ -568,30 +626,30 @@ private struct APICostEstimateCard: View {
                 Image(systemName: "dollarsign.circle")
                     .font(.system(size: 15, weight: .semibold))
                 Text(language.apiCostTitle)
-                    .font(UsageDesign.font(15, weight: .bold, language: language))
+                    .font(AppTypography.font(15, weight: .bold, language: language))
                 Spacer()
                 Text(language.standardAPIRates)
-                    .font(UsageDesign.font(10.5, weight: .medium, language: language))
+                    .font(AppTypography.font(10.5, weight: .medium, language: language))
                     .foregroundStyle(.secondary)
             }
 
             HStack(alignment: .firstTextBaseline) {
                 Text(sevenDayValue)
-                    .font(UsageDesign.font(25, weight: .bold, language: language))
+                    .font(AppTypography.font(25, weight: .bold, language: language))
                     .foregroundStyle(UsageDesign.blue)
                     .monospacedDigit()
                 Text(language.metricSevenDays)
-                    .font(UsageDesign.font(11.5, weight: .medium, language: language))
+                    .font(AppTypography.font(11.5, weight: .medium, language: language))
                     .foregroundStyle(.secondary)
 
                 Spacer()
 
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(lifetimeValue)
-                        .font(UsageDesign.font(15, weight: .bold, language: language))
+                        .font(AppTypography.font(15, weight: .bold, language: language))
                         .monospacedDigit()
                     Text(language.lifetimeCost)
-                        .font(UsageDesign.font(10.5, language: language))
+                        .font(AppTypography.font(10.5, language: language))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -608,11 +666,11 @@ private struct APICostEstimateCard: View {
                 Text(language.pricedCoverage(estimate?.coveragePercent ?? 0))
                     .monospacedDigit()
             }
-            .font(UsageDesign.font(10.5, weight: .medium, language: language))
+            .font(AppTypography.font(10.5, weight: .medium, language: language))
             .foregroundStyle(.secondary)
 
             Text(language.costDisclaimer)
-                .font(UsageDesign.font(9.5, language: language))
+                .font(AppTypography.font(9.5, language: language))
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .lineLimit(2)
@@ -654,13 +712,13 @@ private struct HeaderView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 9) {
                     Text(store.language.appTitle)
-                        .font(UsageDesign.font(20, weight: .bold, language: store.language))
+                        .font(AppTypography.font(20, weight: .bold, language: store.language))
                         .lineLimit(1)
                         .minimumScaleFactor(UsagePanelHeaderLayout.titleMinimumScaleFactor)
                         .layoutPriority(UsagePanelHeaderLayout.titleLayoutPriority)
                     if recovery == nil {
                         Text(store.snapshot.planLabel)
-                            .font(UsageDesign.font(11, weight: .bold, language: store.language))
+                            .font(AppTypography.font(11, weight: .bold, language: store.language))
                             .tracking(1.0)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: true, vertical: false)
@@ -672,7 +730,7 @@ private struct HeaderView: View {
                         .fill(recovery == nil && store.lastError == nil ? UsageDesign.green : Color.orange)
                         .frame(width: 8, height: 8)
                     Text(recovery?.statusText ?? store.statusText)
-                        .font(UsageDesign.font(13, language: store.language))
+                        .font(AppTypography.font(13, language: store.language))
                         .foregroundStyle(.secondary)
                         .lineLimit(recovery == nil ? 1 : 2)
                         .minimumScaleFactor(0.78)
@@ -782,10 +840,10 @@ private struct UsageSummaryCard: View {
                 ForEach(snapshot.metrics) { metric in
                     VStack(spacing: 4) {
                         Text(metric.value)
-                            .font(UsageDesign.font(19, weight: .bold, language: language))
+                            .font(AppTypography.font(19, weight: .bold, language: language))
                             .monospacedDigit()
                         Text(metric.label)
-                            .font(UsageDesign.font(12, weight: .medium, language: language))
+                            .font(AppTypography.font(12, weight: .medium, language: language))
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity)
@@ -805,10 +863,10 @@ private struct QuotaRow: View {
         VStack(spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 Text(period.title)
-                    .font(UsageDesign.font(16, weight: .bold, language: language))
+                    .font(AppTypography.font(16, weight: .bold, language: language))
                 Spacer()
                 Text(period.isUnlimited ? "♾️" : "\(period.remainingPercent)%")
-                    .font(UsageDesign.font(20, weight: .bold, language: language))
+                    .font(AppTypography.font(20, weight: .bold, language: language))
                     .foregroundStyle(UsageDesign.blue)
                     .monospacedDigit()
             }
@@ -829,7 +887,7 @@ private struct QuotaRow: View {
                 Spacer()
                 Text(period.resetText)
             }
-            .font(UsageDesign.font(11.5, language: language))
+            .font(AppTypography.font(11.5, language: language))
             .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 14)
@@ -848,10 +906,10 @@ private struct RecentTasksCard: View {
                 Image(systemName: "list.bullet.rectangle")
                     .font(.system(size: 15, weight: .semibold))
                 Text(language.recentTasks)
-                    .font(UsageDesign.font(15, weight: .bold, language: language))
+                    .font(AppTypography.font(15, weight: .bold, language: language))
                 Spacer()
                 Text(language.threadTotalTokens)
-                    .font(UsageDesign.font(11, language: language))
+                    .font(AppTypography.font(11, language: language))
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 14)
@@ -880,15 +938,15 @@ private struct RecentTaskRow: View {
             HStack(alignment: .center, spacing: 10) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(task.title)
-                        .font(UsageDesign.font(14, weight: .bold, language: language))
+                        .font(AppTypography.font(14, weight: .bold, language: language))
                         .lineLimit(1)
                     Text(task.time)
-                        .font(UsageDesign.font(10.5, language: language))
+                        .font(AppTypography.font(10.5, language: language))
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
                 Text(task.tokenText)
-                    .font(UsageDesign.font(14.5, weight: .bold, language: language))
+                    .font(AppTypography.font(14.5, weight: .bold, language: language))
                     .foregroundStyle(UsageDesign.blue)
                     .monospacedDigit()
             }
@@ -929,7 +987,7 @@ private struct FooterView: View {
             Spacer()
             Text(language.updatedAt(updatedTime))
         }
-        .font(UsageDesign.font(11.5, weight: .medium, language: language))
+        .font(AppTypography.font(11.5, weight: .medium, language: language))
         .foregroundStyle(.secondary)
         .padding(.horizontal, 4)
         .frame(height: 24)

@@ -11,6 +11,7 @@ final class StatusBarController: NSObject {
     private var panelController: TransparentUsagePanelController!
     private var assistantController: DesktopAssistantPanelController!
     private var storeObserver: AnyCancellable?
+    private var statusUpdateScheduled = false
 
     init(
         store: UsageStore,
@@ -79,7 +80,7 @@ final class StatusBarController: NSObject {
         image?.isTemplate = true
         button.image = image
         button.imagePosition = .imageLeading
-        button.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+        button.font = AppTypography.menuBarNSFont()
         button.target = self
         button.action = #selector(handleStatusItemAction)
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -89,7 +90,13 @@ final class StatusBarController: NSObject {
     private func observeUsageChanges() {
         storeObserver = store.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async {
-                self?.updateStatusButton()
+                guard let self, !self.statusUpdateScheduled else { return }
+                self.statusUpdateScheduled = true
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.statusUpdateScheduled = false
+                    self.updateStatusButton()
+                }
             }
         }
     }

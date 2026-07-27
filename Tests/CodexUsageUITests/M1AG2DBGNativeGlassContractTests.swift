@@ -41,6 +41,7 @@ struct M1AG2DBGNativeGlassContractTests {
         if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
             #expect(host.subviews.count == 1)
             #expect(host.subviews.first === clipper)
+            #expect((host.layer?.borderWidth ?? 0) > 0)
             #expect(host.subviews.contains(where: { $0 is NSVisualEffectView }) == false)
             if #available(macOS 26.0, *) {
                 #expect(host.subviews.contains(where: { $0 is NSGlassEffectView }) == false)
@@ -49,6 +50,7 @@ struct M1AG2DBGNativeGlassContractTests {
             let glass = try #require(host.subviews.first as? NSGlassEffectView)
             #expect(host.subviews.count == 1)
             #expect(host.layer?.masksToBounds == false)
+            #expect(host.layer?.borderWidth == 0)
             #expect(glass.frame == host.bounds)
             #expect(glass.cornerRadius == 28)
             #expect(glass.style == .regular)
@@ -57,6 +59,7 @@ struct M1AG2DBGNativeGlassContractTests {
             let effect = try #require(host.subviews.first as? NSVisualEffectView)
             #expect(host.subviews.count == 2)
             #expect(host.layer?.masksToBounds == true)
+            #expect((host.layer?.borderWidth ?? 0) > 0)
             #expect(effect.frame == host.bounds)
             #expect(effect.material == .underWindowBackground)
             #expect(effect.blendingMode == .behindWindow)
