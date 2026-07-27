@@ -349,7 +349,7 @@ struct M2WG3WorkBuddyMainPanelTests {
 
         #expect(!panel.contains("WorkBuddyMainPanelCard"))
         #expect(panel.contains("expandedProviderIDs"))
-        #expect(panel.contains("settingsDestination = .workBuddy"))
+        #expect(panel.contains("settingsDestination = .agent(canonicalProviderID)"))
         #expect(panel.contains("ScrollView(.vertical)"))
         #expect(settings.contains("enum UsageSettingsDestination"))
         #expect(settings.contains("expandOnAppear"))

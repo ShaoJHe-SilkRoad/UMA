@@ -2,6 +2,7 @@ import SwiftUI
 
 enum UsageSettingsDestination: Equatable {
     case workBuddy
+    case agent(String)
 }
 
 struct UsageSettingsCard: View {
@@ -13,6 +14,8 @@ struct UsageSettingsCard: View {
     let workBuddyLogin: WorkBuddyLoginCoordinator?
     let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
     let providerLoginOptions: [ProviderLoginOption]
+    var agentSettings: AgentSettingsCoordinator? = nil
+    var searchForAgents: (() -> Void)? = nil
     let destination: UsageSettingsDestination?
     let tuning: GlassTuning
     let maximumHeight: CGFloat
@@ -23,6 +26,7 @@ struct UsageSettingsCard: View {
 
     @State private var launchAtLoginState = LaunchAtLoginService.state
     @State private var launchAtLoginError: String?
+    @State private var selectedAgentID: String?
     @AppStorage(DesktopAssistantPreferences.Keys.isEnabled)
     private var assistantEnabled = true
     @AppStorage(DesktopAssistantPreferences.Keys.isAlwaysOnTop)
@@ -63,159 +67,175 @@ struct UsageSettingsCard: View {
 
     private var settingsContent: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 7) {
+            settingsHeader
+
+            if let agentSettings,
+               let selectedAgentID,
+               let providerID = AgentConnectorID(rawValue: selectedAgentID) {
+                AgentSpecificSettingsContent(
+                    coordinator: agentSettings,
+                    providerID: providerID,
+                    language: language,
+                    showUsageSummary: $showUsageSummary,
+                    showRecentTasks: $showRecentTasks,
+                    showAPICost: $showAPICost,
+                    workBuddySettings: workBuddySettings,
+                    workBuddyLogin: workBuddyLogin,
+                    workBuddyAccountWebSync: workBuddyAccountWebSync,
+                    checkAgain: checkAgain,
+                    syncWorkBuddyAccount: syncWorkBuddyAccount,
+                    disconnectWorkBuddyAccount:
+                        disconnectWorkBuddyAccount
+                )
+            } else {
+                globalSettingsContent
+            }
+        }
+        .onAppear {
+            guard selectedAgentID == nil else { return }
+            switch destination {
+            case .workBuddy:
+                selectedAgentID =
+                    AgentPreferenceRecord.workBuddyProviderID.rawValue
+            case let .agent(providerID):
+                selectedAgentID = providerID
+            case nil:
+                break
+            }
+        }
+    }
+
+    private var settingsHeader: some View {
+        HStack(spacing: 7) {
+            if selectedAgentID != nil {
+                Button {
+                    selectedAgentID = nil
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .help(language.backToSettings)
+                .accessibilityLabel(language.backToSettings)
+            } else {
                 Image(systemName: "gearshape.fill")
                     .foregroundStyle(UsageDesign.blue)
-                Text(language.settingsTitle)
-                    .font(AppTypography.font(15, weight: .bold, language: language))
-                Spacer()
-                Button(language.showAll) {
-                    showUsageSummary = true
-                    showRecentTasks = true
-                    showAPICost = true
-                }
-                .buttonStyle(.plain)
+            }
+            Text(
+                selectedAgentID == nil
+                    ? language.settingsTitle
+                    : language.agentSettings
+            )
+            .font(AppTypography.font(15, weight: .bold, language: language))
+            Spacer()
+            Button(action: close) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .frame(width: 22, height: 22)
+                    .background(Circle().fill(Color.secondary.opacity(0.10)))
+            }
+            .buttonStyle(.plain)
+            .help(language.closeSettings)
+            .accessibilityLabel(language.closeSettings)
+        }
+    }
+
+    @ViewBuilder
+    private var globalSettingsContent: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(language.globalSettingsSection)
                 .font(AppTypography.font(10.5, weight: .medium, language: language))
-                .foregroundStyle(UsageDesign.blue)
+                .foregroundStyle(.secondary)
 
-                Button(action: close) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .frame(width: 22, height: 22)
-                        .background(Circle().fill(Color.secondary.opacity(0.10)))
+            LanguageSettingRow(language: $language)
+
+            SettingsToggleRow(
+                title: language.launchAtLogin,
+                systemImage: "power",
+                language: language,
+                isOn: launchAtLoginBinding
+            )
+
+            SettingsToggleRow(
+                title: language.desktopAssistantEnabled,
+                systemImage: "macwindow",
+                language: language,
+                isOn: $assistantEnabled
+            )
+            SettingsToggleRow(
+                title: language.desktopAssistantAlwaysOnTop,
+                systemImage: "pin",
+                language: language,
+                isOn: $assistantAlwaysOnTop
+            )
+            .disabled(!assistantEnabled)
+            .opacity(assistantEnabled ? 1 : 0.55)
+
+            AssistantDensitySettingRow(
+                language: language,
+                selection: Binding(
+                    get: {
+                        DesktopAssistantDensity(rawValue: assistantDensityRaw)
+                            ?? .automatic
+                    },
+                    set: { assistantDensityRaw = $0.rawValue }
+                )
+            )
+            .disabled(!assistantEnabled)
+            .opacity(assistantEnabled ? 1 : 0.55)
+
+            launchAtLoginMessage
+
+            if let agentSettings {
+                AgentDiscoverySettingsSection(
+                    coordinator: agentSettings,
+                    language: language,
+                    search: searchForAgents ?? checkAgain
+                )
+            }
+        }
+
+        if !providerLoginOptions.isEmpty {
+            Divider().opacity(0.35)
+            ProviderLoginAssistanceSection(
+                options: providerLoginOptions,
+                language: language,
+                checkAgain: checkAgain
+            )
+        }
+
+        if let agentSettings {
+            Divider().opacity(0.35)
+            AgentSettingsList(
+                coordinator: agentSettings,
+                language: language,
+                select: { selectedAgentID = $0.rawValue }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var launchAtLoginMessage: some View {
+        if launchAtLoginState == .requiresApproval {
+            HStack(spacing: 6) {
+                Text(language.approvalRequired)
+                Spacer()
+                Button(language.openSettings) {
+                    LaunchAtLoginService.openSystemSettings()
                 }
                 .buttonStyle(.plain)
-                .help(language.closeSettings)
-                .accessibilityLabel(language.closeSettings)
+                .foregroundStyle(UsageDesign.blue)
             }
+            .font(AppTypography.font(9.5, weight: .medium, language: language))
+            .foregroundStyle(.secondary)
+        }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text(language.cardsSection)
-                    .font(AppTypography.font(10.5, weight: .medium, language: language))
-                    .foregroundStyle(.secondary)
-
-                SettingsToggleRow(
-                    title: language.usageSummaryCard,
-                    systemImage: "gauge.with.dots.needle.67percent",
-                    language: language,
-                    isOn: $showUsageSummary
-                )
-                SettingsToggleRow(
-                    title: language.recentTasks,
-                    systemImage: "list.bullet.rectangle",
-                    language: language,
-                    isOn: $showRecentTasks
-                )
-                SettingsToggleRow(
-                    title: language.costCard,
-                    systemImage: "dollarsign.circle",
-                    language: language,
-                    isOn: $showAPICost
-                )
-            }
-
-            Divider()
-                .opacity(0.35)
-
-            if !providerLoginOptions.isEmpty {
-                ProviderLoginAssistanceSection(
-                    options: providerLoginOptions,
-                    language: language,
-                    checkAgain: checkAgain
-                )
-
-                Divider()
-                    .opacity(0.35)
-            }
-
-            if let workBuddySettings {
-                WorkBuddySettingsSection(
-                    model: workBuddySettings,
-                    login: workBuddyLogin,
-                    accountWebSync: workBuddyAccountWebSync,
-                    language: language,
-                    expandOnAppear: destination == .workBuddy,
-                    checkAgain: checkAgain,
-                    syncNow: syncWorkBuddyAccount,
-                    disconnectAccount: disconnectWorkBuddyAccount
-                )
-
-                Divider()
-                    .opacity(0.35)
-            }
-
-            VStack(alignment: .leading, spacing: 7) {
-                Text(language.desktopAssistantSection)
-                    .font(AppTypography.font(10.5, weight: .medium, language: language))
-                    .foregroundStyle(.secondary)
-
-                SettingsToggleRow(
-                    title: language.desktopAssistantEnabled,
-                    systemImage: "macwindow",
-                    language: language,
-                    isOn: $assistantEnabled
-                )
-                SettingsToggleRow(
-                    title: language.desktopAssistantAlwaysOnTop,
-                    systemImage: "pin",
-                    language: language,
-                    isOn: $assistantAlwaysOnTop
-                )
-                .disabled(!assistantEnabled)
-                .opacity(assistantEnabled ? 1 : 0.55)
-
-                AssistantDensitySettingRow(
-                    language: language,
-                    selection: Binding(
-                        get: {
-                            DesktopAssistantDensity(rawValue: assistantDensityRaw)
-                                ?? .automatic
-                        },
-                        set: { assistantDensityRaw = $0.rawValue }
-                    )
-                )
-                .disabled(!assistantEnabled)
-                .opacity(assistantEnabled ? 1 : 0.55)
-            }
-
-            Divider()
-                .opacity(0.35)
-
-            VStack(alignment: .leading, spacing: 7) {
-                Text(language.generalSection)
-                    .font(AppTypography.font(10.5, weight: .medium, language: language))
-                    .foregroundStyle(.secondary)
-
-                LanguageSettingRow(language: $language)
-
-                SettingsToggleRow(
-                    title: language.launchAtLogin,
-                    systemImage: "power",
-                    language: language,
-                    isOn: launchAtLoginBinding
-                )
-
-                if launchAtLoginState == .requiresApproval {
-                    HStack(spacing: 6) {
-                        Text(language.approvalRequired)
-                        Spacer()
-                        Button(language.openSettings) {
-                            LaunchAtLoginService.openSystemSettings()
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(UsageDesign.blue)
-                    }
-                    .font(AppTypography.font(9.5, weight: .medium, language: language))
-                    .foregroundStyle(.secondary)
-                }
-
-                if let launchAtLoginError {
-                    Text(launchAtLoginError)
-                        .font(AppTypography.font(9.5, language: language))
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+        if let launchAtLoginError {
+            Text(launchAtLoginError)
+                .font(AppTypography.font(9.5, language: language))
+                .foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -230,6 +250,233 @@ struct UsageSettingsCard: View {
                     launchAtLoginState = LaunchAtLoginService.state
                     launchAtLoginError = language.settingsFailure(error.localizedDescription)
                 }
+            }
+        )
+    }
+}
+
+private struct AgentDiscoverySettingsSection: View {
+    @ObservedObject var coordinator: AgentSettingsCoordinator
+    let language: AppLanguage
+    let search: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            SettingsToggleRow(
+                title: language.autoSearchForAgents,
+                systemImage: "magnifyingglass",
+                language: language,
+                isOn: Binding(
+                    get: { coordinator.autoSearchEnabled },
+                    set: { coordinator.setAutoSearchEnabled($0) }
+                )
+            )
+            if !coordinator.initialScanCompleted {
+                Text(language.autoSearchOnboardingHint)
+                    .font(AppTypography.font(9, language: language))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button(language.scanForAgents, action: search)
+                .buttonStyle(.bordered)
+                .accessibilityHint(language.autoSearchOnboardingHint)
+        }
+    }
+}
+
+private struct AgentSettingsList: View {
+    @ObservedObject var coordinator: AgentSettingsCoordinator
+    let language: AppLanguage
+    let select: (AgentConnectorID) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(language.agentsSettingsSection)
+                .font(AppTypography.font(10.5, weight: .medium, language: language))
+                .foregroundStyle(.secondary)
+
+            ForEach(coordinator.entries) { entry in
+                Button {
+                    select(entry.providerID)
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(entry.displayName)
+                            .font(
+                                AppTypography.font(
+                                    11.5,
+                                    weight: .medium,
+                                    language: language
+                                )
+                            )
+                        Spacer()
+                        if entry.requiresSetup {
+                            Text(language.agentSetupRequired)
+                                .font(AppTypography.font(8.5, language: language))
+                                .foregroundStyle(.orange)
+                        } else if !entry.isActive && entry.hasBeenDetected {
+                            Text(language.notCurrentlyRunning)
+                                .font(AppTypography.font(8.5, language: language))
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(language.agentSettings)
+                            .font(AppTypography.font(9.5, language: language))
+                            .foregroundStyle(UsageDesign.blue)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(
+                    "\(entry.displayName), \(language.agentSettings)"
+                )
+            }
+        }
+    }
+}
+
+private struct AgentSpecificSettingsContent: View {
+    @ObservedObject var coordinator: AgentSettingsCoordinator
+    let providerID: AgentConnectorID
+    let language: AppLanguage
+    @Binding var showUsageSummary: Bool
+    @Binding var showRecentTasks: Bool
+    @Binding var showAPICost: Bool
+    let workBuddySettings: WorkBuddySettingsModel?
+    let workBuddyLogin: WorkBuddyLoginCoordinator?
+    let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
+    let checkAgain: () -> Void
+    let syncWorkBuddyAccount: () -> Void
+    let disconnectWorkBuddyAccount: () -> Void
+
+    private var entry: AgentSettingsEntry? {
+        coordinator.entries.first { $0.providerID == providerID }
+    }
+
+    private var displayName: String {
+        entry?.displayName ?? providerID.rawValue
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(displayName)
+                .font(AppTypography.font(13, weight: .semibold, language: language))
+
+            if entry?.requiresSetup == true {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(language.agentSetupRequired)
+                        .font(
+                            AppTypography.font(
+                                10,
+                                weight: .semibold,
+                                language: language
+                            )
+                        )
+                    Text(language.agentSetupRequiredGuidance)
+                        .font(AppTypography.font(9, language: language))
+                }
+                .foregroundStyle(.secondary)
+                .accessibilityElement(children: .combine)
+            } else if entry?.isActive == false,
+                      entry?.hasBeenDetected == true {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(language.notCurrentlyRunning)
+                        .font(
+                            AppTypography.font(
+                                10,
+                                weight: .semibold,
+                                language: language
+                            )
+                        )
+                    Text(language.savedSettingsApplyWhenDetected)
+                        .font(AppTypography.font(9, language: language))
+                }
+                .foregroundStyle(.secondary)
+                .accessibilityElement(children: .combine)
+            }
+
+            SettingsToggleRow(
+                title: language.monitoringEnabled,
+                systemImage: "waveform.path.ecg",
+                language: language,
+                isOn: Binding(
+                    get: {
+                        coordinator.isMonitoringEnabled(for: providerID)
+                    },
+                    set: {
+                        coordinator.setMonitoringEnabled(
+                            $0,
+                            for: providerID
+                        )
+                    }
+                )
+            )
+
+            if providerID == AgentPreferenceRecord.codexProviderID {
+                Divider().opacity(0.35)
+                SettingsToggleRow(
+                    title: language.usageSummaryCard,
+                    systemImage: "gauge.with.dots.needle.67percent",
+                    language: language,
+                    isOn: codexDetailBinding(
+                        keyPath: \.showUsageSummary,
+                        legacy: $showUsageSummary
+                    )
+                )
+                SettingsToggleRow(
+                    title: language.recentTasks,
+                    systemImage: "list.bullet.rectangle",
+                    language: language,
+                    isOn: codexDetailBinding(
+                        keyPath: \.showRecentTasks,
+                        legacy: $showRecentTasks
+                    )
+                )
+                SettingsToggleRow(
+                    title: language.costCard,
+                    systemImage: "dollarsign.circle",
+                    language: language,
+                    isOn: codexDetailBinding(
+                        keyPath: \.showAPICost,
+                        legacy: $showAPICost
+                    )
+                )
+            }
+
+            if providerID == AgentPreferenceRecord.workBuddyProviderID,
+               let workBuddySettings {
+                Divider().opacity(0.35)
+                WorkBuddySettingsSection(
+                    model: workBuddySettings,
+                    login: workBuddyLogin,
+                    accountWebSync: workBuddyAccountWebSync,
+                    language: language,
+                    expandOnAppear: true,
+                    checkAgain: checkAgain,
+                    syncNow: syncWorkBuddyAccount,
+                    disconnectAccount: disconnectWorkBuddyAccount
+                )
+            }
+        }
+    }
+
+    private func codexDetailBinding(
+        keyPath: WritableKeyPath<CodexDetailPreferences, Bool>,
+        legacy: Binding<Bool>
+    ) -> Binding<Bool> {
+        Binding(
+            get: {
+                coordinator.record(for: providerID)
+                    .providerSettings.codexDetails?[keyPath: keyPath]
+                    ?? legacy.wrappedValue
+            },
+            set: { newValue in
+                var details = coordinator.record(for: providerID)
+                    .providerSettings.codexDetails ?? .defaults
+                details[keyPath: keyPath] = newValue
+                legacy.wrappedValue = newValue
+                coordinator.setCodexDetails(details, for: providerID)
             }
         )
     }

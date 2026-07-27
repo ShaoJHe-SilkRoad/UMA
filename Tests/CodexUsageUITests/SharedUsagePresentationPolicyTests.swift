@@ -136,6 +136,61 @@ struct SharedUsagePresentationPolicyTests {
     }
 
     @Test
+    func unlimitedOrUnavailableFiveHourCannotRetainOverFiniteSevenDay() {
+        let finite = card(snapshot(fiveHourRemaining: 40, sevenDayRemaining: 55))
+        let priorFiveHour = SharedUsageCardPresentation(
+            id: finite.id,
+            providerName: finite.providerName,
+            connectionStatus: finite.connectionStatus,
+            freshness: finite.freshness,
+            windows: finite.windows,
+            selectedWindowID: "five-hour",
+            remaining: .finite(40),
+            availability: finite.availability,
+            availabilityLifecycle: finite.availabilityLifecycle,
+            isVisibleInDesktopAssistant: finite.isVisibleInDesktopAssistant,
+            severity: finite.severity,
+            isRetainingLastValidValue: false,
+            capturedAt: finite.capturedAt
+        )
+
+        let unlimited = card(
+            snapshot(
+                fiveHourRemaining: nil,
+                sevenDayRemaining: 55,
+                fiveHourUnlimited: true,
+                capturedAt: epoch.addingTimeInterval(60)
+            ),
+            previous: priorFiveHour
+        )
+        #expect(unlimited.selectedWindowID == "seven-day")
+
+        let unavailable = card(
+            snapshot(
+                fiveHourRemaining: nil,
+                sevenDayRemaining: 55,
+                capturedAt: epoch.addingTimeInterval(120)
+            ),
+            previous: priorFiveHour
+        )
+        #expect(unavailable.selectedWindowID == "seven-day")
+    }
+
+    @Test
+    func equalDecrementsUseSevenDayAsStableTieBreak() {
+        let previous = card(snapshot(fiveHourRemaining: 70, sevenDayRemaining: 70))
+        let result = card(
+            snapshot(
+                fiveHourRemaining: 60,
+                sevenDayRemaining: 60,
+                capturedAt: epoch.addingTimeInterval(60)
+            ),
+            previous: previous
+        )
+        #expect(result.selectedWindowID == "seven-day")
+    }
+
+    @Test
     func missingUnlimitedAndFiniteHundredRemainDistinct() {
         let oneMissing = card(snapshot(fiveHourRemaining: nil, sevenDayRemaining: 44))
         #expect(oneMissing.selectedWindowID == "seven-day")

@@ -133,7 +133,7 @@ struct M2WADBGLocalLiveAdmissionTests {
     }
 
     @Test @MainActor
-    func launchAndManualRefreshAreTheOnlyStoreScanTriggers() async throws {
+    func firstManualSearchThenRefreshAreTheOnlyStoreScanTriggers() async throws {
         let connector = try TestAdmissionConnector(
             id: "codex.local",
             probe: .init(state: .ready, safeFailure: nil),
@@ -159,9 +159,10 @@ struct M2WADBGLocalLiveAdmissionTests {
             backgroundRefreshInterval: .milliseconds(1)
         )
 
-        try await waitUntil {
-            (await scanner.diagnostics()).completedScanCount == 1
-        }
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect((await scanner.diagnostics()).completedScanCount == 0)
+        await store.searchForAgents()
+        #expect((await scanner.diagnostics()).completedScanCount == 1)
         store.setPanelVisible(true)
         store.setLanguage(.simplifiedChinese)
         store.setPanelVisible(false)
@@ -172,7 +173,7 @@ struct M2WADBGLocalLiveAdmissionTests {
         await store.refresh()
         #expect((await scanner.diagnostics()).completedScanCount == 2)
         #expect(
-            (await scanner.diagnostics()).countsByTrigger[.applicationLaunch]
+            (await scanner.diagnostics()).countsByTrigger[.manualSearch]
                 == 1
         )
         #expect(
@@ -239,7 +240,7 @@ struct M2WADBGLocalLiveAdmissionTests {
     }
 
     @Test @MainActor
-    func overlappingDifferentTriggersKeepRefreshOwnedByNewestScan() async throws {
+    func overlappingDifferentTriggersCoalesceUnderOneRefreshOwner() async throws {
         let connector = try TestAdmissionConnector(
             id: "codex.local",
             probe: .init(state: .ready, safeFailure: nil),
@@ -268,17 +269,15 @@ struct M2WADBGLocalLiveAdmissionTests {
         try await waitUntil { await connector.probeCount == 1 }
         let checkAgain = Task { await store.checkLocalSessionAgain() }
         await connector.releaseProbe()
-        try await waitUntil { await connector.probeCount == 2 }
-        #expect(store.isRefreshing)
-        await connector.releaseProbe()
         await manual.value
         await checkAgain.value
 
         #expect(!store.isRefreshing)
         let diagnostics = await scanner.diagnostics()
-        #expect(diagnostics.completedScanCount == 2)
+        #expect(diagnostics.completedScanCount == 1)
+        #expect(await connector.probeCount == 1)
         #expect(diagnostics.countsByTrigger[.manualRefresh] == 1)
-        #expect(diagnostics.countsByTrigger[.checkAgain] == 1)
+        #expect(diagnostics.countsByTrigger[.checkAgain] == nil)
         await store.stopAllConnectors()
     }
 
@@ -323,10 +322,15 @@ struct M2WADBGLocalLiveAdmissionTests {
         )
 
         try await waitUntil {
-            (await scanner.diagnostics()).completedScanCount == 1
+            await registry.orderedSnapshots().count == 1
         }
+        #expect((await scanner.diagnostics()).completedScanCount == 0)
         #expect(store.presentationCards.isEmpty)
         #expect(store.providerSnapshots.isEmpty)
+        #expect(await registry.orderedSnapshots().count == 1)
+
+        await store.searchForAgents()
+        #expect((await scanner.diagnostics()).completedScanCount == 1)
         #expect(await registry.orderedSnapshots().isEmpty)
         #expect(await snapshotStore.load().count == 1)
         await store.stopAllConnectors()

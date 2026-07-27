@@ -438,7 +438,7 @@ struct M2WG2WorkBuddyManualSourceTests {
     }
 
     @Test @MainActor
-    func persistedCodexLaunchScanSkipsManualSourceStartup() async throws {
+    func firstManualSearchSkipsManualSourceStartup() async throws {
         let primary = StartupOrderingConnector(
             rawID: "codex.local",
             passive: false,
@@ -463,9 +463,9 @@ struct M2WG2WorkBuddyManualSourceTests {
             consentDefaults: defaults
         )
 
-        for _ in 0..<100 where await primary.performCount == 0 {
-            await Task.yield()
-        }
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(await primary.performCount == 0)
+        await store.searchForAgents()
         #expect(await primary.performCount == 1)
         #expect(!(await passive.didEnterStart))
         #expect(!(await passive.didFinishStart))
@@ -545,8 +545,9 @@ struct M2WG2WorkBuddyManualSourceTests {
                 .appendingPathComponent("Sources/CodexUsageUI/Views/UsagePanelView.swift"),
             encoding: .utf8
         )
-        #expect(panel.contains("!presentation.showsRealData"))
-        #expect(panel.contains(".accessibilityLabel(store.language.showSettings)"))
+        #expect(panel.contains("MonitorHeaderView"))
+        #expect(panel.contains("ForEach(store.presentationCards)"))
+        #expect(panel.contains(".accessibilityLabel(agentSettingsLabel)"))
     }
 
     @Test

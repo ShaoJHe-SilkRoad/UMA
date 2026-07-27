@@ -533,6 +533,7 @@ struct M2WAccountWebSyncTests {
     {
         #expect(ProviderEligibilityScanTrigger.allCases == [
             .applicationLaunch,
+            .manualSearch,
             .manualRefresh,
             .checkAgain,
             .syncNow

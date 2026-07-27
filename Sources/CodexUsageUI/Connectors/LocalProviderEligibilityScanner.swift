@@ -2,6 +2,7 @@ import Foundation
 
 enum ProviderEligibilityScanTrigger: String, CaseIterable, Hashable, Sendable {
     case applicationLaunch
+    case manualSearch
     case manualRefresh
     case checkAgain
     case syncNow
@@ -54,6 +55,23 @@ struct ProviderSurfaceAdmissionSet: Sendable, Equatable {
 
     var loginOptions: [ProviderLoginOption] {
         records.compactMap(\.loginOption)
+    }
+
+    /// A provider becomes known only after a bounded registered-provider scan
+    /// either reads current admissible data or proves that authentication is
+    /// the sole remaining blocker. Other hidden states are not detection.
+    var safelyDetectedProviderIDs: [AgentConnectorID] {
+        records.compactMap { record in
+            switch record.admission {
+            case .admitted, .hiddenNotAuthenticated:
+                record.id
+            case .hiddenNotRunning,
+                 .hiddenNoAdmittedLocalSource,
+                 .hiddenCurrentReadFailed,
+                 .hiddenUnsupported:
+                nil
+            }
+        }
     }
 }
 

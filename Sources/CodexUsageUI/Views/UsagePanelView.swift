@@ -79,12 +79,7 @@ public struct UsagePanelView: View {
         self.renderedHeightOverride = renderedHeightOverride
         self.cardVisibilityOverride = cardVisibilityOverride
         _isShowingSettings = State(initialValue: settingsInitiallyPresented)
-        _settingsDestination = State(
-            initialValue: settingsInitiallyPresented
-                && (workBuddyLogin != nil || workBuddyAccountWebSync != nil)
-                ? .workBuddy
-                : nil
-        )
+        _settingsDestination = State(initialValue: nil)
         _providerExpansion = State(
             initialValue: MainPanelProviderExpansionState(
                 expandedProviderIDs: expandedProviderIDs
@@ -136,10 +131,12 @@ public struct UsagePanelView: View {
             : preferredHeight
     }
 
-    private var additionalProviderCards: [SharedUsageCardPresentation] {
-        store.presentationCards.filter {
-            $0.id != CodexUsageConnector.connectorID.rawValue
-        }
+    private var visibleProviderIDs: [String] {
+        store.presentationCards.map(\.id)
+    }
+
+    private var areAllProvidersExpanded: Bool {
+        providerExpansion.areAllExpanded(providerIDs: visibleProviderIDs)
     }
 
     public var body: some View {
@@ -184,33 +181,6 @@ public struct UsagePanelView: View {
         }
         .overlay(alignment: .topTrailing) {
             ZStack(alignment: .topTrailing) {
-                if !presentation.showsRealData,
-                   preferencesEnabled,
-                   !isShowingSettings {
-                    Button {
-                        settingsDestination = nil
-                        isShowingSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 28, height: 28)
-                            .background(
-                                Circle()
-                                    .fill(.ultraThinMaterial)
-                                    .overlay(
-                                        Circle()
-                                            .stroke(Color.white.opacity(0.22), lineWidth: 0.6)
-                                    )
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .help(store.language.showSettings)
-                    .accessibilityLabel(store.language.showSettings)
-                    .padding(.top, 14)
-                    .padding(.trailing, 16)
-                }
-
                 if isShowingSettings {
                     UsageSettingsCard(
                         showUsageSummary: $storedShowUsageSummary,
@@ -224,6 +194,10 @@ public struct UsagePanelView: View {
                         workBuddyLogin: workBuddyLogin,
                         workBuddyAccountWebSync: workBuddyAccountWebSync,
                         providerLoginOptions: store.providerLoginOptions,
+                        agentSettings: store.agentSettings,
+                        searchForAgents: {
+                            Task { await store.searchForAgents() }
+                        },
                         destination: settingsDestination,
                         tuning: tuning,
                         maximumHeight: max(240, displayedHeight - 124),
@@ -267,6 +241,9 @@ public struct UsagePanelView: View {
         .onChange(of: navigation.providerSelection) { _, selection in
             applyNavigation(selection)
         }
+        .onChange(of: visibleProviderIDs) { _, providerIDs in
+            providerExpansion.retain(providerIDs: Set(providerIDs))
+        }
         .onChange(of: displayedHeight) { _, newHeight in
             onHeightChange?(newHeight)
         }
@@ -275,50 +252,39 @@ public struct UsagePanelView: View {
 
     private var panelContent: some View {
         VStack(spacing: UsagePanelMetrics.cardSpacing) {
-            if presentation.showsRealData {
-                HeaderView(
-                    store: store,
-                    recovery: retainedSnapshotRecovery,
-                    tuning: tuning,
-                    isShowingSettings: $isShowingSettings,
-                    perform: perform
+            MonitorHeaderView(
+                store: store,
+                tuning: tuning,
+                isShowingSettings: $isShowingSettings,
+                settingsDestination: $settingsDestination
+            )
+
+            if !store.presentationCards.isEmpty {
+                ProviderExpansionToolbar(
+                    language: store.language,
+                    allExpanded: areAllProvidersExpanded,
+                    setAllExpanded: setAllProvidersExpanded
                 )
-                if showUsageSummary {
-                    UsageSummaryCard(
-                        snapshot: store.snapshot,
-                        language: store.language,
-                        tuning: tuning
-                    )
-                }
-                ForEach(additionalProviderCards) { card in
-                    LocalLiveProviderCard(
-                        card: card,
-                        language: store.language,
-                        tuning: tuning,
-                        isExpanded: expansionBinding(for: card.id)
-                    )
-                }
-                if showRecentTasks {
-                    RecentTasksCard(
-                        tasks: store.snapshot.recentTasks,
-                        language: store.language,
-                        tuning: tuning
-                    )
-                }
-                if showAPICost {
-                    APICostEstimateCard(
-                        estimate: store.snapshot.apiCostEstimate,
-                        language: store.language,
-                        tuning: tuning
-                    )
-                }
-                FooterView(snapshot: store.snapshot, language: store.language)
-            } else if !store.presentationCards.isEmpty {
                 ForEach(store.presentationCards) { card in
                     LocalLiveProviderCard(
                         card: card,
                         language: store.language,
                         tuning: tuning,
+                        codexSnapshot: card.id
+                            == CodexUsageConnector.connectorID.rawValue
+                            ? store.snapshot
+                            : nil,
+                        codexRecovery: card.id
+                            == CodexUsageConnector.connectorID.rawValue
+                            ? retainedSnapshotRecovery
+                            : nil,
+                        showUsageSummary: showUsageSummary,
+                        showRecentTasks: showRecentTasks,
+                        showAPICost: showAPICost,
+                        openAgentSettings: {
+                            openAgentSettings(card.id)
+                        },
+                        performCodexAction: perform,
                         isExpanded: expansionBinding(for: card.id)
                     )
                 }
@@ -365,8 +331,20 @@ public struct UsagePanelView: View {
         providerExpansion.setExpanded(true, providerID: selection.providerID)
     }
 
-    private func openWorkBuddySettings() {
-        settingsDestination = .workBuddy
+    private func setAllProvidersExpanded(_ expanded: Bool) {
+        if expanded {
+            providerExpansion.expandAll(providerIDs: visibleProviderIDs)
+        } else {
+            providerExpansion.collapseAll()
+        }
+    }
+
+    private func openAgentSettings(_ providerID: String) {
+        let canonicalProviderID = AgentConnectorID(rawValue: providerID)
+            .map(AgentPreferenceRecord.canonicalProviderID)?
+            .rawValue
+            ?? providerID
+        settingsDestination = .agent(canonicalProviderID)
         isShowingSettings = true
     }
 
@@ -451,113 +429,86 @@ private struct LocalLiveProviderCard: View {
     let card: SharedUsageCardPresentation
     let language: AppLanguage
     let tuning: GlassTuning
+    let codexSnapshot: UsageSnapshot?
+    let codexRecovery: RetainedSnapshotRecoveryPresentation?
+    let showUsageSummary: Bool
+    let showRecentTasks: Bool
+    let showAPICost: Bool
+    let openAgentSettings: () -> Void
+    let performCodexAction: @MainActor (CodexConnectionAction) async -> Void
     @Binding var isExpanded: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button {
-                if card.availability?.displayUnit == .credits {
-                    isExpanded.toggle()
+            HStack(spacing: 9) {
+                Circle()
+                    .fill(connectionColor)
+                    .frame(width: 9, height: 9)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(card.providerName)
+                        .font(AppTypography.font(13, weight: .semibold, language: language))
+                        .lineLimit(1)
+                    Text(providerSubtitle)
+                        .font(AppTypography.font(9.5, language: language))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "circle.fill")
-                        .font(.system(size: 8))
-                        .foregroundStyle(.green)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(card.providerName)
-                            .font(AppTypography.font(13, weight: .semibold, language: language))
-                        if isAccountWebCredits {
-                            Text(language.workBuddyAccountWebSource)
-                                .font(AppTypography.font(9, language: language))
-                                .foregroundStyle(.secondary)
-                        }
+
+                Spacer(minLength: 6)
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    if let selectedWindowLabel {
+                        Text(selectedWindowLabel)
+                            .font(AppTypography.font(9, weight: .medium, language: language))
+                            .foregroundStyle(.secondary)
                     }
-                    Spacer()
                     Text(primaryValue)
                         .font(AppTypography.font(.regularValue, language: language))
                         .monospacedDigit()
-                    if card.availability?.displayUnit == .credits {
-                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                    }
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
                 }
-                .padding(14)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+                .frame(minWidth: 46, alignment: .trailing)
 
-            if isExpanded, let balance = card.availability?.value.creditBalance {
+                Button {
+                    isExpanded.toggle()
+                } label: {
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                        .background(Circle().fill(Color.secondary.opacity(0.10)))
+                }
+                .buttonStyle(.plain)
+                .help(detailsLabel)
+                .accessibilityLabel(detailsLabel)
+
+                Button(action: openAgentSettings) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: 24, height: 24)
+                        .background(Circle().fill(Color.secondary.opacity(0.10)))
+                }
+                .buttonStyle(.plain)
+                .help(agentSettingsLabel)
+                .accessibilityLabel(agentSettingsLabel)
+            }
+            .padding(.horizontal, 14)
+            .frame(minHeight: UsagePanelMetrics.collapsedProviderCardHeight)
+
+            if isExpanded {
                 Divider()
                     .opacity(0.32)
                     .padding(.horizontal, 14)
-                VStack(alignment: .leading, spacing: 7) {
-                    if let snapshot = card.accountCreditBreakdown {
-                        detailRow(
-                            language.workBuddySubscriptionRemaining,
-                            value: CreditFormatter.exactTwoDecimal(
-                                snapshot.subscriptionRemaining,
-                                language: language
-                            )
-                        )
-                        detailRow(
-                            language.workBuddyAddOnRemaining,
-                            value: CreditFormatter.exactTwoDecimal(
-                                snapshot.addOnRemaining,
-                                language: language
-                            )
-                        )
-                        detailRow(
-                            language.workBuddyBenefitGiftRemaining,
-                            value: CreditFormatter.exactTwoDecimal(
-                                snapshot.benefitGiftRemaining,
-                                language: language
-                            )
-                        )
-                    }
-                    detailRow(
-                        language.workBuddyAvailableCredits,
-                        value: exactValue(balance.remaining)
-                    )
-                    if let used = balance.used {
-                        detailRow(
-                            language.workBuddyCompanionName(.used),
-                            value: CreditFormatter.exact(used, language: language)
-                        )
-                    }
-                    if let total = balance.total {
-                        detailRow(
-                            language.workBuddyCompanionName(.total),
-                            value: CreditFormatter.exact(total, language: language)
-                        )
-                    }
-                    detailRow(
-                        language.workBuddySource,
-                        value: isAccountWebCredits
-                            ? language.workBuddyAccountWebSource
-                            : (card.availability?.sourceState == .officialStructured
-                                ? "Official structured source"
-                                : "Provider source")
-                    )
-                    detailRow(
-                        language.workBuddyScope,
-                        value: language.workBuddySharedWithCodeBuddy
-                    )
-                    detailRow(
-                        language.workBuddyLastConfirmed,
-                        value: language.workBuddyConfirmedAt(balance.observedAt)
-                    )
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 11)
+                expandedDetails
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .background {
             GlassCardBackground(tuning: tuning)
         }
-        .accessibilityElement(children: .ignore)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(card.accessibilityLabel)
         .animation(.easeInOut(duration: 0.18), value: isExpanded)
     }
@@ -566,18 +517,213 @@ private struct LocalLiveProviderCard: View {
         card.availability?.sourceState == .authenticatedAccountWeb
     }
 
-    private var primaryValue: String {
-        guard let balance = card.availability?.value.creditBalance else {
-            return card.remaining.displayText
+    private var selectedWindowLabel: String? {
+        card.selectedWindowCompactLabel
+    }
+
+    private var providerSubtitle: String {
+        if isAccountWebCredits {
+            return "\(language.workBuddyAccountWebSource) · \(connectionLabel)"
         }
-        let exact = exactValue(balance.remaining)
-        return language.workBuddyCreditsAvailable(exact)
+        if let plan = card.planLabel, !plan.isEmpty {
+            return "\(plan) · \(connectionLabel)"
+        }
+        return connectionLabel
+    }
+
+    private var connectionLabel: String {
+        switch (language, card.connectionStatus) {
+        case (.english, .connected): "Connected"
+        case (.english, .transitional): "Connecting"
+        case (.english, .authenticationRequired): "Sign-in required"
+        case (.english, .stale): "Reconnecting"
+        case (.english, .disconnected): "Disconnected"
+        case (.english, .unavailable): "Unavailable"
+        case (.english, .failed): "Connection failed"
+        case (.simplifiedChinese, .connected): "已连接"
+        case (.simplifiedChinese, .transitional): "正在连接"
+        case (.simplifiedChinese, .authenticationRequired): "需要登录"
+        case (.simplifiedChinese, .stale): "正在重新连接"
+        case (.simplifiedChinese, .disconnected): "已断开"
+        case (.simplifiedChinese, .unavailable): "不可用"
+        case (.simplifiedChinese, .failed): "连接失败"
+        }
+    }
+
+    private var connectionColor: Color {
+        switch card.connectionStatus {
+        case .connected: UsageDesign.green
+        case .transitional, .stale: .orange
+        case .authenticationRequired, .disconnected, .unavailable: .secondary
+        case .failed: .red
+        }
+    }
+
+    private var primaryValue: String {
+        if let availability = card.availability,
+           availability.displayUnit == .credits {
+            return availability.compactText
+        }
+        return card.remaining.displayText
     }
 
     private func exactValue(_ value: Decimal) -> String {
         isAccountWebCredits
             ? CreditFormatter.exactTwoDecimal(value, language: language)
             : CreditFormatter.exact(value, language: language)
+    }
+
+    @ViewBuilder
+    private var expandedDetails: some View {
+        if let codexSnapshot {
+            VStack(spacing: UsagePanelMetrics.cardSpacing) {
+                if let codexRecovery {
+                    HStack(spacing: 6) {
+                        Text(codexRecovery.statusText)
+                            .font(AppTypography.font(10.5, language: language))
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 6)
+                        if let action = codexRecovery.primaryAction {
+                            RecoveryActionButton(
+                                action: action,
+                                perform: performCodexAction
+                            )
+                        }
+                        if let action = codexRecovery.secondaryAction {
+                            RecoveryActionButton(
+                                action: action,
+                                perform: performCodexAction
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.top, 11)
+                }
+                if showUsageSummary {
+                    UsageSummaryCard(
+                        snapshot: codexSnapshot,
+                        selectedWindowID: card.selectedWindowID,
+                        language: language,
+                        tuning: tuning,
+                        showsBackground: false
+                    )
+                }
+                CodexSourceHealthDetails(
+                    snapshot: codexSnapshot,
+                    language: language
+                )
+                if showRecentTasks {
+                    RecentTasksCard(
+                        tasks: codexSnapshot.recentTasks,
+                        language: language,
+                        tuning: tuning,
+                        showsBackground: false
+                    )
+                }
+                if showAPICost {
+                    APICostEstimateCard(
+                        estimate: codexSnapshot.apiCostEstimate,
+                        language: language,
+                        tuning: tuning,
+                        showsBackground: false
+                    )
+                }
+                FooterView(snapshot: codexSnapshot, language: language)
+            }
+            .padding(10)
+        } else if let balance = card.availability?.value.creditBalance {
+            creditDetails(balance)
+        } else {
+            percentageDetails
+        }
+    }
+
+    private func creditDetails(_ balance: CreditBalance) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            if let snapshot = card.accountCreditBreakdown {
+                detailRow(
+                    language.workBuddySubscriptionRemaining,
+                    value: CreditFormatter.exactTwoDecimal(
+                        snapshot.subscriptionRemaining,
+                        language: language
+                    )
+                )
+                detailRow(
+                    language.workBuddyAddOnRemaining,
+                    value: CreditFormatter.exactTwoDecimal(
+                        snapshot.addOnRemaining,
+                        language: language
+                    )
+                )
+                detailRow(
+                    language.workBuddyBenefitGiftRemaining,
+                    value: CreditFormatter.exactTwoDecimal(
+                        snapshot.benefitGiftRemaining,
+                        language: language
+                    )
+                )
+            }
+            detailRow(
+                language.workBuddyAvailableCredits,
+                value: exactValue(balance.remaining)
+            )
+            if let used = balance.used {
+                detailRow(
+                    language.workBuddyCompanionName(.used),
+                    value: CreditFormatter.exact(used, language: language)
+                )
+            }
+            if let total = balance.total {
+                detailRow(
+                    language.workBuddyCompanionName(.total),
+                    value: CreditFormatter.exact(total, language: language)
+                )
+            }
+            detailRow(
+                language.workBuddySource,
+                value: isAccountWebCredits
+                    ? language.workBuddyAccountWebSource
+                    : "Official structured source"
+            )
+            detailRow(
+                language.workBuddyScope,
+                value: language.workBuddySharedWithCodeBuddy
+            )
+            detailRow(
+                language.workBuddyLastConfirmed,
+                value: language.workBuddyConfirmedAt(balance.observedAt)
+            )
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+    }
+
+    private var percentageDetails: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(card.windows) { window in
+                detailRow(
+                    window.accessibilityLabel,
+                    value: window.remaining.displayText
+                )
+            }
+            if card.windows.isEmpty {
+                detailRow(connectionLabel, value: card.remaining.displayText)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+    }
+
+    private var detailsLabel: String {
+        language == .english
+            ? (isExpanded ? "Hide \(card.providerName) Details" : "Show \(card.providerName) Details")
+            : (isExpanded ? "收起 \(card.providerName) 详情" : "显示 \(card.providerName) 详情")
+    }
+
+    private var agentSettingsLabel: String {
+        language == .english
+            ? "\(card.providerName) Agent Settings"
+            : "\(card.providerName) Agent 设置"
     }
 
     private func detailRow(_ label: String, value: String) -> some View {
@@ -604,6 +750,7 @@ private struct APICostEstimateCard: View {
     let estimate: APICostEstimateSnapshot?
     let language: AppLanguage
     let tuning: GlassTuning
+    var showsBackground = true
 
     private var sevenDayValue: String {
         guard let estimate else { return "—" }
@@ -677,7 +824,11 @@ private struct APICostEstimateCard: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(GlassCardBackground(tuning: tuning))
+        .background {
+            if showsBackground {
+                GlassCardBackground(tuning: tuning)
+            }
+        }
     }
 
     private static func currency(_ value: Double) -> String {
@@ -691,12 +842,39 @@ private struct APICostEstimateCard: View {
     }
 }
 
-private struct HeaderView: View {
+private struct ProviderExpansionToolbar: View {
+    let language: AppLanguage
+    let allExpanded: Bool
+    let setAllExpanded: (Bool) -> Void
+
+    var body: some View {
+        HStack {
+            Text(language == .english ? "Agents" : "Agent")
+                .font(AppTypography.font(11, weight: .semibold, language: language))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button(
+                language == .english
+                    ? (allExpanded ? "Hide All" : "Show All")
+                    : (allExpanded ? "全部收起" : "全部显示")
+            ) {
+                setAllExpanded(!allExpanded)
+            }
+            .buttonStyle(.plain)
+            .font(AppTypography.font(10.5, weight: .semibold, language: language))
+            .foregroundStyle(UsageDesign.blue)
+            .accessibilityIdentifier("usage.providers.toggleAll")
+        }
+        .padding(.horizontal, 4)
+        .frame(height: UsagePanelMetrics.providerToolbarHeight)
+    }
+}
+
+private struct MonitorHeaderView: View {
     @ObservedObject var store: UsageStore
-    let recovery: RetainedSnapshotRecoveryPresentation?
     let tuning: GlassTuning
     @Binding var isShowingSettings: Bool
-    let perform: @MainActor (CodexConnectionAction) async -> Void
+    @Binding var settingsDestination: UsageSettingsDestination?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -710,89 +888,80 @@ private struct HeaderView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 9) {
-                    Text(store.language.appTitle)
-                        .font(AppTypography.font(20, weight: .bold, language: store.language))
-                        .lineLimit(1)
-                        .minimumScaleFactor(UsagePanelHeaderLayout.titleMinimumScaleFactor)
-                        .layoutPriority(UsagePanelHeaderLayout.titleLayoutPriority)
-                    if recovery == nil {
-                        Text(store.snapshot.planLabel)
-                            .font(AppTypography.font(11, weight: .bold, language: store.language))
-                            .tracking(1.0)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: true, vertical: false)
-                    }
-                }
+                Text("UMA")
+                    .font(AppTypography.font(20, weight: .bold, language: store.language))
+                    .lineLimit(1)
+                    .layoutPriority(UsagePanelHeaderLayout.titleLayoutPriority)
 
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(recovery == nil && store.lastError == nil ? UsageDesign.green : Color.orange)
+                        .fill(store.presentationCards.isEmpty ? Color.secondary : UsageDesign.green)
                         .frame(width: 8, height: 8)
-                    Text(recovery?.statusText ?? store.statusText)
+                    Text(monitorStatus)
                         .font(AppTypography.font(13, language: store.language))
                         .foregroundStyle(.secondary)
-                        .lineLimit(recovery == nil ? 1 : 2)
+                        .lineLimit(1)
                         .minimumScaleFactor(0.78)
                 }
             }
 
             Spacer(minLength: 8)
 
-            if let recovery {
-                HStack(spacing: 4) {
-                    if let primaryAction = recovery.primaryAction {
-                        RecoveryActionButton(action: primaryAction, perform: perform)
-                    }
-                    if let secondaryAction = recovery.secondaryAction {
-                        RecoveryActionButton(action: secondaryAction, perform: perform)
-                    }
-                }
-            } else {
-                HStack(spacing: 4) {
-                    Button {
-                        Task { await store.refresh() }
-                    } label: {
-                        ZStack {
-                            Circle()
-                                .fill(Color.white.opacity(0.14))
-                                .frame(width: 34, height: 34)
-                            if store.isRefreshing {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Image(systemName: "arrow.clockwise")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundStyle(.secondary)
-                            }
+            HStack(spacing: 4) {
+                Button {
+                    Task { await store.refresh() }
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(Color.white.opacity(0.14))
+                            .frame(width: 34, height: 34)
+                        if store.isRefreshing {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(.secondary)
                         }
                     }
-                    .buttonStyle(.plain)
-                    .help(store.language.refreshUsage)
-                    .accessibilityLabel(store.language.refreshUsage)
-                    .accessibilityHint(store.lastError ?? store.language.refreshFromAccountHint)
+                }
+                .buttonStyle(.plain)
+                .help(store.language.refreshUsage)
+                .accessibilityLabel(store.language.refreshUsage)
+                .accessibilityHint(store.lastError ?? store.language.refreshFromAccountHint)
 
-                    Button {
-                        isShowingSettings.toggle()
-                    } label: {
-                        ZStack {
-                            Circle()
-                                .fill(Color.white.opacity(isShowingSettings ? 0.25 : 0.14))
-                                .frame(width: 30, height: 30)
-                            Image(systemName: isShowingSettings ? "gearshape.fill" : "gearshape")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(isShowingSettings ? UsageDesign.blue : Color.secondary)
-                        }
+                Button {
+                    settingsDestination = nil
+                    isShowingSettings.toggle()
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(Color.white.opacity(isShowingSettings ? 0.25 : 0.14))
+                            .frame(width: 30, height: 30)
+                        Image(systemName: isShowingSettings ? "gearshape.fill" : "gearshape")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(isShowingSettings ? UsageDesign.blue : Color.secondary)
                     }
-                    .buttonStyle(.plain)
-                    .help(store.language.showSettings)
-                    .accessibilityLabel(store.language.showSettings)
                 }
+                .buttonStyle(.plain)
+                .help(store.language.showSettings)
+                .accessibilityLabel(store.language.showSettings)
             }
         }
         .padding(.horizontal, 14)
         .frame(height: 70)
         .background(GlassCardBackground(tuning: tuning))
+    }
+
+    private var monitorStatus: String {
+        let count = store.presentationCards.count
+        return switch (store.language, count) {
+        case (.english, 0): "No active Agents"
+        case (.english, 1): "1 active Agent"
+        case (.english, _): "\(count) active Agents"
+        case (.simplifiedChinese, 0): "没有活跃 Agent"
+        case (.simplifiedChinese, _): "\(count) 个活跃 Agent"
+        }
     }
 }
 
@@ -817,14 +986,20 @@ private struct RecoveryActionButton: View {
 
 private struct UsageSummaryCard: View {
     let snapshot: UsageSnapshot
+    let selectedWindowID: String?
     let language: AppLanguage
     let tuning: GlassTuning
+    var showsBackground = true
 
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 0) {
                 ForEach(Array(snapshot.periods.enumerated()), id: \.element.id) { index, period in
-                    QuotaRow(period: period, language: language)
+                    QuotaRow(
+                        period: period,
+                        language: language,
+                        isPrimary: period.id == selectedWindowID
+                    )
                     if index < snapshot.periods.count - 1 {
                         Divider()
                             .opacity(0.32)
@@ -851,23 +1026,42 @@ private struct UsageSummaryCard: View {
             }
             .frame(height: 79)
         }
-        .background(GlassCardBackground(tuning: tuning))
+        .background {
+            if showsBackground {
+                GlassCardBackground(tuning: tuning)
+            }
+        }
     }
 }
 
 private struct QuotaRow: View {
     let period: UsagePeriod
     let language: AppLanguage
+    let isPrimary: Bool
 
     var body: some View {
         VStack(spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 Text(period.title)
-                    .font(AppTypography.font(16, weight: .bold, language: language))
+                    .font(
+                        AppTypography.font(
+                            isPrimary ? 16 : 13,
+                            weight: isPrimary ? .bold : .medium,
+                            language: language
+                        )
+                    )
                 Spacer()
                 Text(period.isUnlimited ? "♾️" : "\(period.remainingPercent)%")
-                    .font(AppTypography.font(20, weight: .bold, language: language))
-                    .foregroundStyle(UsageDesign.blue)
+                    .font(
+                        AppTypography.font(
+                            isPrimary ? 20 : 14,
+                            weight: isPrimary ? .bold : .medium,
+                            language: language
+                        )
+                    )
+                    .foregroundStyle(
+                        UsageDesign.blue.opacity(isPrimary ? 1 : 0.62)
+                    )
                     .monospacedDigit()
             }
 
@@ -876,18 +1070,23 @@ private struct QuotaRow: View {
                     Capsule()
                         .fill(Color.secondary.opacity(0.14))
                     Capsule()
-                        .fill(UsageDesign.blue)
+                        .fill(UsageDesign.blue.opacity(isPrimary ? 1 : 0.55))
                         .frame(width: proxy.size.width * CGFloat(period.isUnlimited ? 100 : period.remainingPercent) / 100)
                 }
             }
-            .frame(height: 10)
+            .frame(height: isPrimary ? 10 : 5)
 
             HStack {
                 Text(language.remaining)
                 Spacer()
                 Text(period.resetText)
             }
-            .font(AppTypography.font(11.5, language: language))
+            .font(
+                AppTypography.font(
+                    isPrimary ? 11.5 : 9.5,
+                    language: language
+                )
+            )
             .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 14)
@@ -895,10 +1094,44 @@ private struct QuotaRow: View {
     }
 }
 
+private struct CodexSourceHealthDetails: View {
+    let snapshot: UsageSnapshot
+    let language: AppLanguage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let provider = snapshot.providerSource {
+                sourceRow(provider)
+            }
+            if let local = snapshot.localSource {
+                sourceRow(local)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+
+    private func sourceRow(_ source: UsageSourceStatus) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(source.label)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Text(
+                "\(language.sourceFreshness(source.freshness)) · "
+                    + language.sourceScope(source.scope)
+            )
+            .multilineTextAlignment(.trailing)
+        }
+        .font(AppTypography.font(9.5, weight: .medium, language: language))
+        .accessibilityElement(children: .combine)
+    }
+}
+
 private struct RecentTasksCard: View {
     let tasks: [RecentTask]
     let language: AppLanguage
     let tuning: GlassTuning
+    var showsBackground = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -925,7 +1158,11 @@ private struct RecentTasksCard: View {
                 }
             }
         }
-        .background(GlassCardBackground(tuning: tuning))
+        .background {
+            if showsBackground {
+                GlassCardBackground(tuning: tuning)
+            }
+        }
     }
 }
 

@@ -60,12 +60,20 @@ public struct UsageMonitorRuntime {
                 await accountWebSync.disconnectAndClearOwnedWebsiteData()
             }
         )
+        let agentSettings = AgentSettingsCoordinator()
         let registry = AgentUsageRuntime.makeCodexRegistry(
             snapshotStore: snapshotStoreURL.map { AgentConnectorSnapshotStore(url: $0) }
                 ?? AgentConnectorSnapshotStore(),
             additionalConnectors: [workBuddyConnector, accountWebConnector]
         )
         accountWebSync.configureAutoRefresh {
+            guard await MainActor.run(body: {
+                agentSettings.isMonitoringEnabled(
+                    for: WorkBuddyAccountWebCreditsConnector.connectorID
+                )
+            }) else {
+                return
+            }
             try? await registry.refresh(
                 WorkBuddyAccountWebCreditsConnector.connectorID,
                 trigger: .timer
@@ -74,7 +82,8 @@ public struct UsageMonitorRuntime {
         let usageStore = UsageStore(
             registry: registry,
             primaryConnectorID: CodexUsageConnector.connectorID,
-            consentDefaults: .standard
+            consentDefaults: .standard,
+            agentSettings: agentSettings
         )
         let settings = WorkBuddySettingsModel(source: manualSource)
         let login = WorkBuddyLoginCoordinator()

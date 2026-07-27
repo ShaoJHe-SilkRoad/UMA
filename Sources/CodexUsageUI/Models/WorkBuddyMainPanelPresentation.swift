@@ -10,9 +10,14 @@ public enum WorkBuddyMainPanelState: String, Equatable, Sendable {
 
 struct MainPanelProviderExpansionState: Equatable {
     private(set) var expandedProviderIDs: Set<String>
+    private(set) var isShowAllModeActive: Bool
 
-    init(expandedProviderIDs: Set<String> = []) {
+    init(
+        expandedProviderIDs: Set<String> = [],
+        isShowAllModeActive: Bool = false
+    ) {
         self.expandedProviderIDs = expandedProviderIDs
+        self.isShowAllModeActive = isShowAllModeActive
     }
 
     func isExpanded(_ providerID: String) -> Bool {
@@ -24,7 +29,32 @@ struct MainPanelProviderExpansionState: Equatable {
             expandedProviderIDs.insert(providerID)
         } else {
             expandedProviderIDs.remove(providerID)
+            isShowAllModeActive = false
         }
+    }
+
+    mutating func expandAll(providerIDs: some Sequence<String>) {
+        expandedProviderIDs.formUnion(providerIDs)
+        isShowAllModeActive = true
+    }
+
+    mutating func collapseAll() {
+        expandedProviderIDs.removeAll()
+        isShowAllModeActive = false
+    }
+
+    mutating func retain(providerIDs: Set<String>) {
+        if isShowAllModeActive {
+            expandedProviderIDs = providerIDs
+        } else {
+            expandedProviderIDs.formIntersection(providerIDs)
+        }
+    }
+
+    func areAllExpanded(providerIDs: some Sequence<String>) -> Bool {
+        let providerIDs = Set(providerIDs)
+        return !providerIDs.isEmpty
+            && providerIDs.isSubset(of: expandedProviderIDs)
     }
 }
 

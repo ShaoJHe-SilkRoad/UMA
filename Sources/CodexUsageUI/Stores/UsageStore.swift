@@ -1,6 +1,11 @@
 import Combine
 import Foundation
 
+private struct UsageEligibilityScanOutcome: Sendable {
+    let safelyDetectedProviderIDs: [AgentConnectorID]
+    let completedAt: Date
+}
+
 @MainActor
 public final class UsageStore: ObservableObject {
     @Published private(set) var snapshot: UsageSnapshot
@@ -17,15 +22,16 @@ public final class UsageStore: ObservableObject {
     @Published public private(set) var freshness: UsageFreshness
     @Published public private(set) var isPanelVisible = false
 
+    let agentSettings: AgentSettingsCoordinator?
     private let registry: AgentConnectorRegistry?
     private let primaryConnectorID: AgentConnectorID?
     private let previewOnly: Bool
     private let previewDisplaysFixtureData: Bool
-    private let performsLaunchScan: Bool
+    private let allowsLaunchScan: Bool
     private let consentDefaults: UserDefaults?
     private var registrySubscription: Task<Void, Never>?
-    private var activeScanTask: Task<Void, Never>?
-    private var activeScanTrigger: ProviderEligibilityScanTrigger?
+    private var agentSettingsSubscription: AnyCancellable?
+    private var activeScanTask: Task<UsageEligibilityScanOutcome?, Never>?
     private var activeScanGeneration: UInt64 = 0
 
     public convenience init(autoRefresh: Bool = true, language: AppLanguage? = nil) {
@@ -94,6 +100,7 @@ public final class UsageStore: ObservableObject {
         registry: AgentConnectorRegistry?,
         primaryConnectorID: AgentConnectorID?,
         consentDefaults: UserDefaults? = nil,
+        agentSettings: AgentSettingsCoordinator? = nil,
         previewScenario: CodexPreviewScenario = .ready,
         previewPresentationCards: [SharedUsageCardPresentation] = [],
         previewLoginOptions: [ProviderLoginOption] = [],
@@ -108,8 +115,18 @@ public final class UsageStore: ObservableObject {
         self.previewOnly = previewOnly
         self.previewDisplaysFixtureData =
             previewOnly && previewScenario.displaysFixtureData
-        self.performsLaunchScan = autoRefresh
+        self.allowsLaunchScan = autoRefresh
         self.consentDefaults = consentDefaults
+        self.agentSettings = previewOnly
+            ? nil
+            : (
+                agentSettings
+                    ?? AgentSettingsCoordinator(
+                        store: AgentPreferenceStore(
+                            defaults: consentDefaults ?? .standard
+                        )
+                    )
+            )
         self.language = selectedLanguage
         self.presentationCards = previewPresentationCards
         self.providerLoginOptions = previewLoginOptions
@@ -129,6 +146,7 @@ public final class UsageStore: ObservableObject {
             self.connectionState = .idle
         }
         self.freshness = previewOnly ? .fixture : .noRealData
+        beginAgentSettingsObservation()
         beginRegistryObservation()
     }
 
@@ -206,18 +224,32 @@ public final class UsageStore: ObservableObject {
         grantMonitorConsent()
         guard !wasGranted else { return }
         Task { @MainActor [weak self] in
-            await self?.performEligibilityScan(trigger: .manualRefresh)
+            _ = await self?.performEligibilityScan(trigger: .manualRefresh)
         }
     }
 
     public func requestReconnect() {
         Task { @MainActor [weak self] in
-            await self?.performEligibilityScan(trigger: .manualRefresh)
+            _ = await self?.performEligibilityScan(trigger: .manualRefresh)
         }
     }
 
     public func refresh() async {
-        await performEligibilityScan(trigger: .manualRefresh)
+        _ = await performEligibilityScan(trigger: .manualRefresh)
+    }
+
+    /// The only action that completes first-run Agent Search onboarding.
+    /// Auto Search never bypasses this deliberate first manual scan.
+    public func searchForAgents() async {
+        guard let outcome = await performEligibilityScan(
+            trigger: .manualSearch
+        ) else {
+            return
+        }
+        agentSettings?.completeFirstManualScan(
+            detectedConnectorIDs: outcome.safelyDetectedProviderIDs,
+            detectedAt: outcome.completedAt
+        )
     }
 
     /// Non-user triggers are display/lifecycle events and never initiate
@@ -225,19 +257,19 @@ public final class UsageStore: ObservableObject {
     /// their connector and flow through the registry independently.
     public func refresh(trigger: CodexRefreshTrigger) async {
         guard trigger == .manual else { return }
-        await performEligibilityScan(trigger: .manualRefresh)
+        _ = await performEligibilityScan(trigger: .manualRefresh)
     }
 
     public func connectToLocalSession() async {
-        await performEligibilityScan(trigger: .manualRefresh)
+        _ = await performEligibilityScan(trigger: .manualRefresh)
     }
 
     public func checkLocalSessionAgain() async {
-        await performEligibilityScan(trigger: .checkAgain)
+        _ = await performEligibilityScan(trigger: .checkAgain)
     }
 
     public func syncWorkBuddyAccountNow() async {
-        await performEligibilityScan(trigger: .syncNow)
+        _ = await performEligibilityScan(trigger: .syncNow)
     }
 
     public func disconnectWorkBuddyAccount() async {
@@ -261,7 +293,7 @@ public final class UsageStore: ObservableObject {
     }
 
     public func reconnectMonitor() async {
-        await performEligibilityScan(trigger: .manualRefresh)
+        _ = await performEligibilityScan(trigger: .manualRefresh)
     }
 
     /// Wake is intentionally not a discovery trigger.
@@ -272,7 +304,6 @@ public final class UsageStore: ObservableObject {
         activeScanGeneration &+= 1
         activeScanTask?.cancel()
         activeScanTask = nil
-        activeScanTrigger = nil
         registrySubscription?.cancel()
         await registry.stopAll()
         receive([], loginOptions: [])
@@ -298,8 +329,11 @@ public final class UsageStore: ObservableObject {
         registrySubscription = Task { [weak self] in
             let stream = await registry.snapshots()
             await registry.restorePersistedSnapshots()
-            if self?.performsLaunchScan == true {
-                await self?.performEligibilityScan(trigger: .applicationLaunch)
+            if self?.allowsLaunchScan == true,
+               self?.agentSettings?.shouldAutoSearchAtLaunch == true {
+                _ = await self?.performEligibilityScan(
+                    trigger: .applicationLaunch
+                )
             }
             for await snapshots in stream {
                 guard !Task.isCancelled else { return }
@@ -308,59 +342,141 @@ public final class UsageStore: ObservableObject {
                 else { continue }
                 self?.receive(
                     snapshots,
-                    loginOptions: admissionSet.loginOptions
+                    loginOptions: admissionSet.loginOptions,
+                    setupRequiredProviderIDs:
+                        admissionSet.records.compactMap {
+                            $0.admission == .hiddenNotAuthenticated
+                                ? $0.id
+                                : nil
+                        }
                 )
             }
         }
     }
 
+    private func beginAgentSettingsObservation() {
+        agentSettingsSubscription = agentSettings?.$envelope
+            .dropFirst()
+            .sink { @MainActor [weak self] _ in
+                self?.applyMonitoringPreferences()
+            }
+    }
+
+    private func applyMonitoringPreferences() {
+        guard let agentSettings else { return }
+        let visibleSnapshots = providerSnapshots.filter {
+            agentSettings.isMonitoringEnabled(for: $0.id)
+        }
+        let visibleLoginOptions = providerLoginOptions.filter {
+            agentSettings.isMonitoringEnabled(for: $0.id)
+        }
+        let visibleSetupRequiredProviderIDs =
+            agentSettings.setupRequiredProviderIDs.filter {
+                agentSettings.isMonitoringEnabled(for: $0)
+            }
+        guard visibleSnapshots != providerSnapshots
+                || visibleLoginOptions != providerLoginOptions
+                || visibleSetupRequiredProviderIDs
+                    != agentSettings.setupRequiredProviderIDs
+        else {
+            return
+        }
+        receive(
+            visibleSnapshots,
+            loginOptions: visibleLoginOptions,
+            setupRequiredProviderIDs:
+                Array(visibleSetupRequiredProviderIDs)
+        )
+    }
+
     private func performEligibilityScan(
         trigger: ProviderEligibilityScanTrigger
-    ) async {
-        guard !previewOnly, let registry else { return }
+    ) async -> UsageEligibilityScanOutcome? {
+        guard !previewOnly, let registry else { return nil }
         if let activeScanTask {
-            let activeTrigger = activeScanTrigger
-            await activeScanTask.value
-            if activeTrigger == trigger { return }
+            return await activeScanTask.value
         }
 
-        let excluded: Set<AgentConnectorID>
+        var excluded: Set<AgentConnectorID>
         if !monitorConsentGranted, let primaryConnectorID {
             excluded = [primaryConnectorID]
         } else {
             excluded = []
         }
+        var monitoringDisabledIDs: Set<AgentConnectorID> = []
+        if let agentSettings {
+            let descriptors = await registry.orderedDescriptors()
+            monitoringDisabledIDs = agentSettings.disabledConnectorIDs(
+                from: descriptors.map(\.id)
+            )
+            excluded.formUnion(monitoringDisabledIDs)
+        }
         isRefreshing = true
-        activeScanTrigger = trigger
         activeScanGeneration &+= 1
         let generation = activeScanGeneration
-        let task = Task { @MainActor [weak self] in
-            guard let self else { return }
+        let task = Task<UsageEligibilityScanOutcome?, Never> {
+            @MainActor [weak self] in
+            guard let self else { return nil }
             let result = await registry.scanSurfaceAdmissions(
                 trigger: trigger,
                 excludedProviderIDs: excluded
             )
             self.receive(
                 result.admittedSnapshots,
-                loginOptions: result.loginOptions
+                loginOptions: result.loginOptions,
+                setupRequiredProviderIDs:
+                    result.records.compactMap {
+                        $0.admission == .hiddenNotAuthenticated
+                            ? $0.id
+                            : nil
+                    }
             )
+            let outcome = UsageEligibilityScanOutcome(
+                safelyDetectedProviderIDs:
+                    result.safelyDetectedProviderIDs.filter {
+                        !monitoringDisabledIDs.contains($0)
+                    },
+                completedAt: Date()
+            )
+            if trigger != .manualSearch {
+                self.agentSettings?.recordSafeDetections(
+                    outcome.safelyDetectedProviderIDs,
+                    detectedAt: outcome.completedAt
+                )
+            }
+            return outcome
         }
         activeScanTask = task
-        await task.value
+        let result = await task.value
         if activeScanGeneration == generation {
             activeScanTask = nil
-            activeScanTrigger = nil
             isRefreshing = false
         }
+        return result
     }
 
     private func receive(
         _ snapshots: [AgentUsageSnapshot],
-        loginOptions: [ProviderLoginOption]
+        loginOptions: [ProviderLoginOption],
+        setupRequiredProviderIDs: [AgentConnectorID] = []
     ) {
         guard !previewOnly else { return }
-        providerSnapshots = snapshots
-        providerLoginOptions = loginOptions
+        let visibleSnapshots = snapshots.filter {
+            agentSettings?.isMonitoringEnabled(for: $0.id) ?? true
+        }
+        let visibleLoginOptions = loginOptions.filter {
+            agentSettings?.isMonitoringEnabled(for: $0.id) ?? true
+        }
+        let visibleSetupRequiredProviderIDs =
+            setupRequiredProviderIDs.filter {
+                agentSettings?.isMonitoringEnabled(for: $0) ?? true
+            }
+        providerSnapshots = visibleSnapshots
+        providerLoginOptions = visibleLoginOptions
+        agentSettings?.setProviderRuntimeState(
+            activeConnectorIDs: visibleSnapshots.map(\.id),
+            setupRequiredConnectorIDs: visibleSetupRequiredProviderIDs
+        )
         rebuildPresentation()
     }
 
@@ -407,7 +523,6 @@ public final class UsageStore: ObservableObject {
         activeScanGeneration &+= 1
         activeScanTask?.cancel()
         activeScanTask = nil
-        activeScanTrigger = nil
         if let registry, let id = primaryConnectorID {
             try? await registry.perform(.disconnect, for: id)
         }

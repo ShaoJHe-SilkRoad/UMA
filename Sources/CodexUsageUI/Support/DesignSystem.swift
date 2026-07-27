@@ -42,6 +42,7 @@ public enum UsagePanelMetrics {
     public static let outerTopInset: CGFloat = 14
     public static let outerBottomInset: CGFloat = 12
     public static let cardSpacing: CGFloat = 12
+    public static let providerToolbarHeight: CGFloat = 24
     public static let collapsedProviderCardHeight: CGFloat = 82
 
     public static var collapsedProviderContribution: CGFloat {

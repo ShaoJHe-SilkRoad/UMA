@@ -737,7 +737,11 @@ public enum SharedUsagePresentationPolicy {
                 return winner.window.id
             }
             if let previousID,
-               windows.contains(where: { $0.id == previousID && $0.remaining != .unavailable }) {
+               windows.contains(where: { window in
+                   guard window.id == previousID else { return false }
+                   if case .finite = window.remaining { return true }
+                   return false
+               }) {
                 return previousID
             }
         }
@@ -759,8 +763,13 @@ public enum SharedUsagePresentationPolicy {
     ) -> Bool {
         let rank: (SharedUsageWindowPresentation) -> Int = {
             switch $0.kind {
-            case .fiveHour: 0
-            case .sevenDay: 1
+            // The seven-day account window is the stable deterministic
+            // preference when otherwise-equal finite windows compete. A
+            // five-hour window still wins when it is the only finite value,
+            // depleted/critical with a stronger value, or has the strictly
+            // greatest decrement.
+            case .sevenDay: 0
+            case .fiveHour: 1
             default: 2
             }
         }

@@ -42,10 +42,7 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
     }
 
     public var appTitle: String {
-        switch self {
-        case .simplifiedChinese: "Codex 用量"
-        case .english: "Codex Usage"
-        }
+        "UMA"
     }
 
     public func remainingAccessibilityLabel(percent: Int) -> String {
@@ -64,8 +61,8 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
 
     public var quitApplication: String {
         switch self {
-        case .simplifiedChinese: "退出 Codex 用量"
-        case .english: "Quit Codex Usage"
+        case .simplifiedChinese: "退出 UMA"
+        case .english: "Quit UMA"
         }
     }
 
