@@ -113,7 +113,12 @@ struct STABG1StabilityContractTests {
         let settings = try source("Sources/CodexUsageUI/Views/UsageSettingsCard.swift")
 
         #expect(panel.contains("if isShowingSettings"))
-        #expect(panel.contains("panelContent\n                    .frame(maxHeight: displayedHeight"))
+        #expect(panel.contains("settingsBackdrop\n                    .frame(maxHeight: displayedHeight"))
+        #expect(
+            !panel.contains(
+                "panelContent\n                    .opacity(0.14)"
+            )
+        )
         #expect(!settings.contains("ViewThatFits"))
         #expect(settings.occurrenceCount(of: "ScrollView(.vertical)") == 1)
         #expect(settings.contains("height: max(0, maximumHeight - 28)"))

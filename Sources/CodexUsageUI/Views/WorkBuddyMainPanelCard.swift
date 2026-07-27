@@ -96,8 +96,7 @@ struct WorkBuddyMainPanelCard: View {
                 Spacer(minLength: 6)
                 VStack(alignment: .trailing, spacing: 3) {
                     Text(presentation.compactValue)
-                        .font(AppTypography.font(19, weight: .bold, language: language))
-                        .monospacedDigit()
+                        .font(AppTypography.numericFont(19, weight: .bold))
                     Label(
                         presentation.severityText,
                         systemImage: severitySymbol(presentation.severity)
@@ -140,7 +139,7 @@ struct WorkBuddyMainPanelCard: View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(presentation.availableText)
-                    .font(AppTypography.font(17, weight: .bold, language: language))
+                    .font(AppTypography.numericFont(17, weight: .bold))
                     .foregroundStyle(severityColor(presentation.severity))
                     .fixedSize(horizontal: false, vertical: true)
                 if let balanceDetail = presentation.balanceDetail {

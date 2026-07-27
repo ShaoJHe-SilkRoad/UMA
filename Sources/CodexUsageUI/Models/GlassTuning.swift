@@ -1,11 +1,11 @@
 public struct GlassTuning: Sendable {
     public static let final = GlassTuning(
         backgroundBlurPercent: 44,
-        panelTintPercent: 51,
-        panelGradientPercent: 100,
-        cardMaterialPercent: 59,
-        cardWhiteLayerPercent: 36,
-        cardBorderPercent: 100
+        panelTintPercent: 32,
+        panelGradientPercent: 80,
+        cardMaterialPercent: 72,
+        cardWhiteLayerPercent: 12,
+        cardBorderPercent: 85
     )
 
     public let backgroundBlurPercent: Double

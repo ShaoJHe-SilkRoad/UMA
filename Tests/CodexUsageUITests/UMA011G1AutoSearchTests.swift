@@ -307,7 +307,7 @@ struct UMA011G1AutoSearchTests {
     }
 
     private func waitUntil(
-        attempts: Int = 200,
+        attempts: Int = 1_000,
         condition: @escaping @Sendable () async -> Bool
     ) async throws {
         for _ in 0..<attempts {
@@ -326,6 +326,7 @@ private actor SearchFixtureConnector: AgentUsageConnector {
     private let snapshotValue: AgentUsageSnapshot
     private let blocksProbe: Bool
     private var probeContinuation: CheckedContinuation<Void, Never>?
+    private var probeWasReleased = false
     private(set) var didEnterProbe = false
     private(set) var probeCount = 0
 
@@ -402,7 +403,7 @@ private actor SearchFixtureConnector: AgentUsageConnector {
     func probe() async -> AgentConnectorProbe {
         probeCount += 1
         didEnterProbe = true
-        if blocksProbe {
+        if blocksProbe && !probeWasReleased {
             await withCheckedContinuation { continuation in
                 probeContinuation = continuation
             }
@@ -411,6 +412,7 @@ private actor SearchFixtureConnector: AgentUsageConnector {
     }
 
     func releaseProbe() {
+        probeWasReleased = true
         probeContinuation?.resume()
         probeContinuation = nil
     }

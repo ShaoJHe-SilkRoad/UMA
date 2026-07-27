@@ -36,14 +36,15 @@ public struct UsagePanelCardVisibility: Equatable, Sendable {
 public enum UsagePanelMetrics {
     public static let width: CGFloat = 370
     public static let height: CGFloat = 776
-    public static let minimumHeight: CGFloat = 135
+    public static let minimumHeight: CGFloat = 125
     public static let settingsMinimumHeight: CGFloat = 430
     public static let outerHorizontalInset: CGFloat = 16
-    public static let outerTopInset: CGFloat = 14
+    public static let outerTopInset: CGFloat = 12
     public static let outerBottomInset: CGFloat = 12
-    public static let cardSpacing: CGFloat = 12
-    public static let providerToolbarHeight: CGFloat = 24
-    public static let collapsedProviderCardHeight: CGFloat = 82
+    public static let cardSpacing: CGFloat = 8
+    public static let providerToolbarHeight: CGFloat = 22
+    public static let collapsedProviderCardHeight: CGFloat = 74
+    public static let headerHeight: CGFloat = 64
 
     public static var collapsedProviderContribution: CGFloat {
         collapsedProviderCardHeight + cardSpacing
@@ -71,6 +72,12 @@ public enum UsagePanelMetrics {
         }
         return result
     }
+}
+
+enum AppTypographyFamily: Equatable {
+    case serif
+    case system
+    case monospaced
 }
 
 enum AppTypographyRole {
@@ -139,6 +146,16 @@ enum AppTypographyRole {
         self == .technicalMono
     }
 
+    var family: AppTypographyFamily {
+        if usesMonospacedDesign {
+            return .monospaced
+        }
+        if usesTabularDigits {
+            return .system
+        }
+        return .serif
+    }
+
     var usesTabularDigits: Bool {
         switch self {
         case .largeValue, .regularValue, .compactValue, .menuBarValue, .assistantValue:
@@ -149,30 +166,55 @@ enum AppTypographyRole {
     }
 }
 
-/// Package-safe application typography. Claude Desktop's bundled Anthropic
-/// fonts are not system-installed and do not carry redistribution authority,
-/// so UMA uses the native macOS UI families: SF Pro with the system CJK
-/// cascade (including PingFang SC) and SF Mono only for technical content.
+/// Package-safe serif-led application typography. Anthropic Serif is not
+/// system-registered and UMA has no redistribution authority for private app
+/// assets, so public macOS system-serif design resolution supplies the visual
+/// identity and native CJK cascade. Exact values stay in system tabular sans;
+/// SF Mono remains restricted to technical content.
 public enum AppTypography {
     static func font(
         _ role: AppTypographyRole,
         language: AppLanguage = .english
     ) -> Font {
-        font(
-            role.size,
-            weight: role.weight,
-            language: language,
-            design: role.usesMonospacedDesign ? .monospaced : .default
-        )
+        let font = switch role.family {
+        case .serif:
+            font(role.size, weight: role.weight, language: language)
+        case .system:
+            systemFont(role.size, weight: role.weight)
+        case .monospaced:
+            technicalFont(role.size, weight: role.weight)
+        }
+        return role.usesTabularDigits ? font.monospacedDigit() : font
     }
 
     static func font(
         _ size: CGFloat,
         weight: Font.Weight = .regular,
         language _: AppLanguage = .simplifiedChinese,
-        design: Font.Design = .default
+        design: Font.Design = .serif
     ) -> Font {
         .system(size: size, weight: weight, design: design)
+    }
+
+    static func systemFont(
+        _ size: CGFloat,
+        weight: Font.Weight = .regular
+    ) -> Font {
+        .system(size: size, weight: weight, design: .default)
+    }
+
+    static func numericFont(
+        _ size: CGFloat,
+        weight: Font.Weight = .regular
+    ) -> Font {
+        systemFont(size, weight: weight).monospacedDigit()
+    }
+
+    static func technicalFont(
+        _ size: CGFloat,
+        weight: Font.Weight = .regular
+    ) -> Font {
+        .system(size: size, weight: weight, design: .monospaced)
     }
 
     static func nsFont(_ role: AppTypographyRole) -> NSFont {
@@ -188,10 +230,16 @@ public enum AppTypography {
                 weight: nsFontWeight(role.weight)
             )
         }
-        return .systemFont(
+        let systemFont = NSFont.systemFont(
             ofSize: role.size,
             weight: nsFontWeight(role.weight)
         )
+        guard role.family == .serif,
+              let descriptor = systemFont.fontDescriptor.withDesign(.serif),
+              let serifFont = NSFont(descriptor: descriptor, size: role.size) else {
+            return systemFont
+        }
+        return serifFont
     }
 
     public static func menuBarNSFont() -> NSFont {
@@ -253,6 +301,21 @@ public extension View {
 enum AppGlass {
     static let cardCornerRadius: CGFloat = 20
     static let panelCornerRadius: CGFloat = 28
+    static let settingsReadabilityFillOpacity: Double = 0.24
+    static let cardShadowOpacity: Double = 0.035
+    static let cardShadowRadius: CGFloat = 3
+    static let cardShadowY: CGFloat = 1
+}
+
+enum UsageQuotaVisualMetrics {
+    static let primaryTitleSize: CGFloat = 16
+    static let secondaryTitleSize: CGFloat = 10.5
+    static let primaryValueSize: CGFloat = 20
+    static let secondaryValueSize: CGFloat = 11
+    static let primaryBarHeight: CGFloat = 10
+    static let secondaryBarHeight: CGFloat = 2.5
+    static let primaryVerticalInset: CGFloat = 13
+    static let secondaryVerticalInset: CGFloat = 8
 }
 
 enum AppBorders {
@@ -355,7 +418,7 @@ struct GlassCardBackground: View {
                             ? Color(nsColor: .windowBackgroundColor)
                             : Color(nsColor: .controlBackgroundColor)
                     )
-                    : AnyShapeStyle(.ultraThinMaterial)
+                    : AnyShapeStyle(.thinMaterial)
             )
             .opacity(usesReducedTransparency ? 1 : tuning.cardMaterialPercent / 100)
             .overlay {
@@ -380,7 +443,7 @@ struct GlassCardBackground: View {
             }
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(
+                    .strokeBorder(
                         AppBorders.cardStroke(
                             colorScheme: colorScheme,
                             tuning: tuning,
@@ -393,10 +456,14 @@ struct GlassCardBackground: View {
             }
             .shadow(
                 color: Color.black.opacity(
-                    usesReducedTransparency ? 0.04 : (usesIncreasedContrast ? 0.10 : 0.07)
+                    usesReducedTransparency
+                        ? 0.03
+                        : (usesIncreasedContrast ? 0.08 : AppGlass.cardShadowOpacity)
                 ),
-                radius: usesReducedTransparency ? 2 : 5,
-                y: usesReducedTransparency ? 1 : 2
+                radius: usesReducedTransparency
+                    ? 1
+                    : (usesIncreasedContrast ? 4 : AppGlass.cardShadowRadius),
+                y: AppGlass.cardShadowY
             )
     }
 }

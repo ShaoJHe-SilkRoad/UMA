@@ -200,7 +200,16 @@ struct UMA011G1ProviderCardTests {
         )
         #expect(summary.contains("let selectedWindowID: String?"))
         #expect(summary.contains("isPrimary: period.id == selectedWindowID"))
-        #expect(summary.contains("isPrimary ? 20 : 14"))
+        #expect(
+            summary.contains(
+                "UsageQuotaVisualMetrics.primaryValueSize"
+            )
+        )
+        #expect(
+            summary.contains(
+                "UsageQuotaVisualMetrics.secondaryValueSize"
+            )
+        )
         #expect(summary.contains("isPrimary ? 10 : 5"))
         #expect(summary.contains("CodexSourceHealthDetails"))
     }

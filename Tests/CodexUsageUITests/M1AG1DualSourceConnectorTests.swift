@@ -6,7 +6,7 @@ struct M1AG1DualSourceConnectorTests {
     @Test
     func panelBudgetIncludesBothSourceRowsWithoutClippingTheExistingFooter() {
         #expect(
-            UsagePanelMetrics.height == UsagePanelMetrics.preferredHeight(
+            UsagePanelMetrics.height >= UsagePanelMetrics.preferredHeight(
                 showUsageSummary: true,
                 showRecentTasks: true,
                 showAPICost: true

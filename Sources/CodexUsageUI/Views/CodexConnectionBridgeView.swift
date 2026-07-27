@@ -36,7 +36,7 @@ struct CodexConnectionBridgeView: View {
             if let detail = presentation.technicalDetail {
                 DisclosureGroup(language.connectionTechnicalDetail, isExpanded: $showsTechnicalDetail) {
                     Text(detail)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(AppTypography.font(.technicalMono))
                         .foregroundStyle(.secondary)
                         .textSelection(.disabled)
                 }

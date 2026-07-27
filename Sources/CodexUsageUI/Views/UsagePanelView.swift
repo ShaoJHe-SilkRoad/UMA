@@ -142,10 +142,9 @@ public struct UsagePanelView: View {
     public var body: some View {
         Group {
             if isShowingSettings {
-                panelContent
+                settingsBackdrop
                     .frame(maxHeight: displayedHeight, alignment: .top)
                     .clipped()
-                    .opacity(0.14)
                     .allowsHitTesting(false)
             } else {
                 ScrollView(.vertical) {
@@ -166,7 +165,7 @@ public struct UsagePanelView: View {
                     cornerRadius: AppGlass.panelCornerRadius,
                     style: .continuous
                 )
-                .stroke(
+                .strokeBorder(
                     AppBorders.panelStroke(
                         colorScheme: colorScheme,
                         increaseContrast: usesIncreasedContrast
@@ -175,7 +174,6 @@ public struct UsagePanelView: View {
                         increaseContrast: usesIncreasedContrast
                     )
                 )
-                .padding(0.4)
                 .allowsHitTesting(false)
             }
         }
@@ -248,6 +246,21 @@ public struct UsagePanelView: View {
             onHeightChange?(newHeight)
         }
         .environment(\.usagePanelAppearanceOverride, appearanceOverride)
+    }
+
+    private var settingsBackdrop: some View {
+        VStack(spacing: 0) {
+            MonitorHeaderView(
+                store: store,
+                tuning: tuning,
+                isShowingSettings: $isShowingSettings,
+                settingsDestination: $settingsDestination
+            )
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, UsagePanelMetrics.outerHorizontalInset)
+        .padding(.top, UsagePanelMetrics.outerTopInset)
+        .padding(.bottom, UsagePanelMetrics.outerBottomInset)
     }
 
     private var panelContent: some View {
@@ -782,9 +795,10 @@ private struct APICostEstimateCard: View {
 
             HStack(alignment: .firstTextBaseline) {
                 Text(sevenDayValue)
-                    .font(AppTypography.font(25, weight: .bold, language: language))
+                    .font(AppTypography.numericFont(25, weight: .bold))
                     .foregroundStyle(UsageDesign.blue)
-                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
                 Text(language.metricSevenDays)
                     .font(AppTypography.font(11.5, weight: .medium, language: language))
                     .foregroundStyle(.secondary)
@@ -793,8 +807,9 @@ private struct APICostEstimateCard: View {
 
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(lifetimeValue)
-                        .font(AppTypography.font(15, weight: .bold, language: language))
-                        .monospacedDigit()
+                        .font(AppTypography.numericFont(15, weight: .bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
                     Text(language.lifetimeCost)
                         .font(AppTypography.font(10.5, language: language))
                         .foregroundStyle(.secondary)
@@ -809,11 +824,13 @@ private struct APICostEstimateCard: View {
                     .font(.system(size: 11, weight: .medium))
                 Text(modelText)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 Spacer(minLength: 8)
                 Text(language.pricedCoverage(estimate?.coveragePercent ?? 0))
-                    .monospacedDigit()
+                    .font(AppTypography.numericFont(10.5, weight: .medium))
+                    .lineLimit(1)
             }
-            .font(AppTypography.font(10.5, weight: .medium, language: language))
+            .font(AppTypography.font(.secondary, language: language))
             .foregroundStyle(.secondary)
 
             Text(language.costDisclaimer)
@@ -949,7 +966,7 @@ private struct MonitorHeaderView: View {
             }
         }
         .padding(.horizontal, 14)
-        .frame(height: 70)
+        .frame(height: UsagePanelMetrics.headerHeight)
         .background(GlassCardBackground(tuning: tuning))
     }
 
@@ -974,7 +991,7 @@ private struct RecoveryActionButton: View {
             Task { await perform(action.action) }
         }
         .buttonStyle(.plain)
-        .font(.system(size: 10.5, weight: .semibold))
+        .font(AppTypography.font(.action))
         .lineLimit(1)
         .minimumScaleFactor(0.7)
         .padding(.horizontal, 7)
@@ -1015,8 +1032,7 @@ private struct UsageSummaryCard: View {
                 ForEach(snapshot.metrics) { metric in
                     VStack(spacing: 4) {
                         Text(metric.value)
-                            .font(AppTypography.font(19, weight: .bold, language: language))
-                            .monospacedDigit()
+                            .font(AppTypography.numericFont(19, weight: .bold))
                         Text(metric.label)
                             .font(AppTypography.font(12, weight: .medium, language: language))
                             .foregroundStyle(.secondary)
@@ -1040,41 +1056,47 @@ private struct QuotaRow: View {
     let isPrimary: Bool
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: isPrimary ? 10 : 5) {
             HStack(alignment: .firstTextBaseline) {
                 Text(period.title)
                     .font(
                         AppTypography.font(
-                            isPrimary ? 16 : 13,
-                            weight: isPrimary ? .bold : .medium,
+                            isPrimary
+                                ? UsageQuotaVisualMetrics.primaryTitleSize
+                                : UsageQuotaVisualMetrics.secondaryTitleSize,
+                            weight: isPrimary ? .bold : .regular,
                             language: language
                         )
                     )
                 Spacer()
                 Text(period.isUnlimited ? "♾️" : "\(period.remainingPercent)%")
                     .font(
-                        AppTypography.font(
-                            isPrimary ? 20 : 14,
-                            weight: isPrimary ? .bold : .medium,
-                            language: language
+                        AppTypography.numericFont(
+                            isPrimary
+                                ? UsageQuotaVisualMetrics.primaryValueSize
+                                : UsageQuotaVisualMetrics.secondaryValueSize,
+                            weight: isPrimary ? .bold : .medium
                         )
                     )
                     .foregroundStyle(
-                        UsageDesign.blue.opacity(isPrimary ? 1 : 0.62)
+                        UsageDesign.blue.opacity(isPrimary ? 1 : 0.48)
                     )
-                    .monospacedDigit()
             }
 
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(Color.secondary.opacity(0.14))
+                        .fill(Color.secondary.opacity(isPrimary ? 0.14 : 0.08))
                     Capsule()
-                        .fill(UsageDesign.blue.opacity(isPrimary ? 1 : 0.55))
+                        .fill(UsageDesign.blue.opacity(isPrimary ? 1 : 0.34))
                         .frame(width: proxy.size.width * CGFloat(period.isUnlimited ? 100 : period.remainingPercent) / 100)
                 }
             }
-            .frame(height: isPrimary ? 10 : 5)
+            .frame(
+                height: isPrimary
+                    ? UsageQuotaVisualMetrics.primaryBarHeight
+                    : UsageQuotaVisualMetrics.secondaryBarHeight
+            )
 
             HStack {
                 Text(language.remaining)
@@ -1083,14 +1105,20 @@ private struct QuotaRow: View {
             }
             .font(
                 AppTypography.font(
-                    isPrimary ? 11.5 : 9.5,
+                    isPrimary ? 11.5 : 8.5,
                     language: language
                 )
             )
             .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 13)
+        .padding(
+            .vertical,
+            isPrimary
+                ? UsageQuotaVisualMetrics.primaryVerticalInset
+                : UsageQuotaVisualMetrics.secondaryVerticalInset
+        )
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -1183,9 +1211,8 @@ private struct RecentTaskRow: View {
                 }
                 Spacer(minLength: 8)
                 Text(task.tokenText)
-                    .font(AppTypography.font(14.5, weight: .bold, language: language))
+                    .font(AppTypography.numericFont(14.5, weight: .bold))
                     .foregroundStyle(UsageDesign.blue)
-                    .monospacedDigit()
             }
 
             GeometryReader { proxy in

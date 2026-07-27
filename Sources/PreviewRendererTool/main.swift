@@ -11,6 +11,9 @@ struct PreviewRendererTool {
 
         let arguments = Array(CommandLine.arguments.dropFirst())
         let interactive = arguments.contains("--interactive")
+        if interactive {
+            NSApplication.shared.setActivationPolicy(.regular)
+        }
         let outputPath = arguments.first(where: { !$0.hasPrefix("--") })
             ?? "work/codex-usage-panel-preview.png"
         let showsSettings = arguments.contains("--settings")
@@ -38,36 +41,10 @@ struct PreviewRendererTool {
                 .first(where: { $0.hasPrefix("--percent=") })
                 .flatMap { Double($0.dropFirst("--percent=".count)) }
                 ?? 44
-            let remaining: SharedRemainingValue
-            if arguments.contains("--unlimited") {
-                remaining = .unlimited
-            } else if arguments.contains("--unavailable") {
-                remaining = .unavailable
-            } else {
-                remaining = .finite(min(100, max(0, percent)))
-            }
-            let window = SharedUsageWindowPresentation(
-                id: "seven-day",
-                kind: .sevenDay,
-                compactLabel: "7D",
-                accessibilityLabel: language == .english ? "seven-day window" : "七天额度窗口",
-                remaining: remaining,
-                resetsAt: Date().addingTimeInterval(7_200),
-                resetText: language == .english ? "Resets in 2 hr" : "2 小时后重置"
-            )
-            let shared = SharedUsageCardPresentation(
-                id: "codex.local",
-                providerName: "Codex",
-                planLabel: "PRO",
-                connectionStatus: arguments.contains("--failed")
-                    ? .failed
-                    : (arguments.contains("--stale") ? .stale : .connected),
-                freshness: arguments.contains("--stale") ? .stale : .fresh,
-                windows: [window],
-                selectedWindowID: window.id,
-                remaining: remaining,
-                severity: SharedUsagePresentationPolicy.severity(for: remaining),
-                isRetainingLastValidValue: arguments.contains("--stale")
+            let shared = makeCodexCard(
+                arguments: arguments,
+                language: language,
+                percent: percent
             )
             let workBuddyCard = try makeWorkBuddyCard(
                 arguments: arguments,
@@ -84,6 +61,14 @@ struct PreviewRendererTool {
                     DesktopAssistantCard(shared: workBuddyCard, language: language)
                 )
             }
+            assistantCards.append(
+                contentsOf: makeSyntheticCards(
+                    count: syntheticProviderCount(arguments),
+                    language: language
+                ).map {
+                    DesktopAssistantCard(shared: $0, language: language)
+                }
+            )
             let size = DesktopAssistantMetrics.stackSize(
                 for: density,
                 rowCount: assistantCards.count
@@ -109,23 +94,43 @@ struct PreviewRendererTool {
                 arguments: arguments,
                 language: language
             )
-            let previewScenario = try codexPreviewScenario(arguments)
+            let previewScenario = arguments.contains("--workbuddy-only")
+                ? CodexPreviewScenario.permission
+                : try codexPreviewScenario(arguments)
+            let codexCard = shouldIncludeCodexCard(for: previewScenario)
+                ? makeCodexCard(
+                    arguments: arguments,
+                    language: language,
+                    scenario: previewScenario
+                )
+                : nil
+            let extraCards = (codexCard.map { [$0] } ?? [])
+                + (workBuddyCard.map { [$0] } ?? [])
+                + makeSyntheticCards(
+                    count: syntheticProviderCount(arguments),
+                    language: language
+                )
             let store = UsageStore.preview(
                 scenario: previewScenario,
                 language: language,
-                presentationCards: workBuddyCard.map { [$0] } ?? [],
+                presentationCards: extraCards,
                 chineseLoginProviderName: arguments.contains(
                     "--chinese-login-option"
                 ) ? "Kimi" : nil
             )
             let tuning = GlassTuning.final
-            let expandedProviderIDs: Set<String> = arguments.contains("--workbuddy-expanded")
-                ? [
+            let expandedProviderIDs: Set<String>
+            if arguments.contains("--all-expanded") {
+                expandedProviderIDs = Set(store.presentationCards.map(\.id))
+            } else if arguments.contains("--workbuddy-expanded") {
+                expandedProviderIDs = [
                     arguments.contains("--workbuddy-account-web")
                         ? "workbuddy.accountWebCredits"
                         : "workbuddy.manualAvailability"
                 ]
-                : []
+            } else {
+                expandedProviderIDs = []
+            }
             let appearanceOverride = UsagePanelAppearanceOverride(
                 reduceTransparency: reduceTransparency,
                 increaseContrast: increaseContrast,
@@ -206,7 +211,7 @@ struct PreviewRendererTool {
             defer: false
         )
         window.contentView = host
-        window.title = "UMA M2WACCOUNT-G1 Review Candidate"
+        window.title = "UMA 0.11-G2 Visual Review Candidate"
         host.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
         if interactive {
@@ -251,6 +256,65 @@ struct PreviewRendererTool {
             throw PreviewError.invalidScenario
         }
         return scenario
+    }
+
+    private static func shouldIncludeCodexCard(
+        for scenario: CodexPreviewScenario
+    ) -> Bool {
+        switch scenario {
+        case .ready, .refreshing, .stale, .settings:
+            true
+        default:
+            false
+        }
+    }
+
+    private static func makeCodexCard(
+        arguments: [String],
+        language: AppLanguage,
+        percent: Double = 44,
+        scenario: CodexPreviewScenario? = nil
+    ) -> SharedUsageCardPresentation {
+        let remaining: SharedRemainingValue
+        if arguments.contains("--unlimited") {
+            remaining = .unlimited
+        } else if arguments.contains("--unavailable") {
+            remaining = .unavailable
+        } else {
+            remaining = .finite(min(100, max(0, percent)))
+        }
+        let isStale = arguments.contains("--stale") || scenario == .stale
+        let isRefreshing = scenario == .refreshing
+        let window = SharedUsageWindowPresentation(
+            id: "seven-day",
+            kind: .sevenDay,
+            compactLabel: "7D",
+            accessibilityLabel: language == .english
+                ? "seven-day window"
+                : "七天额度窗口",
+            remaining: remaining,
+            resetsAt: Date(timeIntervalSince1970: 1_800_007_200),
+            resetText: language == .english
+                ? "Resets in 2 hr"
+                : "2 小时后重置"
+        )
+        return SharedUsageCardPresentation(
+            id: "codex.local",
+            providerName: "Codex",
+            planLabel: "PRO",
+            connectionStatus: arguments.contains("--failed")
+                ? .failed
+                : (isRefreshing ? .transitional : (isStale ? .stale : .connected)),
+            freshness: isStale ? .stale : .fresh,
+            windows: [window],
+            selectedWindowID: window.id,
+            remaining: remaining,
+            sourceDescription: language == .english
+                ? "Official local Codex usage"
+                : "Codex 官方本机用量",
+            severity: SharedUsagePresentationPolicy.severity(for: remaining),
+            isRetainingLastValidValue: isStale
+        )
     }
 
     private static func measuredPanelHeight(
@@ -452,6 +516,68 @@ struct PreviewRendererTool {
             severity: .neutral,
             capturedAt: now
         )
+    }
+
+    private static func syntheticProviderCount(_ arguments: [String]) -> Int {
+        guard
+            let argument = arguments.first(where: {
+                $0.hasPrefix("--synthetic-providers=")
+            }),
+            let count = Int(
+                argument.dropFirst("--synthetic-providers=".count)
+            )
+        else {
+            return 0
+        }
+        return min(8, max(0, count))
+    }
+
+    private static func makeSyntheticCards(
+        count: Int,
+        language: AppLanguage
+    ) -> [SharedUsageCardPresentation] {
+        (0..<count).map { index in
+            let providerNumber = index + 2
+            let percent = Double(max(8, 88 - (index * 11)))
+            let remaining = SharedRemainingValue.finite(percent)
+            let window = SharedUsageWindowPresentation(
+                id: "synthetic.\(providerNumber).seven-day",
+                kind: .sevenDay,
+                compactLabel: "7D",
+                accessibilityLabel: language == .english
+                    ? "seven-day window"
+                    : "七天额度窗口",
+                remaining: remaining,
+                resetsAt: Date(
+                    timeIntervalSince1970: 1_800_000_000
+                        + Double(index * 3_600)
+                ),
+                resetText: language == .english
+                    ? "Resets later today"
+                    : "今天稍后重置"
+            )
+            return SharedUsageCardPresentation(
+                id: "synthetic.agent.\(providerNumber)",
+                providerName: "Agent \(providerNumber)",
+                planLabel: index.isMultiple(of: 2) ? "PRO" : "TEAM",
+                connectionStatus: index == count - 1 && count > 4
+                    ? .stale
+                    : .connected,
+                freshness: index == count - 1 && count > 4
+                    ? .stale
+                    : .fresh,
+                windows: [window],
+                selectedWindowID: window.id,
+                remaining: remaining,
+                sourceDescription: language == .english
+                    ? "Synthetic renderer record"
+                    : "合成渲染记录",
+                isVisibleInDesktopAssistant: true,
+                severity: SharedUsagePresentationPolicy.severity(for: remaining),
+                isRetainingLastValidValue: index == count - 1 && count > 4,
+                capturedAt: Date(timeIntervalSince1970: 1_800_000_000)
+            )
+        }
     }
 }
 

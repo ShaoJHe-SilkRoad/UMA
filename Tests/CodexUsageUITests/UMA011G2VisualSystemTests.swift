@@ -1,0 +1,277 @@
+import AppKit
+import CoreText
+import Foundation
+import Testing
+@testable import CodexUsageUI
+
+@Suite("UMA 0.11-G2 compact visual system")
+struct UMA011G2VisualSystemTests {
+    @Test("Compact panel metrics preserve equal provider geometry")
+    func compactPanelMetrics() {
+        #expect(UsagePanelMetrics.width == 370)
+        #expect(UsagePanelMetrics.minimumHeight == 125)
+        #expect(UsagePanelMetrics.headerHeight == 64)
+        #expect(UsagePanelMetrics.collapsedProviderCardHeight == 74)
+        #expect(UsagePanelMetrics.cardSpacing == 8)
+        #expect(UsagePanelMetrics.outerTopInset == UsagePanelMetrics.outerBottomInset)
+        #expect(UsagePanelMetrics.collapsedProviderContribution == 82)
+        #expect(UsagePanelMetrics.resolvedContentHeight(10_000) == UsagePanelMetrics.height)
+    }
+
+    @Test("Serif labels and tabular values have separate centralized families")
+    func typographyFamilies() {
+        for role in [
+            AppTypographyRole.display,
+            .sectionTitle,
+            .cardTitle,
+            .body,
+            .secondary,
+            .caption,
+            .action,
+            .assistantProvider,
+            .assistantDetail
+        ] {
+            #expect(role.family == .serif)
+            #expect(!role.usesTabularDigits)
+        }
+        for role in [
+            AppTypographyRole.largeValue,
+            .regularValue,
+            .compactValue,
+            .menuBarValue,
+            .assistantValue
+        ] {
+            #expect(role.family == .system)
+            #expect(role.usesTabularDigits)
+        }
+        #expect(AppTypographyRole.technicalMono.family == .monospaced)
+    }
+
+    @Test("Public system serif resolves safely and CJK has real coverage")
+    func serifAndCJKResolution() {
+        let body = AppTypography.nsFont(.body)
+        let base = CTFontCreateWithFontDescriptor(
+            body.fontDescriptor as CTFontDescriptor,
+            body.pointSize,
+            nil
+        )
+        let cjk = CTFontCreateForString(
+            base,
+            "中文，。UMA" as CFString,
+            CFRange(location: 0, length: 5)
+        )
+        let baseName = CTFontCopyPostScriptName(base) as String
+        let cjkName = CTFontCopyPostScriptName(cjk) as String
+
+        #expect(!baseName.isEmpty)
+        #expect(!cjkName.isEmpty)
+        #expect(!baseName.localizedCaseInsensitiveContains("Anthropic"))
+        #expect(!cjkName.localizedCaseInsensitiveContains("LastResort"))
+    }
+
+    @Test("Numeric metrics remain tabular and stable across large values")
+    func stableNumericWidths() {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: AppTypography.nsFont(.assistantValue)
+        ]
+        let narrow = ("111%" as NSString).size(withAttributes: attributes).width
+        let wide = ("888%" as NSString).size(withAttributes: attributes).width
+        #expect(abs(narrow - wide) < 0.01)
+
+        let large = ("$999.99B" as NSString).size(withAttributes: attributes).width
+        #expect(large.isFinite)
+        #expect(large > 0)
+    }
+
+    @Test("WorkBuddy exact values use the centralized numeric family")
+    func workBuddyNumericTypography() throws {
+        let card = try source(
+            "Sources/CodexUsageUI/Views/WorkBuddyMainPanelCard.swift"
+        )
+
+        #expect(
+            card.contains(
+                "Text(presentation.compactValue)\n"
+                    + "                        .font(AppTypography.numericFont(19, weight: .bold))"
+            )
+        )
+        #expect(
+            card.contains(
+                "Text(presentation.availableText)\n"
+                    + "                    .font(AppTypography.numericFont(17, weight: .bold))"
+            )
+        )
+        #expect(!card.contains("AppTypography.font(19, weight: .bold"))
+        #expect(!card.contains("AppTypography.font(17, weight: .bold"))
+    }
+
+    @Test("Medium glass uses one inset contour and restrained edge mass")
+    func glassAndContourContract() throws {
+        let design = try source("Sources/CodexUsageUI/Support/DesignSystem.swift")
+        let tuning = try source("Sources/CodexUsageUI/Models/GlassTuning.swift")
+        let assistant = try source("Sources/CodexUsageUI/Views/DesktopAssistantView.swift")
+        let panel = try source("Sources/CodexUsageUI/Views/UsagePanelView.swift")
+
+        #expect(tuning.contains("panelTintPercent: 32"))
+        #expect(tuning.contains("cardMaterialPercent: 72"))
+        #expect(tuning.contains("cardWhiteLayerPercent: 12"))
+        #expect(design.contains("AnyShapeStyle(.thinMaterial)"))
+        #expect(design.contains(".strokeBorder("))
+        #expect(!design.contains("radius: usesReducedTransparency ? 2 : 5"))
+        #expect(assistant.contains(".strokeBorder("))
+        #expect(panel.contains(".strokeBorder("))
+    }
+
+    @Test("Settings never composites provider materials behind its glass")
+    func settingsSingleShell() throws {
+        let panel = try source("Sources/CodexUsageUI/Views/UsagePanelView.swift")
+        let settings = try source("Sources/CodexUsageUI/Views/UsageSettingsCard.swift")
+
+        #expect(panel.contains("private var settingsBackdrop"))
+        #expect(panel.contains("if isShowingSettings {\n                settingsBackdrop"))
+        #expect(
+            !panel.contains(
+                "panelContent\n                    .opacity(0.14)"
+            )
+        )
+        #expect(settings.occurrenceCount(of: "GlassCardBackground") == 1)
+        #expect(settings.contains("AppGlass.settingsReadabilityFillOpacity"))
+        #expect(settings.occurrenceCount(of: "ScrollView(.vertical)") == 1)
+    }
+
+    @Test("Expanded provider details keep one continuous card shell")
+    func attachedProviderDetails() throws {
+        let panel = try source("Sources/CodexUsageUI/Views/UsagePanelView.swift")
+        let provider = try #require(
+            panel.slice(
+                from: "private struct LocalLiveProviderCard",
+                to: "private struct UsagePanelContentHeightPreferenceKey"
+            )
+        )
+
+        #expect(provider.occurrenceCount(of: "GlassCardBackground") == 1)
+        #expect(provider.contains("showsBackground: false"))
+        #expect(provider.contains("Divider()"))
+        #expect(!provider.contains(".fill(.regularMaterial)"))
+        #expect(!provider.contains(".fill(.thinMaterial)"))
+    }
+
+    @Test("Five-hour secondary treatment is materially smaller")
+    func secondaryQuotaTreatment() {
+        #expect(
+            UsageQuotaVisualMetrics.secondaryTitleSize
+                < UsageQuotaVisualMetrics.primaryTitleSize
+        )
+        #expect(
+            UsageQuotaVisualMetrics.secondaryValueSize
+                < UsageQuotaVisualMetrics.primaryValueSize
+        )
+        #expect(
+            UsageQuotaVisualMetrics.secondaryBarHeight
+                <= UsageQuotaVisualMetrics.primaryBarHeight / 4
+        )
+        #expect(
+            UsageQuotaVisualMetrics.secondaryVerticalInset
+                < UsageQuotaVisualMetrics.primaryVerticalInset
+        )
+    }
+
+    @Test("Token Cost large values have deterministic clipping protection")
+    func tokenCostLayoutProtection() throws {
+        let panel = try source("Sources/CodexUsageUI/Views/UsagePanelView.swift")
+        let cost = try #require(
+            panel.slice(
+                from: "private struct APICostEstimateCard",
+                to: "private struct ProviderExpansionToolbar"
+            )
+        )
+        #expect(cost.contains("AppTypography.numericFont(25, weight: .bold)"))
+        #expect(cost.contains("AppTypography.numericFont(15, weight: .bold)"))
+        #expect(cost.occurrenceCount(of: ".minimumScaleFactor(") >= 3)
+        #expect(cost.contains(".lineLimit(1)"))
+        #expect(cost.contains("guard let estimate else { return \"—\" }"))
+    }
+
+    @Test("Assistant geometry and Minimalist content remain frozen")
+    func assistantGeometry() throws {
+        #expect(DesktopAssistantMetrics.regularWidth == 210)
+        #expect(DesktopAssistantMetrics.regularHeight == 60)
+        #expect(DesktopAssistantMetrics.minimalistWidth == 58.333333)
+        #expect(DesktopAssistantMetrics.minimalistHeight == 30)
+        #expect(DesktopAssistantMetrics.minimalistReservedWindowWidth == 0)
+        #expect(DesktopAssistantMetrics.percentageFontSize == 13)
+        #expect(
+            DesktopAssistantContentContract.visibleFields(for: .minimalist)
+                == [.providerConnectionMark, .percentage]
+        )
+    }
+
+    @Test("No proprietary font asset or Claude runtime dependency is admitted")
+    func fontPackageSafety() throws {
+        let root = repositoryRoot()
+        let design = try source("Sources/CodexUsageUI/Support/DesignSystem.swift")
+        let enumerator = try #require(
+            FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )
+        )
+        var prohibitedAssets: [String] = []
+        for case let url as URL in enumerator {
+            if ["ttf", "otf", "ttc", "woff", "woff2"].contains(
+                url.pathExtension.lowercased()
+            ) {
+                prohibitedAssets.append(url.path)
+            }
+        }
+
+        #expect(prohibitedAssets.isEmpty)
+        #expect(!design.contains("Font.custom"))
+        #expect(!design.contains("/Applications/Claude.app"))
+        #expect(!design.contains("Bundle(path:"))
+    }
+
+    @Test("Renderer covers dense provider and expanded-card matrices")
+    func rendererMatrixContract() throws {
+        let renderer = try source("Sources/PreviewRendererTool/main.swift")
+
+        #expect(renderer.contains("--synthetic-providers="))
+        #expect(renderer.contains("--all-expanded"))
+        #expect(renderer.contains("--workbuddy-only"))
+        #expect(renderer.contains("makeSyntheticCards("))
+        #expect(renderer.contains("DesktopAssistantMetrics.stackSize("))
+        #expect(renderer.contains("UMA 0.11-G2 Visual Review Candidate"))
+    }
+
+    private func source(_ relativePath: String) throws -> String {
+        try String(
+            contentsOf: repositoryRoot().appendingPathComponent(relativePath),
+            encoding: .utf8
+        )
+    }
+
+    private func repositoryRoot() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+}
+
+private extension String {
+    func occurrenceCount(of needle: String) -> Int {
+        components(separatedBy: needle).count - 1
+    }
+
+    func slice(from start: String, to end: String) -> String? {
+        guard let startRange = range(of: start),
+              let endRange = range(
+                of: end,
+                range: startRange.upperBound..<endIndex
+              ) else {
+            return nil
+        }
+        return String(self[startRange.lowerBound..<endRange.lowerBound])
+    }
+}

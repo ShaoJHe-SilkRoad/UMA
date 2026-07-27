@@ -543,7 +543,7 @@ private struct DesktopAssistantCardView: View {
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .stroke(
+                .strokeBorder(
                     Color.primary.opacity(hasIncreasedContrast ? 0.56 : 0.22),
                     lineWidth: AppBorders.assistantLineWidth(
                         increaseContrast: hasIncreasedContrast
@@ -633,7 +633,7 @@ private struct DesktopAssistantCardView: View {
                 Circle()
                     .stroke(connectionColor, lineWidth: 1.5)
                 Text("C")
-                    .font(AppTypography.font(diameter * 0.56, weight: .semibold))
+                    .font(AppTypography.systemFont(diameter * 0.56, weight: .semibold))
                     .foregroundStyle(connectionColor)
             }
             .frame(width: diameter, height: diameter)
@@ -643,7 +643,7 @@ private struct DesktopAssistantCardView: View {
                 Circle()
                     .stroke(connectionColor, lineWidth: 1.5)
                 Text("W")
-                    .font(AppTypography.font(diameter * 0.52, weight: .semibold))
+                    .font(AppTypography.systemFont(diameter * 0.52, weight: .semibold))
                     .foregroundStyle(connectionColor)
             }
             .frame(width: diameter, height: diameter)
@@ -656,7 +656,7 @@ private struct DesktopAssistantCardView: View {
                         style: StrokeStyle(lineWidth: 1.5, dash: [2, 1.5])
                     )
                 Text("M")
-                    .font(AppTypography.font(diameter * 0.50, weight: .semibold))
+                    .font(AppTypography.systemFont(diameter * 0.50, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
             .frame(width: diameter, height: diameter)

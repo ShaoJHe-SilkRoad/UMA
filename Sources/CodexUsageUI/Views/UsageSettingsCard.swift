@@ -46,7 +46,7 @@ struct UsageSettingsCard: View {
             .background {
                 GlassCardBackground(
                     tuning: tuning,
-                    readabilityFillOpacity: 0.72
+                    readabilityFillOpacity: AppGlass.settingsReadabilityFillOpacity
                 )
             }
             .onAppear {
@@ -1108,7 +1108,7 @@ private struct WorkBuddyAccountWebSyncSection: View {
             Text(
                 CreditFormatter.exactTwoDecimal(value, language: language)
             )
-            .monospacedDigit()
+            .font(AppTypography.numericFont(9, weight: .medium))
         }
     }
 }
