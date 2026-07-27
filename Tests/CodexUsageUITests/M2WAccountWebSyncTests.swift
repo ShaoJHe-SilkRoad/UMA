@@ -528,7 +528,9 @@ struct M2WAccountWebSyncTests {
     }
 
     @Test
-    func onlyExplicitTriggersCanReadAccountWebCredits() throws {
+    func eligibilityScannerTriggersStayExplicitAndAutoRefreshStaysSourceOwned()
+        throws
+    {
         #expect(ProviderEligibilityScanTrigger.allCases == [
             .applicationLaunch,
             .manualRefresh,
@@ -544,6 +546,7 @@ struct M2WAccountWebSyncTests {
         #expect(!controller.contains("poll"))
         #expect(!controller.contains("backgroundRefresh"))
         #expect(!controller.contains("DispatchSourceTimer"))
+        #expect(controller.contains("WorkBuddyAccountSyncScheduler"))
         #expect(controller.contains("maximumAttempts = 20"))
         #expect(controller.contains("delay = Duration.milliseconds(250)"))
         #expect(controller.contains("readGeneration &+= 1"))
@@ -730,12 +733,12 @@ struct M2WAccountWebSyncTests {
         )
         #expect(
             AppLanguage.english.workBuddyAccountWebState(.failed(.timedOut))
-                == "Sync unavailable: request timed out"
+                == "Could not read current Credits"
         )
         #expect(
             AppLanguage.simplifiedChinese.workBuddyAccountWebState(
                 .failed(.timedOut)
-            ) == "同步不可用：请求超时"
+            ) == "无法读取当前积分"
         )
     }
 
@@ -748,11 +751,11 @@ struct M2WAccountWebSyncTests {
             encoding: .utf8
         )
         #expect(script.contains("MARKETING_VERSION=\"0.10.1\""))
-        #expect(script.contains("DEFAULT_BUILD=\"202607250006\""))
+        #expect(script.contains("DEFAULT_BUILD=\"202607260001\""))
         #expect(script.contains("BUNDLE_ID=\"com.kevinchen.CodexUsageMonitor\""))
         #expect(
             script.contains(
-                "/private/tmp/uma-workbuddy-account-final-$short_commit/UMA.app"
+                "/private/tmp/uma-workbuddy-autorefresh-final-$short_commit/UMA.app"
             )
         )
         #expect(script.contains("git -C \"$REPO_ROOT\" archive"))

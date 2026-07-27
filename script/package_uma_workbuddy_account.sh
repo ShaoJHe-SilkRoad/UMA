@@ -6,11 +6,11 @@ readonly REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 readonly PRODUCT="CodexUsageMonitor"
 readonly MARKETING_VERSION="0.10.1"
 readonly BUNDLE_ID="com.kevinchen.CodexUsageMonitor"
-readonly DEFAULT_BUILD="202607250006"
+readonly DEFAULT_BUILD="202607260001"
 
 usage() {
     printf '%s\n' \
-        "Usage: $0 --commit <40-hex-sha> [--build <number>] --output /private/tmp/uma-workbuddy-account-final-<short-final-commit>/UMA.app"
+        "Usage: $0 --commit <40-hex-sha> [--build <number>] --output /private/tmp/uma-workbuddy-autorefresh-final-<short-final-commit>/UMA.app"
 }
 
 commit=""
@@ -28,7 +28,7 @@ done
 [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { usage >&2; exit 2; }
 [[ "$build_number" =~ ^[0-9]{12}$ ]] || { usage >&2; exit 2; }
 readonly short_commit="${commit:0:12}"
-readonly expected_output="/private/tmp/uma-workbuddy-account-final-$short_commit/UMA.app"
+readonly expected_output="/private/tmp/uma-workbuddy-autorefresh-final-$short_commit/UMA.app"
 [[ "$output" == "$expected_output" ]] || {
     printf 'Refusing output outside %s\n' "$expected_output" >&2
     exit 2

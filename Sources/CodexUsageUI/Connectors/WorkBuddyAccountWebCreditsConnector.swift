@@ -71,6 +71,12 @@ actor WorkBuddyAccountWebCreditsConnector: AgentUsageConnector {
     private let disconnectOwnedSession: @MainActor @Sendable () async -> Void
     private var snapshot: AgentUsageSnapshot
     private var continuation: AsyncStream<AgentUsageSnapshot>.Continuation?
+    private var inFlightRead:
+        (generation: UInt64, task: Task<WorkBuddyAccountWebReadResult, Never>)?
+    private var nextReadGeneration: UInt64 = 0
+    private var completedReadCount = 0
+    private var coalescedReadCount = 0
+    private var publicationCount = 0
 
     init(
         hasConsent: @escaping @MainActor @Sendable () -> Bool,
@@ -123,6 +129,7 @@ actor WorkBuddyAccountWebCreditsConnector: AgentUsageConnector {
         case .connect, .reconnect, .refresh:
             await read()
         case .disconnect:
+            invalidateInFlightRead()
             await disconnectOwnedSession()
             replace(
                 Self.unavailableSnapshot(
@@ -134,6 +141,20 @@ actor WorkBuddyAccountWebCreditsConnector: AgentUsageConnector {
     }
 
     func stop() async {}
+
+    func readDiagnostics() -> (
+        active: Int,
+        completed: Int,
+        coalesced: Int,
+        publications: Int
+    ) {
+        (
+            inFlightRead == nil ? 0 : 1,
+            completedReadCount,
+            coalescedReadCount,
+            publicationCount
+        )
+    }
 
     func currentSnapshot() async -> AgentUsageSnapshot {
         snapshot
@@ -150,13 +171,29 @@ actor WorkBuddyAccountWebCreditsConnector: AgentUsageConnector {
     }
 
     private func read() async {
+        if let inFlightRead {
+            coalescedReadCount += 1
+            _ = await inFlightRead.task.value
+            return
+        }
+        nextReadGeneration &+= 1
+        let generation = nextReadGeneration
+        let reader = self.reader
+        let task = Task { @MainActor in
+            await reader()
+        }
+        inFlightRead = (generation, task)
         replace(
             Self.unavailableSnapshot(
                 state: .waitingForFirstResponse,
                 failure: nil
             )
         )
-        switch await reader() {
+        let result = await task.value
+        guard inFlightRead?.generation == generation else { return }
+        inFlightRead = nil
+        completedReadCount += 1
+        switch result {
         case let .success(reading):
             replace(Self.snapshot(for: reading))
         case .authenticationRequired:
@@ -176,7 +213,16 @@ actor WorkBuddyAccountWebCreditsConnector: AgentUsageConnector {
         }
     }
 
+    private func invalidateInFlightRead() {
+        nextReadGeneration &+= 1
+        inFlightRead?.task.cancel()
+        inFlightRead = nil
+    }
+
     private func replace(_ next: AgentUsageSnapshot) {
+        if next.state != .waitingForFirstResponse {
+            publicationCount += 1
+        }
         snapshot = next
         continuation?.yield(next)
     }

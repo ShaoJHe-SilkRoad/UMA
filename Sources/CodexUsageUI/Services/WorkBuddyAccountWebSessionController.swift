@@ -87,9 +87,21 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
     @Published public private(set) var safeDiagnosticCode: String?
     @Published private(set) var latestCreditSnapshot:
         WorkBuddyAccountCreditSnapshot?
+    @Published public var autoRefreshEnabled: Bool {
+        didSet {
+            guard oldValue != autoRefreshEnabled else { return }
+            defaults.set(autoRefreshEnabled, forKey: Self.autoRefreshEnabledKey)
+            reconcileAutoRefresh()
+        }
+    }
+    @Published public private(set) var nextAutoRefreshAt: Date?
     @Published public var sessionMode: WorkBuddyAccountWebSessionMode {
         didSet {
             guard oldValue != sessionMode else { return }
+            hasUsableSession = false
+            synchronizationCompletedInProcess = false
+            scheduler.update(enabled: autoRefreshEnabled, eligible: false)
+            nextAutoRefreshAt = nil
             defaults.removeObject(forKey: Self.sessionEstablishedKey)
             latestCreditSnapshot = nil
             safeDiagnosticCode = nil
@@ -108,6 +120,8 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
     }
 
     private static let consentKey = "workbuddy.accountWebSync.consent.v1"
+    static let autoRefreshEnabledKey =
+        "workbuddy.accountWebSync.autoRefreshEnabled.v1"
     static let sessionEstablishedKey =
         "workbuddy.accountWebSync.establishedPersistentSession.v1"
     private static let persistentDataStoreIdentifier = UUID(
@@ -115,12 +129,21 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
     )!
     private let defaults: UserDefaults
     private let websiteDataClearer: @MainActor () async -> Bool
+    private let readOverride:
+        (@MainActor @Sendable () async -> WorkBuddyAccountWebReadResult)?
+    private let scheduler: WorkBuddyAccountSyncScheduler
     private var webView: WKWebView?
     private var window: NSWindow?
     private var navigationContinuation: CheckedContinuation<Void, Error>?
     private var navigationTimeoutTask: Task<Void, Never>?
     private var readGeneration: UInt64 = 0
+    private var readOperationGeneration: UInt64 = 0
     private var inFlightRead: Task<WorkBuddyAccountWebReadResult, Never>?
+    private var hasUsableSession = false
+    private var synchronizationCompletedInProcess = false
+    private var applicationIsRunning = true
+    private var completedReadCount = 0
+    private var activeReadCount = 0
 
     var canReadOnApplicationLaunch: Bool {
         consentGranted
@@ -132,14 +155,56 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
         self.init(defaults: .standard)
     }
 
+    public static func previewConnected(
+        autoRefreshEnabled: Bool = true,
+        observedAt: Date = Date()
+    ) -> WorkBuddyAccountWebSessionController {
+        let defaults = UserDefaults(
+            suiteName: "com.kevinchen.uma.preview.account-web"
+        )!
+        let controller = WorkBuddyAccountWebSessionController(
+            defaults: defaults,
+            autoRefreshDefaultOverride: autoRefreshEnabled
+        )
+        controller.consentGranted = true
+        controller.flowState = .connected
+        controller.lastSynchronizedAt = observedAt
+        controller.hasUsableSession = true
+        controller.synchronizationCompletedInProcess = true
+        controller.nextAutoRefreshAt = autoRefreshEnabled
+            ? observedAt.addingTimeInterval(60)
+            : nil
+        return controller
+    }
+
     init(
         defaults: UserDefaults,
-        websiteDataClearer: (@MainActor () async -> Bool)? = nil
+        websiteDataClearer: (@MainActor () async -> Bool)? = nil,
+        autoRefreshInterval: Duration = WorkBuddyAccountSyncScheduler.interval,
+        autoRefreshSleeper:
+            @escaping WorkBuddyAccountSyncScheduler.Sleeper = { duration in
+                try await Task.sleep(for: duration)
+            },
+        now: @escaping WorkBuddyAccountSyncScheduler.Now = { Date() },
+        readOverride:
+            (@MainActor @Sendable () async -> WorkBuddyAccountWebReadResult)?
+                = nil,
+        autoRefreshDefaultOverride: Bool? = nil
     ) {
         self.defaults = defaults
+        self.readOverride = readOverride
         self.websiteDataClearer = websiteDataClearer ?? {
             await WorkBuddyAccountWebSessionController.clearPersistentWebsiteData()
         }
+        scheduler = WorkBuddyAccountSyncScheduler(
+            interval: autoRefreshInterval,
+            sleeper: autoRefreshSleeper,
+            now: now
+        )
+        autoRefreshEnabled =
+            autoRefreshDefaultOverride
+                ?? defaults.object(forKey: Self.autoRefreshEnabledKey) as? Bool
+                ?? true
         let record: WorkBuddyAccountWebConsentRecord? = defaults.data(
             forKey: Self.consentKey
         ).flatMap {
@@ -158,6 +223,31 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
             defaults.removeObject(forKey: Self.sessionEstablishedKey)
         }
         super.init()
+        hasUsableSession =
+            consentGranted
+                && sessionMode == .persistent
+                && defaults.bool(forKey: Self.sessionEstablishedKey)
+    }
+
+    func configureAutoRefresh(
+        onFire: @escaping @MainActor @Sendable () async -> Void
+    ) {
+        scheduler.configure(onFire: onFire)
+        reconcileAutoRefresh()
+    }
+
+    func autoRefreshDiagnostics()
+        -> WorkBuddyAccountSyncSchedulerDiagnostics
+    {
+        scheduler.diagnostics()
+    }
+
+    var accountReadDiagnostics: (active: Int, completed: Int, webViews: Int) {
+        (
+            activeReadCount,
+            completedReadCount,
+            webView == nil ? 0 : 1
+        )
     }
 
     public func grantConsent() {
@@ -175,6 +265,10 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
             flowState = .consentRequired
             return
         }
+        releaseBrowser()
+        scheduler.update(enabled: autoRefreshEnabled, eligible: false)
+        nextAutoRefreshAt = nil
+        synchronizationCompletedInProcess = false
         let browser = ensureBrowser()
         showWindow()
         flowState = .opening
@@ -189,17 +283,50 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
         if let inFlightRead {
             return await inFlightRead.value
         }
+        scheduler.readWillStart()
+        nextAutoRefreshAt = nil
+        activeReadCount = 1
+        readOperationGeneration &+= 1
+        let operationGeneration = readOperationGeneration
         let task = Task { @MainActor [weak self] in
             guard let self else {
                 return WorkBuddyAccountWebReadResult.failure(
                     .webContentUnavailable
                 )
             }
+            if let readOverride {
+                return await readOverride()
+            }
             return await performCurrentCreditRead()
         }
         inFlightRead = task
         let result = await task.value
+        guard readOperationGeneration == operationGeneration else {
+            return .failure(.webContentUnavailable)
+        }
         inFlightRead = nil
+        activeReadCount = 0
+        completedReadCount += 1
+        synchronizationCompletedInProcess = true
+        switch result {
+        case .success:
+            hasUsableSession = true
+        case .authenticationRequired:
+            hasUsableSession = false
+        case let .failure(failure):
+            if failure == .consentRequired
+                || failure == .authenticationRequired {
+                hasUsableSession = false
+            } else if consentGranted {
+                // A non-authentication failure preserves the authenticated
+                // account session and returns to the normal cadence. This is
+                // deliberately not an immediate retry.
+                hasUsableSession = true
+            }
+        }
+        reconcileAutoRefresh()
+        scheduler.readDidFinish()
+        nextAutoRefreshAt = scheduler.diagnostics().nextRefreshAt
         return result
     }
 
@@ -319,6 +446,10 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
     }
 
     func disconnectAndClearOwnedWebsiteData() async {
+        scheduler.update(enabled: autoRefreshEnabled, eligible: false)
+        nextAutoRefreshAt = nil
+        hasUsableSession = false
+        synchronizationCompletedInProcess = false
         releaseBrowser()
         lastSynchronizedAt = nil
         latestCreditSnapshot = nil
@@ -355,6 +486,11 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
     }
 
     public func cancel() {
+        scheduler.update(enabled: autoRefreshEnabled, eligible: false)
+        nextAutoRefreshAt = nil
+        hasUsableSession = false
+        synchronizationCompletedInProcess = false
+        invalidateInFlightRead()
         readGeneration &+= 1
         webView?.stopLoading()
         navigationTimeoutTask?.cancel()
@@ -369,8 +505,25 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
     }
 
     public func tearDown() {
+        applicationIsRunning = false
+        scheduler.cancel()
+        nextAutoRefreshAt = nil
         cancel()
         releaseBrowser()
+    }
+
+    private func reconcileAutoRefresh() {
+        let eligible =
+            applicationIsRunning
+                && consentGranted
+                && hasUsableSession
+                && synchronizationCompletedInProcess
+                && flowState != .signInRequired
+        scheduler.update(
+            enabled: autoRefreshEnabled,
+            eligible: eligible
+        )
+        nextAutoRefreshAt = scheduler.diagnostics().nextRefreshAt
     }
 
     private func persistConsentIfGranted() {
@@ -458,6 +611,7 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
     }
 
     private func releaseBrowser() {
+        invalidateInFlightRead()
         readGeneration &+= 1
         navigationTimeoutTask?.cancel()
         navigationTimeoutTask = nil
@@ -472,6 +626,13 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
         window?.contentView = nil
         window = nil
         webView = nil
+    }
+
+    private func invalidateInFlightRead() {
+        readOperationGeneration &+= 1
+        inFlightRead?.cancel()
+        inFlightRead = nil
+        activeReadCount = 0
     }
 }
 

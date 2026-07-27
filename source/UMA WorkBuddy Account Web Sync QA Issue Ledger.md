@@ -1,6 +1,6 @@
 # UMA WorkBuddy Account Web Sync QA Issue Ledger
 
-Version: 1.6
+Version: 1.8
 Date: 2026-07-26
 Goal: M2WACCOUNT-G1
 
@@ -50,6 +50,24 @@ Goal: M2WACCOUNT-G1
 | WA-038 Hidden sole quota row could suppress bounded section discovery | Independent review found that row-derived section presence considered hidden pre-rendered candidates. | Blocking | A hidden row could satisfy the section-presence check before its visible section was discoverable. | Row-derived section discovery now considers visible quota candidates only. Hidden rows remain excluded from extraction and cannot short-circuit the bounded discovery sweep. | The executable JavaScriptCore fixture includes a hidden sole benefit/gift row and still requires visible section recovery before success. | All section-discovery and atomic-total cases. | Automated PASS; independent Examiner PASS |
 | WA-039 Success diagnostics exceeded the failure-only privacy contract | Independent review found that aggregate count codes could be retained after a successful read. | Major | The success path reused the safe-diagnostic channel even though the accepted ledger contract was failure-only. | Successful extraction emits no diagnostic; the native attempt model rejects every diagnostic when failure is nil; successful synchronization explicitly clears the channel. Only validated `Txxx-Dxxx-Qx` failure codes remain admitted. | Focused tests prove strict failure-only acceptance and reject success-path or malformed codes. | Account read, cancel, disconnect, and new-read lifecycle. | Automated PASS; independent Examiner PASS |
 
+## M2WACCOUNT-R1 — WorkBuddy Auto Refresh
+
+| ID | First evidence | Severity | Root cause | Repair | Focused retest | Affected regression | Final status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| AR-001 Duplicate WorkBuddy auto-refresh timer | A retained account session needed a periodic read owner without multiplying lifecycle work. | Blocking | G1 intentionally had no scheduled source lane. | One source-owned scheduler stores at most one monotonic sleep task and invalidates its generation before replacement. | Timer-count and repeated-cycle scheduler tests. | Session lifecycle and launch sync. | PASS; seven live post-launch cycles showed one bounded read envelope per cycle |
+| AR-002 Overlapping account-page reads | Timer and explicit actions can arrive together. | Blocking | The session gate coalesced page loads, but connector callers could still publish the same result more than once. | The connector now joins one generated in-flight task and only its owner publishes the completed result. | Three concurrent triggers produce one source read, one maximum active read, and one publication. | Atomic all-pool observation. | PASS; automated concurrency proof plus live nonoverlapping read envelopes |
+| AR-003 Manual Refresh followed by immediate timer duplicate | A pending minute boundary could follow Sync Now or shared Manual Refresh. | Major | A pending schedule was not part of G1. | Every source read invalidates the pending schedule; the next schedule begins only after that read completes. | Manual reset scheduler test. | Sync Now, Check Again, and shared Refresh. | PASS; automated boundary coalescing and live Sync Now rescheduling both passed |
+| AR-004 Timer or stale read continues after Disconnect | Independent staged review found that the connector invalidated its wrapper read while the session controller could still accept a stale completion. | Blocking | G1 had no timer cancellation responsibility, and the new connector gate did not invalidate the controller-owned read operation. | Disconnect makes the session ineligible, invalidates both read generations, cancels the controller task, releases the browser, and ignores every stale completion before clearing UMA-owned website data. | Preference/disconnect, timer-cancellation, connector-publication, and controller stale-completion tests. | Manual record preservation and surface withdrawal. | PASS; 11 focused tests passed, consent and admission cleared, WorkBuddy disappeared, and the task-owned WebKit process terminated |
+| AR-005 Timer continues on login page | An expired session must not poll the Human-controlled login flow. | Blocking | A generic periodic loop could retry authentication pages. | Authentication-required results clear usable-session eligibility and schedule no further cycle. | Authentication-expiry suspension test. | Consent and isolated login flow. | Automated PASS |
+| AR-006 Auto Refresh OFF still performs scheduled reads | Manual-only mode needs a hard zero-schedule contract. | Blocking | No persisted cadence preference existed. | A local Boolean defaults ON; OFF invalidates the scheduler while leaving explicit connector actions available. | Default/persistence and Manual-only cancellation tests. | Existing explicit scan triggers. | PASS; two live minutes produced no provider-read burst and Sync Now still completed while OFF |
+| AR-007 Assistant creates or changes polling | Surface lifecycle must remain presentation-only. | Major | Placing cadence in a view would couple visibility to reads. | Scheduler ownership is confined to the WorkBuddy account source/session; view and Assistant sources contain no scheduler or account-read call. | Static ownership audit. | Main/Assistant parity. | PASS; repeated hide/show cycles left the same countdown running and Settings-close cadence continued |
+| AR-008 Settings contains duplicate or excessive sync copy | G1 showed consent, session, actions, diagnostics, pool rows, and disclosure simultaneously. | Major | Research and troubleshooting content shared the primary hierarchy. | Connected, expired, failed, and disconnected states now expose only the primary status/action; privacy, source details, diagnostics, pool detail, and disconnect live behind one secondary menu/disclosure. | Concise Settings and localization tests. | Scrolling, accessibility, EN/zh-CN. | PASS; renderer and native accessibility review passed |
+| AR-009 Existing user migration does not default to ON | Existing G1 defaults have no auto-refresh key. | Major | A naïve Boolean read could conflate absence with an explicit false. | The controller distinguishes an absent object and defaults it to true while retaining explicit false. | Fresh, migration, OFF/ON, and relaunch persistence tests. | Consent-record compatibility. | PASS; deterministic migration tests and controlled relaunch both restored ON |
+| AR-010 Temporary extraction failure creates rapid retry loop | Fail-closed extraction may recover on the next product cadence. | Blocking | Immediate retry logic could multiply official-page reads. | A previously usable session receives one new schedule only after the failed read completes; there is no retry loop or catch-up path. | Failure normal-cadence test and scheduler source audit. | Fail-closed admission and no manual fallback. | PASS; live failure withdrew WorkBuddy and subsequent attempts remained on the ordinary minute cadence |
+| AR-011 Countdown triggers provider read | Relative timing copy could become a second refresh source. | Major | A UI-owned countdown could be confused with provider cadence. | Settings renders `nextAutoRefreshAt` through a presentation-only one-second `TimelineView`; it never owns or invokes the provider scheduler. | Countdown localization, renderer-preview, and view ownership tests. | Settings open/close behavior. | PASS; countdown advanced independently and closing Settings did not reset the provider cadence |
+| AR-012 Multiple WebViews created by periodic synchronization | Periodic reads must reuse the accepted isolated session. | Blocking | A scheduler could instantiate its own browser. | The scheduler has no WebKit dependency; the controller retains the single existing optional WKWebView. | Source ownership and WebView-count audit. | Privacy, session isolation, and package content. | PASS; one task-owned WebKit GPU/WebContent/Networking trio remained constant until Disconnect |
+| AR-013 Stale read crosses a newer Connect flow | Independent staged re-review found that Connect invalidated the outer task but not the inner WebView/extraction generation. | Blocking | The connector and session controller correctly had separate ownership fences, but Connect initially advanced only the outer fence. | Connect now releases the prior browser and invalidates both read generations before constructing the next single WebView. | Source-contract test locks `releaseBrowser()` before `ensureBrowser()`; bounded extraction-readiness tests prove generation invalidation stops late publication. | Sign In Again, Open Account Usage, cancel, disconnect, and session-mode changes. | PASS; focused, account-web, full-suite, and strict-concurrency verification passed |
+
 ## Verification state
 
 The version-1.5 repair passed 52 focused tests across the account-web,
@@ -80,3 +98,20 @@ account-web admission, removed WorkBuddy from both surfaces, and preserved the
 separate manual `500` record. The final commit-exact package is built and
 audited after the closeout record is committed; its exact identity and hashes
 belong to the final task report.
+
+The M2WACCOUNT-R1 verification added 11 focused scheduler tests and passed
+251 tests across 32 suites, Debug, Release, and strict-concurrency Release
+with warnings as errors. English and Simplified Chinese renderer evidence
+passed in Light, Dark, Reduce Transparency, Increase Contrast, and Reduce
+Motion modes. The bounded live run observed seven scheduled read envelopes
+with 65–75 second start-to-start separation, no overlap, no catch-up burst,
+one UMA process, one owned Codex child, and one WorkBuddy WebKit trio. CPU,
+RSS, file-descriptor, and WebContent usage returned toward idle between reads
+without unexplained monotonic growth. Manual-only mode produced no provider
+read burst for two minutes while Sync Now remained functional. Re-enabling
+Auto Refresh restored the 60-second countdown; repeated Assistant visibility
+changes did not reset it, and a scheduled read completed after Settings
+closed. Disconnect cleared account-web admission, removed WorkBuddy from both
+surfaces, terminated the task-owned WebKit trio, and preserved the separate
+manual record. The task-owned candidate then completed a one-app/one-child
+sole-instance smoke and clean shutdown.

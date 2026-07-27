@@ -13,8 +13,8 @@ extension AppLanguage {
 
     var workBuddyAccountWebDisclosure: String {
         self == .simplifiedChinese
-            ? "UMA 将在隔离的 WorkBuddy 网页会话中打开官方网站，并只读取“套餐与用量”页上的 Credits 余额字段。UMA 不会导出 Cookie、令牌、身份、完整 HTML 或浏览器存储，也不会后台轮询。"
-            : "UMA opens the official site in an isolated WorkBuddy web session and reads only Credit balance fields from Plan and Usage. UMA does not export cookies, tokens, identity, full HTML, or browser storage, and does not poll in the background."
+            ? "UMA 将在隔离的 WorkBuddy 网页会话中打开官方网站，并只读取“套餐与用量”页上的 Credits 余额字段。UMA 不会导出 Cookie、令牌、身份、完整 HTML 或浏览器存储。启用自动刷新时，UMA 每分钟进行一次限定的官方账号页面读取。"
+            : "UMA opens the official site in an isolated WorkBuddy web session and reads only Credit balance fields from Plan and Usage. UMA does not export cookies, tokens, identity, full HTML, or browser storage. When Auto Refresh is enabled, UMA performs one bounded official account-page read every minute."
     }
 
     var workBuddyAccountWebConsent: String {
@@ -44,6 +44,81 @@ extension AppLanguage {
 
     var workBuddyAccountWebSyncNow: String {
         self == .simplifiedChinese ? "立即同步" : "Sync Now"
+    }
+
+    var workBuddyAccountAutoRefresh: String {
+        self == .simplifiedChinese ? "自动刷新" : "Auto Refresh"
+    }
+
+    var workBuddyAccountEveryMinute: String {
+        self == .simplifiedChinese ? "每分钟" : "Every minute"
+    }
+
+    var workBuddyAccountManualOnly: String {
+        self == .simplifiedChinese ? "仅手动" : "Manual only"
+    }
+
+    var workBuddyAccountUpdatedJustNow: String {
+        self == .simplifiedChinese ? "刚刚更新" : "Updated just now"
+    }
+
+    func workBuddyAccountUpdated(at date: Date, now: Date) -> String {
+        let elapsed = max(0, Int(now.timeIntervalSince(date)))
+        guard elapsed >= 60 else { return workBuddyAccountUpdatedJustNow }
+        let minutes = elapsed / 60
+        if minutes < 60 {
+            return self == .simplifiedChinese
+                ? "\(minutes) 分钟前更新"
+                : "Updated \(minutes)m ago"
+        }
+        let hours = minutes / 60
+        return self == .simplifiedChinese
+            ? "\(hours) 小时前更新"
+            : "Updated \(hours)h ago"
+    }
+
+    var workBuddyAccountSignInRequired: String {
+        self == .simplifiedChinese ? "需要重新登录" : "Sign in required"
+    }
+
+    var workBuddyAccountCouldNotReadCredits: String {
+        self == .simplifiedChinese
+            ? "无法读取当前积分"
+            : "Could not read current Credits"
+    }
+
+    var workBuddyAccountSignInAgain: String {
+        self == .simplifiedChinese ? "重新登录" : "Sign In Again"
+    }
+
+    var workBuddyAccountSyncAgain: String {
+        self == .simplifiedChinese ? "再次同步" : "Sync Again"
+    }
+
+    var workBuddyAccountPrivacyAndSourceDetails: String {
+        self == .simplifiedChinese
+            ? "隐私与来源详情"
+            : "Privacy and Source Details"
+    }
+
+    var workBuddyAccountMoreActions: String {
+        self == .simplifiedChinese ? "更多操作" : "More actions"
+    }
+
+    func workBuddyAccountNextRefresh(_ interval: String) -> String {
+        self == .simplifiedChinese
+            ? "下次刷新：\(interval)"
+            : "Next refresh in \(interval)"
+    }
+
+    func workBuddyAccountRefreshInterval(seconds: Int) -> String {
+        self == .simplifiedChinese
+            ? "\(seconds) 秒"
+            : "\(seconds)s"
+    }
+
+    var workBuddyAccountWebSubtitle: String {
+        "\(workBuddyAccountWebSource) · \(workBuddyExperimentalLabel)"
     }
 
     var workBuddyAccountWebOpenUsage: String {
@@ -105,21 +180,20 @@ extension AppLanguage {
         case (.english, .idle): "Not connected"
         case (.english, .consentRequired): "Consent required"
         case (.english, .opening): "Opening isolated session"
-        case (.english, .signInRequired): "Complete the official sign-in in this window"
+        case (.english, .signInRequired): workBuddyAccountSignInRequired
         case (.english, .readyToSync): "Plan and Usage is ready"
-        case (.english, .synchronizing): "Reading allowlisted Credit fields"
-        case (.english, .connected): "Connected · Account web sync"
-        case let (.english, .failed(failure)):
-            "Sync unavailable: \(workBuddyAccountWebFailure(failure))"
+        case (.english, .synchronizing): "Syncing"
+        case (.english, .connected): "Connected"
+        case (.english, .failed): workBuddyAccountCouldNotReadCredits
         case (.simplifiedChinese, .idle): "未连接"
         case (.simplifiedChinese, .consentRequired): "需要同意"
         case (.simplifiedChinese, .opening): "正在打开隔离会话"
-        case (.simplifiedChinese, .signInRequired): "请在此窗口完成官方登录"
+        case (.simplifiedChinese, .signInRequired): workBuddyAccountSignInRequired
         case (.simplifiedChinese, .readyToSync): "“套餐与用量”页面已就绪"
-        case (.simplifiedChinese, .synchronizing): "正在读取允许的 Credits 字段"
-        case (.simplifiedChinese, .connected): "已连接 · 账号网页同步"
-        case let (.simplifiedChinese, .failed(failure)):
-            "同步不可用：\(workBuddyAccountWebFailure(failure))"
+        case (.simplifiedChinese, .synchronizing): "正在同步"
+        case (.simplifiedChinese, .connected): "已连接"
+        case (.simplifiedChinese, .failed):
+            workBuddyAccountCouldNotReadCredits
         }
     }
 

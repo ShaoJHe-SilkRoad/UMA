@@ -150,7 +150,14 @@ struct PreviewRendererTool {
                 : nil
             let accountWebSync = arguments.contains(
                 "--workbuddy-account-web-settings"
-            ) ? WorkBuddyAccountWebSessionController() : nil
+            ) ? (
+                arguments.contains("--workbuddy-account-web-connected")
+                    ? WorkBuddyAccountWebSessionController.previewConnected(
+                        autoRefreshEnabled:
+                            !arguments.contains("--workbuddy-manual-only")
+                    )
+                    : WorkBuddyAccountWebSessionController()
+            ) : nil
             let workBuddySettings = workBuddyLogin != nil || accountWebSync != nil
                 ? WorkBuddySettingsModel.preview()
                 : nil

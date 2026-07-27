@@ -601,20 +601,47 @@ private struct WorkBuddyAccountWebSyncSection: View {
     let checkAgain: () -> Void
     let syncNow: () -> Void
     let disconnectAccount: () -> Void
+    @State private var isShowingDetails = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Label(
-                    language.workBuddyAccountWebTitle,
-                    systemImage: "safari"
-                )
+            HStack(alignment: .top, spacing: 7) {
+                Image(systemName: "w.circle")
+                    .foregroundStyle(UsageDesign.blue)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(language.workBuddySection)
+                    Text(language.workBuddyAccountWebSubtitle)
+                        .font(UsageDesign.font(9, language: language))
+                        .foregroundStyle(.secondary)
+                }
                 .font(UsageDesign.font(12, weight: .semibold, language: language))
                 Spacer()
-                Text(language.workBuddyExperimentalLabel)
-                    .font(.system(size: 8.5, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.orange)
             }
+
+            if !controller.consentGranted {
+                firstConnectionContent
+            } else {
+                currentSessionContent
+            }
+
+            if isShowingDetails {
+                sourceAndPrivacyDetails
+                    .transition(.opacity)
+            }
+        }
+        .padding(9)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.secondary.opacity(0.07))
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var firstConnectionContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(language.workBuddyAccountWebState(.idle))
+                .font(UsageDesign.font(10, weight: .medium, language: language))
+                .foregroundStyle(.secondary)
 
             Text(language.workBuddyAccountWebDisclosure)
                 .font(UsageDesign.font(9.5, language: language))
@@ -623,86 +650,185 @@ private struct WorkBuddyAccountWebSyncSection: View {
 
             WorkBuddyLoginConfirmationRow(
                 title: language.workBuddyAccountWebConsent,
-                isOn: controller.consentGranted,
+                isOn: false,
                 language: language,
-                action: {
-                    if controller.consentGranted {
-                        disconnectAccount()
-                    } else {
-                        controller.grantConsent()
-                    }
-                }
+                action: controller.grantConsent
             )
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(language.workBuddyAccountWebSessionChoice)
-                    .font(UsageDesign.font(9.5, weight: .medium, language: language))
-                    .foregroundStyle(.secondary)
-                Picker(
-                    "",
-                    selection: $controller.sessionMode
-                ) {
-                    ForEach(WorkBuddyAccountWebSessionMode.allCases) { mode in
-                        Text(language.workBuddyAccountWebSessionMode(mode)).tag(mode)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .disabled(!controller.consentGranted)
-                .accessibilityLabel(language.workBuddyAccountWebSessionChoice)
-            }
+            sessionChoice
 
-            VStack(alignment: .leading, spacing: 6) {
-                Button(language.workBuddyAccountWebConnect) {
-                    controller.connect()
-                }
-                .disabled(!controller.consentGranted)
-
-                Button(language.workBuddyAccountWebSyncNow, action: syncNow)
-                    .disabled(
-                        !controller.consentGranted
-                            || controller.flowState == .synchronizing
-                    )
+            Button(language.workBuddyAccountWebConnect) {
+                controller.connect()
             }
             .buttonStyle(.bordered)
+            .disabled(!controller.consentGranted)
+        }
+    }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Button(language.workBuddyAccountWebOpenUsage) {
-                    controller.openAccountUsage()
-                }
-                .disabled(!controller.consentGranted)
-
-                Button(language.checkAgain, action: checkAgain)
-                    .disabled(!controller.consentGranted)
+    @ViewBuilder
+    private var currentSessionContent: some View {
+        switch controller.flowState {
+        case .connected:
+            connectedContent
+        case .signInRequired:
+            Text(language.workBuddyAccountSignInRequired)
+                .font(UsageDesign.font(10, weight: .medium, language: language))
+            Button(language.workBuddyAccountSignInAgain) {
+                controller.connect()
             }
             .buttonStyle(.bordered)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Button(language.workBuddyCancelLogin, role: .cancel) {
-                    controller.cancel()
-                }
-                Button(
-                    language.workBuddyAccountWebDisconnect,
-                    role: .destructive,
-                    action: disconnectAccount
-                )
-                .disabled(!controller.consentGranted)
+            secondaryActions
+        case .failed:
+            Text(language.workBuddyAccountCouldNotReadCredits)
+                .font(UsageDesign.font(10, weight: .medium, language: language))
+            Button(language.workBuddyAccountSyncAgain, action: syncNow)
+                .buttonStyle(.bordered)
+            if controller.lastSynchronizedAt != nil {
+                autoRefreshControls
             }
-            .buttonStyle(.borderless)
-
+            secondaryActions
+        case .opening, .synchronizing, .readyToSync:
             HStack(spacing: 6) {
-                if controller.flowState == .opening
-                    || controller.flowState == .synchronizing {
-                    ProgressView()
-                        .controlSize(.small)
-                }
+                ProgressView()
+                    .controlSize(.small)
                 Text(language.workBuddyAccountWebState(controller.flowState))
                     .font(UsageDesign.font(9.5, weight: .medium, language: language))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
-            .accessibilityElement(children: .combine)
+            Button(language.checkAgain, action: checkAgain)
+                .buttonStyle(.bordered)
+            Button(language.workBuddyCancelLogin, role: .cancel) {
+                controller.cancel()
+            }
+            .buttonStyle(.borderless)
+        case .idle, .consentRequired:
+            Text(language.workBuddyAccountWebState(.idle))
+                .font(UsageDesign.font(10, weight: .medium, language: language))
+                .foregroundStyle(.secondary)
+            sessionChoice
+            Button(language.workBuddyAccountWebConnect) {
+                controller.connect()
+            }
+            .buttonStyle(.bordered)
+        }
+    }
 
+    private var connectedContent: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(language.workBuddyAccountWebState(.connected))
+                    .font(UsageDesign.font(10.5, weight: .semibold, language: language))
+                if let lastSynchronizedAt = controller.lastSynchronizedAt {
+                    TimelineView(.periodic(from: .now, by: 30)) { context in
+                        Text(
+                            language.workBuddyAccountUpdated(
+                                at: lastSynchronizedAt,
+                                now: context.date
+                            )
+                        )
+                    }
+                    .font(UsageDesign.font(9.5, language: language))
+                    .foregroundStyle(.secondary)
+                }
+            }
+            autoRefreshControls
+            HStack(spacing: 8) {
+                Button(language.workBuddyAccountWebSyncNow, action: syncNow)
+                    .buttonStyle(.bordered)
+                    .disabled(controller.flowState == .synchronizing)
+                Spacer()
+                secondaryActions
+            }
+        }
+    }
+
+    private var autoRefreshControls: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Toggle(
+                language.workBuddyAccountAutoRefresh,
+                isOn: $controller.autoRefreshEnabled
+            )
+            .toggleStyle(.switch)
+            .tint(UsageDesign.blue)
+            .font(UsageDesign.font(10, weight: .medium, language: language))
+            Text(
+                controller.autoRefreshEnabled
+                    ? language.workBuddyAccountEveryMinute
+                    : language.workBuddyAccountManualOnly
+            )
+            .font(UsageDesign.font(9, language: language))
+            .foregroundStyle(.secondary)
+            if controller.autoRefreshEnabled,
+               let nextRefreshAt = controller.nextAutoRefreshAt {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let seconds = max(
+                        0,
+                        Int(ceil(nextRefreshAt.timeIntervalSince(context.date)))
+                    )
+                    Text(
+                        language.workBuddyAccountNextRefresh(
+                            language.workBuddyAccountRefreshInterval(
+                                seconds: seconds
+                            )
+                        )
+                    )
+                }
+                .font(UsageDesign.font(9, language: language))
+                .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var secondaryActions: some View {
+        Menu {
+            Button(language.workBuddyAccountWebOpenUsage) {
+                controller.openAccountUsage()
+            }
+            Button(language.workBuddyAccountSignInAgain) {
+                controller.connect()
+            }
+            Button(language.workBuddyAccountPrivacyAndSourceDetails) {
+                isShowingDetails.toggle()
+            }
+            Divider()
+            Button(
+                language.workBuddyAccountWebDisconnect,
+                role: .destructive,
+                action: disconnectAccount
+            )
+        } label: {
+            Image(systemName: "ellipsis")
+                .frame(width: 24, height: 20)
+        }
+        .menuStyle(.borderlessButton)
+        .help(language.workBuddyAccountMoreActions)
+        .accessibilityLabel(language.workBuddyAccountMoreActions)
+    }
+
+    private var sessionChoice: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(language.workBuddyAccountWebSessionChoice)
+                .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                .foregroundStyle(.secondary)
+            Picker("", selection: $controller.sessionMode) {
+                ForEach(WorkBuddyAccountWebSessionMode.allCases) { mode in
+                    Text(language.workBuddyAccountWebSessionMode(mode)).tag(mode)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .accessibilityLabel(language.workBuddyAccountWebSessionChoice)
+        }
+    }
+
+    private var sourceAndPrivacyDetails: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Divider()
+                .opacity(0.35)
+            Text(language.workBuddyAccountWebDisclosure)
+                .font(UsageDesign.font(9, language: language))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            sessionChoice
             if let safeDiagnosticCode = controller.safeDiagnosticCode {
                 Text(
                     "\(language.workBuddyAccountWebSafeDiagnostic): "
@@ -710,12 +836,7 @@ private struct WorkBuddyAccountWebSyncSection: View {
                 )
                 .font(UsageDesign.font(8.5, language: language))
                 .foregroundStyle(.secondary)
-                .accessibilityLabel(
-                    "\(language.workBuddyAccountWebSafeDiagnostic), "
-                        + safeDiagnosticCode
-                )
             }
-
             if let snapshot = controller.latestCreditSnapshot {
                 VStack(alignment: .leading, spacing: 4) {
                     accountCreditRow(
@@ -734,27 +855,13 @@ private struct WorkBuddyAccountWebSyncSection: View {
                         language.workBuddyTotalAvailable,
                         value: snapshot.calculatedTotalRemaining
                     )
-                    Text(
-                        "\(language.workBuddySource): "
-                            + language.workBuddyAccountWebSource
-                    )
-                    Text(
-                        "\(language.workBuddySupportStatus): "
-                            + language.workBuddyExperimentalLabel
-                    )
                     Text(language.workBuddyConfirmedAt(snapshot.observedAt))
                 }
-                .font(UsageDesign.font(9.5, weight: .medium, language: language))
+                .font(UsageDesign.font(9, weight: .medium, language: language))
                 .foregroundStyle(.secondary)
                 .accessibilityElement(children: .combine)
             }
         }
-        .padding(9)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.secondary.opacity(0.07))
-        )
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func accountCreditRow(_ label: String, value: Decimal) -> some View {

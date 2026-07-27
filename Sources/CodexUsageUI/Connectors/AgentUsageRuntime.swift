@@ -65,6 +65,12 @@ public struct UsageMonitorRuntime {
                 ?? AgentConnectorSnapshotStore(),
             additionalConnectors: [workBuddyConnector, accountWebConnector]
         )
+        accountWebSync.configureAutoRefresh {
+            try? await registry.refresh(
+                WorkBuddyAccountWebCreditsConnector.connectorID,
+                trigger: .timer
+            )
+        }
         let usageStore = UsageStore(
             registry: registry,
             primaryConnectorID: CodexUsageConnector.connectorID,
