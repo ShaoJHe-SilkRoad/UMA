@@ -238,7 +238,7 @@ struct STABG1StabilityContractTests {
         }
     }
 
-    @Test("Stability packaging is commit-exact, allowlisted, and privacy-audited")
+    @Test("UMA 0.11 manual-test packaging is commit-exact, allowlisted, and privacy-audited")
     func packageContract() throws {
         let relativePath = "script/package_uma_stability.sh"
         let url = repositoryRoot().appendingPathComponent(relativePath)
@@ -248,9 +248,9 @@ struct STABG1StabilityContractTests {
 
         #expect(permissions.intValue & 0o111 != 0)
         #expect(script.contains("git -C \"$REPO_ROOT\" archive"))
-        #expect(script.contains("uma-stability-final-$short_commit/UMA.app"))
-        #expect(script.contains("MARKETING_VERSION=\"0.10.1\""))
-        #expect(script.contains("DEFAULT_BUILD=\"202607270001\""))
+        #expect(script.contains("uma-0.11-manual-$short_commit/UMA.app"))
+        #expect(script.contains("MARKETING_VERSION=\"0.11\""))
+        #expect(script.contains("DEFAULT_BUILD=\"202607270002\""))
         #expect(script.contains("TypographyDecision"))
         #expect(script.contains("CLAUDE TYPOGRAPHY FALLBACK USED"))
         #expect(script.contains("Package file allowlist mismatch"))
@@ -260,6 +260,7 @@ struct STABG1StabilityContractTests {
         #expect(!script.contains("git checkout"))
         #expect(!script.contains("git reset"))
         #expect(!script.contains("/Users/juliushe/Desktop/UMA_0.10.1.app"))
+        #expect(!script.contains("/Users/juliushe/Desktop/UMA_0.11.app"))
     }
 
     private func source(_ relativePath: String) throws -> String {

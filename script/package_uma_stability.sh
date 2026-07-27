@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Builds and audits one immutable, commit-exact UMA STAB-G1 package.
+# Builds and audits one immutable, commit-exact UMA 0.11 manual-test package.
 set -euo pipefail
 
 readonly REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 readonly PRODUCT="CodexUsageMonitor"
-readonly MARKETING_VERSION="0.10.1"
+readonly MARKETING_VERSION="0.11"
 readonly BUNDLE_ID="com.kevinchen.CodexUsageMonitor"
-readonly DEFAULT_BUILD="202607270001"
+readonly DEFAULT_BUILD="202607270002"
 
 usage() {
     printf '%s\n' \
-        "Usage: $0 --commit <40-hex-sha> [--build <12-digit-number>] --output /private/tmp/uma-stability-final-<short-commit>/UMA.app"
+        "Usage: $0 --commit <40-hex-sha> [--build <12-digit-number>] --output /private/tmp/uma-0.11-manual-<short-commit>/UMA.app"
 }
 
 commit=""
@@ -28,7 +28,7 @@ done
 [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { usage >&2; exit 2; }
 [[ "$build_number" =~ ^[0-9]{12}$ ]] || { usage >&2; exit 2; }
 readonly short_commit="${commit:0:12}"
-readonly expected_output="/private/tmp/uma-stability-final-$short_commit/UMA.app"
+readonly expected_output="/private/tmp/uma-0.11-manual-$short_commit/UMA.app"
 [[ "$output" == "$expected_output" ]] || {
     printf 'Refusing output outside %s\n' "$expected_output" >&2
     exit 2
@@ -48,7 +48,7 @@ readonly output_parent="$(dirname "$output")"
 }
 
 git -C "$REPO_ROOT" cat-file -e "$commit^{commit}"
-readonly package_root="/private/tmp/uma-stability-package-$commit"
+readonly package_root="/private/tmp/uma-0.11-manual-package-$commit"
 readonly source_root="$package_root/source"
 readonly source_archive="$package_root/source-$commit.tar"
 readonly scratch_root="$package_root/swift"
