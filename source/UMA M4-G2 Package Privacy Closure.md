@@ -1,7 +1,7 @@
 # UMA M4-G2 Package and Privacy Closure
 
-Status: implementation and package contract verified; final artifact is
-commit-exact
+Status: historical offline prototype evidence — never installed or released;
+superseded by M4-N product-path retirement
 Date: 2026-07-28
 
 ## Package boundary

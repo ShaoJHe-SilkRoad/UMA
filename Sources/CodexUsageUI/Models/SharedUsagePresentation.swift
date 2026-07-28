@@ -233,7 +233,6 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
     public let remaining: SharedRemainingValue
     public let availability: SharedAvailabilityPresentation?
     public let accountCreditBreakdown: SharedAccountCreditBreakdown?
-    public let creditDetails: AgentCreditDetailsSnapshot?
     public let availabilityLifecycle: SharedAvailabilityLifecycle?
     public let sourceDescription: String?
     public let isVisibleInDesktopAssistant: Bool
@@ -252,7 +251,6 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
         remaining: SharedRemainingValue,
         availability: SharedAvailabilityPresentation? = nil,
         accountCreditBreakdown: SharedAccountCreditBreakdown? = nil,
-        creditDetails: AgentCreditDetailsSnapshot? = nil,
         availabilityLifecycle: SharedAvailabilityLifecycle? = nil,
         sourceDescription: String? = nil,
         isVisibleInDesktopAssistant: Bool = true,
@@ -270,7 +268,6 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
         self.remaining = remaining
         self.availability = availability
         self.accountCreditBreakdown = accountCreditBreakdown
-        self.creditDetails = creditDetails
         self.availabilityLifecycle = availabilityLifecycle
         self.sourceDescription = sourceDescription
         self.isVisibleInDesktopAssistant = isVisibleInDesktopAssistant
@@ -290,8 +287,7 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
 
     public var tooltipText: String {
         if let availability {
-            if availability.sourceState == .authenticatedAccountWeb
-                || availability.sourceState == .officialRemoteUsageAPI {
+            if availability.sourceState == .authenticatedAccountWeb {
                 return "\(providerName), \(connectionStatus.accessibilityText), "
                     + "\(availability.accessibilityText), "
                     + "\(sourceDescription ?? "Account web sync")."
@@ -379,11 +375,6 @@ public enum SharedUsagePresentationPolicy {
         case let .credits(balance):
             compactText = CreditFormatter.compact(balance.remaining)
             if case .authenticatedAccountWeb = balance.provenance {
-                accessibilityText = CreditFormatter.accessibilityAvailable(
-                    balance.remaining,
-                    language: language
-                )
-            } else if case .officialRemoteUsageAPI = balance.provenance {
                 accessibilityText = CreditFormatter.accessibilityAvailable(
                     balance.remaining,
                     language: language
@@ -514,8 +505,7 @@ public enum SharedUsagePresentationPolicy {
               account.safeFailure == nil
         else { return false }
         if account.availabilitySourceState == .officialStructured
-            || account.availabilitySourceState == .authenticatedAccountWeb
-            || account.availabilitySourceState == .officialRemoteUsageAPI {
+            || account.availabilitySourceState == .authenticatedAccountWeb {
             return true
         }
         return !account.rateLimitWindows.isEmpty
@@ -577,15 +567,12 @@ public enum SharedUsagePresentationPolicy {
         }()
         let receivedManualConfirmation =
             freshAvailability?.sourceState == .manualConfirmed
-        let permitsAvailabilityRetention =
-            previous?.availability?.sourceState != .officialRemoteUsageAPI
-                && freshAvailability?.sourceState != .officialRemoteUsageAPI
         let availability: SharedAvailabilityPresentation?
         let retainedAvailability: Bool
         if receivedManualConfirmation {
             availability = freshAvailability
             retainedAvailability = false
-        } else if permitsAvailabilityRetention && (
+        } else if (
             sourceIsStale
                 || (sourceIsUnavailable && availabilityLifecycle == nil)
         ),
@@ -643,18 +630,10 @@ public enum SharedUsagePresentationPolicy {
                     observedAt: $0.observedAt
                 )
             },
-            creditDetails: accountChannel?.creditDetails,
             availabilityLifecycle: availabilityLifecycle,
-            sourceDescription: {
-                switch availability?.sourceState {
-                case .authenticatedAccountWeb:
-                    language.workBuddyAccountWebSource
-                case .officialRemoteUsageAPI:
-                    language.manusOfficialAPIV2
-                default:
-                    nil
-                }
-            }(),
+            sourceDescription: availability?.sourceState == .authenticatedAccountWeb
+                ? language.workBuddyAccountWebSource
+                : nil,
             isVisibleInDesktopAssistant: !snapshot.capabilities.contains(
                 .hiddenFromDesktopAssistant
             ),

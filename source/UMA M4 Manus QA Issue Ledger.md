@@ -1,6 +1,6 @@
 # UMA M4 Manus QA Issue Ledger
 
-Status: M4-G2 implementation ledger
+Status: M4 closed; Manus unsupported
 Date: 2026-07-28
 
 | ID | First evidence | Root cause / risk | Repair or decision | Verification | Final status |
@@ -33,49 +33,37 @@ Date: 2026-07-28
 | M4-G2-015 | Final independent review found a failed remote read used the local-provider withdrawal path | Stopping the remote connector would also stop scheduled recovery and clear authentication suspension | Withdraw failed remote data immediately without stopping its scheduler; explicit monitoring exclusion still stops the connector and timer | Network-failure recovery-timer and authentication-suspension regressions | CLOSED |
 | M4-G2-016 | Final independent review found an unsaved SecureField draft could survive Settings navigation and the presented source label was English-only | A retained draft broadens credential lifetime, and an untranslated source label breaks the required Chinese surface | Clear the draft on back, close, and Manus-section disappearance; localize API provenance through `AppLanguage` | Draft-discard/no-mutation test and English/Chinese presentation assertions | CLOSED |
 | M4-G2-017 | The first commit-exact package build reached signing but the helper required the short header literal to appear in optimizer-visible binary strings | Swift can encode a short constant without a printable C string, so the check produced a false negative after a correct Release build | Verify the exact header declaration in the archived commit source while retaining binary checks for the endpoint, Keychain service, forbidden routes, dependencies, and package manifest | Focused package-helper test plus final commit-exact package audit | CLOSED |
+| M4-N-001 | Founder rejected API-key product access after the offline prototype | Leaving the connector, Keychain store, Settings entrance, scheduler, endpoint, or package helper would preserve an unadmitted callable route | Restore shared runtime to the accepted pre-M4-G2 tree and remove Manus-only production paths, tests, and active packaging | M4-N source, registry, Settings, presentation, and executable-string assertions | CLOSED |
+| M4-N-002 | Current official documentation exposes no qualifying local CLI Credit contract | A manual, inferred, browser, private-state, or reverse-engineered fallback would violate the locked source direction | Keep Manus unsupported and hidden; allow reconsideration only after a new Founder instruction and official documented local CLI or IPC contract | Admission decision, source dossier, retirement decision, and closeout review | CLOSED — NO-GO |
+| M4-N-003 | Eight M4-G3 worktree paths survived cancellation | Stale acceptance tests, package tooling, or presentation changes could imply that live Manus admission remained active | Restore exact tracked G3-only changes and remove exact untracked G3-only files | Clean-status and absence assertions | CLOSED |
+| M4-N-004 | Historical M4-G2 records contained now-obsolete setup language | Readers could mistake a rejected prototype for current product guidance | Mark historical records superseded, remove live setup sequence, and add explicit retirement/closeout records | Documentation review and focused retirement tests | CLOSED |
 
-## Verification matrix
+## M4-N verification matrix
 
-Required M4-G2 checks:
-
-- official documentation inventory: covered by Source Dossier;
-- exact current host/path/method/auth: focused test;
-- schema fixture decode: focused test;
-- missing primary, negative, wrong-type, overflow, and malformed data:
-  focused test;
-- optional fields and non-reconciling components: focused test;
-- redacted request diagnostic: focused test;
-- redirect, timeout, body-size, one-in-flight, and cadence contract:
-  focused test;
-- no-secret Keychain query design: typed contract test plus one unique
-  synthetic Security-framework lifecycle;
-- affected Credit and Assistant regressions: 67 tests across 5 suites PASS;
-- full suite: 351 tests across 43 suites PASS;
+- production source matches the accepted pre-M4-G2 runtime tree;
+- focused M4-N retirement suite: 7/7 PASS;
+- provider-registry, Codex, WorkBuddy, Settings, main-panel, Desktop Assistant,
+  localization, and accessibility coverage is included in the full suite;
+- full suite: 325 tests across 40 suites PASS;
 - Debug, Release, and strict-concurrency Release builds: PASS;
+- rejected endpoint, header, Keychain service, Settings entrance, connector,
+  scheduler, and source-class identifiers are absent from production source;
+- the two exact M4-G3 WIP files are absent;
+- `git diff --check`: PASS;
 - final package, staged-index review, and clean final state are recorded by
   the completion report.
 
-## Residual risks
+## Residual risk
 
-1. A live Manus account may expose a permission or schema behavior not
-   represented in the public docs.
-2. The endpoint-specific rate limit remains unpublished.
-3. Personal versus team balance semantics can only be confirmed with the
-   Human's chosen key scope.
-4. Swift strings cannot be guaranteed to be cryptographically zeroized;
-   implementation must minimize lifetime and copies.
-5. Locked-screen reads are intentionally unavailable under the stronger
-   Keychain accessibility class.
-
-None of these risks require broadening M4-G2. They remain explicit gates for
-later Human live validation.
+Manus remains unsupported because no official documented local CLI or IPC
+contract exposes current Credits as stable structured read-only data. No live
+account validation is pending, and the rejected API-key route must not be
+revived without a new Founder decision.
 
 ## Final observed evidence
 
-- focused M4-G2 suite: 33 tests across 4 suites PASS;
-- affected Codex/WorkBuddy/Credit/Assistant regressions:
-  67 tests across 5 suites PASS;
-- full suite: 351 tests across 43 suites PASS;
+- focused M4-N retirement suite: 7/7 PASS;
+- full suite: 325 tests across 40 suites PASS;
 - Debug, Release, and strict-concurrency Release builds: PASS;
 - `git diff --check`: PASS before staging.
 

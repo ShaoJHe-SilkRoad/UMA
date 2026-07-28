@@ -1,93 +1,72 @@
 # UMA M4 Manus Admission Decision
 
-Status: M4-G1 decision
+Status: M4 CLI-only source decision — current authority
 Date: 2026-07-28
-Decision: **CONDITIONAL GO**
+Decision: **NO-GO**
 
 ## Decision statement
 
-**CONDITIONAL GO — OFFICIAL MANUS CREDIT SOURCE ADMITTED FOR BOUNDED
-IMPLEMENTATION; HUMAN LIVE BALANCE PROOF REMAINS REQUIRED.**
+**NO-GO — NO OFFICIAL LOCAL MANUS CLI CREDIT CONTRACT EXISTS.**
 
-Current official documentation and the UMA architecture establish a secure,
-read-only implementation path for:
+Founder direction admits only:
 
 ```text
-GET https://api.manus.ai/v2/usage.availableCredits
+Official Manus CLI
+  → documented read-only structured Credits output
+  → current total available Credits
+  → UMA connector
 ```
 
-using the required `x-manus-api-key` header and
-`data.total_credits` as the only authoritative current balance.
+The installed Manus 1.6.8 arm64 bundle supplies no public CLI command on PATH.
+Its additional `sidecar` executable is undocumented as a public CLI, and both
+the enclosing application and `sidecar` fail strict signature verification.
+Current official Manus documentation contains no CLI installation,
+authentication-reuse, status, usage, Credits, JSON, schema, or local freshness
+contract for a Manus command.
 
-This is not a full GO because M4-G1 intentionally used no real API key,
-performed no authenticated provider read, and made no same-time Human balance
-comparison. The official documentation also does not publish an
-endpoint-specific rate limit for this method. Those facts do not block a
-bounded implementation, but they prevent final live acceptance.
+No documented CLI command was run because no documented CLI exists. No
+structured Credit field was available, no authentication boundary was
+crossed, and no task or Credit-consuming operation occurred.
 
-## Admission basis
+## Admission failure basis
 
-The source is admitted because:
+- no official Manus CLI installation or executable contract is documented;
+- no documented `status`, `usage`, or `credits` command exists;
+- no documented JSON or other machine-readable Credit schema exists;
+- no command directly returns current total available Credits;
+- the undocumented bundled `sidecar` is not an admissible public interface;
+- the installed bundle's failed trust checks forbid treating its executables
+  as a stable source;
+- human-readable scraping, private-state inspection, API keys, OAuth, browser
+  sessions, manual entry, estimation, and task-generating probes are forbidden.
 
-- API v2 is current and the exact host, method, and path are public;
-- the endpoint is read-only and no-task;
-- endpoint authentication is explicitly API-key-only; OAuth is not accepted;
-- `total_credits` is documented as actual spendable balance;
-- personal and team-key scope is documented;
-- all current fields can be classified without inferring private data;
-- UMA can keep the full-account API key in a device-bound Keychain item;
-- exact route, redirect, timeout, body-size, cadence, and decoder boundaries
-  can be enforced locally;
-- UMA's provider-neutral Credit model can represent the value exactly;
-- no SDK, browser automation, Hook, local Manus.app process, task history, or
-  private implementation inspection is required.
+## API-key route retirement
 
-## M4-G2 implementation lock
+The former M4-G1 **CONDITIONAL GO** for the API-key endpoint is revoked. The
+M4-G2 API-key implementation is not admitted for production, packaging, live
+validation, deployment, or release. Manus remains unsupported and hidden.
 
-M4-G2 may implement only:
+M4-N removes the M4-G2 API-key implementation from the product and final
+package while preserving the original M4-G2 commit as historical Git
+evidence. No production connector, Settings entrance, credential store,
+scheduler, endpoint request, or presentation path remains.
 
-- one Keychain item owned by UMA;
-- one exact `usage.availableCredits` URLSession client;
-- one strict decoder for the admitted schema;
-- one provider-neutral Manus Credit connector;
-- one-in-flight/coalesced launch, manual refresh, and bounded cadence;
-- main-panel/Desktop Assistant parity after a current valid read;
-- Official API provenance, Settings controls, and disconnect;
-- focused tests and package/privacy proof.
+## Authentication and consumption boundary
 
-M4-G2 must not:
+No API key, OAuth token, cookie, session, Keychain item, auth database, account
+identity, or private application state was accessed. No Manus application
+task, agent, project, file, browser, or network operation was invoked. The
+official Desktop Credit documentation states that merely opening or running
+the Desktop app does not consume Credits; Credits are deducted during active
+agent task processing. This recheck did not launch such processing.
 
-- use an SDK or platform package to obtain this value;
-- call `task.*`, `usage.list`, team logs/statistics, or any identity endpoint;
-- follow redirects;
-- persist or log the key, headers, body, raw provider error, request ID,
-  identity, or decoded snapshot;
-- reconstruct balance from component fields;
-- treat quotas as remaining balance or percentage denominators;
-- restore a stale Manus balance after launch;
-- access Manus.app, browser sessions, cookies, credentials, tasks, or history;
-- make a live authenticated request without the later explicit Human gate.
+## Re-admission lock
 
-## Live acceptance lock
+A future Manus source may be reconsidered only after Founder instruction and
+only if official documentation proves a local CLI that directly returns
+current total available Credits through a stable read-only structured schema,
+without credential disclosure, private-data access, or Credit consumption.
 
-Production acceptance requires all of the following:
-
-1. Human-created dedicated key in official Manus Settings.
-2. UMA Keychain save and verify with no plaintext persistence.
-3. One current successful read of the exact admitted endpoint.
-4. Same-time numeric comparison of official balance and UMA.
-5. Main-panel/Desktop Assistant parity and Official API provenance.
-6. Manual Refresh coalescing and cadence validation.
-7. Disconnect deletion and immediate surface withdrawal.
-8. Package, logs, diagnostics, preferences, and Git remain secret-free.
-
-If the endpoint returns a materially different schema, requires an undisclosed
-permission, or cannot be reconciled with the official balance, the verdict
-returns to NO-GO pending a new admission decision. A login or key alone does
-not convert this conditional verdict to GO.
-
-## Decision owner and next gate
-
-M4-G1 admits the source contract only. It does not implement the production
-connector. M4-G2 may begin after this commit. The Human-controlled live proof
-belongs to the later live-validation gate defined by the M4 governing plan.
+Do not search hidden or reverse-engineered alternatives, do not fall back to
+manual Credit entry, and do not move to another source class without a new
+Founder instruction.

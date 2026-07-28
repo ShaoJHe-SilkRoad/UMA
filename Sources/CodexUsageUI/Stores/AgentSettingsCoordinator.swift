@@ -27,7 +27,6 @@ final class AgentSettingsCoordinator: ObservableObject {
         shippedProviders: [(AgentConnectorID, String)] = [
             (AgentPreferenceRecord.codexProviderID, "Codex"),
             (AgentPreferenceRecord.workBuddyProviderID, "WorkBuddy"),
-            (AgentPreferenceRecord.manusProviderID, "Manus"),
         ]
     ) {
         self.store = store

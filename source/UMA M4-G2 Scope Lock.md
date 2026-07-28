@@ -1,6 +1,6 @@
 # UMA M4-G2 Scope Lock
 
-Status: implemented; offline acceptance only
+Status: historical prototype scope — retired by M4-N; do not execute
 Date: 2026-07-28
 
 ## Accepted predecessor

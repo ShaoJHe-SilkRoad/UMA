@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Builds one immutable, commit-exact, offline UMA M4-G2 package.
+# Builds and audits one immutable, commit-exact M4-N retirement package.
 set -euo pipefail
 
 readonly REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 readonly PRODUCT="CodexUsageMonitor"
 readonly MARKETING_VERSION="0.11"
 readonly BUNDLE_ID="com.kevinchen.CodexUsageMonitor"
-readonly DEFAULT_BUILD="202607280002"
+readonly DEFAULT_BUILD="202607280004"
 readonly SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk"
 
 usage() {
     printf '%s\n' \
-        "Usage: $0 --commit <40-hex-sha> [--build <12-digit-number>] --output /private/tmp/uma-m4-g2-final-<short-commit>/UMA.app"
+        "Usage: $0 --commit <40-hex-sha> [--build <12-digit-number>] --output /private/tmp/uma-m4-n-final-<short-commit>/UMA.app"
 }
 
 commit=""
@@ -33,7 +33,7 @@ done
     exit 1
 }
 readonly short_commit="${commit:0:12}"
-readonly expected_output="/private/tmp/uma-m4-g2-final-$short_commit/UMA.app"
+readonly expected_output="/private/tmp/uma-m4-n-final-$short_commit/UMA.app"
 [[ "$output" == "$expected_output" ]] || {
     printf 'Refusing output outside %s\n' "$expected_output" >&2
     exit 2
@@ -57,7 +57,7 @@ readonly canonical_parent_base="$(cd "$(dirname "$output_parent")" && pwd -P)"
 mkdir "$output_parent"
 
 git -C "$REPO_ROOT" cat-file -e "$commit^{commit}"
-readonly package_root="/private/tmp/uma-m4-g2-package-$commit"
+readonly package_root="/private/tmp/uma-m4-n-package-$commit"
 readonly source_root="$package_root/source"
 readonly source_archive="$package_root/source-$commit.tar"
 readonly scratch_root="$package_root/swift"
@@ -91,6 +91,14 @@ readonly archive_sha256="$(
     printf '%s\n' "Commit archive is incomplete." >&2
     exit 1
 }
+
+readonly production_forbidden='ManusUsageConnector|ManusSettingsModel|ManusAPIKeyStore|ManusCreditsAPIClient|ManusRefreshScheduler|officialRemoteUsageAPI|currentOfficialRemoteRead|umaOwnedKeychainCredential|/v2/usage\.availableCredits|x-manus-api-key|com\.kevinchen\.CodexUsageMonitor\.manus-api-v2|Connect Manus|Save and Verify'
+if /usr/bin/grep -R -E -q \
+    "$production_forbidden" \
+    "$source_root/Sources"; then
+    printf '%s\n' "Package production source retained a rejected Manus route." >&2
+    exit 1
+fi
 
 export HOME="$home_root"
 export TMPDIR="$tmp_root"
@@ -133,14 +141,14 @@ install -m 644 \
     "$source_root/Assets/AppIcon.icns" \
     "$contents/Resources/AppIcon.icns"
 
-cat > "$contents/Resources/UMA-M4-Provenance.plist" <<PLIST
+cat > "$contents/Resources/UMA-M4-N-Provenance.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Revision</key><string>$commit</string>
 <key>SourceArchiveSHA256</key><string>$archive_sha256</string>
 <key>SourceState</key><string>commit-exact</string>
-<key>LiveManusBalance</key><string>LIVE MANUS BALANCE NOT YET VALIDATED</string>
+<key>ProviderRetirementStatus</key><string>M4-CLOSED-NO-SOURCE</string>
 </dict></plist>
 PLIST
 
@@ -166,16 +174,33 @@ PLIST
 
 /usr/bin/plutil -lint "$contents/Info.plist" >/dev/null
 /usr/bin/plutil -lint \
-    "$contents/Resources/UMA-M4-Provenance.plist" >/dev/null
+    "$contents/Resources/UMA-M4-N-Provenance.plist" >/dev/null
 /usr/bin/codesign --force --deep --sign - "$output"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$output"
+
+[[ "$(/usr/bin/lipo -archs "$contents/MacOS/$PRODUCT")" == "arm64" ]] || {
+    printf '%s\n' "Package executable is not arm64-only." >&2
+    exit 1
+}
+if /usr/bin/find "$output" -type l -print -quit | /usr/bin/grep -q .; then
+    printf '%s\n' "Package contains a symbolic link." >&2
+    exit 1
+fi
+if /usr/bin/find "$output" -type f \
+    \( -iname '*.json' -o -iname '*.sqlite*' -o -iname '*.db' \
+       -o -iname '*.log' -o -iname '*.png' -o -iname '*.jpg' \
+       -o -iname '*.md' -o -iname '*.txt' \) \
+    -print -quit | /usr/bin/grep -q .; then
+    printf '%s\n' "Package contains a fixture, record, log, or evidence file." >&2
+    exit 1
+fi
 
 readonly expected_manifest="$(
     printf '%s\n' \
         "Contents/Info.plist" \
         "Contents/MacOS/$PRODUCT" \
         "Contents/Resources/AppIcon.icns" \
-        "Contents/Resources/UMA-M4-Provenance.plist" \
+        "Contents/Resources/UMA-M4-N-Provenance.plist" \
         "Contents/_CodeSignature/CodeResources"
 )"
 readonly actual_manifest="$(
@@ -184,36 +209,17 @@ readonly actual_manifest="$(
         | LC_ALL=C /usr/bin/sort
 )"
 [[ "$actual_manifest" == "$expected_manifest" ]] || {
-    printf '%s\n' "Package manifest differs from the exact allowlist." >&2
-    exit 1
-}
-if /usr/bin/find "$output" -type l -print | /usr/bin/grep -q .; then
-    printf '%s\n' "Package contains a symbolic link." >&2
-    exit 1
-fi
-if /usr/bin/find "$output" ! -type d ! -type f -print \
-    | /usr/bin/grep -q .; then
-    printf '%s\n' "Package contains an unsupported filesystem entry." >&2
-    exit 1
-fi
-[[ "$(/usr/bin/lipo -archs "$contents/MacOS/$PRODUCT")" == "arm64" ]] || {
-    printf '%s\n' "Package executable is not arm64-only." >&2
+    printf '%s\n' "Package file allowlist mismatch." >&2
+    printf '%s\n' "$actual_manifest" >&2
     exit 1
 }
 
 readonly binary_strings="$package_root/binary-strings.txt"
-/usr/bin/strings "$contents/MacOS/$PRODUCT" > "$binary_strings"
-/usr/bin/grep -q '/v2/usage.availableCredits' "$binary_strings"
-/usr/bin/grep -q 'com.kevinchen.CodexUsageMonitor.manus-api-v2' \
-    "$binary_strings"
-readonly api_client_source="$source_root/Sources/CodexUsageUI/Services/ManusCreditsAPIClient.swift"
-/usr/bin/grep -F -q \
-    'static let authenticationHeader = "x-manus-api-key"' \
-    "$api_client_source"
+/usr/bin/strings -a "$contents/MacOS/$PRODUCT" > "$binary_strings"
 if /usr/bin/grep -E -q \
-    'usage\.list|/v2/tasks?|synthetic-(a|b|non-secret|settings|lifecycle)' \
+    "$production_forbidden|usage\.list|/v2/tasks?|BEGIN [A-Z ]*PRIVATE KEY|Bearer [A-Za-z0-9._-]{20,}" \
     "$binary_strings"; then
-    printf '%s\n' "Package binary contains a prohibited route or test value." >&2
+    printf '%s\n' "Package executable retained rejected route or private material." >&2
     exit 1
 fi
 
@@ -230,12 +236,22 @@ readonly executable_sha256="$(
     /usr/bin/shasum -a 256 "$contents/MacOS/$PRODUCT" \
         | /usr/bin/awk '{print $1}'
 )"
-printf 'PACKAGED output=%s commit=%s archive_sha256=%s executable_sha256=%s version=%s build=%s bundle_id=%s live_status=%s\n' \
+readonly manifest_sha256="$(
+    (
+        cd "$output"
+        /usr/bin/find . -type f -print0 \
+            | LC_ALL=C /usr/bin/sort -z \
+            | /usr/bin/xargs -0 /usr/bin/shasum -a 256
+    ) | /usr/bin/shasum -a 256 | /usr/bin/awk '{print $1}'
+)"
+
+printf 'PACKAGED output=%s commit=%s archive_sha256=%s executable_sha256=%s manifest_sha256=%s version=%s build=%s bundle_id=%s status=%s\n' \
     "$output" \
     "$commit" \
     "$archive_sha256" \
     "$executable_sha256" \
+    "$manifest_sha256" \
     "$MARKETING_VERSION" \
     "$build_number" \
     "$BUNDLE_ID" \
-    "LIVE MANUS BALANCE NOT YET VALIDATED"
+    "M4-CLOSED-NO-SOURCE"

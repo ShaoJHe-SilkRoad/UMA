@@ -13,7 +13,6 @@ struct UsageSettingsCard: View {
     let workBuddySettings: WorkBuddySettingsModel?
     let workBuddyLogin: WorkBuddyLoginCoordinator?
     let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
-    let manusSettings: ManusSettingsModel?
     let providerLoginOptions: [ProviderLoginOption]
     var agentSettings: AgentSettingsCoordinator? = nil
     var searchForAgents: (() -> Void)? = nil
@@ -103,7 +102,6 @@ struct UsageSettingsCard: View {
                     workBuddySettings: workBuddySettings,
                     workBuddyLogin: workBuddyLogin,
                     workBuddyAccountWebSync: workBuddyAccountWebSync,
-                    manusSettings: manusSettings,
                     checkAgain: checkAgain,
                     syncWorkBuddyAccount: syncWorkBuddyAccount,
                     disconnectWorkBuddyAccount:
@@ -143,7 +141,6 @@ struct UsageSettingsCard: View {
         HStack(spacing: 7) {
             if selectedAgentID != nil {
                 Button {
-                    manusSettings?.discardDraft()
                     selectedAgentID = nil
                 } label: {
                     Image(systemName: "chevron.left")
@@ -164,10 +161,7 @@ struct UsageSettingsCard: View {
             )
             .font(AppTypography.font(15, weight: .bold, language: language))
             Spacer()
-            Button {
-                manusSettings?.discardDraft()
-                close()
-            } label: {
+            Button(action: close) {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .bold))
                     .frame(width: 22, height: 22)
@@ -384,7 +378,6 @@ private struct AgentSpecificSettingsContent: View {
     let workBuddySettings: WorkBuddySettingsModel?
     let workBuddyLogin: WorkBuddyLoginCoordinator?
     let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
-    let manusSettings: ManusSettingsModel?
     let checkAgain: () -> Void
     let syncWorkBuddyAccount: () -> Void
     let disconnectWorkBuddyAccount: () -> Void
@@ -497,15 +490,6 @@ private struct AgentSpecificSettingsContent: View {
                     disconnectAccount: disconnectWorkBuddyAccount
                 )
             }
-
-            if providerID == AgentPreferenceRecord.manusProviderID,
-               let manusSettings {
-                Divider().opacity(0.35)
-                ManusSettingsSection(
-                    model: manusSettings,
-                    language: language
-                )
-            }
         }
     }
 
@@ -527,157 +511,6 @@ private struct AgentSpecificSettingsContent: View {
                 coordinator.setCodexDetails(details, for: providerID)
             }
         )
-    }
-}
-
-private struct ManusSettingsSection: View {
-    @ObservedObject var model: ManusSettingsModel
-    let language: AppLanguage
-    @State private var showsConnectionForm = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(language.manusTitle)
-                        .font(
-                            AppTypography.font(
-                                12.5,
-                                weight: .semibold,
-                                language: language
-                            )
-                        )
-                    Text(language.manusOfficialAPIV2)
-                        .font(AppTypography.font(9.5, language: language))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text(connectionText)
-                    .font(
-                        AppTypography.font(
-                            9.5,
-                            weight: .medium,
-                            language: language
-                        )
-                    )
-                    .foregroundStyle(
-                        model.connectionState == .connected
-                            ? UsageDesign.green
-                            : Color.secondary
-                    )
-            }
-            .accessibilityElement(children: .combine)
-
-            if let failure = model.safeFailure {
-                Text(language.manusFailure(failure))
-                    .font(AppTypography.font(9.5, language: language))
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityLabel(language.manusFailure(failure))
-            }
-
-            if model.isConfigured {
-                if let updated = model.lastUpdatedAt {
-                    Text(language.manusUpdated(at: updated))
-                        .font(AppTypography.font(9.5, language: language))
-                        .foregroundStyle(.secondary)
-                }
-
-                Toggle(
-                    language.manusAutoRefresh,
-                    isOn: Binding(
-                        get: { model.autoRefreshEnabled },
-                        set: { model.setAutoRefreshEnabled($0) }
-                    )
-                )
-                .toggleStyle(.switch)
-                .accessibilityHint(
-                    model.autoRefreshEnabled
-                        ? language.manusEveryMinute
-                        : language.manusManualOnly
-                )
-
-                Text(
-                    model.autoRefreshEnabled
-                        ? language.manusEveryMinute
-                        : language.manusManualOnly
-                )
-                    .font(AppTypography.font(9, language: language))
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 8) {
-                    Button(language.manusSyncNow) {
-                        model.syncNow()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(model.connectionState == .verifying)
-
-                    Button(language.manusDisconnect, role: .destructive) {
-                        model.disconnect()
-                    }
-                    .buttonStyle(.borderless)
-                }
-            } else if showsConnectionForm {
-                Text(language.manusDisclosure)
-                    .font(AppTypography.font(9.5, language: language))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                SecureField(
-                    language.manusAPIKey,
-                    text: $model.draftCredential
-                )
-                .textFieldStyle(.roundedBorder)
-                .accessibilityLabel(language.manusAPIKey)
-                .accessibilityHint(language.manusDisclosure)
-
-                HStack(spacing: 8) {
-                    Button(language.manusSaveAndVerify) {
-                        model.saveAndVerify()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!model.canSaveAndVerify)
-
-                    Button(language.manusCancel) {
-                        model.cancelConnection()
-                        showsConnectionForm = false
-                    }
-                    .buttonStyle(.borderless)
-                }
-            } else {
-                Text(language.manusNotConnected)
-                    .font(AppTypography.font(9.5, language: language))
-                    .foregroundStyle(.secondary)
-
-                Button(language.manusConnect) {
-                    showsConnectionForm = true
-                }
-                .buttonStyle(.borderedProminent)
-            }
-        }
-        .onChange(of: model.credentialConfigured) { _, configured in
-            if configured {
-                showsConnectionForm = false
-            }
-        }
-        .onDisappear {
-            model.discardDraft()
-        }
-    }
-
-    private var connectionText: String {
-        switch model.connectionState {
-        case .disconnected:
-            language.manusNotConnected
-        case .configured:
-            language.manusConfigured
-        case .verifying:
-            language.manusVerifying
-        case .connected:
-            language.manusConnected
-        case .failed:
-            language.manusConnectionFailed
-        }
     }
 }
 

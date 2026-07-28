@@ -1,9 +1,89 @@
 # UMA M4 Manus Source Dossier
 
-Status: M4-G1 source-admission record
+Status: M4 CLI-only source recheck — current authority
 Date: 2026-07-28
 Baseline commit: `55104d1009f19a78b4b6f1b857afb1487068e413`
 Baseline tree: `9bf0c711a0cc60c8a056f4e1618e9c2ea4f27f2b`
+
+## Founder CLI-only override
+
+The current product source policy is:
+
+```text
+Official Manus CLI
+  → documented read-only status/usage/Credits command
+  → documented structured machine-readable output
+  → current total available Credits
+  → UMA connector
+```
+
+No API key, OAuth, embedded login, browser/account-web source, private local
+state, manual entry, estimation, or task-generating probe is admissible.
+
+### Installed application inventory
+
+Read-only inspection found:
+
+| Property | Observation |
+|---|---|
+| Bundle | `/Applications/Manus.app` |
+| Bundle identifier | `im.manus.desktop` |
+| Version / build | `1.6.8` / `1.6.8` |
+| Main executable | `Contents/MacOS/Manus` |
+| Architecture | arm64 |
+| Team ID | `5V8XDGQQB6` |
+| Strict deep signature | FAIL — bundle reports a modified/invalid signature |
+| Gatekeeper | FAIL — Code Signing subsystem internal error |
+| PATH command | No `manus`, `manus-cli`, or `Manus` command found |
+| Additional executable | `Contents/Resources/bin/sidecar` |
+| Sidecar identity | arm64, identifier `sidecar`, Team ID `5V8XDGQQB6` |
+| Sidecar signature | FAIL — modified/invalid signature |
+
+The bundle's `sidecar` is not documented by Manus as a public CLI. It was not
+executed, queried for private help, or treated as a product contract.
+
+### Official documentation recheck
+
+Current official sources inspected:
+
+- documentation index: <https://manus.im/docs/llms.txt>;
+- Desktop documentation: <https://manus.im/docs/features/desktop>;
+- Desktop Credit behavior:
+  <https://help.manus.im/en/articles/14134826-understanding-credit-consumption-in-the-manus-desktop-app>;
+- Credits and Usage collection:
+  <https://help.manus.im/en/collections/15919440-credits-usage>.
+
+The complete official documentation index exposes Desktop, API, integrations,
+and product features, but no installable Manus CLI or CLI command reference.
+The Desktop documentation uses “CLI” to describe third-party command-line
+tools that the Manus agent can execute. It does not document Manus itself as a
+CLI and contains no status, usage, Credits, JSON, schema, authentication-reuse,
+or local-freshness command contract.
+
+No documented read-only CLI command was therefore run. No structured field was
+returned. No authentication material, private application state, account
+identity, task, project, file, browser, network request, or Credit-consuming
+operation was accessed.
+
+### Current CLI source conclusion
+
+**NO-GO — NO OFFICIAL LOCAL MANUS CLI CREDIT CONTRACT EXISTS.**
+
+The installed bundle provides no admitted CLI, and current official
+documentation provides no stable structured command or schema for current
+total available Credits. The undocumented `sidecar` cannot be used as a
+source, and the invalid installed-bundle signature independently prevents
+trusting it.
+
+Manus remains unsupported and hidden. M4-N removes the M4-G2 API-key path from
+the product and final package while preserving the original commit as
+historical, unreleased Git evidence.
+
+## Superseded M4-G1 API-key finding
+
+The remainder of this document records the former M4-G1 API-key research for
+historical traceability. It is superseded by the Founder CLI-only override
+above and is not an admissible production direction.
 
 ## Executive finding
 
@@ -66,11 +146,8 @@ host remains `api.manus.ai`.
 | Personal scope | the key owner's personal balance |
 | Team scope | the team shared pool for a team sub-account key |
 
-The exact API-key creation route is the Manus API Integration area in Manus
-Settings. The user chooses **Create API Key** and copies the value when it is
-shown. The official documentation says the value is shown once and each key
-grants full account access. It therefore has password-equivalent sensitivity
-for UMA and must be revoked if compromised.
+The former API-key route was rejected before live use. No key was created,
+received, stored, or used by UMA, and no authenticated Credit read occurred.
 
 This balance endpoint creates no task and consumes no Credits. M4-G1 did not
 perform an authenticated read.
@@ -212,29 +289,9 @@ Credit/Assistant regression tests, the full 318-test suite, and the arm64
 Release product build all passed. No package manifest or toolchain was
 modified.
 
-## Human-controlled live validation plan
-
-The later live gate must remain Human-controlled:
-
-1. The Human creates a dedicated Manus API key in official Manus Settings.
-2. UMA receives it only through the local SecureField and saves it to
-   Keychain.
-3. The Human selects Save and Verify.
-4. UMA performs one read of the exact admitted endpoint.
-5. At the same time, the Human compares the official displayed Credit balance
-   with UMA's `total_credits` value.
-6. The Human checks main-panel/Desktop Assistant parity and provenance.
-7. Manual Refresh is exercised once; overlapping reads are shown to coalesce.
-8. The Human disconnects; UMA deletes only its own Keychain item and hides
-   Manus.
-9. Package and logs are audited again for secrets and raw response material.
-
-No key or balance value belongs in the evidence packet. If the response schema
-differs from the admitted contract, validation stops and M4 returns to source
-admission rather than loosening the decoder.
-
 ## Dossier conclusion
 
-The official source is sufficiently documented and narrow for an
-implementation goal. Full production acceptance remains conditional on the
-later one-read Human balance comparison and key-lifecycle proof.
+The API-key prototype was not admitted. The CLI-only investigation returned
+NO-GO, M4 is closed, and Manus remains unsupported. Reconsideration requires a
+new Founder instruction after publication of an official documented local CLI
+or public local IPC Credit contract.

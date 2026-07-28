@@ -26,8 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store: store,
             workBuddySettings: runtime.workBuddySettings,
             workBuddyLogin: runtime.workBuddyLogin,
-            workBuddyAccountWebSync: runtime.workBuddyAccountWebSync,
-            manusSettings: runtime.manusSettings
+            workBuddyAccountWebSync: runtime.workBuddyAccountWebSync
         )
     }
 

@@ -37,7 +37,6 @@ final class TransparentUsagePanelController {
     private let workBuddySettings: WorkBuddySettingsModel
     private let workBuddyLogin: WorkBuddyLoginCoordinator
     private let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController
-    private let manusSettings: ManusSettingsModel
     private weak var statusItem: NSStatusItem?
     private let visibilityDidChange: (Bool) -> Void
     private let navigation = UsagePanelNavigationCoordinator()
@@ -50,14 +49,12 @@ final class TransparentUsagePanelController {
         workBuddySettings: WorkBuddySettingsModel,
         workBuddyLogin: WorkBuddyLoginCoordinator,
         workBuddyAccountWebSync: WorkBuddyAccountWebSessionController,
-        manusSettings: ManusSettingsModel,
         visibilityDidChange: @escaping (Bool) -> Void
     ) {
         self.store = store
         self.workBuddySettings = workBuddySettings
         self.workBuddyLogin = workBuddyLogin
         self.workBuddyAccountWebSync = workBuddyAccountWebSync
-        self.manusSettings = manusSettings
         self.statusItem = statusItem
         self.visibilityDidChange = visibilityDidChange
         tuning = .final
@@ -78,7 +75,6 @@ final class TransparentUsagePanelController {
             workBuddySettings: workBuddySettings,
             workBuddyLogin: workBuddyLogin,
             workBuddyAccountWebSync: workBuddyAccountWebSync,
-            manusSettings: manusSettings,
             expandedProviderIDs: []
         )
     }
@@ -118,7 +114,6 @@ final class TransparentUsagePanelController {
         workBuddySettings: WorkBuddySettingsModel,
         workBuddyLogin: WorkBuddyLoginCoordinator,
         workBuddyAccountWebSync: WorkBuddyAccountWebSessionController,
-        manusSettings: ManusSettingsModel,
         expandedProviderIDs: Set<String>
     ) {
         panel.level = .popUpMenu
@@ -159,8 +154,7 @@ final class TransparentUsagePanelController {
                 localAccessConfirmationAction: NativeLocalCodexAccessConfirmation.action(for: store),
                 workBuddySettings: workBuddySettings,
                 workBuddyLogin: workBuddyLogin,
-                workBuddyAccountWebSync: workBuddyAccountWebSync,
-                manusSettings: manusSettings
+                workBuddyAccountWebSync: workBuddyAccountWebSync
             )
             .usagePanelOuterContourOwnedByNativeHost()
         let hostingView = NSHostingView(

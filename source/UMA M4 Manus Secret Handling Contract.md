@@ -1,7 +1,12 @@
 # UMA M4 Manus Secret Handling Contract
 
-Status: mandatory M4-G2 implementation contract
+Status: superseded historical M4-G2 design — do not execute
 Date: 2026-07-28
+
+> M4-N retired and removed the API-key product path before production
+> admission. This document is retained only to explain the rejected
+> prototype's former safety boundary. It is not setup guidance, and UMA must
+> not request, accept, persist, or use a Manus credential.
 
 ## Secret classification
 

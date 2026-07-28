@@ -259,8 +259,7 @@ actor LocalProviderEligibilityScanner {
         _ channel: AgentUsageChannel
     ) -> Bool {
         if channel.availabilitySourceState == .officialStructured
-            || channel.availabilitySourceState == .authenticatedAccountWeb
-            || channel.availabilitySourceState == .officialRemoteUsageAPI {
+            || channel.availabilitySourceState == .authenticatedAccountWeb {
             return true
         }
         if channel.rateLimitWindows.isEmpty {
@@ -298,8 +297,7 @@ extension AgentConnectorDescriptor {
     var hasSurfaceAdmissibleReadContract: Bool {
         switch (localSourceClass, usageReadContract) {
         case (.admittedStructuredLocal, .currentStructuredLocalRead),
-             (.authenticatedAccountWeb, .currentAuthenticatedAccountWebRead),
-             (.officialRemoteUsageAPI, .currentOfficialRemoteRead):
+             (.authenticatedAccountWeb, .currentAuthenticatedAccountWebRead):
             true
         default:
             false
