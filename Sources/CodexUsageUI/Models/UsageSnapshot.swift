@@ -4,15 +4,13 @@ struct UsagePeriod: Identifiable, Codable, Sendable {
     let id: String
     let title: String
     var remainingPercent: Int
+    /// Optional for compatibility with snapshots encoded before G2 recorded
+    /// the provider window kind in this presentation model.
+    var isFiveHour: Bool? = nil
     /// A special provider-granted five-hour credit window. The bar remains
     /// visible, but the numeric status must not imply an ordinary quota.
     var isUnlimited = false
     let resetText: String
-
-    /// Unlimited entitlement is supporting context for the finite quota, not
-    /// another measurable quota bar.
-    var isSecondary: Bool { isUnlimited }
-    var showsBar: Bool { !isUnlimited }
 }
 
 struct UsageMetric: Identifiable, Codable, Sendable {
@@ -111,6 +109,7 @@ struct UsageSnapshot: Codable, Sendable {
                     id: "five-hour",
                     title: language.quotaTitle(durationMinutes: 300, index: 0),
                     remainingPercent: 78,
+                    isFiveHour: true,
                     resetText: language == .simplifiedChinese
                         ? "重置 3 小时后 (7月12日 18:41)"
                         : "Resets in 3 hr (Jul 12, 18:41)"
@@ -119,6 +118,7 @@ struct UsageSnapshot: Codable, Sendable {
                     id: "seven-day",
                     title: language.quotaTitle(durationMinutes: 10_080, index: 1),
                     remainingPercent: 72,
+                    isFiveHour: false,
                     resetText: language == .simplifiedChinese
                         ? "重置 5 天后 (7月18日 14:45)"
                         : "Resets in 5 days (Jul 18, 14:45)"
@@ -172,23 +172,23 @@ extension UsageSnapshot {
     init(agentSnapshot: AgentUsageSnapshot, language: AppLanguage, now: Date = Date()) {
         let account = agentSnapshot.channels.first(where: { $0.id == .account })
         let local = agentSnapshot.channels.first(where: { $0.id == .localActivity })
-        let unsortedWindows = account?.rateLimitWindows ?? []
-        let promotesWeeklyQuota = unsortedWindows.contains {
-            $0.kind == .fiveHour && $0.isUnlimited
-        } && unsortedWindows.contains {
-            $0.kind == .sevenDay
-        }
-        let windows = unsortedWindows.sorted { lhs, rhs in
-            let lhsRank = Self.quotaDisplayRank(for: lhs, promotesWeeklyQuota: promotesWeeklyQuota)
-            let rhsRank = Self.quotaDisplayRank(for: rhs, promotesWeeklyQuota: promotesWeeklyQuota)
-            if lhsRank != rhsRank { return lhsRank < rhsRank }
-            return lhs.id < rhs.id
-        }
-        let periods = windows.enumerated().map { index, window in
-            UsagePeriod(
+        let windows = (account?.rateLimitWindows ?? []).sorted { $0.kind.rawValue < $1.kind.rawValue }
+        let periods = windows.enumerated().compactMap { index, window -> UsagePeriod? in
+            let remainingPercent: Int
+            if window.isUnlimited {
+                remainingPercent = 100
+            } else if let used = window.usedPercent,
+                      used.isFinite,
+                      (0...100).contains(used) {
+                remainingPercent = Int((100 - used).rounded())
+            } else {
+                return nil
+            }
+            return UsagePeriod(
                 id: window.id,
                 title: language.quotaTitle(durationMinutes: window.kind == .fiveHour ? 300 : (window.kind == .sevenDay ? 10_080 : nil), index: index),
-                remainingPercent: window.isUnlimited ? 100 : max(0, min(100, Int((100 - (window.usedPercent ?? 0)).rounded()))),
+                remainingPercent: remainingPercent,
+                isFiveHour: window.kind == .fiveHour,
                 isUnlimited: window.isUnlimited,
                 resetText: language.resetDescription(for: window.resetsAt, now: now)
             )
@@ -247,21 +247,6 @@ extension UsageSnapshot {
     private static func normalizedPlanLabel(_ value: String?) -> String {
         guard let value, !value.isEmpty else { return "—" }
         return value.uppercased()
-    }
-
-    private static func quotaDisplayRank(
-        for window: AgentRateLimitWindow,
-        promotesWeeklyQuota: Bool
-    ) -> Int {
-        if promotesWeeklyQuota {
-            if window.kind == .sevenDay { return 0 }
-            if window.kind == .fiveHour { return 1 }
-        }
-        switch window.kind {
-        case .fiveHour: return 0
-        case .sevenDay: return 1
-        case .other: return 2
-        }
     }
 
     private static func formatNormalizedTokens(_ value: Int64?) -> String {

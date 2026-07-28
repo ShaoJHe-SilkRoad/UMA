@@ -15,11 +15,15 @@ enum CodexLocalActivityFilesystemChange: Sendable {
 /// needs reprocessing. The consumer receives a debounced invalidation only,
 /// and must re-read through `CodexLocalActivityReader`'s metadata allowlist.
 final class CodexLocalActivityObserver: @unchecked Sendable {
+    static let maximumFileWatchCount = 24
+    static let defaultMetadataRescanInterval: TimeInterval = 15
+
     typealias FilesystemChangeHandler = @Sendable (CodexLocalActivityFilesystemChange) -> Void
     typealias ChangeHandler = @Sendable () -> Void
 
     private let sessionRoots: [URL]
     private let debounceInterval: TimeInterval
+    private let metadataRescanInterval: TimeInterval
     private let onFilesystemChange: FilesystemChangeHandler
     private let onChange: ChangeHandler
     private let fileManager: FileManager
@@ -30,18 +34,22 @@ final class CodexLocalActivityObserver: @unchecked Sendable {
     private let lock = NSLock()
     private var rootSources: [DispatchSourceFileSystemObject] = []
     private var fileSources: [String: DispatchSourceFileSystemObject] = [:]
+    private var metadataRescanTimer: DispatchSourceTimer?
+    private var knownSignatures: [String: SessionFileSignature] = [:]
     private var pendingDelivery: DispatchWorkItem?
     private var started = false
 
     init(
         sessionRoots: [URL],
         debounceInterval: TimeInterval = 0.20,
+        metadataRescanInterval: TimeInterval = defaultMetadataRescanInterval,
         fileManager: FileManager = .default,
         onFilesystemChange: @escaping FilesystemChangeHandler = { _ in },
         onChange: @escaping ChangeHandler
     ) {
         self.sessionRoots = sessionRoots.map(\.standardizedFileURL)
         self.debounceInterval = max(0, debounceInterval)
+        self.metadataRescanInterval = max(0, metadataRescanInterval)
         self.fileManager = fileManager
         self.onFilesystemChange = onFilesystemChange
         self.onChange = onChange
@@ -74,9 +82,13 @@ final class CodexLocalActivityObserver: @unchecked Sendable {
         rootSources.removeAll()
         let files = Array(fileSources.values)
         fileSources.removeAll()
+        let rescanTimer = metadataRescanTimer
+        metadataRescanTimer = nil
+        knownSignatures.removeAll()
         lock.unlock()
 
         pending?.cancel()
+        rescanTimer?.cancel()
         roots.forEach { $0.cancel() }
         files.forEach { $0.cancel() }
     }
@@ -85,6 +97,12 @@ final class CodexLocalActivityObserver: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return started
+    }
+
+    var watchedFileCountForTesting: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return fileSources.count
     }
 
     /// Deterministic test hook. Production changes enter through a Dispatch
@@ -97,7 +115,8 @@ final class CodexLocalActivityObserver: @unchecked Sendable {
     private func installSources() {
         guard isRunning else { return }
         for root in sessionRoots { installRootSource(for: root) }
-        refreshFileSources()
+        refreshFileSources(recordingCurrentSignatures: true)
+        installMetadataRescanTimer()
     }
 
     private func installRootSource(for root: URL) {
@@ -107,7 +126,7 @@ final class CodexLocalActivityObserver: @unchecked Sendable {
         ) else { return }
         source.setEventHandler { [weak self] in
             self?.receive(.roots)
-            self?.queue.async { [weak self] in self?.refreshFileSources() }
+            self?.refreshFileSources(recordingCurrentSignatures: true)
         }
         source.resume()
         lock.lock()
@@ -119,15 +138,24 @@ final class CodexLocalActivityObserver: @unchecked Sendable {
         lock.unlock()
     }
 
-    private func refreshFileSources() {
+    private func refreshFileSources(recordingCurrentSignatures: Bool) {
         guard isRunning else { return }
-        let urls = SessionMetadataScanner.watchableFileURLs(
+        let scan = SessionMetadataScanner.scan(
             roots: sessionRoots,
             fileManager: fileManager
+        )
+        let urls = SessionMetadataScanner.watchableFileURLs(
+            in: scan,
+            limit: Self.maximumFileWatchCount
         )
         let newKeys = Set(urls.map { $0.standardizedFileURL.path })
 
         lock.lock()
+        if recordingCurrentSignatures {
+            knownSignatures = Dictionary(
+                uniqueKeysWithValues: scan.files.map { ($0.stableID, $0.signature) }
+            )
+        }
         let obsolete = fileSources.keys.filter { !newKeys.contains($0) }
         let obsoleteSources = obsolete.compactMap { fileSources.removeValue(forKey: $0) }
         let existing = Set(fileSources.keys)
@@ -149,7 +177,7 @@ final class CodexLocalActivityObserver: @unchecked Sendable {
             let flags = source.data
             if flags.contains(.delete) || flags.contains(.rename) || flags.contains(.revoke) {
                 self.receive(.roots)
-                self.queue.async { [weak self] in self?.refreshFileSources() }
+                self.refreshFileSources(recordingCurrentSignatures: true)
             } else {
                 self.receive(.file(file))
             }
@@ -162,6 +190,52 @@ final class CodexLocalActivityObserver: @unchecked Sendable {
             source.cancel()
         }
         lock.unlock()
+    }
+
+    private func installMetadataRescanTimer() {
+        guard metadataRescanInterval > 0 else { return }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(
+            deadline: .now() + metadataRescanInterval,
+            repeating: metadataRescanInterval,
+            leeway: .seconds(2)
+        )
+        timer.setEventHandler { [weak self] in
+            self?.pollMetadataSignatures()
+        }
+        timer.resume()
+
+        lock.lock()
+        if started {
+            metadataRescanTimer = timer
+        } else {
+            timer.cancel()
+        }
+        lock.unlock()
+    }
+
+    /// The timer performs metadata-only reconciliation for session histories
+    /// larger than the bounded low-latency watch set. If an older session is
+    /// resumed, its signature changes and it is promoted into that set without
+    /// retaining one file descriptor per historical JSONL file.
+    private func pollMetadataSignatures() {
+        guard isRunning else { return }
+        let scan = SessionMetadataScanner.scan(
+            roots: sessionRoots,
+            fileManager: fileManager
+        )
+        let current = Dictionary(
+            uniqueKeysWithValues: scan.files.map { ($0.stableID, $0.signature) }
+        )
+
+        lock.lock()
+        let changed = current != knownSignatures
+        knownSignatures = current
+        lock.unlock()
+
+        guard changed else { return }
+        receive(.roots)
+        refreshFileSources(recordingCurrentSignatures: false)
     }
 
     private func makeSource(

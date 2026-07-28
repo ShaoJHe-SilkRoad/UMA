@@ -47,8 +47,8 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
 
     public func remainingAccessibilityLabel(percent: Int) -> String {
         switch self {
-        case .simplifiedChinese: "UMA 剩余额度 \(percent)%"
-        case .english: "UMA usage, \(percent)% remaining"
+        case .simplifiedChinese: "Codex 剩余额度 \(percent)%"
+        case .english: "Codex usage, \(percent)% remaining"
         }
     }
 
@@ -177,17 +177,6 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
         case .simplifiedChinese: "剩余"
         case .english: "Remaining"
         }
-    }
-
-    func remainingAccessibilityValue(_ percent: Int) -> String {
-        switch self {
-        case .simplifiedChinese: "剩余 \(percent)%"
-        case .english: "\(percent)% remaining"
-        }
-    }
-
-    func quotaAccessibilityLabel(title: String, remainingPercent: Int) -> String {
-        "\(title), \(remainingAccessibilityValue(remainingPercent))"
     }
 
     var recentTasks: String {
@@ -353,55 +342,6 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    var moreInfo: String {
-        switch self {
-        case .simplifiedChinese: "更多信息"
-        case .english: "More info"
-        }
-    }
-
-    var lessInfo: String {
-        switch self {
-        case .simplifiedChinese: "收起信息"
-        case .english: "Less info"
-        }
-    }
-
-    func disclosureLabel(isExpanded: Bool) -> String {
-        isExpanded ? lessInfo : moreInfo
-    }
-
-    var expandedAccessibilityValue: String {
-        switch self {
-        case .simplifiedChinese: "已展开"
-        case .english: "Expanded"
-        }
-    }
-
-    var collapsedAccessibilityValue: String {
-        switch self {
-        case .simplifiedChinese: "已折叠"
-        case .english: "Collapsed"
-        }
-    }
-
-    func syncedAt(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "HH:mm"
-        return switch self {
-        case .simplifiedChinese: "已同步 \(formatter.string(from: date))"
-        case .english: "Synced \(formatter.string(from: date))"
-        }
-    }
-
-    var outdated: String {
-        switch self {
-        case .simplifiedChinese: "已过期"
-        case .english: "Outdated"
-        }
-    }
-
     func availableResets(_ count: Int) -> String {
         switch self {
         case .simplifiedChinese: "可用重置 \(count) 次"
@@ -469,6 +409,45 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .simplifiedChinese: "通用"
         case .english: "General"
+        }
+    }
+
+    var desktopAssistantSection: String {
+        switch self {
+        case .simplifiedChinese: "桌面助手"
+        case .english: "Desktop Assistant"
+        }
+    }
+
+    var desktopAssistantEnabled: String {
+        switch self {
+        case .simplifiedChinese: "显示桌面助手"
+        case .english: "Show Desktop Assistant"
+        }
+    }
+
+    var desktopAssistantAlwaysOnTop: String {
+        switch self {
+        case .simplifiedChinese: "始终置顶"
+        case .english: "Always on Top"
+        }
+    }
+
+    var desktopAssistantDensity: String {
+        switch self {
+        case .simplifiedChinese: "布局"
+        case .english: "Layout"
+        }
+    }
+
+    func desktopAssistantDensityName(_ density: DesktopAssistantDensity) -> String {
+        switch (self, density) {
+        case (.simplifiedChinese, .automatic): "自动"
+        case (.simplifiedChinese, .regular): "常规"
+        case (.simplifiedChinese, .minimalist): "极简"
+        case (.english, .automatic): "Auto"
+        case (.english, .regular): "Regular"
+        case (.english, .minimalist): "Minimal"
         }
     }
 

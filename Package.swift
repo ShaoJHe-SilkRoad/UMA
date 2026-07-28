@@ -14,10 +14,7 @@ let package = Package(
     targets: [
         .target(
             name: "CodexUsageUI",
-            path: "Sources/CodexUsageUI",
-            resources: [
-                .process("Resources")
-            ]
+            path: "Sources/CodexUsageUI"
         ),
         .executableTarget(
             name: "CodexUsageMonitor",

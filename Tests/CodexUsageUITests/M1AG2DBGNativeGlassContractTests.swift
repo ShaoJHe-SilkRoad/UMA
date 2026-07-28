@@ -1,5 +1,4 @@
 import AppKit
-import CodexUsageUI
 import Testing
 
 #if canImport(CodexUsageAppShell)
@@ -18,7 +17,7 @@ struct M1AG2DBGNativeGlassContractTests {
             x: 0,
             y: 0,
             width: 370,
-            height: UsagePanelMetrics.height
+            height: 776
         )
         let host = AdaptivePanelMaterialHostView(
             frame: expectedFrame,
@@ -42,6 +41,7 @@ struct M1AG2DBGNativeGlassContractTests {
         if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
             #expect(host.subviews.count == 1)
             #expect(host.subviews.first === clipper)
+            #expect((host.layer?.borderWidth ?? 0) > 0)
             #expect(host.subviews.contains(where: { $0 is NSVisualEffectView }) == false)
             if #available(macOS 26.0, *) {
                 #expect(host.subviews.contains(where: { $0 is NSGlassEffectView }) == false)
@@ -49,10 +49,8 @@ struct M1AG2DBGNativeGlassContractTests {
         } else if #available(macOS 26.0, *) {
             let glass = try #require(host.subviews.first as? NSGlassEffectView)
             #expect(host.subviews.count == 1)
-            // The host is the sole exterior boundary; clipping suppresses the
-            // native glass halo that otherwise reads as a second Light-mode
-            // perimeter.
-            #expect(host.layer?.masksToBounds == true)
+            #expect(host.layer?.masksToBounds == false)
+            #expect(host.layer?.borderWidth == 0)
             #expect(glass.frame == host.bounds)
             #expect(glass.cornerRadius == 28)
             #expect(glass.style == .regular)
@@ -61,6 +59,7 @@ struct M1AG2DBGNativeGlassContractTests {
             let effect = try #require(host.subviews.first as? NSVisualEffectView)
             #expect(host.subviews.count == 2)
             #expect(host.layer?.masksToBounds == true)
+            #expect((host.layer?.borderWidth ?? 0) > 0)
             #expect(effect.frame == host.bounds)
             #expect(effect.material == .underWindowBackground)
             #expect(effect.blendingMode == .behindWindow)
