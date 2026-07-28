@@ -590,7 +590,8 @@ public enum SharedUsagePresentationPolicy {
         let selectedID = selectedWindowID(
             windows: windows,
             previous: previous,
-            isStale: sourceIsStale
+            isStale: sourceIsStale,
+            now: now
         )
         let remaining: SharedRemainingValue
         if let selected = windows.first(where: { $0.id == selectedID }) {
@@ -680,17 +681,24 @@ public enum SharedUsagePresentationPolicy {
     private static func selectedWindowID(
         windows: [SharedUsageWindowPresentation],
         previous: SharedUsageCardPresentation?,
-        isStale: Bool
+        isStale: Bool,
+        now: Date
     ) -> String? {
         let previousID = previous?.selectedWindowID
-        let finite = windows.compactMap { window -> (SharedUsageWindowPresentation, Double)? in
+        // Keep obsolete windows in `windows` for truthful detail disclosure,
+        // but never allow an already-ended quota epoch to drive the compact
+        // card, status item, or Desktop Assistant selection.
+        let eligibleWindows = windows.filter { window in
+            window.resetsAt.map { $0 > now } ?? true
+        }
+        let finite = eligibleWindows.compactMap { window -> (SharedUsageWindowPresentation, Double)? in
             guard case let .finite(value) = window.remaining else { return nil }
             return (window, value)
         }
 
         if isStale,
            let previousID,
-           windows.contains(where: { $0.id == previousID }) {
+           eligibleWindows.contains(where: { $0.id == previousID }) {
             return previousID
         }
 
@@ -737,7 +745,7 @@ public enum SharedUsagePresentationPolicy {
                 return winner.window.id
             }
             if let previousID,
-               windows.contains(where: { window in
+               eligibleWindows.contains(where: { window in
                    guard window.id == previousID else { return false }
                    if case .finite = window.remaining { return true }
                    return false
@@ -751,10 +759,10 @@ public enum SharedUsagePresentationPolicy {
         }).first {
             return coldStart.0.id
         }
-        if let unlimited = windows.first(where: { $0.remaining == .unlimited }) {
+        if let unlimited = eligibleWindows.first(where: { $0.remaining == .unlimited }) {
             return unlimited.id
         }
-        return windows.first?.id
+        return eligibleWindows.first?.id
     }
 
     private static func deterministicWindowOrder(

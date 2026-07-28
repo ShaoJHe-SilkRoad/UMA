@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds and audits one immutable, commit-exact UMA 0.11 manual-test package.
+# Builds and audits one immutable, commit-exact UMA 0.11 qualification package.
 set -euo pipefail
 
 readonly REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -7,18 +7,21 @@ readonly PRODUCT="CodexUsageMonitor"
 readonly MARKETING_VERSION="0.11"
 readonly BUNDLE_ID="com.kevinchen.CodexUsageMonitor"
 readonly DEFAULT_BUILD="202607270002"
+readonly DEFAULT_DBG_BUILD="202607270003"
 
 usage() {
     printf '%s\n' \
-        "Usage: $0 --commit <40-hex-sha> [--build <12-digit-number>] --output /private/tmp/uma-0.11-manual-<short-commit>/UMA.app"
+        "Usage: $0 --commit <40-hex-sha> [--profile manual|dbg] [--build <12-digit-number>] --output /private/tmp/uma-0.11-<profile>-<short-commit>/UMA.app"
 }
 
 commit=""
-build_number="$DEFAULT_BUILD"
+profile="manual"
+build_number=""
 output=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --commit) commit="${2:-}"; shift 2 ;;
+        --profile) profile="${2:-}"; shift 2 ;;
         --build) build_number="${2:-}"; shift 2 ;;
         --output) output="${2:-}"; shift 2 ;;
         *) usage >&2; exit 2 ;;
@@ -26,9 +29,25 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { usage >&2; exit 2; }
+[[ "$profile" == "manual" || "$profile" == "dbg" ]] || { usage >&2; exit 2; }
+if [[ -z "$build_number" ]]; then
+    if [[ "$profile" == "dbg" ]]; then
+        build_number="$DEFAULT_DBG_BUILD"
+    else
+        build_number="$DEFAULT_BUILD"
+    fi
+fi
 [[ "$build_number" =~ ^[0-9]{12}$ ]] || { usage >&2; exit 2; }
+if [[ "$profile" == "dbg" ]] && (( 10#$build_number < 10#$DEFAULT_DBG_BUILD )); then
+    printf 'DBG build must be %s or later\n' "$DEFAULT_DBG_BUILD" >&2
+    exit 2
+fi
 readonly short_commit="${commit:0:12}"
-readonly expected_output="/private/tmp/uma-0.11-manual-$short_commit/UMA.app"
+if [[ "$profile" == "dbg" ]]; then
+    readonly expected_output="/private/tmp/uma-0.11-dbg-final-$short_commit/UMA.app"
+else
+    readonly expected_output="/private/tmp/uma-0.11-manual-$short_commit/UMA.app"
+fi
 [[ "$output" == "$expected_output" ]] || {
     printf 'Refusing output outside %s\n' "$expected_output" >&2
     exit 2
@@ -48,7 +67,7 @@ readonly output_parent="$(dirname "$output")"
 }
 
 git -C "$REPO_ROOT" cat-file -e "$commit^{commit}"
-readonly package_root="/private/tmp/uma-0.11-manual-package-$commit"
+readonly package_root="/private/tmp/uma-0.11-$profile-package-$commit"
 readonly source_root="$package_root/source"
 readonly source_archive="$package_root/source-$commit.tar"
 readonly scratch_root="$package_root/swift"
@@ -223,7 +242,7 @@ readonly manifest_digest="$(
     printf '%s\n' "$manifest_digest" | /usr/bin/shasum -a 256 | /usr/bin/awk '{print $1}'
 )"
 
-printf 'PACKAGED output=%s commit=%s archive_sha256=%s executable_sha256=%s manifest_sha256=%s version=%s build=%s bundle_id=%s\n' \
+printf 'PACKAGED output=%s commit=%s archive_sha256=%s executable_sha256=%s manifest_sha256=%s version=%s build=%s bundle_id=%s profile=%s\n' \
     "$output" \
     "$commit" \
     "$archive_sha256" \
@@ -231,4 +250,5 @@ printf 'PACKAGED output=%s commit=%s archive_sha256=%s executable_sha256=%s mani
     "$manifest_sha256" \
     "$MARKETING_VERSION" \
     "$build_number" \
-    "$BUNDLE_ID"
+    "$BUNDLE_ID" \
+    "$profile"

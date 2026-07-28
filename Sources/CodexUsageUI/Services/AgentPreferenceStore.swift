@@ -157,7 +157,8 @@ final class AgentPreferenceStore {
                         for: record.providerID
                     ),
                   seen.insert(record.providerID).inserted,
-                  record.sourceConfigurationVersion > 0,
+                  record.sourceConfigurationVersion
+                    == AgentPreferenceRecord.currentSourceConfigurationVersion,
                   record.hasNonDefaultSettings
                     == (
                         record.providerSettings

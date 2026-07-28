@@ -218,6 +218,40 @@ struct UMA011G1AgentPreferencesTests {
         )
         #expect(!future.save(AgentPreferencesEnvelope()))
         #expect(defaults.data(forKey: AgentPreferenceStore.key) == futureData)
+
+        let futureSourceVersion = AgentPreferenceRecord
+            .currentSourceConfigurationVersion + 1
+        let futureSourceData = try JSONSerialization.data(
+            withJSONObject: [
+                "schemaVersion": AgentPreferencesEnvelope.currentSchemaVersion,
+                "initialScanCompleted": true,
+                "autoSearchEnabled": true,
+                "autoSearchExplicitlySet": true,
+                "records": [[
+                    "providerID": "codex",
+                    "hasBeenDetected": true,
+                    "hasNonDefaultSettings": false,
+                    "sourceConfigurationVersion": futureSourceVersion,
+                    "providerSettings": [
+                        "monitoring": ["monitoringEnabled": true],
+                        "codexDetails": [
+                            "showUsageSummary": true,
+                            "showRecentTasks": false,
+                            "showAPICost": false,
+                        ],
+                    ],
+                ]],
+            ],
+            options: [.sortedKeys]
+        )
+        defaults.set(futureSourceData, forKey: AgentPreferenceStore.key)
+        let futureSource = AgentPreferenceStore(defaults: defaults)
+        #expect(futureSource.loadResult == .corrupt)
+        #expect(!futureSource.save(AgentPreferencesEnvelope()))
+        #expect(
+            defaults.data(forKey: AgentPreferenceStore.key)
+                == futureSourceData
+        )
     }
 
     @MainActor

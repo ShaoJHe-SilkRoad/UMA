@@ -159,15 +159,48 @@ struct UMA011G2VisualSystemTests {
             coveragePercent: 1,
             modelNames: ["GPT-5.6"]
         )
+        let negative = APICostEstimateSnapshot(
+            sevenDayUSD: -0.01,
+            lifetimeUSD: 56.78,
+            coveragePercent: 100,
+            modelNames: []
+        )
+        let nonfinite = APICostEstimateSnapshot(
+            sevenDayUSD: .infinity,
+            lifetimeUSD: 56.78,
+            coveragePercent: 100,
+            modelNames: []
+        )
+        let impossibleCoverage = APICostEstimateSnapshot(
+            sevenDayUSD: 12.34,
+            lifetimeUSD: 56.78,
+            coveragePercent: 101,
+            modelNames: []
+        )
 
         #expect(APICostVisualPolicy.displayableEstimate(nil) == nil)
         #expect(
             APICostVisualPolicy.displayableEstimate(zeroCoverage) == nil
         )
+        #expect(APICostVisualPolicy.displayableEstimate(negative) == nil)
+        #expect(APICostVisualPolicy.displayableEstimate(nonfinite) == nil)
+        #expect(
+            APICostVisualPolicy.displayableEstimate(impossibleCoverage) == nil
+        )
         #expect(
             APICostVisualPolicy.displayableEstimate(priced)?.sevenDayUSD
                 == 12.34
         )
+    }
+
+    @Test("Adaptive material rebuilds when effective appearance changes")
+    func adaptiveMaterialTracksAppearance() throws {
+        let source = try source(
+            "Sources/CodexUsageMonitor/App/AdaptivePanelMaterialHostView.swift"
+        )
+        #expect(source.contains("override func viewDidChangeEffectiveAppearance()"))
+        #expect(source.contains("super.viewDidChangeEffectiveAppearance()"))
+        #expect(source.contains("rebuildMaterial()"))
     }
 
     @Test("Settings shrink to content and cap long content at panel height")

@@ -44,6 +44,11 @@ final class AdaptivePanelMaterialHostView: NSView {
         rebuildMaterial()
     }
 
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        rebuildMaterial()
+    }
+
     private func rebuildMaterial() {
         guard let contentView = hostedContentView else { return }
         contentView.removeFromSuperview()

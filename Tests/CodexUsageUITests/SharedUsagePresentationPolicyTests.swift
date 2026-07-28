@@ -72,6 +72,30 @@ struct SharedUsagePresentationPolicyTests {
     }
 
     @Test
+    func obsoleteFiveHourWindowCannotWinMaximumDecrement() {
+        let previous = card(
+            snapshot(
+                fiveHourRemaining: 90,
+                sevenDayRemaining: 60,
+                fiveHourReset: epoch.addingTimeInterval(-1)
+            )
+        )
+        let result = card(
+            snapshot(
+                fiveHourRemaining: 1,
+                sevenDayRemaining: 55,
+                fiveHourReset: epoch.addingTimeInterval(-1),
+                capturedAt: epoch.addingTimeInterval(60)
+            ),
+            previous: previous
+        )
+
+        #expect(result.windows.map(\.id).contains("five-hour"))
+        #expect(result.selectedWindowID == "seven-day")
+        #expect(result.remaining == .finite(55))
+    }
+
+    @Test
     func changedResetEpochDoesNotCreateADecrement() {
         let initial = card(snapshot(fiveHourRemaining: 60, sevenDayRemaining: 60))
         let result = card(

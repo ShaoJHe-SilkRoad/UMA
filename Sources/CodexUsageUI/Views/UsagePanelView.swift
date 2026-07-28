@@ -896,7 +896,16 @@ enum APICostVisualPolicy {
     static func displayableEstimate(
         _ estimate: APICostEstimateSnapshot?
     ) -> APICostEstimateSnapshot? {
-        guard let estimate, estimate.coveragePercent > 0 else { return nil }
+        guard let estimate,
+              estimate.coveragePercent > 0,
+              estimate.coveragePercent <= 100,
+              estimate.sevenDayUSD.isFinite,
+              estimate.sevenDayUSD >= 0,
+              estimate.lifetimeUSD.isFinite,
+              estimate.lifetimeUSD >= 0
+        else {
+            return nil
+        }
         return estimate
     }
 }
