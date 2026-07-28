@@ -9,8 +9,8 @@ extension AppLanguage {
     var connectionReconnectTitle: String { c("Reconnect to Codex", "重新连接 Codex") }
     var connectionConsentBody: String {
         c(
-            "UMA connects to the local Codex service to request account status, usage limits, and a token-usage summary. Local session metadata is collected separately. It does not read or store your password or authentication tokens. Codex manages sign-in.",
-            "UMA 会连接本机 Codex 服务，请求账户状态、用量限额和 Token 用量摘要。本机会话元数据会单独收集。它不会读取或存储你的密码或身份验证令牌。登录由 Codex 管理。"
+            "Codex Usage Monitor connects to the local Codex service to request account status, usage limits, and a token-usage summary. Local session metadata is collected separately. It does not read or store your password or authentication tokens. Codex manages sign-in.",
+            "Codex 用量监视器会连接本机 Codex 服务，请求账户状态、用量限额和 Token 用量摘要。本机会话元数据会单独收集。它不会读取或存储你的密码或身份验证令牌。登录由 Codex 管理。"
         )
     }
     var connectionConsentAnnouncement: String { c("Permission is required before connecting.", "连接前需要你的许可。") }

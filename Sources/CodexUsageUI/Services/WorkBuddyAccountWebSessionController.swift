@@ -1,0 +1,729 @@
+import AppKit
+import Combine
+import Foundation
+import WebKit
+
+struct WorkBuddyAccountWebExtractionAttempt: Equatable, Sendable {
+    let data: Data
+    let failure: WorkBuddyAccountWebFailure?
+    let safeDiagnosticCode: String?
+
+    init(
+        data: Data,
+        failure: WorkBuddyAccountWebFailure?,
+        safeDiagnosticCode: String? = nil
+    ) {
+        self.data = data
+        self.failure = failure
+        self.safeDiagnosticCode = failure == nil
+            ? nil
+            : Self.validatedSafeDiagnosticCode(safeDiagnosticCode)
+    }
+
+    private static func validatedSafeDiagnosticCode(
+        _ code: String?
+    ) -> String? {
+        guard let code,
+              code.range(
+                of: "^T[01]{3}-D[01]{3}-Q[01]$",
+                options: .regularExpression
+              ) != nil
+        else {
+            return nil
+        }
+        return code
+    }
+}
+
+@MainActor
+enum WorkBuddyAccountWebExtractionReadiness {
+    static let maximumAttempts = 20
+    static let delay = Duration.milliseconds(250)
+
+    static func evaluate(
+        isCurrent: () -> Bool,
+        read: () async throws -> WorkBuddyAccountWebExtractionAttempt,
+        wait: (Duration) async throws -> Void = { duration in
+            try await Task.sleep(for: duration)
+        }
+    ) async throws -> WorkBuddyAccountWebExtractionAttempt? {
+        for attempt in 0..<maximumAttempts {
+            guard isCurrent() else { return nil }
+            let result = try await read()
+            guard isCurrent() else { return nil }
+            let isStillRendering =
+                result.failure == .unexpectedPage
+                    || result.failure == .incompletePoolSections
+                    || result.failure == .pageNotStabilized
+            guard isStillRendering, attempt + 1 < maximumAttempts else {
+                return result
+            }
+            try await wait(delay)
+        }
+        return nil
+    }
+}
+
+@MainActor
+enum WorkBuddyOwnedWebsiteDataClearer {
+    static func clear<Record>(
+        fetch: () async -> [Record],
+        remove: ([Record]) async -> Void
+    ) async -> Bool {
+        let records = await fetch()
+        await remove(records)
+        return await fetch().isEmpty
+    }
+}
+
+@MainActor
+public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObject {
+    public static let disclosureVersion =
+        WorkBuddyAccountWebConsentRecord.currentDisclosureVersion
+
+    @Published public private(set) var flowState: WorkBuddyAccountWebFlowState = .idle
+    @Published public private(set) var consentGranted = false
+    @Published public private(set) var lastSynchronizedAt: Date?
+    @Published public private(set) var safeDiagnosticCode: String?
+    @Published private(set) var latestCreditSnapshot:
+        WorkBuddyAccountCreditSnapshot?
+    @Published public var autoRefreshEnabled: Bool {
+        didSet {
+            guard oldValue != autoRefreshEnabled else { return }
+            defaults.set(autoRefreshEnabled, forKey: Self.autoRefreshEnabledKey)
+            reconcileAutoRefresh()
+        }
+    }
+    @Published public private(set) var nextAutoRefreshAt: Date?
+    @Published public var sessionMode: WorkBuddyAccountWebSessionMode {
+        didSet {
+            guard oldValue != sessionMode else { return }
+            hasUsableSession = false
+            synchronizationCompletedInProcess = false
+            scheduler.update(enabled: autoRefreshEnabled, eligible: false)
+            nextAutoRefreshAt = nil
+            defaults.removeObject(forKey: Self.sessionEstablishedKey)
+            latestCreditSnapshot = nil
+            safeDiagnosticCode = nil
+            persistConsentIfGranted()
+            releaseBrowser()
+            if oldValue == .persistent && sessionMode == .nonpersistent {
+                Task { @MainActor [weak self] in
+                    guard let self,
+                          !(await websiteDataClearer()) else {
+                        return
+                    }
+                    flowState = .failed(.websiteDataClearFailed)
+                }
+            }
+        }
+    }
+
+    private static let consentKey = "workbuddy.accountWebSync.consent.v1"
+    static let autoRefreshEnabledKey =
+        "workbuddy.accountWebSync.autoRefreshEnabled.v1"
+    static let sessionEstablishedKey =
+        "workbuddy.accountWebSync.establishedPersistentSession.v1"
+    private static let persistentDataStoreIdentifier = UUID(
+        uuidString: "99F5E198-BD63-4450-8EE1-2447F27A5F2D"
+    )!
+    private let defaults: UserDefaults
+    private let websiteDataClearer: @MainActor () async -> Bool
+    private let readOverride:
+        (@MainActor @Sendable () async -> WorkBuddyAccountWebReadResult)?
+    private let scheduler: WorkBuddyAccountSyncScheduler
+    private var webView: WKWebView?
+    private var window: NSWindow?
+    private var navigationContinuation: CheckedContinuation<Void, Error>?
+    private var navigationTimeoutTask: Task<Void, Never>?
+    private var readGeneration: UInt64 = 0
+    private var readOperationGeneration: UInt64 = 0
+    private var inFlightRead: Task<WorkBuddyAccountWebReadResult, Never>?
+    private var hasUsableSession = false
+    private var synchronizationCompletedInProcess = false
+    private var applicationIsRunning = true
+    private var completedReadCount = 0
+    private var activeReadCount = 0
+
+    var canReadOnApplicationLaunch: Bool {
+        consentGranted
+            && sessionMode == .persistent
+            && defaults.bool(forKey: Self.sessionEstablishedKey)
+    }
+
+    public override convenience init() {
+        self.init(defaults: .standard)
+    }
+
+    public static func previewConnected(
+        autoRefreshEnabled: Bool = true,
+        observedAt: Date = Date()
+    ) -> WorkBuddyAccountWebSessionController {
+        let defaults = UserDefaults(
+            suiteName:
+                "com.kevinchen.uma.preview.account-web.\(UUID().uuidString)"
+        )!
+        let controller = WorkBuddyAccountWebSessionController(
+            defaults: defaults,
+            autoRefreshDefaultOverride: autoRefreshEnabled
+        )
+        controller.consentGranted = true
+        controller.flowState = .connected
+        controller.lastSynchronizedAt = observedAt
+        controller.hasUsableSession = true
+        controller.synchronizationCompletedInProcess = true
+        controller.nextAutoRefreshAt = autoRefreshEnabled
+            ? observedAt.addingTimeInterval(60)
+            : nil
+        return controller
+    }
+
+    public static func previewFailed(
+        failure: WorkBuddyAccountWebFailure = .malformedCredits
+    ) -> WorkBuddyAccountWebSessionController {
+        let defaults = UserDefaults(
+            suiteName:
+                "com.kevinchen.uma.preview.account-web.failed.\(UUID().uuidString)"
+        )!
+        let controller = WorkBuddyAccountWebSessionController(defaults: defaults)
+        controller.consentGranted = true
+        controller.flowState = .failed(failure)
+        return controller
+    }
+
+    init(
+        defaults: UserDefaults,
+        websiteDataClearer: (@MainActor () async -> Bool)? = nil,
+        autoRefreshInterval: Duration = WorkBuddyAccountSyncScheduler.interval,
+        autoRefreshSleeper:
+            @escaping WorkBuddyAccountSyncScheduler.Sleeper = { duration in
+                try await Task.sleep(for: duration)
+            },
+        now: @escaping WorkBuddyAccountSyncScheduler.Now = { Date() },
+        readOverride:
+            (@MainActor @Sendable () async -> WorkBuddyAccountWebReadResult)?
+                = nil,
+        autoRefreshDefaultOverride: Bool? = nil
+    ) {
+        self.defaults = defaults
+        self.readOverride = readOverride
+        self.websiteDataClearer = websiteDataClearer ?? {
+            await WorkBuddyAccountWebSessionController.clearPersistentWebsiteData()
+        }
+        scheduler = WorkBuddyAccountSyncScheduler(
+            interval: autoRefreshInterval,
+            sleeper: autoRefreshSleeper,
+            now: now
+        )
+        autoRefreshEnabled =
+            autoRefreshDefaultOverride
+                ?? defaults.object(forKey: Self.autoRefreshEnabledKey) as? Bool
+                ?? true
+        let record: WorkBuddyAccountWebConsentRecord? = defaults.data(
+            forKey: Self.consentKey
+        ).flatMap {
+            try? JSONDecoder().decode(WorkBuddyAccountWebConsentRecord.self, from: $0)
+        }
+        if let record,
+           record.disclosureVersion == Self.disclosureVersion {
+            consentGranted = true
+            sessionMode = record.sessionMode
+            if record.sessionMode != .persistent {
+                defaults.removeObject(forKey: Self.sessionEstablishedKey)
+            }
+        } else {
+            consentGranted = false
+            sessionMode = .nonpersistent
+            defaults.removeObject(forKey: Self.sessionEstablishedKey)
+        }
+        super.init()
+        hasUsableSession =
+            consentGranted
+                && sessionMode == .persistent
+                && defaults.bool(forKey: Self.sessionEstablishedKey)
+    }
+
+    func configureAutoRefresh(
+        onFire: @escaping @MainActor @Sendable () async -> Void
+    ) {
+        scheduler.configure(onFire: onFire)
+        reconcileAutoRefresh()
+    }
+
+    func autoRefreshDiagnostics()
+        -> WorkBuddyAccountSyncSchedulerDiagnostics
+    {
+        scheduler.diagnostics()
+    }
+
+    var accountReadDiagnostics: (active: Int, completed: Int, webViews: Int) {
+        (
+            activeReadCount,
+            completedReadCount,
+            webView == nil ? 0 : 1
+        )
+    }
+
+    public func grantConsent() {
+        consentGranted = true
+        if sessionMode != .persistent {
+            defaults.removeObject(forKey: Self.sessionEstablishedKey)
+        }
+        persistConsentIfGranted()
+        safeDiagnosticCode = nil
+        flowState = .idle
+    }
+
+    public func connect() {
+        guard consentGranted else {
+            flowState = .consentRequired
+            return
+        }
+        releaseBrowser()
+        scheduler.update(enabled: autoRefreshEnabled, eligible: false)
+        nextAutoRefreshAt = nil
+        synchronizationCompletedInProcess = false
+        let browser = ensureBrowser()
+        showWindow()
+        flowState = .opening
+        browser.load(URLRequest(url: WorkBuddyAccountWebPolicy.usageURL))
+    }
+
+    public func openAccountUsage() {
+        connect()
+    }
+
+    func readCurrentCredits() async -> WorkBuddyAccountWebReadResult {
+        if let inFlightRead {
+            return await inFlightRead.value
+        }
+        scheduler.readWillStart()
+        nextAutoRefreshAt = nil
+        activeReadCount = 1
+        readOperationGeneration &+= 1
+        let operationGeneration = readOperationGeneration
+        let task = Task { @MainActor [weak self] in
+            guard let self else {
+                return WorkBuddyAccountWebReadResult.failure(
+                    .webContentUnavailable
+                )
+            }
+            if let readOverride {
+                return await readOverride()
+            }
+            return await performCurrentCreditRead()
+        }
+        inFlightRead = task
+        let result = await task.value
+        guard readOperationGeneration == operationGeneration else {
+            return .failure(.webContentUnavailable)
+        }
+        inFlightRead = nil
+        activeReadCount = 0
+        completedReadCount += 1
+        synchronizationCompletedInProcess = true
+        switch result {
+        case .success:
+            hasUsableSession = true
+        case .authenticationRequired:
+            hasUsableSession = false
+        case let .failure(failure):
+            if failure == .consentRequired
+                || failure == .authenticationRequired {
+                hasUsableSession = false
+            } else if consentGranted {
+                // A non-authentication failure preserves the authenticated
+                // account session and returns to the normal cadence. This is
+                // deliberately not an immediate retry.
+                hasUsableSession = true
+            }
+        }
+        reconcileAutoRefresh()
+        scheduler.readDidFinish()
+        nextAutoRefreshAt = scheduler.diagnostics().nextRefreshAt
+        return result
+    }
+
+    private func performCurrentCreditRead() async -> WorkBuddyAccountWebReadResult {
+        guard consentGranted else {
+            flowState = .consentRequired
+            return .failure(.consentRequired)
+        }
+        latestCreditSnapshot = nil
+        safeDiagnosticCode = nil
+        readGeneration &+= 1
+        let generation = readGeneration
+        let browser = ensureBrowser()
+        flowState = .synchronizing
+        do {
+            try await loadAndAwait(
+                URLRequest(url: WorkBuddyAccountWebPolicy.usageURL),
+                in: browser
+            )
+        } catch let failure as WorkBuddyAccountWebFailure {
+            guard readGeneration == generation else {
+                return .failure(.webContentUnavailable)
+            }
+            flowState = .failed(failure)
+            return .failure(failure)
+        } catch {
+            guard readGeneration == generation else {
+                return .failure(.webContentUnavailable)
+            }
+            flowState = .failed(.webContentUnavailable)
+            return .failure(.webContentUnavailable)
+        }
+
+        guard readGeneration == generation else {
+            return .failure(.webContentUnavailable)
+        }
+        guard WorkBuddyAccountWebPolicy.isExactUsagePage(browser.url) else {
+            flowState = .signInRequired
+            return .authenticationRequired
+        }
+        do {
+            let attempt = try await WorkBuddyAccountWebExtractionReadiness.evaluate(
+                isCurrent: { [weak self] in
+                    self?.readGeneration == generation
+                },
+                read: {
+                    guard WorkBuddyAccountWebPolicy.isExactUsagePage(browser.url)
+                    else {
+                        throw WorkBuddyAccountWebFailure.authenticationRequired
+                    }
+                    let value = try await browser.evaluateJavaScript(
+                        WorkBuddyAccountWebExtractorScript.source
+                    )
+                    guard let dictionary = value as? [String: Any] else {
+                        throw WorkBuddyAccountWebFailure.malformedCredits
+                    }
+                    let data = try JSONSerialization.data(
+                        withJSONObject: dictionary,
+                        options: [.sortedKeys]
+                    )
+                    return WorkBuddyAccountWebExtractionAttempt(
+                        data: data,
+                        failure: (dictionary["failure"] as? String).flatMap(
+                            WorkBuddyAccountWebFailure.init(rawValue:)
+                        ),
+                        safeDiagnosticCode:
+                            dictionary["safeDiagnosticCode"] as? String
+                    )
+                }
+            )
+            guard let attempt else {
+                return .failure(.webContentUnavailable)
+            }
+            if let failure = attempt.failure {
+                safeDiagnosticCode = attempt.safeDiagnosticCode
+                flowState = .failed(failure)
+                return .failure(failure)
+            }
+            let payload = try JSONDecoder().decode(
+                WorkBuddyAccountWebExtractionPayload.self,
+                from: attempt.data
+            )
+            let result = WorkBuddyAccountWebExtractor.validate(
+                payload,
+                observedAt: Date()
+            )
+            switch result {
+            case let .success(reading):
+                lastSynchronizedAt = reading.observedAt
+                latestCreditSnapshot = reading.creditSnapshot
+                safeDiagnosticCode = nil
+                if sessionMode == .persistent {
+                    defaults.set(true, forKey: Self.sessionEstablishedKey)
+                }
+                flowState = .connected
+            case .authenticationRequired:
+                defaults.removeObject(forKey: Self.sessionEstablishedKey)
+                flowState = .signInRequired
+            case let .failure(failure):
+                flowState = .failed(failure)
+            }
+            return result
+        } catch WorkBuddyAccountWebFailure.authenticationRequired {
+            guard readGeneration == generation else {
+                return .failure(.webContentUnavailable)
+            }
+            defaults.removeObject(forKey: Self.sessionEstablishedKey)
+            flowState = .signInRequired
+            return .authenticationRequired
+        } catch {
+            guard readGeneration == generation else {
+                return .failure(.webContentUnavailable)
+            }
+            flowState = .failed(.malformedCredits)
+            return .failure(.malformedCredits)
+        }
+    }
+
+    func disconnectAndClearOwnedWebsiteData() async {
+        scheduler.update(enabled: autoRefreshEnabled, eligible: false)
+        nextAutoRefreshAt = nil
+        hasUsableSession = false
+        synchronizationCompletedInProcess = false
+        releaseBrowser()
+        lastSynchronizedAt = nil
+        latestCreditSnapshot = nil
+        safeDiagnosticCode = nil
+        consentGranted = false
+        defaults.removeObject(forKey: Self.consentKey)
+        defaults.removeObject(forKey: Self.sessionEstablishedKey)
+        flowState = await websiteDataClearer()
+            ? .idle
+            : .failed(.websiteDataClearFailed)
+    }
+
+    private static func clearPersistentWebsiteData() async -> Bool {
+        let dataStore = WKWebsiteDataStore(
+            forIdentifier: Self.persistentDataStoreIdentifier
+        )
+        let dataTypes = WKWebsiteDataStore.allWebsiteDataTypes()
+        return await WorkBuddyOwnedWebsiteDataClearer.clear(
+            fetch: {
+                await withCheckedContinuation { continuation in
+                    dataStore.fetchDataRecords(ofTypes: dataTypes) { records in
+                        continuation.resume(returning: records)
+                    }
+                }
+            },
+            remove: { records in
+                await withCheckedContinuation { continuation in
+                    dataStore.removeData(ofTypes: dataTypes, for: records) {
+                        continuation.resume()
+                    }
+                }
+            }
+        )
+    }
+
+    public func cancel() {
+        scheduler.update(enabled: autoRefreshEnabled, eligible: false)
+        nextAutoRefreshAt = nil
+        hasUsableSession = false
+        synchronizationCompletedInProcess = false
+        invalidateInFlightRead()
+        readGeneration &+= 1
+        webView?.stopLoading()
+        navigationTimeoutTask?.cancel()
+        navigationTimeoutTask = nil
+        navigationContinuation?.resume(
+            throwing: WorkBuddyAccountWebFailure.webContentUnavailable
+        )
+        navigationContinuation = nil
+        window?.orderOut(nil)
+        safeDiagnosticCode = nil
+        flowState = .idle
+    }
+
+    public func tearDown() {
+        applicationIsRunning = false
+        scheduler.cancel()
+        nextAutoRefreshAt = nil
+        cancel()
+        releaseBrowser()
+    }
+
+    private func reconcileAutoRefresh() {
+        let eligible =
+            applicationIsRunning
+                && consentGranted
+                && hasUsableSession
+                && synchronizationCompletedInProcess
+                && flowState != .signInRequired
+        scheduler.update(
+            enabled: autoRefreshEnabled,
+            eligible: eligible
+        )
+        nextAutoRefreshAt = scheduler.diagnostics().nextRefreshAt
+    }
+
+    private func persistConsentIfGranted() {
+        guard consentGranted else { return }
+        let record = WorkBuddyAccountWebConsentRecord(
+            disclosureVersion: Self.disclosureVersion,
+            acceptedAt: Date(),
+            sessionMode: sessionMode
+        )
+        if let data = try? JSONEncoder().encode(record) {
+            defaults.set(data, forKey: Self.consentKey)
+        }
+    }
+
+    private func ensureBrowser() -> WKWebView {
+        if let webView { return webView }
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = sessionMode == .persistent
+            ? WKWebsiteDataStore(
+                forIdentifier: Self.persistentDataStoreIdentifier
+            )
+            : .nonPersistent()
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        let browser = WKWebView(
+            frame: NSRect(x: 0, y: 0, width: 860, height: 680),
+            configuration: configuration
+        )
+        browser.navigationDelegate = self
+        browser.uiDelegate = self
+        webView = browser
+        return browser
+    }
+
+    private func showWindow() {
+        let browser = ensureBrowser()
+        if window == nil {
+            let created = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 860, height: 680),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            created.title = "WorkBuddy Account Web Sync"
+            created.contentView = browser
+            created.center()
+            created.isReleasedWhenClosed = false
+            window = created
+        }
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func loadAndAwait(
+        _ request: URLRequest,
+        in browser: WKWebView
+    ) async throws {
+        guard navigationContinuation == nil else {
+            throw WorkBuddyAccountWebFailure.webContentUnavailable
+        }
+        try await withCheckedThrowingContinuation { continuation in
+            navigationContinuation = continuation
+            navigationTimeoutTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(30))
+                guard !Task.isCancelled else { return }
+                self?.finishNavigation(
+                    failure: .timedOut
+                )
+            }
+            browser.load(request)
+        }
+    }
+
+    private func finishNavigation(
+        failure: WorkBuddyAccountWebFailure? = nil
+    ) {
+        navigationTimeoutTask?.cancel()
+        navigationTimeoutTask = nil
+        guard let continuation = navigationContinuation else { return }
+        navigationContinuation = nil
+        if let failure {
+            continuation.resume(throwing: failure)
+        } else {
+            continuation.resume()
+        }
+    }
+
+    private func releaseBrowser() {
+        invalidateInFlightRead()
+        readGeneration &+= 1
+        navigationTimeoutTask?.cancel()
+        navigationTimeoutTask = nil
+        navigationContinuation?.resume(
+            throwing: WorkBuddyAccountWebFailure.webContentUnavailable
+        )
+        navigationContinuation = nil
+        webView?.stopLoading()
+        webView?.navigationDelegate = nil
+        webView?.uiDelegate = nil
+        window?.orderOut(nil)
+        window?.contentView = nil
+        window = nil
+        webView = nil
+    }
+
+    private func invalidateInFlightRead() {
+        readOperationGeneration &+= 1
+        inFlightRead?.cancel()
+        inFlightRead = nil
+        activeReadCount = 0
+    }
+}
+
+@MainActor
+extension WorkBuddyAccountWebSessionController: WKNavigationDelegate {
+    public func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping @MainActor @Sendable
+            (WKNavigationActionPolicy) -> Void
+    ) {
+        let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+        switch WorkBuddyAccountWebPolicy.navigationDecision(
+            for: navigationAction.request.url,
+            isMainFrame: isMainFrame
+        ) {
+        case .allow:
+            decisionHandler(.allow)
+        case .cancel:
+            decisionHandler(.cancel)
+            if isMainFrame {
+                flowState = .failed(.invalidNavigation)
+                finishNavigation(failure: .invalidNavigation)
+            }
+        case let .confirmExternalHost(host):
+            let alert = NSAlert()
+            alert.messageText = "Allow external sign-in host?"
+            alert.informativeText = host
+            alert.addButton(withTitle: "Allow Once")
+            alert.addButton(withTitle: "Cancel")
+            if alert.runModal() == .alertFirstButtonReturn {
+                decisionHandler(.allow)
+            } else {
+                decisionHandler(.cancel)
+                flowState = .failed(.invalidNavigation)
+                finishNavigation(failure: .invalidNavigation)
+            }
+        }
+    }
+
+    public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        flowState = WorkBuddyAccountWebPolicy.isExactUsagePage(webView.url)
+            ? .readyToSync
+            : .signInRequired
+        finishNavigation()
+    }
+
+    public func webView(
+        _ webView: WKWebView,
+        didFail navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        flowState = .failed(.webContentUnavailable)
+        finishNavigation(failure: .webContentUnavailable)
+    }
+
+    public func webView(
+        _ webView: WKWebView,
+        didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        flowState = .failed(.webContentUnavailable)
+        finishNavigation(failure: .webContentUnavailable)
+    }
+}
+
+@MainActor
+extension WorkBuddyAccountWebSessionController: WKUIDelegate {
+    public func webView(
+        _ webView: WKWebView,
+        createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction,
+        windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        guard navigationAction.targetFrame == nil,
+              let url = navigationAction.request.url else { return nil }
+        webView.load(URLRequest(url: url))
+        return nil
+    }
+}

@@ -1,58 +1,58 @@
 import AppKit
-import CoreText
 import SwiftUI
+
+public struct UsagePanelAppearanceOverride: Equatable, Sendable {
+    public let reduceTransparency: Bool
+    public let increaseContrast: Bool
+    public let reduceMotion: Bool
+
+    public init(
+        reduceTransparency: Bool,
+        increaseContrast: Bool,
+        reduceMotion: Bool
+    ) {
+        self.reduceTransparency = reduceTransparency
+        self.increaseContrast = increaseContrast
+        self.reduceMotion = reduceMotion
+    }
+}
+
+public struct UsagePanelCardVisibility: Equatable, Sendable {
+    public let showUsageSummary: Bool
+    public let showRecentTasks: Bool
+    public let showAPICost: Bool
+
+    public init(
+        showUsageSummary: Bool,
+        showRecentTasks: Bool,
+        showAPICost: Bool
+    ) {
+        self.showUsageSummary = showUsageSummary
+        self.showRecentTasks = showRecentTasks
+        self.showAPICost = showAPICost
+    }
+}
 
 public enum UsagePanelMetrics {
     public static let width: CGFloat = 370
-    public static let outerInset: CGFloat = 16
-    public static let minimumHeight: CGFloat = 330
-    public static let height: CGFloat = 740
-    public static let collapsedHeight: CGFloat = 360
-    public static let settingsMinimumHeight: CGFloat = collapsedHeight
+    public static let height: CGFloat = 776
+    public static let minimumHeight: CGFloat = 125
+    public static let settingsMinimumHeight: CGFloat = 430
+    public static let outerHorizontalInset: CGFloat = 16
+    public static let outerTopInset: CGFloat = 12
+    public static let outerBottomInset: CGFloat = 12
+    public static let cardSpacing: CGFloat = 8
+    public static let providerToolbarHeight: CGFloat = 22
+    public static let collapsedProviderCardHeight: CGFloat = 74
+    public static let headerHeight: CGFloat = 64
 
-    public static func presentedHeight(
-        showsRealData: Bool,
-        moreInfoExpanded: Bool,
-        recentTaskCount: Int,
-        meteredPeriodCount: Int,
-        settingsPresented: Bool
-    ) -> CGFloat {
-        let meteredPeriodAdjustment =
-            CGFloat(max(0, meteredPeriodCount - 1)) * 30
-        let contentHeight: CGFloat
-        if !showsRealData {
-            contentHeight = minimumHeight
-        } else if moreInfoExpanded {
-            // The expanded body adds the two established 10-point gaps, the
-            // Recent Tasks header, its existing rows/dividers, and the
-            // unchanged cost card. This sizes the exterior to the presented
-            // rows instead of leaving a second-looking empty lower bezel.
-            contentHeight = min(
-                height,
-                560
-                    + (CGFloat(max(0, recentTaskCount)) * 50)
-                    + meteredPeriodAdjustment
-            )
-        } else {
-            contentHeight = collapsedHeight + meteredPeriodAdjustment
-        }
-        return settingsPresented
-            ? max(contentHeight, settingsMinimumHeight)
-            : contentHeight
+    public static var collapsedProviderContribution: CGFloat {
+        collapsedProviderCardHeight + cardSpacing
     }
 
-    public static func targetHeight(
-        showsRealData: Bool,
-        moreInfoExpanded: Bool,
-        settingsPresented: Bool
-    ) -> CGFloat {
-        let contentHeight: CGFloat
-        if !showsRealData {
-            contentHeight = minimumHeight
-        } else {
-            contentHeight = moreInfoExpanded ? height : collapsedHeight
-        }
-        return settingsPresented ? max(contentHeight, settingsMinimumHeight) : contentHeight
+    public static func resolvedContentHeight(_ measuredHeight: CGFloat?) -> CGFloat {
+        let measuredHeight = measuredHeight.map(ceil) ?? minimumHeight
+        return min(height, max(minimumHeight, measuredHeight))
     }
 
     public static func preferredHeight(
@@ -60,265 +60,492 @@ public enum UsagePanelMetrics {
         showRecentTasks: Bool,
         showAPICost: Bool
     ) -> CGFloat {
-        guard showRecentTasks || showAPICost else { return collapsedHeight }
-        return height
+        var result = minimumHeight
+        if showUsageSummary {
+            result += 271
+        }
+        if showRecentTasks {
+            result += 223
+        }
+        if showAPICost {
+            result += 147
+        }
+        return result
     }
 }
 
-public enum UsageTypographyRole: String, CaseIterable, Sendable {
-    case applicationTitle
-    case planLabel
-    case primaryQuotaValue
-    case quotaLabel
-    case resetTime
-    case syncStatus
+enum UsageSettingsSizing {
+    static let cardHorizontalPadding: CGFloat = 14
+    static let cardVerticalPadding: CGFloat = 14
+    static let panelTopOffset: CGFloat = UsagePanelMetrics.headerHeight + 12
+    static let panelBottomInset: CGFloat = 16
+    static let minimumViewportHeight: CGFloat = 120
+
+    static func cardHeight(
+        contentHeight: CGFloat?,
+        maximumHeight: CGFloat
+    ) -> CGFloat {
+        let availableViewport = max(
+            0,
+            maximumHeight - (cardVerticalPadding * 2)
+        )
+        let naturalViewport = max(
+            minimumViewportHeight,
+            contentHeight ?? availableViewport
+        )
+        return min(maximumHeight, naturalViewport + (cardVerticalPadding * 2))
+    }
+
+    static func panelHeight(cardHeight: CGFloat) -> CGFloat {
+        UsagePanelMetrics.resolvedContentHeight(
+            panelTopOffset + cardHeight + panelBottomInset
+        )
+    }
+}
+
+enum AppTypographyFamily: Equatable {
+    case serif
+    case system
+    case monospaced
+}
+
+enum AppTypographyRole {
+    case display
     case sectionTitle
+    case cardTitle
     case body
-    case secondaryBody
-    case disclosure
-    case settingsLabel
-    case tokenMetric
-    case priceMetric
-    case errorStatus
+    case secondary
+    case caption
+    case action
+    case largeValue
+    case regularValue
+    case compactValue
+    case menuBarValue
+    case technicalMono
+    case assistantProvider
+    case assistantPlan
+    case assistantDetail
+    case assistantAccountDetail
+    case assistantValue
 
-    fileprivate var pointSize: CGFloat {
+    var size: CGFloat {
         switch self {
-        case .applicationTitle: 20
-        case .planLabel: 11
-        case .primaryQuotaValue: 24
-        case .quotaLabel: 16
-        case .resetTime: 11.5
-        case .syncStatus: 13
+        case .display: 25
         case .sectionTitle: 15
-        case .body: 13
-        case .secondaryBody: 10.5
-        case .disclosure: 12.5
-        case .settingsLabel: 12.5
-        case .tokenMetric: 14.5
-        case .priceMetric: 25
-        case .errorStatus: 9.5
+        case .cardTitle: 13
+        case .body: 11
+        case .secondary: 10.5
+        case .caption: 9
+        case .action: 10.5
+        case .largeValue: 21
+        case .regularValue: 13
+        case .compactValue: 13
+        case .menuBarValue: 13
+        case .technicalMono: 10
+        case .assistantProvider: 12
+        case .assistantPlan: 8.5
+        case .assistantDetail: 9
+        case .assistantAccountDetail: 8.2
+        case .assistantValue: 13
         }
     }
 
-    fileprivate var robotoPostScriptName: String {
+    var weight: Font.Weight {
         switch self {
-        case .applicationTitle, .planLabel, .primaryQuotaValue, .quotaLabel,
-             .sectionTitle, .tokenMetric, .priceMetric:
-            "Roboto-Bold"
-        case .disclosure, .settingsLabel:
-            "Roboto-Medium"
-        case .resetTime, .syncStatus, .body, .secondaryBody, .errorStatus:
-            "Roboto-Regular"
+        case .display: .bold
+        case .sectionTitle: .bold
+        case .cardTitle: .semibold
+        case .body: .regular
+        case .secondary: .regular
+        case .caption: .regular
+        case .action: .medium
+        case .largeValue: .bold
+        case .regularValue: .medium
+        case .compactValue: .medium
+        case .menuBarValue: .semibold
+        case .technicalMono: .regular
+        case .assistantProvider: .semibold
+        case .assistantPlan: .medium
+        case .assistantDetail, .assistantAccountDetail: .medium
+        case .assistantValue: .medium
         }
     }
 
-    fileprivate var cjkPostScriptName: String {
+    var usesMonospacedDesign: Bool {
+        self == .technicalMono
+    }
+
+    var family: AppTypographyFamily {
+        if usesMonospacedDesign {
+            return .monospaced
+        }
+        if usesTabularDigits {
+            return .system
+        }
+        return .serif
+    }
+
+    var usesTabularDigits: Bool {
         switch self {
-        case .applicationTitle, .planLabel, .primaryQuotaValue, .quotaLabel,
-             .sectionTitle, .tokenMetric, .priceMetric:
-            "PingFangSC-Semibold"
-        case .disclosure, .settingsLabel:
-            "PingFangSC-Medium"
-        case .resetTime, .syncStatus, .body, .secondaryBody, .errorStatus:
-            "PingFangSC-Regular"
+        case .largeValue, .regularValue, .compactValue, .menuBarValue, .assistantValue:
+            true
+        default:
+            false
         }
     }
 }
 
-public enum UsageTypographyError: Error, CustomStringConvertible {
-    case missingResource(String)
-    case registrationFailed(String, String)
-    case unavailablePostScriptName(String)
+/// Package-safe serif-led application typography. Anthropic Serif is not
+/// system-registered and UMA has no redistribution authority for private app
+/// assets, so public macOS system-serif design resolution supplies the visual
+/// identity and native CJK cascade. Exact values stay in system tabular sans;
+/// SF Mono remains restricted to technical content.
+public enum AppTypography {
+    /// PreviewRendererTool uses this to exercise large-text layout without
+    /// mutating the user's system accessibility preferences. Production UMA
+    /// cannot activate the override.
+    nonisolated(unsafe) private static var previewPointSizeScale: CGFloat = 1
 
-    public var description: String {
-        switch self {
-        case .missingResource(let name):
-            "Missing bundled font resource: \(name)"
-        case .registrationFailed(let name, let reason):
-            "Could not register \(name): \(reason)"
-        case .unavailablePostScriptName(let name):
-            "Registered font is unavailable by PostScript name: \(name)"
+    public static func configurePreviewPointSizeScale(_ scale: CGFloat) {
+        let processName = ProcessInfo.processInfo.processName
+        guard processName == "PreviewRendererTool"
+                || processName == "UMA-G2-Review"
+        else {
+            return
         }
-    }
-}
-
-@MainActor
-public enum UsageTypography {
-    public static let requiredPostScriptNames = [
-        "Roboto-Regular",
-        "Roboto-Medium",
-        "Roboto-Bold"
-    ]
-    public static let cjkFallbackFamily = "PingFang SC"
-
-    private static var registrationResult: Result<[String], Error>?
-
-    @discardableResult
-    public static func registerBundledFonts() throws -> [String] {
-        if let registrationResult {
-            return try registrationResult.get()
-        }
-
-        do {
-            for postScriptName in requiredPostScriptNames {
-                let resourceName = postScriptName
-                guard let url = resourceURL(named: resourceName) else {
-                    throw UsageTypographyError.missingResource("\(resourceName).ttf")
-                }
-
-                var unmanagedError: Unmanaged<CFError>?
-                let didRegister = CTFontManagerRegisterFontsForURL(
-                    url as CFURL,
-                    .process,
-                    &unmanagedError
-                )
-                if !didRegister,
-                   NSFont(name: postScriptName, size: 12) == nil {
-                    let reason = unmanagedError?.takeRetainedValue().localizedDescription
-                        ?? "CoreText returned no error detail"
-                    throw UsageTypographyError.registrationFailed(resourceName, reason)
-                }
-                if let unmanagedError {
-                    unmanagedError.release()
-                }
-
-                guard NSFont(name: postScriptName, size: 12) != nil else {
-                    throw UsageTypographyError.unavailablePostScriptName(postScriptName)
-                }
-            }
-            registrationResult = .success(requiredPostScriptNames)
-            return requiredPostScriptNames
-        } catch {
-            registrationResult = .failure(error)
-            throw error
-        }
+        previewPointSizeScale = min(1.5, max(1, scale))
     }
 
-    public static func font(
-        _ role: UsageTypographyRole,
-        language: AppLanguage,
-        sizeOverride: CGFloat? = nil
+    static func font(
+        _ role: AppTypographyRole,
+        language: AppLanguage = .english
     ) -> Font {
-        Font(appKitFont(role, language: language, sizeOverride: sizeOverride))
+        let font = switch role.family {
+        case .serif:
+            font(role.size, weight: role.weight, language: language)
+        case .system:
+            systemFont(role.size, weight: role.weight)
+        case .monospaced:
+            technicalFont(role.size, weight: role.weight)
+        }
+        return role.usesTabularDigits ? font.monospacedDigit() : font
     }
 
-    public static func appKitFont(
-        _ role: UsageTypographyRole,
-        language: AppLanguage,
-        sizeOverride: CGFloat? = nil
-    ) -> NSFont {
-        if registrationResult == nil {
-            do {
-                try registerBundledFonts()
-            } catch {
-                preconditionFailure("Roboto registration failed: \(error)")
-            }
-        }
-        let size = sizeOverride ?? role.pointSize
-        let fallback = NSFontDescriptor(
-            name: role.cjkPostScriptName,
-            size: size
+    static func font(
+        _ size: CGFloat,
+        weight: Font.Weight = .regular,
+        language _: AppLanguage = .simplifiedChinese,
+        design: Font.Design = .serif
+    ) -> Font {
+        .system(
+            size: size * previewPointSizeScale,
+            weight: weight,
+            design: design
         )
-        let descriptor = NSFontDescriptor(
-            fontAttributes: [
-                .name: role.robotoPostScriptName,
-                .size: size,
-                NSFontDescriptor.AttributeName(
-                    rawValue: kCTFontCascadeListAttribute as String
-                ): [fallback]
-            ]
+    }
+
+    static func systemFont(
+        _ size: CGFloat,
+        weight: Font.Weight = .regular
+    ) -> Font {
+        .system(
+            size: size * previewPointSizeScale,
+            weight: weight,
+            design: .default
         )
-        guard let font = NSFont(descriptor: descriptor, size: size) else {
-            preconditionFailure(
-                "Roboto must be registered before constructing application UI: "
-                    + role.robotoPostScriptName
+    }
+
+    static func numericFont(
+        _ size: CGFloat,
+        weight: Font.Weight = .regular
+    ) -> Font {
+        systemFont(size, weight: weight).monospacedDigit()
+    }
+
+    static func technicalFont(
+        _ size: CGFloat,
+        weight: Font.Weight = .regular
+    ) -> Font {
+        .system(
+            size: size * previewPointSizeScale,
+            weight: weight,
+            design: .monospaced
+        )
+    }
+
+    static func nsFont(_ role: AppTypographyRole) -> NSFont {
+        if role.usesMonospacedDesign {
+            return .monospacedSystemFont(
+                ofSize: role.size,
+                weight: nsFontWeight(role.weight)
             )
         }
-        return font
-    }
-
-    public static func postScriptName(for role: UsageTypographyRole) -> String {
-        role.robotoPostScriptName
-    }
-
-    public static func cjkPostScriptName(for role: UsageTypographyRole) -> String {
-        role.cjkPostScriptName
-    }
-
-    private static func resourceURL(named name: String) -> URL? {
-        let subdirectory = "Fonts/Roboto"
-        if let packaged = Bundle.main.url(
-            forResource: name,
-            withExtension: "ttf",
-            subdirectory: subdirectory
-        ) {
-            return packaged
+        if role.usesTabularDigits {
+            return .monospacedDigitSystemFont(
+                ofSize: role.size,
+                weight: nsFontWeight(role.weight)
+            )
         }
-        if let structured = Bundle.module.url(
-            forResource: name,
-            withExtension: "ttf",
-            subdirectory: subdirectory
-        ) {
-            return structured
+        let systemFont = NSFont.systemFont(
+            ofSize: role.size,
+            weight: nsFontWeight(role.weight)
+        )
+        guard role.family == .serif,
+              let descriptor = systemFont.fontDescriptor.withDesign(.serif),
+              let serifFont = NSFont(descriptor: descriptor, size: role.size) else {
+            return systemFont
         }
-        // SwiftPM flattens `.process("Resources")` into its generated bundle.
-        return Bundle.module.url(forResource: name, withExtension: "ttf")
+        return serifFont
+    }
+
+    public static func menuBarNSFont() -> NSFont {
+        nsFont(.menuBarValue)
+    }
+
+    private static func nsFontWeight(_ weight: Font.Weight) -> NSFont.Weight {
+        switch weight {
+        case .ultraLight: .ultraLight
+        case .thin: .thin
+        case .light: .light
+        case .regular: .regular
+        case .medium: .medium
+        case .semibold: .semibold
+        case .bold: .bold
+        case .heavy: .heavy
+        case .black: .black
+        default: .regular
+        }
     }
 }
 
 enum UsageDesign {
     static let blue = Color(red: 0.0, green: 0.43, blue: 0.94)
     static let green = Color(red: 0.05, green: 0.72, blue: 0.34)
+}
 
-    @MainActor
-    static func font(
-        _ role: UsageTypographyRole,
-        language: AppLanguage,
-        sizeOverride: CGFloat? = nil
-    ) -> Font {
-        UsageTypography.font(
-            role,
-            language: language,
-            sizeOverride: sizeOverride
+enum UsagePanelOuterContourOwner: Sendable {
+    case swiftUI
+    case nativeHost
+}
+
+private struct UsagePanelOuterContourOwnerKey: EnvironmentKey {
+    static let defaultValue = UsagePanelOuterContourOwner.swiftUI
+}
+
+private struct UsagePanelAppearanceOverrideKey: EnvironmentKey {
+    static let defaultValue: UsagePanelAppearanceOverride? = nil
+}
+
+extension EnvironmentValues {
+    var usagePanelOuterContourOwner: UsagePanelOuterContourOwner {
+        get { self[UsagePanelOuterContourOwnerKey.self] }
+        set { self[UsagePanelOuterContourOwnerKey.self] = newValue }
+    }
+
+    var usagePanelAppearanceOverride: UsagePanelAppearanceOverride? {
+        get { self[UsagePanelAppearanceOverrideKey.self] }
+        set { self[UsagePanelAppearanceOverrideKey.self] = newValue }
+    }
+}
+
+public extension View {
+    func usagePanelOuterContourOwnedByNativeHost() -> some View {
+        environment(\.usagePanelOuterContourOwner, .nativeHost)
+    }
+}
+
+enum AppGlass {
+    static let cardCornerRadius: CGFloat = 20
+    static let panelCornerRadius: CGFloat = 28
+    static let settingsReadabilityFillOpacity: Double = 0.24
+    static let cardShadowOpacity: Double = 0.035
+    static let cardShadowRadius: CGFloat = 3
+    static let cardShadowY: CGFloat = 1
+}
+
+enum UsageQuotaVisualMetrics {
+    static let primaryTitleSize: CGFloat = 16
+    static let secondaryTitleSize: CGFloat = 10.5
+    static let primaryValueSize: CGFloat = 20
+    static let secondaryValueSize: CGFloat = 11
+    static let primaryBarHeight: CGFloat = 10
+    static let secondaryBarHeight: CGFloat = 2.5
+    static let primaryVerticalInset: CGFloat = 13
+    static let secondaryVerticalInset: CGFloat = 8
+}
+
+enum AppBorders {
+    static func cardLineWidth(increaseContrast: Bool) -> CGFloat {
+        increaseContrast ? 1.25 : 0.7
+    }
+
+    static func panelLineWidth(increaseContrast: Bool) -> CGFloat {
+        increaseContrast ? 1.4 : 0.8
+    }
+
+    static func assistantLineWidth(increaseContrast: Bool) -> CGFloat {
+        increaseContrast ? 1 : 0.75
+    }
+
+    static func cardStroke(
+        colorScheme: ColorScheme,
+        tuning: GlassTuning,
+        increaseContrast: Bool
+    ) -> LinearGradient {
+        let contrastMultiplier = increaseContrast ? 1.65 : 1
+        return LinearGradient(
+            colors: [
+                Color.white.opacity(
+                    min(
+                        0.72,
+                        (colorScheme == .dark ? 0.18 : 0.32)
+                            * tuning.cardBorderPercent / 100
+                            * contrastMultiplier
+                    )
+                ),
+                Color.white.opacity(
+                    min(
+                        0.32,
+                        0.05 * tuning.cardBorderPercent / 100 * contrastMultiplier
+                    )
+                ),
+                Color.black.opacity(
+                    min(
+                        0.52,
+                        (colorScheme == .dark ? 0.16 : 0.07)
+                            * tuning.cardBorderPercent / 100
+                            * contrastMultiplier
+                    )
+                )
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    static func panelStroke(
+        colorScheme: ColorScheme,
+        increaseContrast: Bool
+    ) -> LinearGradient {
+        LinearGradient(
+            colors: [
+                Color.white.opacity(increaseContrast ? 0.64 : 0.38),
+                Color.white.opacity(increaseContrast ? 0.18 : 0.08),
+                Color.black.opacity(
+                    increaseContrast
+                        ? (colorScheme == .dark ? 0.52 : 0.34)
+                        : 0.12
+                )
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
         )
     }
 }
 
 struct GlassCardBackground: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.usagePanelAppearanceOverride) private var inheritedAppearanceOverride
     let tuning: GlassTuning
+    var appearanceOverride: UsagePanelAppearanceOverride? = nil
+    var cornerRadius: CGFloat = AppGlass.cardCornerRadius
+    var readabilityFillOpacity: Double = 0
+
+    private var usesReducedTransparency: Bool {
+        appearanceOverride?.reduceTransparency
+            ?? inheritedAppearanceOverride?.reduceTransparency
+            ?? reduceTransparency
+    }
+
+    private var usesIncreasedContrast: Bool {
+        appearanceOverride?.increaseContrast
+            ?? inheritedAppearanceOverride?.increaseContrast
+            ?? (colorSchemeContrast == .increased)
+    }
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 20, style: .continuous)
-            .fill(.ultraThinMaterial)
-            .opacity(0.72)
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(
+                usesReducedTransparency
+                    ? AnyShapeStyle(
+                        colorScheme == .dark
+                            ? Color(nsColor: .windowBackgroundColor)
+                            : Color(nsColor: .controlBackgroundColor)
+                    )
+                    : AnyShapeStyle(.thinMaterial)
+            )
+            .opacity(usesReducedTransparency ? 1 : tuning.cardMaterialPercent / 100)
             .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(
-                        Color.white.opacity(
-                            colorScheme == .dark ? 0.035 : 0.085
+                        usesReducedTransparency
+                            ? Color.clear
+                            : Color(nsColor: .controlBackgroundColor)
+                                .opacity(readabilityFillOpacity)
+                    )
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(
+                        usesReducedTransparency
+                            ? Color.clear
+                            : Color.white.opacity(
+                                tuning.cardWhiteLayerPercent / 100
+                                    * (colorScheme == .dark ? 0.43 : 1)
+                            )
+                    )
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(
+                        AppBorders.cardStroke(
+                            colorScheme: colorScheme,
+                            tuning: tuning,
+                            increaseContrast: usesIncreasedContrast
+                        ),
+                        lineWidth: AppBorders.cardLineWidth(
+                            increaseContrast: usesIncreasedContrast
                         )
                     )
             }
-            .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(
-                                    colorScheme == .dark ? 0.12 : 0.20
-                                ),
-                                Color.white.opacity(0.03),
-                                Color.black.opacity(
-                                    colorScheme == .dark ? 0.10 : 0.045
-                                )
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 0.7
+            .shadow(
+                color: Color.black.opacity(
+                    usesReducedTransparency
+                        ? 0.03
+                        : (usesIncreasedContrast ? 0.08 : AppGlass.cardShadowOpacity)
+                ),
+                radius: usesReducedTransparency
+                    ? 1
+                    : (usesIncreasedContrast ? 4 : AppGlass.cardShadowRadius),
+                y: AppGlass.cardShadowY
+            )
+    }
+}
+
+struct BalancedPanelTint: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let tuning: GlassTuning
+
+    var body: some View {
+        ZStack {
+            (colorScheme == .dark ? Color.black : Color.white)
+                .opacity(
+                    tuning.panelTintPercent / 100 * (colorScheme == .dark ? 1.5 : 1)
+                )
+            LinearGradient(
+                colors: [
+                    UsageDesign.blue.opacity(0.03 * tuning.panelGradientPercent / 100),
+                    Color.clear,
+                    Color.black.opacity(
+                        (colorScheme == .dark ? 0.07 : 0.04)
+                            * tuning.panelGradientPercent / 100
                     )
-            }
-            .shadow(color: Color.black.opacity(0.045), radius: 4, y: 1)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
     }
 }

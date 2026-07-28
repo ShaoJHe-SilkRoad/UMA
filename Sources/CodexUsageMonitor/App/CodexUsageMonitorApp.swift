@@ -3,15 +3,31 @@ import CodexUsageUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let store = UsageStore()
+    private let runtime: UsageMonitorRuntime
+    private var store: UsageStore { runtime.store }
     private var statusBarController: StatusBarController?
-    private var wakeRefreshObserver: CodexWakeRefreshObserver?
     private var isDisconnectingForTermination = false
+
+    override init() {
+        do {
+            runtime = try UsageMonitorRuntime.live(
+                bundleIdentifier: Bundle.main.bundleIdentifier,
+                environment: ProcessInfo.processInfo.environment
+            )
+        } catch {
+            fatalError("Invalid task-owned review store configuration")
+        }
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        statusBarController = StatusBarController(store: store)
-        wakeRefreshObserver = CodexWakeRefreshObserver(store: store)
+        statusBarController = StatusBarController(
+            store: store,
+            workBuddySettings: runtime.workBuddySettings,
+            workBuddyLogin: runtime.workBuddyLogin,
+            workBuddyAccountWebSync: runtime.workBuddyAccountWebSync
+        )
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -25,8 +41,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        wakeRefreshObserver?.invalidate()
-        wakeRefreshObserver = nil
         statusBarController?.tearDown()
     }
 }
@@ -35,11 +49,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 enum CodexUsageMonitorApp {
     @MainActor
     static func main() {
-        do {
-            try UsageTypography.registerBundledFonts()
-        } catch {
-            fatalError("Roboto registration failed: \(error)")
-        }
         let application = NSApplication.shared
         let delegate = AppDelegate()
         application.delegate = delegate

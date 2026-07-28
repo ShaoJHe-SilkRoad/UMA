@@ -6,7 +6,10 @@ struct AgentConnectorID: RawRepresentable, Codable, Hashable, Comparable, Sendab
     let rawValue: String
 
     init?(rawValue: String) {
-        guard rawValue.range(of: "^[a-z0-9]+(?:[.-][a-z0-9]+)*$", options: .regularExpression) != nil else {
+        guard rawValue.range(
+            of: "^[a-z][a-z0-9]*(?:[.-][A-Za-z][A-Za-z0-9]*)*$",
+            options: .regularExpression
+        ) != nil else {
             return nil
         }
         self.rawValue = rawValue
@@ -17,14 +20,86 @@ struct AgentConnectorID: RawRepresentable, Codable, Hashable, Comparable, Sendab
     static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
 }
 
+/// Stable product ordering keyed only by provider identity. Missing providers
+/// do not create placeholders, and runtime state can never move a row.
+enum AgentProviderOrder {
+    private static let fallbackPriority = 1_000
+
+    static func priority(for id: AgentConnectorID) -> Int {
+        let providerNamespace = id.rawValue.split(
+            separator: ".",
+            maxSplits: 1
+        ).first.map(String.init) ?? id.rawValue
+        return switch providerNamespace {
+        case "codex": 0
+        case "claude": 100
+        case "workbuddy": 200
+        case "manus": 300
+        case "cursor": 400
+        case "kimi": 500
+        case "doubao": 600
+        default: fallbackPriority
+        }
+    }
+
+    static func precedes(_ lhs: AgentConnectorID, _ rhs: AgentConnectorID) -> Bool {
+        let lhsPriority = priority(for: lhs)
+        let rhsPriority = priority(for: rhs)
+        return lhsPriority == rhsPriority ? lhs < rhs : lhsPriority < rhsPriority
+    }
+
+    static func precedes(raw lhs: String, _ rhs: String) -> Bool {
+        guard let lhsID = AgentConnectorID(rawValue: lhs),
+              let rhsID = AgentConnectorID(rawValue: rhs) else {
+            return lhs < rhs
+        }
+        return precedes(lhsID, rhsID)
+    }
+}
+
 enum AgentSourceTier: String, Codable, CaseIterable, Sendable {
     case officialLocalService = "A"
     case officialStructuredHook = "B"
     case officialCLIOrMetadata = "C"
     case authorizedReadOnlyRemote = "R"
+    case manualUserConfirmed = "M"
     case unsupported = "U"
 
     var isAdmissible: Bool { self != .unsupported }
+}
+
+/// Surface admission is intentionally stricter than the historical source
+/// tier. A source can remain supported for persistence or Settings while being
+/// ineligible for production provider surfaces.
+enum ProviderLocalSourceClass: String, Codable, Sendable {
+    case admittedStructuredLocal
+    case authenticatedAccountWeb
+    case manualOnly
+    case unsupported
+}
+
+enum ProviderRuntimeRequirement: String, Codable, Sendable {
+    case activeOfficialApplicationCLIOrService
+    case none
+}
+
+enum ProviderAuthenticationMethod: String, Codable, Sendable {
+    case existingLocalSession
+    case officialApplicationOwnedSession
+    case umaOwnedAuthenticatedAccountWebSession
+    case none
+}
+
+enum ProviderUsageReadContract: String, Codable, Sendable {
+    case currentStructuredLocalRead
+    case currentAuthenticatedAccountWebRead
+    case none
+}
+
+enum ProviderLoginAssistance: String, Codable, Sendable {
+    case none
+    case existingSessionOnly
+    case userInitiatedOfficialChineseAppLogin
 }
 
 enum AgentMetricScope: String, Codable, CaseIterable, Hashable, Sendable {
@@ -37,6 +112,7 @@ enum AgentMetricScope: String, Codable, CaseIterable, Hashable, Sendable {
 enum AgentMetricProvenance: String, Codable, Sendable {
     case providerReported
     case locallyEstimated
+    case manualConfirmed
 }
 
 enum AgentConnectorFreshness: String, Codable, Sendable {
@@ -63,6 +139,9 @@ enum AgentConnectorCapability: String, Codable, CaseIterable, Hashable, Sendable
     case localActivity
     case rateLimits
     case accountUsage
+    case passiveLocalAvailability
+    case hiddenFromProviderSurfaces
+    case hiddenFromDesktopAssistant
 }
 
 /// Declarative, privacy-safe prerequisites.  Deliberately no free-form
@@ -104,6 +183,14 @@ struct AgentConnectorDescriptor: Codable, Sendable, Equatable {
     let supportsRestore: Bool
     let supportsUninstall: Bool
     let unsupportedFields: Set<String>
+    let providerPriority: Int
+    let expectedRuntime: ProviderRuntimeRequirement
+    let localSourceClass: ProviderLocalSourceClass
+    let authenticationMethod: ProviderAuthenticationMethod
+    let usageReadContract: ProviderUsageReadContract
+    let loginAssistance: ProviderLoginAssistance
+    let isRegisteredChineseAgent: Bool
+    let officialLoginApplicationURL: URL?
 
     init?(
         id: AgentConnectorID,
@@ -117,13 +204,30 @@ struct AgentConnectorDescriptor: Codable, Sendable, Equatable {
         privacyAllowlist: Set<String>,
         supportsRestore: Bool,
         supportsUninstall: Bool,
-        unsupportedFields: Set<String>
+        unsupportedFields: Set<String>,
+        providerPriority: Int? = nil,
+        expectedRuntime: ProviderRuntimeRequirement = .activeOfficialApplicationCLIOrService,
+        localSourceClass: ProviderLocalSourceClass? = nil,
+        authenticationMethod: ProviderAuthenticationMethod = .existingLocalSession,
+        usageReadContract: ProviderUsageReadContract? = nil,
+        loginAssistance: ProviderLoginAssistance = .existingSessionOnly,
+        isRegisteredChineseAgent: Bool = false,
+        officialLoginApplicationURL: URL? = nil
     ) {
+        let resolvedLocalSourceClass = localSourceClass
+            ?? Self.defaultLocalSourceClass(for: sourceTier)
         guard sourceTier.isAdmissible,
               !providerName.isEmpty,
               !officialSource.isEmpty,
               !sourceVersion.isEmpty,
-              !supportedScopes.isEmpty else { return nil }
+              !supportedScopes.isEmpty,
+              loginAssistance != .userInitiatedOfficialChineseAppLogin
+                || (
+                    isRegisteredChineseAgent
+                        && officialLoginApplicationURL != nil
+                        && resolvedLocalSourceClass == .admittedStructuredLocal
+                )
+        else { return nil }
         self.id = id
         self.providerName = providerName
         self.officialSource = officialSource
@@ -136,6 +240,40 @@ struct AgentConnectorDescriptor: Codable, Sendable, Equatable {
         self.supportsRestore = supportsRestore
         self.supportsUninstall = supportsUninstall
         self.unsupportedFields = unsupportedFields
+        self.providerPriority = providerPriority ?? AgentProviderOrder.priority(for: id)
+        self.expectedRuntime = expectedRuntime
+        self.localSourceClass = resolvedLocalSourceClass
+        self.authenticationMethod = authenticationMethod
+        let resolvedUsageReadContract: ProviderUsageReadContract
+        if let usageReadContract {
+            resolvedUsageReadContract = usageReadContract
+        } else {
+            resolvedUsageReadContract = switch resolvedLocalSourceClass {
+            case .admittedStructuredLocal:
+                .currentStructuredLocalRead
+            case .authenticatedAccountWeb:
+                .currentAuthenticatedAccountWebRead
+            case .manualOnly, .unsupported:
+                .none
+            }
+        }
+        self.usageReadContract = resolvedUsageReadContract
+        self.loginAssistance = loginAssistance
+        self.isRegisteredChineseAgent = isRegisteredChineseAgent
+        self.officialLoginApplicationURL = officialLoginApplicationURL
+    }
+
+    private static func defaultLocalSourceClass(
+        for sourceTier: AgentSourceTier
+    ) -> ProviderLocalSourceClass {
+        switch sourceTier {
+        case .officialLocalService, .officialStructuredHook, .officialCLIOrMetadata:
+            .admittedStructuredLocal
+        case .manualUserConfirmed:
+            .manualOnly
+        case .authorizedReadOnlyRemote, .unsupported:
+            .unsupported
+        }
     }
 }
 
@@ -193,6 +331,48 @@ struct AgentUsageChannel: Codable, Sendable, Equatable, Identifiable {
     let accountMetrics: AgentAccountMetrics?
     let localActivityMetrics: AgentLocalActivityMetrics?
     let safeFailure: AgentSafeFailure?
+    /// Optional provider-neutral availability. Existing percentage-based
+    /// connectors continue to publish rate-limit windows unchanged.
+    let availability: AgentAvailabilityValue?
+    /// Sanitized WorkBuddy account-pool reconciliation. It is runtime-only:
+    /// the connector snapshot store intentionally omits it.
+    let accountCreditSnapshot: WorkBuddyAccountCreditSnapshot?
+
+    var availabilitySourceState: AgentAvailabilitySourceState {
+        availability?.sourceState ?? .unspecified
+    }
+
+    init(
+        id: Kind,
+        sourceTier: AgentSourceTier,
+        sourceVersion: String,
+        scopes: Set<AgentMetricScope>,
+        provenance: AgentMetricProvenance,
+        freshness: AgentConnectorFreshness,
+        capturedAt: Date?,
+        coverageNote: String?,
+        rateLimitWindows: [AgentRateLimitWindow],
+        accountMetrics: AgentAccountMetrics?,
+        localActivityMetrics: AgentLocalActivityMetrics?,
+        safeFailure: AgentSafeFailure?,
+        availability: AgentAvailabilityValue? = nil,
+        accountCreditSnapshot: WorkBuddyAccountCreditSnapshot? = nil
+    ) {
+        self.id = id
+        self.sourceTier = sourceTier
+        self.sourceVersion = sourceVersion
+        self.scopes = scopes
+        self.provenance = provenance
+        self.freshness = freshness
+        self.capturedAt = capturedAt
+        self.coverageNote = coverageNote
+        self.rateLimitWindows = rateLimitWindows
+        self.accountMetrics = accountMetrics
+        self.localActivityMetrics = localActivityMetrics
+        self.safeFailure = safeFailure
+        self.availability = availability
+        self.accountCreditSnapshot = accountCreditSnapshot
+    }
 }
 
 /// The core snapshot deliberately contains aggregates and typed availability
@@ -219,6 +399,7 @@ struct AgentUsageSnapshot: Codable, Sendable, Equatable, Identifiable {
 protocol AgentUsageConnector: Sendable {
     var id: AgentConnectorID { get }
     var descriptor: AgentConnectorDescriptor { get }
+    func permitsRead(for trigger: ProviderEligibilityScanTrigger) async -> Bool
     func probe() async -> AgentConnectorProbe
     func start() async
     func refresh() async
@@ -230,6 +411,10 @@ protocol AgentUsageConnector: Sendable {
 }
 
 extension AgentUsageConnector {
+    func permitsRead(for trigger: ProviderEligibilityScanTrigger) async -> Bool {
+        true
+    }
+
     /// Existing adapters retain their one refresh implementation until they
     /// opt into source-aware trigger attribution.
     func refresh(trigger: CodexRefreshTrigger) async {

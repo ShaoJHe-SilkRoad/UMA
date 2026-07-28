@@ -401,8 +401,29 @@ enum SessionMetadataScanner {
 
     /// Returns only allowlisted regular JSONL paths. This is used solely to
     /// attach filesystem watches; it neither opens files nor decodes content.
-    static func watchableFileURLs(roots: [URL], fileManager: FileManager) -> [URL] {
-        scan(roots: roots, fileManager: fileManager).files.map(\.url)
+    static func watchableFileURLs(
+        roots: [URL],
+        fileManager: FileManager,
+        limit: Int = CodexLocalActivityObserver.maximumFileWatchCount
+    ) -> [URL] {
+        watchableFileURLs(
+            in: scan(roots: roots, fileManager: fileManager),
+            limit: limit
+        )
+    }
+
+    static func watchableFileURLs(
+        in scan: SessionMetadataScan,
+        limit: Int = CodexLocalActivityObserver.maximumFileWatchCount
+    ) -> [URL] {
+        let files = scan.files
+            .sorted { lhs, rhs in
+                if lhs.modifiedAt != rhs.modifiedAt {
+                    return lhs.modifiedAt > rhs.modifiedAt
+                }
+                return lhs.url.path < rhs.url.path
+            }
+        return files.prefix(max(0, limit)).map(\.url)
     }
 
     static func stableID(

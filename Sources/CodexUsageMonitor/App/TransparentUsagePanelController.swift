@@ -7,35 +7,17 @@ private final class TransparentUsagePanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-enum UsagePanelFrameGeometry {
-    static func clampedHeight(_ proposedHeight: CGFloat) -> CGFloat {
-        min(
-            UsagePanelMetrics.height,
-            max(UsagePanelMetrics.minimumHeight, proposedHeight.rounded())
-        )
-    }
+struct UsagePanelNavigationRequest: Equatable {
+    let expandedProviderIDs: Set<String>
+    let settingsInitiallyPresented: Bool
+    let requestsRefresh: Bool
 
-    static func targetFrame(
-        from currentFrame: NSRect,
-        height: CGFloat,
-        visibleTopEdge: CGFloat?,
-        visibleFrame: NSRect? = nil,
-        screenMargin: CGFloat = 0
-    ) -> NSRect {
-        var frame = currentFrame
-        frame.size.height = clampedHeight(height)
-        if let visibleTopEdge {
-            frame.origin.y = visibleTopEdge - frame.height
-        }
-        if let visibleFrame {
-            let boundedFrame = visibleFrame.insetBy(dx: screenMargin, dy: screenMargin)
-            frame.size.height = min(frame.height, boundedFrame.height)
-            frame.origin.y = min(
-                boundedFrame.maxY - frame.height,
-                max(boundedFrame.minY, frame.origin.y)
-            )
-        }
-        return frame
+    static func assistantSelection(providerID: String) -> Self {
+        Self(
+            expandedProviderIDs: [providerID],
+            settingsInitiallyPresented: false,
+            requestsRefresh: false
+        )
     }
 }
 
@@ -43,7 +25,7 @@ enum UsagePanelFrameGeometry {
 final class TransparentUsagePanelController {
     private enum Layout {
         static let width = UsagePanelMetrics.width
-        static let height = UsagePanelMetrics.height
+        static let initialHeight = UsagePanelMetrics.minimumHeight
         static let cornerRadius: CGFloat = 28
         static let statusBarGap: CGFloat = 8
         static let screenMargin: CGFloat = 8
@@ -51,40 +33,67 @@ final class TransparentUsagePanelController {
 
     private let panel: TransparentUsagePanel
     private let tuning: GlassTuning
+    private let store: UsageStore
+    private let workBuddySettings: WorkBuddySettingsModel
+    private let workBuddyLogin: WorkBuddyLoginCoordinator
+    private let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController
     private weak var statusItem: NSStatusItem?
     private let visibilityDidChange: (Bool) -> Void
+    private let navigation = UsagePanelNavigationCoordinator()
     private var globalEventMonitor: Any?
     private var localEventMonitor: Any?
-    private var frameAnimationGeneration: UInt = 0
-    private var visibleTopEdge: CGFloat?
-    private var pendingResizeHeight: CGFloat?
-    private var resizeIsScheduled = false
 
     init(
         store: UsageStore,
         statusItem: NSStatusItem,
+        workBuddySettings: WorkBuddySettingsModel,
+        workBuddyLogin: WorkBuddyLoginCoordinator,
+        workBuddyAccountWebSync: WorkBuddyAccountWebSessionController,
         visibilityDidChange: @escaping (Bool) -> Void
     ) {
+        self.store = store
+        self.workBuddySettings = workBuddySettings
+        self.workBuddyLogin = workBuddyLogin
+        self.workBuddyAccountWebSync = workBuddyAccountWebSync
         self.statusItem = statusItem
         self.visibilityDidChange = visibilityDidChange
         tuning = .final
         panel = TransparentUsagePanel(
-            contentRect: NSRect(x: 0, y: 0, width: Layout.width, height: Layout.height),
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: Layout.width,
+                height: Layout.initialHeight
+            ),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
 
-        configurePanel(store: store)
+        configurePanel(
+            store: store,
+            workBuddySettings: workBuddySettings,
+            workBuddyLogin: workBuddyLogin,
+            workBuddyAccountWebSync: workBuddyAccountWebSync,
+            expandedProviderIDs: []
+        )
     }
 
     func toggle() {
         panel.isVisible ? close() : show()
     }
 
+    func show(expandingProviderID providerID: String) {
+        let request = UsagePanelNavigationRequest.assistantSelection(
+            providerID: providerID
+        )
+        for expandedProviderID in request.expandedProviderIDs {
+            navigation.selectProvider(expandedProviderID)
+        }
+        show()
+    }
+
     func tearDown() {
-        pendingResizeHeight = nil
-        resizeIsScheduled = false
         close()
         removeEventMonitors()
     }
@@ -100,14 +109,17 @@ final class TransparentUsagePanelController {
         localEventMonitor = nil
     }
 
-    private func configurePanel(store: UsageStore) {
+    private func configurePanel(
+        store: UsageStore,
+        workBuddySettings: WorkBuddySettingsModel,
+        workBuddyLogin: WorkBuddyLoginCoordinator,
+        workBuddyAccountWebSync: WorkBuddyAccountWebSessionController,
+        expandedProviderIDs: Set<String>
+    ) {
         panel.level = .popUpMenu
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        // The macOS 26 glass host owns the exterior rim. AppKit's panel
-        // shadow would create a second perimeter and can briefly retain stale
-        // geometry while the disclosure animation resizes the window.
-        panel.hasShadow = false
+        panel.hasShadow = true
         panel.hidesOnDeactivate = false
         panel.isFloatingPanel = true
         panel.becomesKeyOnlyIfNeeded = true
@@ -117,110 +129,72 @@ final class TransparentUsagePanelController {
         panel.isReleasedWhenClosed = false
 
         let rootView = AdaptivePanelMaterialHostView(
-            frame: NSRect(x: 0, y: 0, width: Layout.width, height: Layout.height),
+            frame: NSRect(
+                x: 0,
+                y: 0,
+                width: Layout.width,
+                height: Layout.initialHeight
+            ),
             cornerRadius: Layout.cornerRadius,
             // Keep the exact established macOS 14–25 material intensity
             // without coupling the frozen panel geometry to M1-G3 tuning WIP.
             fallbackMaterialOpacity: 0.44
         )
 
-        let hostingView = NSHostingView(
-            rootView: UsagePanelView(
+        let panelView = UsagePanelView(
                 store: store,
                 tuning: tuning,
+                expandedProviderIDs: expandedProviderIDs,
+                navigation: navigation,
                 onHeightChange: { [weak self] height in
-                    self?.resizePanel(to: height)
+                    DispatchQueue.main.async { [weak self] in
+                        self?.resizePanel(to: height)
+                    }
                 },
-                localAccessConfirmationAction: NativeLocalCodexAccessConfirmation.action(for: store)
+                localAccessConfirmationAction: NativeLocalCodexAccessConfirmation.action(for: store),
+                workBuddySettings: workBuddySettings,
+                workBuddyLogin: workBuddyLogin,
+                workBuddyAccountWebSync: workBuddyAccountWebSync
             )
+            .usagePanelOuterContourOwnedByNativeHost()
+        let hostingView = NSHostingView(
+            rootView: panelView
         )
-        hostingView.frame = NSRect(x: 0, y: 0, width: Layout.width, height: Layout.height)
+        hostingView.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: Layout.width,
+            height: Layout.initialHeight
+        )
         hostingView.autoresizingMask = [.width, .height]
         hostingView.wantsLayer = true
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
         rootView.installContentView(hostingView)
-        panel.hasShadow = UsagePanelExteriorContract.windowShadowEnabled(
-            materialOwnsExteriorContour: rootView.ownsExteriorContour
-        )
         panel.contentView = rootView
     }
 
     private func resizePanel(to height: CGFloat) {
-        pendingResizeHeight = height
-        guard !resizeIsScheduled else { return }
-        resizeIsScheduled = true
-        // SwiftUI reports its first semantic height while NSHostingView may
-        // still be inside a layout pass. Defer and coalesce frame work onto
-        // the next main-loop turn so AppKit never lays the host out reentrantly.
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.resizeIsScheduled = false
-            guard let height = self.pendingResizeHeight else { return }
-            self.pendingResizeHeight = nil
-            self.applyResizePanel(to: height)
-        }
-    }
-
-    private func applyResizePanel(to height: CGFloat) {
-        let targetFrame = UsagePanelFrameGeometry.targetFrame(
-            from: panel.frame,
-            height: height,
-            visibleTopEdge: panel.isVisible ? visibleTopEdge ?? panel.frame.maxY : nil,
-            visibleFrame: panel.isVisible ? panel.screen?.visibleFrame : nil,
-            screenMargin: Layout.screenMargin
+        let height = min(
+            UsagePanelMetrics.height,
+            max(UsagePanelMetrics.minimumHeight, height.rounded())
         )
-        guard
-            abs(panel.frame.height - targetFrame.height) > 0.5
-                || abs(panel.frame.minY - targetFrame.minY) > 0.5
-        else { return }
+        guard abs(panel.frame.height - height) > 0.5 else { return }
 
-        if panel.isVisible, visibleTopEdge == nil {
-            visibleTopEdge = panel.frame.maxY
+        var frame = panel.frame
+        if panel.isVisible {
+            frame.origin.y += frame.height - height
         }
-        replaceFrameAnimation(with: targetFrame)
-    }
-
-    private func replaceFrameAnimation(with targetFrame: NSRect) {
-        frameAnimationGeneration &+= 1
-        let generation = frameAnimationGeneration
-        let shouldAnimate = panel.isVisible
-            && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-
-        guard shouldAnimate else {
-            // A zero-duration animator assignment replaces any in-flight frame
-            // animation and applies the final geometry immediately.
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0
-                panel.animator().setFrame(targetFrame, display: panel.isVisible)
-            } completionHandler: { [weak self] in
-                MainActor.assumeIsolated {
-                    guard let self, self.frameAnimationGeneration == generation else { return }
-                    self.panel.invalidateShadow()
-                }
-            }
-            return
-        }
-
-        // NSAnimatablePropertyContainer replaces the existing frame animation
-        // from its current presentation value when the same property receives
-        // a new target. The generation prevents an obsolete completion from
-        // finalizing geometry or invalidating the shadow.
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.18
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            panel.animator().setFrame(targetFrame, display: true)
-        } completionHandler: { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, self.frameAnimationGeneration == generation else { return }
-                self.panel.setFrame(targetFrame, display: true)
-                self.panel.invalidateShadow()
-            }
-        }
+        frame.size.height = height
+        panel.setFrame(
+            frame,
+            display: panel.isVisible,
+            animate: panel.isVisible && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        )
+        panel.invalidateShadow()
     }
 
     private func show() {
         positionPanel()
-        visibleTopEdge = panel.frame.maxY
         panel.makeKeyAndOrderFront(nil)
         panel.invalidateShadow()
         visibilityDidChange(true)
@@ -231,12 +205,6 @@ final class TransparentUsagePanelController {
     }
 
     private func close() {
-        frameAnimationGeneration &+= 1
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0
-            panel.animator().setFrame(panel.frame, display: false)
-        }
-        visibleTopEdge = nil
         if panel.isVisible {
             panel.orderOut(nil)
             visibilityDidChange(false)
