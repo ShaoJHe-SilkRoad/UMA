@@ -35,6 +35,7 @@ public struct UsageMonitorRuntime {
     public let workBuddySettings: WorkBuddySettingsModel
     public let workBuddyLogin: WorkBuddyLoginCoordinator
     public let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController
+    public let manusSettings: ManusSettingsModel
 
     public static func live(
         workBuddyStoreURL: URL? = nil,
@@ -61,10 +62,21 @@ public struct UsageMonitorRuntime {
             }
         )
         let agentSettings = AgentSettingsCoordinator()
+        let manusKeyStore = ManusAPIKeyStore()
+        let manusScheduler = ManusRefreshScheduler()
+        let manusConnector = ManusUsageConnector(
+            keyStore: manusKeyStore,
+            client: ManusCreditsAPIClient(),
+            scheduler: manusScheduler
+        )
         let registry = AgentUsageRuntime.makeCodexRegistry(
             snapshotStore: snapshotStoreURL.map { AgentConnectorSnapshotStore(url: $0) }
                 ?? AgentConnectorSnapshotStore(),
-            additionalConnectors: [workBuddyConnector, accountWebConnector]
+            additionalConnectors: [
+                workBuddyConnector,
+                accountWebConnector,
+                manusConnector,
+            ]
         )
         accountWebSync.configureAutoRefresh {
             guard await MainActor.run(body: {
@@ -87,11 +99,27 @@ public struct UsageMonitorRuntime {
         )
         let settings = WorkBuddySettingsModel(source: manualSource)
         let login = WorkBuddyLoginCoordinator()
+        let manusSettings = ManusSettingsModel(
+            keyStore: manusKeyStore,
+            connector: manusConnector,
+            registry: registry,
+            scheduler: manusScheduler
+        )
+        Task {
+            await manusScheduler.configure {
+                try? await registry.refresh(
+                    ManusUsageConnector.connectorID,
+                    trigger: .timer
+                )
+            }
+        }
+        manusSettings.start()
         return UsageMonitorRuntime(
             store: usageStore,
             workBuddySettings: settings,
             workBuddyLogin: login,
-            workBuddyAccountWebSync: accountWebSync
+            workBuddyAccountWebSync: accountWebSync,
+            manusSettings: manusSettings
         )
     }
 

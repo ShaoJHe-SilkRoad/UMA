@@ -340,8 +340,11 @@ public final class UsageStore: ObservableObject {
         registrySubscription = Task { [weak self] in
             let stream = await registry.snapshots()
             await registry.restorePersistedSnapshots()
+            let hasConfiguredOfficialRemote =
+                await registry.hasConfiguredOfficialRemoteConnector()
             if self?.allowsLaunchScan == true,
-               self?.agentSettings?.shouldAutoSearchAtLaunch == true {
+               self?.agentSettings?.shouldAutoSearchAtLaunch == true
+                    || hasConfiguredOfficialRemote {
                 _ = await self?.performEligibilityScan(
                     trigger: .applicationLaunch
                 )
@@ -375,6 +378,16 @@ public final class UsageStore: ObservableObject {
 
     private func applyMonitoringPreferences() {
         guard let agentSettings else { return }
+        if let registry {
+            Task { @MainActor [weak self] in
+                guard let agentSettings = self?.agentSettings else { return }
+                let descriptors = await registry.orderedDescriptors()
+                let disabled = agentSettings.disabledConnectorIDs(
+                    from: descriptors.map(\.id)
+                )
+                await registry.stopConnectors(disabled)
+            }
+        }
         let visibleSnapshots = providerSnapshots.filter {
             agentSettings.isMonitoringEnabled(for: $0.id)
         }

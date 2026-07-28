@@ -45,6 +45,7 @@ public struct UsagePanelView: View {
     private let workBuddySettings: WorkBuddySettingsModel?
     private let workBuddyLogin: WorkBuddyLoginCoordinator?
     private let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
+    private let manusSettings: ManusSettingsModel?
     private let appearanceOverride: UsagePanelAppearanceOverride?
     private let renderedHeightOverride: CGFloat?
     private let cardVisibilityOverride: UsagePanelCardVisibility?
@@ -62,6 +63,7 @@ public struct UsagePanelView: View {
         workBuddySettings: WorkBuddySettingsModel? = nil,
         workBuddyLogin: WorkBuddyLoginCoordinator? = nil,
         workBuddyAccountWebSync: WorkBuddyAccountWebSessionController? = nil,
+        manusSettings: ManusSettingsModel? = nil,
         appearanceOverride: UsagePanelAppearanceOverride? = nil,
         renderedHeightOverride: CGFloat? = nil,
         cardVisibilityOverride: UsagePanelCardVisibility? = nil
@@ -77,6 +79,7 @@ public struct UsagePanelView: View {
         self.workBuddySettings = workBuddySettings
         self.workBuddyLogin = workBuddyLogin
         self.workBuddyAccountWebSync = workBuddyAccountWebSync
+        self.manusSettings = manusSettings
         self.appearanceOverride = appearanceOverride
         self.renderedHeightOverride = renderedHeightOverride
         self.cardVisibilityOverride = cardVisibilityOverride
@@ -203,6 +206,7 @@ public struct UsagePanelView: View {
                         workBuddySettings: workBuddySettings,
                         workBuddyLogin: workBuddyLogin,
                         workBuddyAccountWebSync: workBuddyAccountWebSync,
+                        manusSettings: manusSettings,
                         providerLoginOptions: store.providerLoginOptions,
                         agentSettings: store.agentSettings,
                         searchForAgents: {
@@ -553,6 +557,10 @@ private struct LocalLiveProviderCard: View {
         card.availability?.sourceState == .authenticatedAccountWeb
     }
 
+    private var isOfficialAPICredits: Bool {
+        card.availability?.sourceState == .officialRemoteUsageAPI
+    }
+
     private var selectedWindowLabel: String? {
         card.selectedWindowCompactLabel
     }
@@ -560,6 +568,9 @@ private struct LocalLiveProviderCard: View {
     private var providerSubtitle: String {
         if isAccountWebCredits {
             return "\(language.workBuddyAccountWebSource) · \(connectionLabel)"
+        }
+        if let sourceDescription = card.sourceDescription {
+            return "\(sourceDescription) · \(connectionLabel)"
         }
         if let plan = card.planLabel, !plan.isEmpty {
             return "\(plan) · \(connectionLabel)"
@@ -699,8 +710,38 @@ private struct LocalLiveProviderCard: View {
                     )
                 )
             }
+            if let snapshot = card.creditDetails {
+                ForEach(snapshot.details) { detail in
+                    detailRow(
+                        language.manusCreditDetail(detail.kind),
+                        value: CreditFormatter.exact(
+                            Decimal(detail.credits),
+                            language: language
+                        )
+                    )
+                }
+                if let nextRefreshAt = snapshot.nextRefreshAt {
+                    detailRow(
+                        language == .english
+                            ? "Next refresh"
+                            : "下次刷新",
+                        value: language.workBuddyConfirmedAt(nextRefreshAt)
+                    )
+                }
+                if let refreshInterval = snapshot.refreshInterval,
+                   !refreshInterval.isEmpty {
+                    detailRow(
+                        language == .english
+                            ? "Refresh interval"
+                            : "刷新周期",
+                        value: refreshInterval
+                    )
+                }
+            }
             detailRow(
-                language.workBuddyAvailableCredits,
+                isOfficialAPICredits
+                    ? language.manusAvailableCredits
+                    : language.workBuddyAvailableCredits,
                 value: exactValue(balance.remaining)
             )
             if let used = balance.used {
@@ -716,14 +757,20 @@ private struct LocalLiveProviderCard: View {
                 )
             }
             detailRow(
-                language.workBuddySource,
+                language == .english ? "Source" : "来源",
                 value: isAccountWebCredits
                     ? language.workBuddyAccountWebSource
-                    : "Official structured source"
+                    : (
+                        isOfficialAPICredits
+                            ? language.manusOfficialAPIV2
+                            : "Official structured source"
+                    )
             )
             detailRow(
-                language.workBuddyScope,
-                value: language.workBuddySharedWithCodeBuddy
+                language == .english ? "Scope" : "范围",
+                value: isOfficialAPICredits
+                    ? language.manusAccountScope
+                    : language.workBuddySharedWithCodeBuddy
             )
             detailRow(
                 language.workBuddyLastConfirmed,

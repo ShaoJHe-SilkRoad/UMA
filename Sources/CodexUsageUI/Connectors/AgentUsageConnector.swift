@@ -74,6 +74,7 @@ enum AgentSourceTier: String, Codable, CaseIterable, Sendable {
 enum ProviderLocalSourceClass: String, Codable, Sendable {
     case admittedStructuredLocal
     case authenticatedAccountWeb
+    case officialRemoteUsageAPI
     case manualOnly
     case unsupported
 }
@@ -87,12 +88,14 @@ enum ProviderAuthenticationMethod: String, Codable, Sendable {
     case existingLocalSession
     case officialApplicationOwnedSession
     case umaOwnedAuthenticatedAccountWebSession
+    case umaOwnedKeychainCredential
     case none
 }
 
 enum ProviderUsageReadContract: String, Codable, Sendable {
     case currentStructuredLocalRead
     case currentAuthenticatedAccountWebRead
+    case currentOfficialRemoteRead
     case none
 }
 
@@ -253,6 +256,8 @@ struct AgentConnectorDescriptor: Codable, Sendable, Equatable {
                 .currentStructuredLocalRead
             case .authenticatedAccountWeb:
                 .currentAuthenticatedAccountWebRead
+            case .officialRemoteUsageAPI:
+                .currentOfficialRemoteRead
             case .manualOnly, .unsupported:
                 .none
             }
@@ -316,6 +321,44 @@ struct AgentLocalActivityMetrics: Codable, Sendable, Equatable {
     let recognizedModelCount: Int?
 }
 
+public enum AgentCreditDetailKind: String, Codable, Sendable {
+    case free
+    case periodic
+    case addOn
+    case event
+    case refresh
+    case monthlyQuota
+    case maximumRefresh
+}
+
+public struct AgentCreditDetail: Codable, Sendable, Equatable, Identifiable {
+    public let kind: AgentCreditDetailKind
+    public let credits: Int64
+
+    public var id: String { kind.rawValue }
+
+    public init(kind: AgentCreditDetailKind, credits: Int64) {
+        self.kind = kind
+        self.credits = credits
+    }
+}
+
+public struct AgentCreditDetailsSnapshot: Codable, Sendable, Equatable {
+    public let details: [AgentCreditDetail]
+    public let nextRefreshAt: Date?
+    public let refreshInterval: String?
+
+    public init(
+        details: [AgentCreditDetail],
+        nextRefreshAt: Date?,
+        refreshInterval: String?
+    ) {
+        self.details = details
+        self.nextRefreshAt = nextRefreshAt
+        self.refreshInterval = refreshInterval
+    }
+}
+
 struct AgentUsageChannel: Codable, Sendable, Equatable, Identifiable {
     enum Kind: String, Codable, Sendable { case account, localActivity }
 
@@ -337,6 +380,9 @@ struct AgentUsageChannel: Codable, Sendable, Equatable, Identifiable {
     /// Sanitized WorkBuddy account-pool reconciliation. It is runtime-only:
     /// the connector snapshot store intentionally omits it.
     let accountCreditSnapshot: WorkBuddyAccountCreditSnapshot?
+    /// Provider-neutral, optional Credit-detail rows. These fields never
+    /// become the primary balance and are never summed into a percentage.
+    let creditDetails: AgentCreditDetailsSnapshot?
 
     var availabilitySourceState: AgentAvailabilitySourceState {
         availability?.sourceState ?? .unspecified
@@ -356,7 +402,8 @@ struct AgentUsageChannel: Codable, Sendable, Equatable, Identifiable {
         localActivityMetrics: AgentLocalActivityMetrics?,
         safeFailure: AgentSafeFailure?,
         availability: AgentAvailabilityValue? = nil,
-        accountCreditSnapshot: WorkBuddyAccountCreditSnapshot? = nil
+        accountCreditSnapshot: WorkBuddyAccountCreditSnapshot? = nil,
+        creditDetails: AgentCreditDetailsSnapshot? = nil
     ) {
         self.id = id
         self.sourceTier = sourceTier
@@ -372,6 +419,7 @@ struct AgentUsageChannel: Codable, Sendable, Equatable, Identifiable {
         self.safeFailure = safeFailure
         self.availability = availability
         self.accountCreditSnapshot = accountCreditSnapshot
+        self.creditDetails = creditDetails
     }
 }
 

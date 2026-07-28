@@ -43,6 +43,20 @@ actor AgentConnectorRegistry {
         orderedIDs.compactMap { connectors[$0]?.descriptor }
     }
 
+    func hasConfiguredOfficialRemoteConnector() async -> Bool {
+        for id in orderedIDs {
+            guard let connector = connectors[id],
+                  connector.descriptor.localSourceClass
+                    == .officialRemoteUsageAPI else {
+                continue
+            }
+            if await connector.permitsRead(for: .applicationLaunch) {
+                return true
+            }
+        }
+        return false
+    }
+
     func snapshots() -> AsyncStream<[AgentUsageSnapshot]> {
         AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             self.continuation = continuation
@@ -72,7 +86,6 @@ actor AgentConnectorRegistry {
         )
 
         let admittedIDs = Set(result.admittedProviderIDs)
-        let previouslyAdmittedIDs = Set(latest.keys)
         let hiddenListenerIDs = listeners.keys.filter {
             !admittedIDs.contains($0)
         }
@@ -89,10 +102,12 @@ actor AgentConnectorRegistry {
             guard let connector = connectors[id] else { continue }
             if admittedIDs.contains(id) {
                 listen(to: connector)
-            } else if connector.descriptor.hasSurfaceAdmissibleReadContract,
-                      !excludedProviderIDs.contains(id)
-                        || previouslyAdmittedIDs.contains(id) {
-                await connector.stop()
+            } else if connector.descriptor.hasSurfaceAdmissibleReadContract {
+                if excludedProviderIDs.contains(id)
+                    || connector.descriptor.localSourceClass
+                        != .officialRemoteUsageAPI {
+                    await connector.stop()
+                }
             }
         }
         await persistCurrentAdmittedSnapshots()
@@ -167,6 +182,22 @@ actor AgentConnectorRegistry {
         await receive(await connector.currentSnapshot())
     }
 
+    func stopConnectors(_ ids: Set<AgentConnectorID>) async {
+        let selected = ids.compactMap { connectors[$0] }
+        for id in ids {
+            listeners[id]?.cancel()
+            listeners[id] = nil
+            latest[id] = nil
+        }
+        await withTaskGroup(of: Void.self) { group in
+            for connector in selected {
+                group.addTask { await connector.stop() }
+            }
+        }
+        await persistCurrentAdmittedSnapshots()
+        publish()
+    }
+
     func stopAll() async {
         let registered = listeners.keys.compactMap { connectors[$0] }
         listeners.values.forEach { $0.cancel() }
@@ -237,7 +268,9 @@ actor AgentConnectorRegistry {
                         )
                     }
                 )
-                if snapshot.state != .inactive {
+                if snapshot.state != .inactive,
+                   connector.descriptor.localSourceClass
+                    != .officialRemoteUsageAPI {
                     await connector.stop()
                 }
                 publish()

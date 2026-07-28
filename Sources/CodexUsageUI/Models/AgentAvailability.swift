@@ -92,12 +92,16 @@ public struct CreditPoolIdentity: RawRepresentable, Codable, Hashable, Sendable 
     public static let buddyAISharedCredits = CreditPoolIdentity(
         rawValue: "buddyAI.sharedCredits"
     )!
+    public static let manusAvailableCredits = CreditPoolIdentity(
+        rawValue: "manus.availableCredits"
+    )!
 }
 
 public enum CreditScopeKind: String, Codable, Equatable, Sendable {
     case buddyAISharedPersonal
     case buddyAIEnterpriseShared
     case buddyAIUnknown
+    case manusAccount
     case other
 }
 
@@ -109,8 +113,11 @@ public struct CreditScope: Codable, Equatable, Sendable {
         switch kind {
         case .buddyAISharedPersonal, .buddyAIEnterpriseShared, .buddyAIUnknown:
             guard poolIdentity == .buddyAISharedCredits else { return nil }
+        case .manusAccount:
+            guard poolIdentity == .manusAvailableCredits else { return nil }
         case .other:
-            guard poolIdentity != .buddyAISharedCredits else { return nil }
+            guard poolIdentity != .buddyAISharedCredits,
+                  poolIdentity != .manusAvailableCredits else { return nil }
         }
         self.kind = kind
         self.poolIdentity = poolIdentity
@@ -127,6 +134,10 @@ public struct CreditScope: Codable, Equatable, Sendable {
     public static let buddyAIUnknown = CreditScope(
         kind: .buddyAIUnknown,
         poolIdentity: .buddyAISharedCredits
+    )!
+    public static let manusAccount = CreditScope(
+        kind: .manusAccount,
+        poolIdentity: .manusAvailableCredits
     )!
 
     private enum CodingKeys: String, CodingKey {
@@ -167,19 +178,23 @@ public enum AvailabilityProvenance: Codable, Equatable, Sendable {
     case manualConfirmed(at: Date)
     case officialStructured(observedAt: Date)
     case authenticatedAccountWeb(observedAt: Date)
+    case officialRemoteUsageAPI(observedAt: Date)
 
     public var observedAt: Date {
         switch self {
         case let .manualConfirmed(at): at
         case let .officialStructured(observedAt): observedAt
         case let .authenticatedAccountWeb(observedAt): observedAt
+        case let .officialRemoteUsageAPI(observedAt): observedAt
         }
     }
 
     public var isLiveStructuredSource: Bool {
         switch self {
         case .manualConfirmed: false
-        case .officialStructured, .authenticatedAccountWeb: true
+        case .officialStructured, .authenticatedAccountWeb,
+             .officialRemoteUsageAPI:
+            true
         }
     }
 }
@@ -188,6 +203,7 @@ public enum AgentAvailabilitySourceState: String, Codable, Equatable, Sendable {
     case manualConfirmed
     case officialStructured
     case authenticatedAccountWeb
+    case officialRemoteUsageAPI
     case unspecified
 }
 
@@ -585,6 +601,7 @@ public enum AgentAvailabilityValue: Codable, Equatable, Sendable {
         case .manualConfirmed: return .manualConfirmed
         case .officialStructured: return .officialStructured
         case .authenticatedAccountWeb: return .authenticatedAccountWeb
+        case .officialRemoteUsageAPI: return .officialRemoteUsageAPI
         }
     }
 
