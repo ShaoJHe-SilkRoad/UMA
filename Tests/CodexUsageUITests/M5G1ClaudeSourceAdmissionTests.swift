@@ -1,8 +1,9 @@
 import CoreFoundation
 import Foundation
 import Testing
+@testable import CodexUsageUI
 
-@Suite("M5-G1 Claude local-source admission")
+@Suite("M5-G1R Claude local-source admission")
 struct M5G1ClaudeSourceAdmissionTests {
     @Test
     func officialAllowlistAcceptsValidSyntheticWindowsAndBoundedVersion() throws {
@@ -28,11 +29,11 @@ struct M5G1ClaudeSourceAdmissionTests {
 
         #expect(projection.version == "synthetic-2.1.80")
         #expect(projection.fiveHour == .valid(.init(
-            usedPercentage: 0,
+            remainingPercentage: 100,
             resetsAt: 1_893_456_000
         )))
         #expect(projection.sevenDay == .valid(.init(
-            usedPercentage: 37.5,
+            remainingPercentage: 62.5,
             resetsAt: 1_894_060_800
         )))
         #expect(projection.validWindowCount == 2)
@@ -40,19 +41,96 @@ struct M5G1ClaudeSourceAdmissionTests {
     }
 
     @Test
-    func percentageBoundariesAndRemainingDerivationAreExact() throws {
-        for used in [0.0, 9.25, 50.0, 100.0] {
+    func percentageBoundariesConvertToRemainingExactlyOnce() throws {
+        let matrix = [
+            (used: 0.0, remaining: 100.0),
+            (used: 1.0, remaining: 99.0),
+            (used: 36.25, remaining: 63.75),
+            (used: 99.9, remaining: 0.1),
+            (used: 100.0, remaining: 0.0),
+        ]
+
+        for example in matrix {
             let projection = try ClaudeStatusLineAdmissionHarness.decode(
                 syntheticWindowPayload(
                     name: "five_hour",
-                    usedPercentage: used,
+                    usedPercentage: example.used,
                     resetsAt: 1_893_456_000
                 )
             )
             let window = try #require(projection.fiveHour.window)
-            #expect(window.usedPercentage == used)
-            #expect(window.remainingPercentage == 100 - used)
+            #expect(
+                abs(window.remainingPercentage - example.remaining)
+                    < 0.000_000_1
+            )
         }
+    }
+
+    @Test
+    func sharedPresentationConvertsUsedToRemainingAndRetainsResetEpoch() {
+        let reset = Date(timeIntervalSince1970: 1_893_456_000)
+        let card = SharedUsagePresentationPolicy.makeCard(
+            snapshot: sharedSnapshot(
+                fiveHourUsed: 36.25,
+                sevenDayUsed: 1,
+                fiveHourReset: reset
+            ),
+            previous: nil,
+            language: .english,
+            now: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+
+        #expect(card.windows[0].remaining == .finite(63.75))
+        #expect(card.windows[0].resetsAt == reset)
+        #expect(card.windows[1].remaining == .finite(99))
+        #expect(card.selectedWindowID == "five-hour")
+    }
+
+    @Test
+    func sharedPresentationKeepsWindowsIndependentAndSelectsMaximumDecrement() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let previous = SharedUsagePresentationPolicy.makeCard(
+            snapshot: sharedSnapshot(fiveHourUsed: 20, sevenDayUsed: 30),
+            previous: nil,
+            language: .english,
+            now: now
+        )
+        let current = SharedUsagePresentationPolicy.makeCard(
+            snapshot: sharedSnapshot(fiveHourUsed: 40, sevenDayUsed: 35),
+            previous: previous,
+            language: .english,
+            now: now
+        )
+
+        #expect(current.windows[0].remaining == .finite(60))
+        #expect(current.windows[1].remaining == .finite(65))
+        #expect(current.selectedWindowID == "five-hour")
+        #expect(current.remaining == .finite(60))
+    }
+
+    @Test
+    func conversionIsCentralizedAndViewsDoNotRepeatIt() throws {
+        let model = try source(
+            "Sources/CodexUsageUI/Models/SharedUsagePresentation.swift"
+        )
+        #expect(model.components(separatedBy: "100 - used").count - 1 == 1)
+
+        let viewRoot = repositoryRoot()
+            .appendingPathComponent("Sources/CodexUsageUI/Views")
+        let viewSources = try FileManager.default
+            .enumerator(at: viewRoot, includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL }
+            .filter { $0.pathExtension == "swift" }
+            .map { try String(contentsOf: $0, encoding: .utf8) }
+            .joined(separator: "\n") ?? ""
+        #expect(!viewSources.contains("100 -"))
+
+        let selectionStart = try #require(
+            model.range(of: "private static func selectedWindowID")
+        ).lowerBound
+        let selection = String(model[selectionStart...])
+        #expect(selection.contains("window.remaining"))
+        #expect(!selection.contains("usedPercent"))
     }
 
     @Test
@@ -250,6 +328,66 @@ struct M5G1ClaudeSourceAdmissionTests {
     }
 
     @Test
+    func installedTrustedButLoggedOutRequiresSetup() {
+        #expect(
+            ClaudeLocalSourceAdmissionHarness.decide(
+                cliTrusted: true,
+                authentication: .loggedOut,
+                secretOrEnterpriseRoutePresent: false,
+                validWindowCount: 0
+            ) == .setupRequired
+        )
+    }
+
+    @Test
+    func authenticatedProviderManagedSourceAdmitsOnlyObservedWindows() {
+        #expect(
+            ClaudeLocalSourceAdmissionHarness.decide(
+                cliTrusted: true,
+                authentication: .providerManaged,
+                secretOrEnterpriseRoutePresent: false,
+                validWindowCount: 2
+            ) == .go
+        )
+        #expect(
+            ClaudeLocalSourceAdmissionHarness.decide(
+                cliTrusted: true,
+                authentication: .providerManaged,
+                secretOrEnterpriseRoutePresent: false,
+                validWindowCount: 1
+            ) == .conditionalGo
+        )
+        #expect(
+            ClaudeLocalSourceAdmissionHarness.decide(
+                cliTrusted: true,
+                authentication: .providerManaged,
+                secretOrEnterpriseRoutePresent: false,
+                validWindowCount: 0
+            ) == .noGo
+        )
+    }
+
+    @Test
+    func secretAndEnterpriseRoutesFailClosed() {
+        for authentication in [
+            ClaudeLocalSourceAdmissionHarness.Authentication.apiKey,
+            .bearerToken,
+            .bedrock,
+            .vertex,
+            .foundry,
+        ] {
+            #expect(
+                ClaudeLocalSourceAdmissionHarness.decide(
+                    cliTrusted: true,
+                    authentication: authentication,
+                    secretOrEnterpriseRoutePresent: true,
+                    validWindowCount: 2
+                ) == .noGo
+            )
+        }
+    }
+
+    @Test
     func versionIsOptionalBoundedAndNonAuthoritative() throws {
         let absent = try ClaudeStatusLineAdmissionHarness.decode(
             syntheticWindowPayload(
@@ -303,7 +441,7 @@ struct M5G1ClaudeSourceAdmissionTests {
         #expect(state == .absent)
 
         let plan = ClaudeSettingsFixtureHarness.probePlan(
-            cliInstalled: false,
+            cliInstalled: true,
             providerManagedAuthentication: false,
             serverManagedPolicyKnown: false,
             settings: state
@@ -311,7 +449,8 @@ struct M5G1ClaudeSourceAdmissionTests {
         #expect(!plan.shouldProbe)
         #expect(!plan.shouldMutateSettings)
         #expect(!plan.shouldCreateBackup)
-        #expect(plan.blockers.contains(.cliMissing))
+        #expect(plan.blockers.contains(.authenticationUnproven))
+        #expect(!plan.blockers.contains(.cliMissing))
     }
 
     @Test
@@ -368,6 +507,18 @@ struct M5G1ClaudeSourceAdmissionTests {
         )
         #expect(managedPlan.blockers.contains(.managedPolicyReviewRequired))
         #expect(!managedPlan.shouldProbe)
+
+        let enterpriseRoute = ClaudeSettingsFixtureHarness.classify(
+            Data(#"{"env":{"CLAUDE_CODE_USE_BEDROCK":"synthetic-present"}}"#.utf8)
+        )
+        let enterprisePlan = ClaudeSettingsFixtureHarness.probePlan(
+            cliInstalled: true,
+            providerManagedAuthentication: true,
+            serverManagedPolicyKnown: true,
+            settings: enterpriseRoute
+        )
+        #expect(enterprisePlan.blockers.contains(.secretRoutePresent))
+        #expect(!enterprisePlan.shouldProbe)
     }
 
     @Test
@@ -392,7 +543,7 @@ struct M5G1ClaudeSourceAdmissionTests {
     @Test
     func syntheticBackupIsOwnerOnlyAndRestoreIsByteExact() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("uma-m5-g1-\(UUID().uuidString)")
+            .appendingPathComponent("uma-m5-g1r-\(UUID().uuidString)")
         try FileManager.default.createDirectory(
             at: root,
             withIntermediateDirectories: true
@@ -443,7 +594,8 @@ struct M5G1ClaudeSourceAdmissionTests {
     @Test
     func durableRecordsAgreeOnSetupRequiredAndOnlyNextTask() throws {
         let records = try durableRecords()
-        let decision = "SETUP REQUIRED — CLAUDE CODE CLI NOT INSTALLED"
+        let decision =
+            "SETUP REQUIRED — CLAUDE CODE CLI PRESENT BUT NOT AUTHENTICATED"
 
         for record in records {
             #expect(record.contains(decision))
@@ -454,15 +606,15 @@ struct M5G1ClaudeSourceAdmissionTests {
     }
 
     @Test
-    func durableRecordsMakeNoLiveOrAuthenticationClaim() throws {
+    func durableRecordsMakeNoLiveCapabilityClaim() throws {
         let combined = try durableRecords().joined(separator: "\n")
 
         #expect(combined.contains("official Claude Code status-line"))
         #expect(combined.contains("potentially admissible"))
-        #expect(combined.contains("Authentication: unknown"))
+        #expect(combined.contains("Authentication: logged out"))
         #expect(combined.contains("No status-line payload was observed"))
-        #expect(combined.contains("No Claude process"))
-        #expect(combined.contains("No settings mutation"))
+        #expect(combined.contains("No Claude provider task"))
+        #expect(combined.contains("Settings file modified: no"))
         #expect(!combined.contains("Admission decision: GO"))
         #expect(!combined.contains("LIVE CLAUDE SOURCE PROVEN"))
     }
@@ -531,6 +683,55 @@ struct M5G1ClaudeSourceAdmissionTests {
             """
         )
     }
+
+    private func sharedSnapshot(
+        fiveHourUsed: Double,
+        sevenDayUsed: Double,
+        fiveHourReset: Date = Date(timeIntervalSince1970: 1_893_456_000)
+    ) -> AgentUsageSnapshot {
+        let capturedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        return AgentUsageSnapshot(
+            id: AgentConnectorID(rawValue: "claude.local")!,
+            providerName: "Claude Code",
+            state: .ready,
+            capturedAt: capturedAt,
+            lastSuccessfulAt: capturedAt,
+            freshness: .fresh,
+            channels: [
+                AgentUsageChannel(
+                    id: .account,
+                    sourceTier: .officialLocalService,
+                    sourceVersion: "synthetic-status-line",
+                    scopes: [.account],
+                    provenance: .providerReported,
+                    freshness: .fresh,
+                    capturedAt: capturedAt,
+                    coverageNote: nil,
+                    rateLimitWindows: [
+                        AgentRateLimitWindow(
+                            id: "five-hour",
+                            kind: .fiveHour,
+                            usedPercent: fiveHourUsed,
+                            isUnlimited: false,
+                            resetsAt: fiveHourReset
+                        ),
+                        AgentRateLimitWindow(
+                            id: "seven-day",
+                            kind: .sevenDay,
+                            usedPercent: sevenDayUsed,
+                            isUnlimited: false,
+                            resetsAt: Date(timeIntervalSince1970: 1_894_060_800)
+                        ),
+                    ],
+                    accountMetrics: nil,
+                    localActivityMetrics: nil,
+                    safeFailure: nil
+                ),
+            ],
+            capabilities: [.connect, .refresh, .disconnect],
+            safeFailure: nil
+        )
+    }
 }
 
 private enum ClaudeStatusLineAdmissionHarness {
@@ -539,12 +740,8 @@ private enum ClaudeStatusLineAdmissionHarness {
     private static let maximumVersionBytes = 64
 
     struct Window: Equatable {
-        let usedPercentage: Double
+        let remainingPercentage: Double
         let resetsAt: Int64
-
-        var remainingPercentage: Double {
-            100 - usedPercentage
-        }
     }
 
     enum WindowState: Equatable {
@@ -655,7 +852,7 @@ private enum ClaudeStatusLineAdmissionHarness {
         }
         return .valid(
             Window(
-                usedPercentage: percentage,
+                remainingPercentage: 100 - percentage,
                 resetsAt: Int64(resetNumber)
             )
         )
@@ -679,6 +876,43 @@ private enum ClaudeStatusLineAdmissionHarness {
             return nil
         }
         return value
+    }
+}
+
+private enum ClaudeLocalSourceAdmissionHarness {
+    enum Authentication: Equatable {
+        case loggedOut
+        case providerManaged
+        case apiKey
+        case bearerToken
+        case bedrock
+        case vertex
+        case foundry
+    }
+
+    enum Decision: Equatable {
+        case go
+        case conditionalGo
+        case setupRequired
+        case noGo
+    }
+
+    static func decide(
+        cliTrusted: Bool,
+        authentication: Authentication,
+        secretOrEnterpriseRoutePresent: Bool,
+        validWindowCount: Int
+    ) -> Decision {
+        guard cliTrusted else { return .setupRequired }
+        guard !secretOrEnterpriseRoutePresent else { return .noGo }
+        guard authentication == .providerManaged else {
+            return authentication == .loggedOut ? .setupRequired : .noGo
+        }
+        switch validWindowCount {
+        case 2: return .go
+        case 1: return .conditionalGo
+        default: return .noGo
+        }
     }
 }
 
@@ -735,6 +969,9 @@ private enum ClaudeSettingsFixtureHarness {
             "ANTHROPIC_API_KEY",
             "ANTHROPIC_AUTH_TOKEN",
             "CLAUDE_CODE_OAUTH_TOKEN",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDE_CODE_USE_VERTEX",
+            "CLAUDE_CODE_USE_FOUNDRY",
         ]
         return .valid(
             Summary(

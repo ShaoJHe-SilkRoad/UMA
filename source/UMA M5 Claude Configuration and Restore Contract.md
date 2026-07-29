@@ -4,11 +4,11 @@ Date: 2026-07-28
 
 ## Current decision
 
-**SETUP REQUIRED — CLAUDE CODE CLI NOT INSTALLED**
+**SETUP REQUIRED — CLAUDE CODE CLI PRESENT BUT NOT AUTHENTICATED**
 
-This contract records the configuration boundary for a future authorized
-Claude local-source recheck. It does not authorize installation, login, a
-probe, or a settings change.
+This contract records both the M5-G1R preservation result and the boundary for
+a future authorized Claude local-source recheck. M5-G1R authorized a temporary
+probe only after its trust and authentication preconditions passed.
 
 ## Official settings hierarchy
 
@@ -40,7 +40,7 @@ Allowlisted local key-presence checks found no:
 - `apiKeyHelper`;
 - API-key, bearer-token, or setup-token route name.
 
-Server-managed settings are unverified because the official CLI is absent.
+Server-managed settings are unverified because the trusted CLI is logged out.
 
 ## Current preservation and restore result
 
@@ -51,17 +51,19 @@ Server-managed settings are unverified because the official CLI is absent.
 - Probe installed: no
 - Restore operation required: no
 - Local absence state after inspection: unchanged
+- Temporary trust artifacts retained: no
 
 This is not a live restore PASS. It is proof that no configuration mutation
-occurred.
+occurred and that the original absence state did not require restoration.
 
 ## Future preconditions before any temporary probe
 
 A later specifically authorized task must establish all of the following
 before writing a settings file:
 
-1. official CLI path, version, architecture, hash, signature, and trust;
-2. provider-managed authentication without reading credentials;
+1. reverify the trusted CLI identity already established by M5-G1R;
+2. establish provider-managed subscription authentication without reading
+   credentials;
 3. every loaded settings source, including server-managed policy;
 4. effective `statusLine`, `disableAllHooks`, and relevant policy state;
 5. workspace trust required for a local command;
@@ -134,7 +136,7 @@ production work may continue after a restore failure.
 
 ## Fixture-test boundary
 
-M5-G1 tests exercise only synthetic settings bytes in task-owned temporary
+M5-G1R tests exercise only synthetic settings bytes in task-owned temporary
 directories. They prove the contract logic can preserve exact bytes,
 formatting, unknown keys, and final newlines. They do not represent a live
 Claude settings mutation or restoration.

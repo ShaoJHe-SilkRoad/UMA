@@ -4,7 +4,7 @@ Date: 2026-07-28
 
 ## Final decision
 
-**SETUP REQUIRED — CLAUDE CODE CLI NOT INSTALLED**
+**SETUP REQUIRED — CLAUDE CODE CLI PRESENT BUT NOT AUTHENTICATED**
 
 ## Decision basis
 
@@ -21,38 +21,45 @@ provider response, and the two windows may be independently absent.
 
 The current device cannot prove that capability because:
 
-1. the official `claude` executable is not installed or resolvable;
-2. executable identity, version, architecture, hash, signature, and trust are
-   therefore unavailable;
-3. provider-managed authentication is not proven;
-4. server-managed settings and effective global policy are unverified;
-5. no status-line payload was observed;
-6. no valid quota window was observed.
+1. a trusted Desktop-managed Claude Code 2.1.219 arm64 executable is present,
+   but the normal shell launcher is absent;
+2. strict native signature and Gatekeeper verification pass for the
+   Desktop-managed CLI;
+3. the CLI reports `loggedIn: false`, `authMethod: none`, and a first-party
+   provider;
+4. provider-managed subscription authentication is therefore not active;
+5. server-managed settings and effective global policy are unverified;
+6. no status-line payload was observed;
+7. no valid quota window was observed.
 
 ## Why this is SETUP REQUIRED
 
 The source is not rejected as inherently unsuitable. The immediate missing
-condition is installation of the official Claude Code CLI through a separately
-authorized owner-controlled setup task.
+condition is provider-managed Claude.ai subscription authentication through a
+separately authorized owner-controlled setup task.
 
-This is not GO or CONDITIONAL GO because no installed or live quota-window
-evidence exists.
+This is not GO or CONDITIONAL GO because no authenticated provider event or
+live quota-window evidence exists.
 
 This is not NO-GO because current official documentation establishes a
-potentially admissible structured local protocol, and the missing runtime is a
-setup condition rather than a demonstrated source failure.
+potentially admissible structured local protocol, the executable is trusted,
+and missing authentication is a setup condition rather than a demonstrated
+source failure.
 
 ## Authentication and privacy decision
 
-Authentication remains **unknown**. Absence of secret-route variable names in
-the task process does not prove provider-managed login.
+Authentication is **logged out**. The CLI’s allowlisted authentication status
+reports no active authentication method. All six prohibited secret or
+enterprise route variable names were absent from the task process, but their
+absence alone is not used as proof of provider-managed login.
 
 No credential, Keychain value, cookie, session, token, account identity,
 prompt, response, transcript, task, workspace history, or private provider
 data was accessed.
 
-No Claude process or provider task ran. No login page opened. No prompt or
-synthetic task was submitted. No raw status-line JSON was received or retained.
+No Claude provider task ran under M5-G1R. No login page opened. No prompt or
+synthetic task was submitted. The reported Human task was not inspected or
+altered. No raw status-line JSON was received or retained.
 
 ## Configuration decision
 
@@ -61,10 +68,11 @@ The inspected local settings layers contain no settings file and no
 secret-route key.
 
 This proves only local absence. Server-managed settings and the globally
-effective policy remain unverified until an installed authenticated CLI can
-report its loaded sources.
+effective policy remain unverified until the trusted CLI is authenticated.
 
-No settings mutation or restoration was required.
+The temporary probe did not begin. No backup, settings mutation, or
+restoration was required, and all temporary trust-check artifacts were
+removed.
 
 ## Locked boundaries
 
@@ -82,6 +90,6 @@ M5-G2 remains locked. This decision does not authorize:
 
 **M5-SETUP-G1**
 
-That task must be separately authorized. It may establish the official
-installation and trust evidence required for a later capability recheck, but
-M5-G1 itself does not start it.
+That task must be separately authorized. It may establish provider-managed
+subscription authentication and repair the missing user launcher before a
+later capability recheck, but M5-G1R itself does not start it.

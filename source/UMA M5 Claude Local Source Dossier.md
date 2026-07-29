@@ -4,22 +4,23 @@ Date: 2026-07-28
 
 ## Decision
 
-**SETUP REQUIRED — CLAUDE CODE CLI NOT INSTALLED**
+**SETUP REQUIRED — CLAUDE CODE CLI PRESENT BUT NOT AUTHENTICATED**
 
 The official Claude Code status-line protocol is a potentially admissible
 local structured source for five-hour and seven-day subscription usage.
-Current-device capability is not proven because the official Claude Code CLI
-is not installed or resolvable.
+Current-device capability is still not proven: a trusted Desktop-managed
+Claude Code CLI is installed, but its own authentication status reports
+logged out and no provider-managed subscription authentication is active.
 
-This decision does not admit a production connector. No Claude process,
-authentication flow, prompt, response, provider task, or settings mutation
-occurred. No status-line payload was observed.
+This decision does not admit a production connector. No interactive Claude
+session, authentication flow, prompt, response, provider task, or settings
+mutation occurred. No status-line payload was observed.
 
 ## Repository and governing provenance
 
 - Branch: `codex/uma-m5-claude`
-- Starting HEAD: `110a81217c39339c79a702559be25041ff56b293`
-- Starting tree: `e254c220eb8a51bdcac2c0d3e5cbccc5e9fc43dc`
+- Starting HEAD: `6ac7e955cf6bf17aa32c948c2b6e7939e56f194f`
+- Starting tree: `c80d882b8f07a84cce7839b50d5599669f8cf037`
 - Starting worktree: clean
 - Starting index: empty
 - M4: closed
@@ -63,28 +64,45 @@ Claude task merely to produce a status-line event.
 
 | Evidence | Current result |
 |---|---|
-| Claude CLI found | No |
+| Claude CLI found | Yes, as a Desktop-managed native component |
 | Normal interactive login-shell resolution | Absent |
-| Standard native executable candidates | Absent |
+| Desktop-managed executable | Present |
 | Standard Homebrew executable candidates | Absent |
 | Homebrew Claude Code package | Absent |
 | Global npm package check | Not available because npm is not installed |
 | Host architecture | arm64 |
-| Normalized executable path | Not applicable |
-| Claude Code version | Not applicable |
-| Executable architecture | Not applicable |
-| Executable SHA-256 | Not applicable |
-| Signature/trust classification | Not applicable |
-| Official installation classification | Not installed |
+| Normalized executable path | `~/Library/Application Support/Claude/claude-code/2.1.219/claude.app/Contents/MacOS/claude` |
+| Claude Code version | `2.1.219 (Claude Code)` |
+| Executable architecture | Mach-O arm64 |
+| Executable SHA-256 | `49b1845cd34af8a57faf30c460824e4235ae4917bf15cd13288c1ae9e6077b97` |
+| Signature | Valid, Team ID `Q6L2SF6YDW` |
+| Gatekeeper | Accepted, Notarized Developer ID, Anthropic PBC |
+| Doctor result | Exit 0; setup warnings remain |
+| Official installation classification | Trusted Desktop-managed distribution; shell launcher absent |
 
-No installation, upgrade, PATH mutation, binary inspection, Desktop
-application substitution, decompilation, or disassembly occurred.
+The standalone `darwin-arm64` release-manifest checksum does not match this
+Desktop-managed app-wrapped artifact, so no standalone-manifest-equivalence
+claim is made. Native macOS signature and Gatekeeper checks passed outside the
+sandbox. The temporary public-manifest files were deleted.
+
+Doctor safely reported that subscription sign-in is inactive, the user
+launcher is absent from the shell, and installation-method metadata is
+unknown. No repair or installation command was run.
+
+No installation, upgrade, PATH mutation, Desktop application substitution,
+decompilation, or disassembly occurred.
 
 ## Authentication classification
 
-**Authentication: unknown because the CLI is absent.**
+**Authentication: logged out.**
 
-Provider-managed Claude.ai subscription authentication is not proven. No
+The trusted CLI returned only the following allowlisted status:
+
+- `loggedIn`: false;
+- `authMethod`: none;
+- `apiProvider`: `firstParty`.
+
+Provider-managed Claude.ai subscription authentication is not active. No
 secret-based route was observed in the task process or inspected local
 settings layers:
 
@@ -114,7 +132,7 @@ local project settings, shared project settings, then user settings.
 | File-based macOS managed settings | File absent |
 | macOS managed-preferences file | File absent |
 | User preferences file for the managed domain | File absent |
-| Server-managed settings | Unobservable without an installed authenticated CLI |
+| Server-managed settings | Unobservable while the CLI is logged out |
 
 Allowlisted key-presence results across the inspected local layers:
 
@@ -129,7 +147,7 @@ Local existing-status-line classification:
 
 Global effective status-line classification:
 **unverified**, because server-managed settings cannot be established without
-an installed, authenticated CLI.
+an authenticated CLI.
 
 Managed-policy blocker classification:
 **unverified globally**.
@@ -139,16 +157,17 @@ read.
 
 ## Required payload capability table
 
-“Unsupported” below is the current-device classification caused by the absent
-CLI. It does not deny the official protocol’s documented capability.
+“Unsupported” below is the current-session classification caused by missing
+authentication and the absence of a provider-generated status-line event. It
+does not deny the official protocol’s documented capability.
 
 | Official field | Official meaning | Current-device evidence | Classification |
 |---|---|---|---|
-| `rate_limits.five_hour.used_percentage` | Five-hour rolling-window percentage consumed, 0–100 | No installed payload source | unsupported |
-| `rate_limits.five_hour.resets_at` | Five-hour reset time in Unix epoch seconds | No installed payload source | unsupported |
-| `rate_limits.seven_day.used_percentage` | Weekly percentage consumed, 0–100 | No installed payload source | unsupported |
-| `rate_limits.seven_day.resets_at` | Weekly reset time in Unix epoch seconds | No installed payload source | unsupported |
-| `version` | Claude Code version string | No installed payload source | unsupported |
+| `rate_limits.five_hour.used_percentage` | Five-hour rolling-window percentage consumed, 0–100 | No authenticated provider event | unsupported |
+| `rate_limits.five_hour.resets_at` | Five-hour reset time in Unix epoch seconds | No authenticated provider event | unsupported |
+| `rate_limits.seven_day.used_percentage` | Weekly percentage consumed, 0–100 | No authenticated provider event | unsupported |
+| `rate_limits.seven_day.resets_at` | Weekly reset time in Unix epoch seconds | No authenticated provider event | unsupported |
+| `version` | Claude Code version string | CLI version independently verified; no payload field observed | unsupported as a payload field |
 
 No field was observed as present, malformed, or absent on an account/session.
 Those classifications would require an installed runtime and a naturally
@@ -195,34 +214,37 @@ the allowlisted projection plus bounded generic validity states.
 ## Temporary probe and restore result
 
 Temporary probe:
-**not feasible and not used because the CLI is absent**.
+**not feasible and not used because the trusted CLI is logged out**.
 
 - Settings backup: not created
 - Settings mutation: none
 - Status-line command mutation: none
-- Claude process launch: none
+- Status-line probe process launch: none
 - Provider task: none
 - Raw payload: none
 - Temporary probe output: none
 - Restoration: not required
 
-The observed absence of local settings files remained unchanged. This is not a
+The observed absence of local settings files remained unchanged. No backup was
+created because no mutation began. Restoration was not required; this is not a
 claim that a live restoration was exercised.
 
 ## Human normal-response checkpoint
 
 **Not reached.**
 
-No request for `ONE RESPONSE COMPLETED` was issued because the CLI is absent
-and no safe status-line probe exists. No Human prompt or response content was
-requested or received.
+No request for `ONE RESPONSE COMPLETED` was issued because authentication is
+the earlier unmet precondition. The reported Human task was neither altered
+nor inspected, and no provider event was awaited. No Human prompt or response
+content was requested or received.
 
 ## Admission closure
 
-The official structured source class is potentially admissible, but the
-current device does not yet have the official runtime required to prove
-authentication, effective managed policy, installed field behavior, or a
-valid quota window.
+The official structured source class remains potentially admissible. The
+trusted runtime is now present, but provider-managed subscription
+authentication is not active. No status-line field or valid quota window can
+be admitted until that single setup condition is completed and M5-G1R is
+rerun.
 
 M5-G2 remains locked.
 

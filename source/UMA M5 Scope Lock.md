@@ -1,16 +1,16 @@
-# UMA M5-G1 Scope Lock
+# UMA M5-G1R Scope Lock
 
 Date: 2026-07-28
 
 ## Decision
 
-**SETUP REQUIRED — CLAUDE CODE CLI NOT INSTALLED**
+**SETUP REQUIRED — CLAUDE CODE CLI PRESENT BUT NOT AUTHENTICATED**
 
 ## Repository baseline
 
 - Branch: `codex/uma-m5-claude`
-- Starting HEAD: `110a81217c39339c79a702559be25041ff56b293`
-- Starting tree: `e254c220eb8a51bdcac2c0d3e5cbccc5e9fc43dc`
+- Starting HEAD: `6ac7e955cf6bf17aa32c948c2b6e7939e56f194f`
+- Starting tree: `c80d882b8f07a84cce7839b50d5599669f8cf037`
 - Starting worktree: clean
 - Starting index: empty
 - M4: closed
@@ -52,21 +52,22 @@ Permitted evidence was limited to:
 - version, architecture, file identity, signature, and trust only if an
   executable existed;
 - safe public help and authentication status only if the CLI existed;
-- presence/type checks for only the settings keys required by M5-G1;
+- presence/type checks for only the settings keys required by M5-G1R;
 - current official Anthropic documentation.
 
 Resolved result:
 
-- Claude Code CLI: not installed or resolvable;
-- executable identity and trust: not applicable;
-- authentication: unknown;
+- Claude Code CLI: trusted Desktop-managed 2.1.219 arm64 component present;
+- normal shell launcher: absent;
+- executable identity and trust: strict signature and Gatekeeper PASS;
+- authentication: logged out; method none; first-party provider;
 - local status line: absent;
 - global effective settings/policy: unverified;
-- temporary probe: not feasible and not used.
+- temporary probe: blocked before mutation and not used.
 
 ## Privacy boundary
 
-No M5-G1 artifact may contain:
+No M5-G1R artifact may contain:
 
 - raw status-line JSON;
 - real quota values;
@@ -83,9 +84,10 @@ Synthetic fixtures must be explicitly synthetic and remain test-local.
 
 ## Provider-operation boundary
 
-M5-G1 performed no:
+M5-G1R performed only bounded read-only CLI version, doctor, and
+authentication-status invocations. It performed no:
 
-- Claude process launch;
+- interactive Claude session;
 - login or login-page opening;
 - prompt submission;
 - synthetic provider task;
@@ -99,7 +101,7 @@ M5-G1 performed no:
 
 Required:
 
-- focused M5-G1 source-admission tests;
+- focused M5-G1R source-admission tests;
 - allowlist and forbidden-field rejection tests;
 - malformed and missing-window tests;
 - settings and byte-exact restore fixture tests;
@@ -117,7 +119,7 @@ Required:
 After verification, stage only the six exact files above and create one local
 commit:
 
-`docs(m5): record Claude local-source capability`
+`docs(m5): admit installed Claude local source`
 
 Do not amend or push.
 
@@ -129,5 +131,5 @@ Exactly one next task is permitted:
 
 **M5-SETUP-G1**
 
-Stop after the M5-G1 report and local commit. Do not start M5-SETUP-G1
+Stop after the M5-G1R report and local commit. Do not start M5-SETUP-G1
 automatically.
