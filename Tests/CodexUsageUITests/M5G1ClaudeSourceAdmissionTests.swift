@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import CodexUsageUI
 
-@Suite("M5-G1R Claude local-source admission")
+@Suite("M5-SETUP-G1R Claude status-line activation")
 struct M5G1ClaudeSourceAdmissionTests {
     @Test
     func officialAllowlistAcceptsValidSyntheticWindowsAndBoundedVersion() throws {
@@ -610,35 +610,97 @@ struct M5G1ClaudeSourceAdmissionTests {
     }
 
     @Test
-    func durableRecordsAgreeOnCurrentSetupRequiredAndOnlyNextTask() throws {
+    func durableRecordsAgreeOnCurrentGoAndOnlyNextTask() throws {
         let records = try durableRecords()
-        let decision =
-            "SETUP REQUIRED — AUTHENTICATED CLI STATUS-LINE EVENT NOT OBSERVED"
+        let decision = "GO — CLAUDE STATUS-LINE QUOTA SOURCE PROVEN"
 
         for record in records {
             #expect(record.contains(decision))
-            #expect(record.contains("M5-SETUP-G1"))
+            #expect(record.contains("M5-SETUP-G1R"))
             #expect(record.contains("status-line activation"))
-            #expect(record.contains("setup revision"))
-            #expect(record.contains("subscription-authentication"))
-            #expect(record.contains("remains closed"))
-            #expect(record.contains("M5-G2 remains locked"))
+            #expect(record.contains("M5-G2"))
             #expect(!record.contains("/Users/"))
         }
     }
 
     @Test
-    func durableRecordsRecordAuthenticatedNoEventWithoutLiveValues() throws {
+    func durableRecordsRecordAuthenticatedTwoWindowProofWithoutLiveValues()
+        throws
+    {
         let combined = try durableRecords().joined(separator: "\n")
 
         #expect(combined.contains("official Claude Code status-line"))
         #expect(combined.contains("provider-managed Claude.ai subscription"))
-        #expect(combined.contains("no status-line callback"))
-        #expect(combined.contains("final user settings file: absent"))
-        #expect(combined.contains("No synthetic Claude task"))
-        #expect(combined.contains("M5-G2 remains locked"))
-        #expect(!combined.contains("Admission decision: GO"))
+        #expect(combined.contains("Five-hour used percentage | present and valid"))
+        #expect(combined.contains("Seven-day used percentage | present and valid"))
+        #expect(combined.contains("real percentages"))
+        #expect(combined.contains("persistent `statusLine`: absent"))
+        #expect(combined.contains("Exactly one next task: M5-G2"))
         #expect(!combined.contains("LIVE CLAUDE SOURCE PROVEN"))
+    }
+
+    @Test
+    func currentRecordsExplainAuthContextRepairAndCommandLineOnlySettings()
+        throws
+    {
+        let combined = try durableRecords().joined(separator: "\n")
+
+        #expect(combined.contains("build-sandbox visibility error"))
+        #expect(combined.contains("real user home"))
+        #expect(combined.contains("normal login shell"))
+        #expect(combined.contains("command-line `--settings`"))
+        #expect(combined.contains("No persistent `statusLine`"))
+        #expect(combined.contains("API-key"))
+        #expect(combined.contains("account-web"))
+    }
+
+    @Test
+    func currentRecordsProveBoundedPrivateFieldRejectionAndCleanup() throws {
+        let combined = try durableRecords().joined(separator: "\n")
+
+        #expect(combined.contains("64 KiB"))
+        #expect(combined.contains("standard input"))
+        #expect(combined.contains("raw payload"))
+        #expect(combined.contains("task-owned Claude session"))
+        #expect(combined.contains("sanitized evidence"))
+        #expect(combined.contains("task-owned backup"))
+        #expect(!combined.contains("used_percentage\":"))
+        #expect(!combined.contains("resets_at\":"))
+    }
+
+    @Test
+    func currentRecordsPreserveOnlyTheAcceptedProviderOnboardingPreference()
+        throws
+    {
+        let records = try durableRecords()
+        let classification =
+            "ACCEPTED PROVIDER-OWNED ONBOARDING PREFERENCE — NOT A PROBE ARTIFACT"
+
+        for record in records {
+            #expect(record.contains(classification))
+            #expect(record.contains("theme"))
+            #expect(record.contains("unchanged"))
+            #expect(record.contains("`statusLine`"))
+        }
+
+        let combined = records.joined(separator: "\n")
+        #expect(combined.contains("No other Claude file"))
+        #expect(combined.contains("API-key"))
+        #expect(combined.contains("enterprise-cloud"))
+        #expect(combined.contains("UMA probe configuration"))
+    }
+
+    @Test
+    func twoValidLiveClassificationsSelectGoWithoutRetainingValues() {
+        #expect(
+            ClaudeLocalSourceAdmissionHarness.decide(
+                cliTrusted: true,
+                authentication: .providerManaged,
+                secretOrEnterpriseRoutePresent: false,
+                providerEventObserved: true,
+                validWindowCount: 2
+            ) == .go
+        )
     }
 
     @Test

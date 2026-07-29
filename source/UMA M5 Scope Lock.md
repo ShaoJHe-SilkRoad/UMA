@@ -1,14 +1,14 @@
-# UMA M5-G1R2 Scope Lock
+# UMA M5-SETUP-G1R Scope Lock
 
 Date: 2026-07-28
 
 ## Current decision
 
-**SETUP REQUIRED — AUTHENTICATED CLI STATUS-LINE EVENT NOT OBSERVED**
+**GO — CLAUDE STATUS-LINE QUOTA SOURCE PROVEN**
 
-M5-G1R2 remains documentation/test-only. No production relay, connector,
+M5-SETUP-G1R remains documentation/test-only. No production relay, connector,
 model, UI, package configuration, installed application, or account-web path
-is authorized or changed.
+is authorized or changed. M5-G2 is the only admitted next task.
 
 ## Historical M5-G1R decision
 
@@ -175,3 +175,57 @@ M5-G2 remains locked. Exactly one next task is:
 This denotes a separately authorized status-line activation setup revision.
 The completed launcher-installation and subscription-authentication setup
 remains closed and cannot be repeated under this lock.
+
+## M5-SETUP-G1R execution lock
+
+Accepted starting state:
+
+- branch: `codex/uma-m5-claude`;
+- HEAD: `802249876d79f2e9cc1396111be8ac1012ada52c`;
+- tree: `fcc6b819ebf715e97b066ff82bc95a6d274a7f63`;
+- worktree: clean;
+- index: empty.
+
+The exact tracked scope remains:
+
+- `source/UMA M5 Claude Local Source Dossier.md`;
+- `source/UMA M5 Claude Admission Decision.md`;
+- `source/UMA M5 Claude Configuration and Restore Contract.md`;
+- `source/UMA M5 Scope Lock.md`;
+- `source/UMA M5 Claude QA Issue Ledger.md`;
+- `Tests/CodexUsageUITests/M5G1ClaudeSourceAdmissionTests.swift`.
+
+No production runtime source, resource, package configuration, installed
+application, or provider connector is in scope.
+
+The live operation boundary was:
+
+- normal authenticated official CLI only;
+- real user home and normal login shell;
+- one temporary command-line `--settings` file;
+- one bounded standard-input allowlist probe;
+- one Human-initiated normal response;
+- no DEV prompt or response access;
+- no real quota value or reset timestamp in Git;
+- no API-key, token, account-web, or enterprise-cloud route.
+
+Current-device evidence proved both documented quota windows, their reset
+fields, and the bounded version field. Temporary probe artifacts were removed,
+and no persistent `statusLine` remains.
+
+The official first-run onboarding settings file is outside the repository and
+is preserved unchanged. Its verified content is exactly one non-sensitive
+`theme` preference, with no `statusLine`, credential, session, token, account
+identity, hook, API-key route, enterprise-cloud route, provider route, or UMA
+probe configuration. No other Claude file may be modified or deleted.
+
+**ACCEPTED PROVIDER-OWNED ONBOARDING PREFERENCE — NOT A PROBE ARTIFACT**
+
+Delivery is limited to exact staging of these six paths, independent
+cached-diff review, and one local commit:
+
+`docs(m5): verify Claude status-line activation`
+
+Do not amend or push.
+
+**Exactly one next task: M5-G2.**

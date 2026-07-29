@@ -2,9 +2,9 @@
 
 Date: 2026-07-28
 
-## Current M5-G1R2 decision
+## Current M5-SETUP-G1R decision
 
-**SETUP REQUIRED — AUTHENTICATED CLI STATUS-LINE EVENT NOT OBSERVED**
+**GO — CLAUDE STATUS-LINE QUOTA SOURCE PROVEN**
 
 ## Historical M5-G1R decision
 
@@ -155,3 +155,57 @@ M5-G2 remains locked. Exactly one next task is:
 This is a new status-line activation setup revision under the required task
 label. The earlier launcher-installation and subscription-authentication
 setup remains closed.
+
+## M5-SETUP-G1R issue ledger
+
+| ID | First evidence | Severity | Root cause | Repair / decision | Focused retest | Affected retest | Status |
+|---|---|---:|---|---|---|---|---|
+| M5SETUPR-001 | Sandboxed auth classification reported logged out while the normal user context reported provider-managed login | Blocker | Build sandbox could not represent normal authentication visibility | Run authentication classification and the probe only in the normal user context with real home and login shell | Auth continuity PASS | No secret route active | Closed |
+| M5SETUPR-002 | First visible CLI launch stopped at first-run onboarding | High | Theme, login-method, and trusted-neutral-directory onboarding had not completed | Complete only provider-owned subscription onboarding and trust the empty task-owned neutral directory | Startup callback PASS | Official CLI trust unchanged | Closed |
+| M5SETUPR-003 | Initial command-line session produced no callback before onboarding | High | CLI exited before reaching the interactive session | Run one documented debug classification, observe no status-line error, then use the authorized fresh visible session | Callback activation PASS | Version presence PASS | Closed |
+| M5SETUPR-004 | Startup callback omitted quota windows | Expected | Official rate-limit fields appear only after a Claude.ai subscriber receives a response | Obtain one Human-controlled normal response without DEV prompt or response access | Post-response callback PASS | Both windows and resets PASS | Closed |
+| M5SETUPR-005 | Provider values use consumed percentages | High | UMA presents remaining percentages | Validate each finite zero-through-100 used value, subtract once with decimal-aware arithmetic, retain no live value | Conversion-validity PASS | Existing conversion matrix PASS | Closed |
+| M5SETUPR-006 | Status payload can contain unrelated private fields | Blocker | Official schema is broader than UMA needs | Bound input, allowlist only window/reset/version classifications, and persist no raw payload | Private-field rejection PASS | Secret/private scan PASS | Closed |
+| M5SETUPR-007 | Temporary configuration must not become persistent | High | A live callback requires an executable command reference | Use command-line-only owner-readable settings, terminate the task-owned process, and delete every task-owned artifact | Temporary cleanup PASS | Persistent `statusLine` absent | Closed |
+| M5SETUPR-008 | Delivery must not begin M5-G2 | High | Admission proof is documentation/test work only | Lock six tracked paths and independently review the cached diff | Exact-scope audit PASS | Runtime unchanged audit PASS | Closed on exact delivery |
+| M5SETUPR-009 | Official first-run onboarding created a one-key user preference file | Medium | A legitimate Human-selected theme must survive probe cleanup | Preserve the file byte-for-byte; classify the one-key theme-only content separately from task-owned artifacts | Theme-only and no-`statusLine` verification PASS | Authentication continuity PASS | Closed by Founder decision |
+
+Required final verification:
+
+- focused M5 setup/status-line activation tests;
+- authentication-context continuity tests;
+- temporary `--settings` contract tests;
+- callback activation and post-response capability tests;
+- used-to-remaining conversion tests;
+- missing, malformed, nonfinite, oversized, and private-field rejection;
+- cleanup and persistent-status-line absence tests;
+- affected provider-neutral percentage and Maximum Decrement tests;
+- secret, private-data, raw-payload, and generated-artifact scans;
+- production runtime and package-configuration unchanged audit;
+- `git diff --check`;
+- exact staged-index and independent reviews.
+
+Durable records contain no real percentage, reset timestamp, credential,
+identity, prompt, response, session, transcript, workspace content, or raw
+provider object.
+
+The retained official onboarding settings file is classified:
+
+**ACCEPTED PROVIDER-OWNED ONBOARDING PREFERENCE — NOT A PROBE ARTIFACT**
+
+It is unchanged, contains exactly one non-sensitive `theme` preference, and
+contains no `statusLine`, credential, session, token, identity, hook, API-key
+route, enterprise-cloud route, provider route, or UMA probe configuration.
+No other Claude file was modified or deleted.
+
+Completed pre-staging verification:
+
+- focused M5-SETUP-G1R suite: 30/30 PASS;
+- affected shared percentage and Maximum Decrement suite: 16/16 PASS;
+- full regression suite: 355 tests across 41 suites PASS;
+- macOS 26.5 SDK compile: PASS;
+- known task-owned Testing runtime links: used outside Git only;
+- `git diff --check`: PASS;
+- production runtime and package configuration: unchanged.
+
+**Admission: GO. Exactly one next task: M5-G2.**

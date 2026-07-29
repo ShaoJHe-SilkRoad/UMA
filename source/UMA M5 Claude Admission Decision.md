@@ -2,21 +2,22 @@
 
 Date: 2026-07-28
 
-## Current M5-G1R2 decision
+## Current M5-SETUP-G1R decision
 
-**SETUP REQUIRED — AUTHENTICATED CLI STATUS-LINE EVENT NOT OBSERVED**
+**GO — CLAUDE STATUS-LINE QUOTA SOURCE PROVEN**
 
-Authentication, installation trust, and shell access now pass. The bounded
-temporary status-line probe did not receive an event after one normal
-Human-controlled response in the installed Claude Code CLI. With no sanitized
-callback evidence, neither quota window can be admitted.
+Trust, provider-managed Claude.ai subscription authentication, normal-shell
+continuity, command-line-only status-line activation, one Human-controlled
+post-response callback, both documented quota windows, both reset epochs, and
+the bounded version field are proven.
 
-This is not GO or CONDITIONAL GO because no valid quota window was observed.
-It is not NO-GO because the official local protocol remains documented and
-the missing evidence is one exact provider/runtime-controlled callback
-condition. No private or account-web alternative is authorized.
+The real quota values and reset times were discarded. Only present/valid
+classifications and the decimal-aware used-to-remaining validation result were
+retained long enough to make this decision. Privacy and task-owned temporary
+artifact cleanup passed.
 
-M5-G2 remains locked. Exactly one next task is **M5-SETUP-G1**.
+M5-G2 is admitted as the only next task. No production relay, connector,
+account-web fallback, or other provider work is included here.
 
 ## Historical M5-G1R decision
 
@@ -185,3 +186,57 @@ Exactly one next task is:
 For this Completion Lock, `M5-SETUP-G1` is a new, separately authorized
 status-line activation setup revision. The completed launcher-installation
 and subscription-authentication setup remains closed and is not reopened.
+
+## M5-SETUP-G1R final decision basis
+
+1. The accepted predecessor is
+   `802249876d79f2e9cc1396111be8ac1012ada52c`.
+2. The official native 2.1.220 arm64 CLI remains the normal launcher.
+3. The real user home and login shell were preserved.
+4. Provider-managed `claude.ai` authentication with the first-party provider
+   was visible in the normal user execution context.
+5. No API-key, bearer-token, Bedrock, Vertex, Foundry, alternate-config, or
+   account-web route was active.
+6. No managed settings source or effective `disableAllHooks=true` policy was
+   found.
+7. A temporary owner-only `--settings` file activated one bounded local
+   status-line command without changing persistent `statusLine` configuration.
+8. A startup callback proved activation.
+9. One Human-controlled response completed without DEV submitting or reading
+   the prompt or reading the response.
+10. A post-response callback contained both documented quota windows, both
+    reset epochs, and a bounded version field.
+11. Each used percentage was finite and within zero through 100.
+12. Each remaining percentage was validated as `100 - used` exactly once with
+    decimal-aware arithmetic; real values were not retained.
+13. Temporary settings, probe, evidence, debug classification, and task-owned
+    directory were removed.
+14. The official first-run onboarding settings file is preserved unchanged
+    with exactly one non-sensitive `theme` preference.
+15. That retained file has no `statusLine`, credential, session, token,
+    account identity, hook, API-key route, enterprise-cloud route, provider
+    route, or UMA probe configuration.
+16. No other Claude file was modified or deleted.
+
+**ACCEPTED PROVIDER-OWNED ONBOARDING PREFERENCE — NOT A PROBE ARTIFACT**
+
+| Capability | Admission result |
+|---|---|
+| Five-hour used and reset | present and valid |
+| Five-hour remaining conversion | valid |
+| Seven-day used and reset | present and valid |
+| Seven-day remaining conversion | valid |
+| Version payload field | present and bounded |
+| Authentication route | provider-managed Claude.ai subscription |
+| Privacy boundary | pass |
+| Temporary configuration cleanup | pass |
+
+The final classification is **GO** because both independent windows and resets
+are valid. A missing or malformed window would still fail independently, and
+Maximum Decrement continues to receive remaining percentages only.
+
+No raw payload, real quota value, reset timestamp, identity, prompt, response,
+session, transcript, workspace content, credential, or provider task content
+entered Git.
+
+Exactly one next task is **M5-G2**.

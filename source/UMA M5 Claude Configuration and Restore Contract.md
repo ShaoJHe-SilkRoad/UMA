@@ -2,19 +2,19 @@
 
 Date: 2026-07-28
 
-## Current M5-G1R2 decision
+## Current M5-SETUP-G1R decision
 
-**SETUP REQUIRED — AUTHENTICATED CLI STATUS-LINE EVENT NOT OBSERVED**
+**GO — CLAUDE STATUS-LINE QUOTA SOURCE PROVEN**
 
-M5-G1R2 exercised the absence-state branch of this contract. The original
-user settings file and `statusLine` were absent. A temporary owner-only
-settings file referenced one task-owned allowlist probe, then was removed
-after the Human CLI checkpoint produced no callback evidence. Final settings
-file and `statusLine` state are again absent.
+M5-SETUP-G1R used a command-line-only `--settings` file outside Git. It
+referenced one owner-only allowlist probe and never installed a persistent
+`statusLine`. Startup and post-response callbacks passed. The task-owned
+settings file, probe, sanitized evidence, debug classification, symlink, and
+directory were deleted after the task-owned session ended.
 
-No existing command required wrapping, no raw payload was written, and every
-task-owned configuration, backup-marker, probe, and evidence artifact was
-deleted.
+No existing status-line command required wrapping. No raw payload was written,
+and no prompt, response, credential, identity, live quota value, or reset time
+was retained.
 
 ## Historical M5-G1R decision
 
@@ -240,3 +240,65 @@ M5-G2 remains locked. Exactly one next task is:
 This next-task label means a separately authorized status-line activation
 setup revision only. The prior launcher and subscription-authentication setup
 remains closed and must not be repeated.
+
+## M5-SETUP-G1R exercised command-line restore record
+
+Preflight classifications:
+
+- real user home: preserved;
+- normal fresh login shell: preserved;
+- normal official launcher: used;
+- provider-managed subscription authentication: active;
+- API-key and enterprise-cloud override names: absent;
+- alternate configuration directory: absent;
+- persistent `statusLine`: absent;
+- managed settings source: absent;
+- effective `disableAllHooks=true`: false.
+
+Temporary configuration:
+
+- delivery: official `--settings` file argument;
+- persistence: none;
+- file permissions: owner-only;
+- command count: one;
+- input source: standard input only;
+- maximum input: 64 KiB;
+- raw payload persistence: none;
+- network access by probe: none;
+- output: fixed harmless marker only;
+- evidence: field-presence, validity, and conversion-validity booleans only.
+
+The probe parsed numeric values with decimal-aware arithmetic, required finite
+used percentages from zero through 100, computed `100 - used`, and retained
+only whether the result was finite and in range. Each reset remained attached
+to its corresponding window. The live numbers were discarded.
+
+Post-checkpoint cleanup:
+
+- task-owned Claude session: terminated;
+- temporary command-line settings file: removed;
+- probe: removed;
+- sanitized evidence: removed;
+- bounded debug classification: removed;
+- task-owned symlink and directory: removed;
+- persistent `statusLine`: absent;
+- raw provider payload: never written;
+- task-owned backup: absent.
+
+The Human completed one normal response. Both independent quota windows,
+their reset fields, and the bounded version field were present and valid in a
+later callback.
+
+Provider-owned onboarding preference:
+
+- the official first-run flow created the user settings file;
+- its verified content is exactly one non-sensitive `theme` preference;
+- the file is preserved unchanged by Founder decision;
+- `statusLine`, credentials, sessions, tokens, account identity, hooks,
+  API-key routes, enterprise-cloud routes, and UMA probe configuration are
+  absent;
+- no other Claude settings file was deleted or modified.
+
+**ACCEPTED PROVIDER-OWNED ONBOARDING PREFERENCE — NOT A PROBE ARTIFACT**
+
+**Admission: GO. Exactly one next task: M5-G2.**

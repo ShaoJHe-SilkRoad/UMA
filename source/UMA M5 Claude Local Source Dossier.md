@@ -2,25 +2,28 @@
 
 Date: 2026-07-28
 
-## Current M5-G1R2 decision
+## Current M5-SETUP-G1R decision
 
-**SETUP REQUIRED — AUTHENTICATED CLI STATUS-LINE EVENT NOT OBSERVED**
+**GO — CLAUDE STATUS-LINE QUOTA SOURCE PROVEN**
 
 The official native Claude Code 2.1.220 CLI is trusted and authenticated
-through a provider-managed Claude.ai subscription. One normal Human-initiated
-response completed in that CLI after a temporary allowlist-only status-line
-probe was installed, but the probe was not invoked and no sanitized evidence
-object was created. Therefore no five-hour or seven-day quota window can be
-classified as present, absent, or malformed from current-device evidence.
+through a provider-managed Claude.ai subscription. One Human-initiated normal
+response caused the official local status-line command to receive a valid
+post-response object. Both the five-hour and seven-day windows supplied finite
+used percentages in the documented range, valid reset epochs, and a bounded
+version field.
 
-The original user settings state was absence. That state was restored
-immediately after the checkpoint, and the temporary settings file, absence
-marker, probe, and evidence location were deleted. No prompt, response,
-provider task content, raw status-line JSON, live quota value, reset time,
-credential, or account identity was read or retained.
+The allowlist probe retained only field-presence and validity classifications.
+It calculated each remaining percentage as `100 - used` with decimal-aware
+arithmetic, confirmed the result remained finite and in range, and discarded
+the real values. No prompt, response, provider task content, raw status-line
+JSON, quota value, reset time, credential, or account identity entered Git or
+durable evidence.
 
-This result does not admit a production connector. M5-G2 remains locked, and
-the only next task is M5-SETUP-G1.
+The command-line settings file, probe, sanitized evidence, and task-owned
+directory were removed. No persistent `statusLine` exists. This decision
+admits M5-G2 as the only next task; it does not implement the relay or
+connector.
 
 ## Historical M5-G1R decision
 
@@ -399,3 +402,68 @@ M5-G2 remains locked. Exactly one next task is:
 For this Completion Lock, `M5-SETUP-G1` denotes a separately authorized
 status-line activation setup revision. The earlier launcher-installation and
 subscription-authentication setup remains closed and must not be repeated.
+
+## M5-SETUP-G1R authenticated activation recheck
+
+The accepted predecessor was:
+
+- branch: `codex/uma-m5-claude`;
+- HEAD: `802249876d79f2e9cc1396111be8ac1012ada52c`;
+- tree: `fcc6b819ebf715e97b066ff82bc95a6d274a7f63`;
+- worktree: clean;
+- index: empty.
+
+The normal fresh login shell resolved the official user launcher and preserved
+the real user home. All API-key, bearer-token, alternate-config, and enterprise
+cloud override names were absent. A sandboxed authentication classification
+incorrectly reported logged out, while the same allowlisted classification in
+the normal user execution context reported provider-managed `claude.ai`
+authentication with the first-party provider. The prior drift was therefore a
+build-sandbox visibility error, compounded by incomplete first-run CLI
+onboarding, not an expired subscription or alternate credential route.
+
+The temporary session used only a command-line `--settings` file. It contained
+one `statusLine` command referencing an owner-only probe. The probe:
+
+- read standard input only;
+- rejected input above 64 KiB;
+- used no network;
+- performed no payload-driven file or path access;
+- persisted no raw JSON;
+- projected only version presence and per-window presence/validity booleans;
+- used decimal-aware subtraction to validate `remaining = 100 - used`;
+- emitted only a fixed harmless marker.
+
+The startup callback proved command activation. After one Human-controlled
+normal response, a later callback proved:
+
+| Allowlisted capability | Current-device classification |
+|---|---|
+| Five-hour used percentage | present and valid |
+| Five-hour reset | present and valid |
+| Five-hour remaining conversion | valid |
+| Seven-day used percentage | present and valid |
+| Seven-day reset | present and valid |
+| Seven-day remaining conversion | valid |
+| Version | present and bounded |
+
+The real percentages and reset epochs were never written to Git or durable
+records. DEV neither submitted nor read the Human prompt and did not read the
+provider response.
+
+The task-owned Claude process was identified by its neutral working directory
+and terminated after evidence collection. The temporary settings, probe,
+sanitized evidence, debug classification, symlink, and directory were deleted.
+No persistent `statusLine`, raw payload, or task-owned backup remains.
+
+The official first-run onboarding settings file is retained unchanged. It
+contains exactly one non-sensitive `theme` preference and contains no
+`statusLine`, credential, session, token, account identity, hook, API-key
+route, enterprise-cloud route, provider route, or UMA probe configuration.
+Founder approval supersedes literal restoration to pre-task file absence
+because removing this provider-owned preference could retrigger onboarding.
+No other Claude file was modified or deleted.
+
+**ACCEPTED PROVIDER-OWNED ONBOARDING PREFERENCE — NOT A PROBE ARTIFACT**
+
+**Admission: GO. Exactly one next task: M5-G2.**
