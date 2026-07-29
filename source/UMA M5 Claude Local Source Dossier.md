@@ -251,3 +251,55 @@ M5-G2 remains locked.
 Exactly one next task is permitted:
 
 **M5-SETUP-G1**
+
+## M5-SETUP-G1 completion addendum
+
+The M5-G1R decision above is retained as historical admission evidence.
+M5-SETUP-G1 subsequently completed the single authorized provider setup task.
+
+Setup result:
+**PASS — CLAUDE.AI SUBSCRIPTION AUTHENTICATION AND NORMAL SHELL ACCESS
+VERIFIED**.
+
+The Human completed the provider-owned browser login without giving DEV a
+password, verification code, URL, token, account identity, or screenshot.
+Sanitized authentication classification after the checkpoint was:
+
+- logged in: yes;
+- authentication method: `claude.ai`;
+- API provider: `firstParty`;
+- API-key, copied-token, setup-token, Bedrock, Vertex, and Foundry routes:
+  inactive.
+
+The official Anthropic native installer was run once from
+`https://claude.ai/install.sh` with all prohibited route variables unset. It
+installed:
+
+- launcher: `~/.local/bin/claude`;
+- native binary: `~/.local/share/claude/versions/2.1.220`;
+- version: `2.1.220 (Claude Code)`;
+- architecture: arm64;
+- SHA-256:
+  `8addc857f3fe64d5a0368af9ee50321b50afb4a6918ba3ef018ab84f5dbbe081`;
+- signature: valid Anthropic Developer ID, Team ID `Q6L2SF6YDW`.
+
+The bare command-line executable is not an application bundle, so Gatekeeper's
+application assessment returned the expected non-app classification. Strict
+code-signature verification passed.
+
+The user Zsh configuration was originally absent. M5-SETUP-G1 created it with
+only the standard official launcher path:
+
+`export PATH="$HOME/.local/bin:$PATH"`
+
+A fresh login shell resolved `claude` to `~/.local/bin/claude`, reported
+version 2.1.220, and completed `claude doctor` with no installation issues.
+The task-owned absence backup was removed only after that verification.
+
+No prompt, response, provider task, status-line probe, settings-file mutation,
+quota field, raw usage payload, credential, account identity, or UMA runtime
+was accessed or created.
+
+M5-G2 remains locked. Exactly one next task is permitted:
+
+**M5-G1R2**

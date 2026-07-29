@@ -76,3 +76,33 @@ M5-G1R may close only when the durable records and focused tests agree on:
 **SETUP REQUIRED — CLAUDE CODE CLI PRESENT BUT NOT AUTHENTICATED**
 
 M5-G2 remains locked. The only next task is M5-SETUP-G1.
+
+## M5-SETUP-G1 completion addendum
+
+The M5-G1R ledger above is retained as historical admission evidence.
+
+| ID | First evidence | Severity | Repair / decision | Verification | Status |
+|---|---|---:|---|---|---|
+| M5SETUP-001 | Trusted Desktop-managed CLI was logged out | Blocker | Human completed only the official Claude.ai paid-subscription browser login | Sanitized final class: logged in, `claude.ai`, `firstParty` | Closed |
+| M5SETUP-002 | Normal shell could not resolve `claude` | Blocker | Ran the official native installer once and added only the documented user PATH line | Fresh login shell resolves `~/.local/bin/claude`; version 2.1.220; doctor PASS | Closed |
+| M5SETUP-003 | Setup must not cross into source probing | High | Kept Claude settings absent and performed no prompt, task, status-line, usage, or UMA operation | Secret-route, settings-absence, repository-scope, and privacy checks PASS | Closed |
+
+M5-SETUP-G1 verification:
+
+- official native installer URL and one-attempt limit: PASS;
+- installed launcher, arm64 architecture, SHA-256, and strict signature: PASS;
+- final provider-managed subscription authentication: PASS;
+- API-key, copied-token, setup-token, Bedrock, Vertex, and Foundry routes:
+  inactive;
+- fresh-shell resolution and version: PASS;
+- `claude doctor`: PASS with no installation issues;
+- user Claude settings file: absent; no status line created by setup;
+- prompt, response, provider task, and quota payload access: none;
+- production runtime, tests, package configuration, and UMA application:
+  unchanged;
+- task-owned backup and temporary setup artifacts: removed;
+- independent staged-index and privacy reviews: PASS; no material findings.
+
+M5-G2 remains locked. Exactly one next task is:
+
+**M5-G1R2**

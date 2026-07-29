@@ -148,3 +148,30 @@ M5-G2 remains locked.
 Exactly one next task is permitted:
 
 **M5-SETUP-G1**
+
+## M5-SETUP-G1 completion addendum
+
+M5-SETUP-G1 did not inspect or modify Claude status-line configuration.
+The user Claude settings file remained absent, so no `statusLine` was created
+and no Claude-settings backup or restoration was required.
+
+The separate shell-launcher repair followed the official native installer
+instruction:
+
+- original user Zsh configuration: absent;
+- task-owned absence backup: owner-only;
+- final configuration: one standard
+  `export PATH="$HOME/.local/bin:$PATH"` line;
+- fresh-shell launcher resolution: PASS;
+- fresh-shell Claude Code version: 2.1.220;
+- fresh-shell `claude doctor`: PASS with no installation issues;
+- task-owned backup after verification: removed.
+
+Provider-managed `claude.ai` authentication is active, while API-key,
+copied-token, setup-token, Bedrock, Vertex, and Foundry routes are inactive.
+No credential value or account identity was accessed.
+
+The temporary status-line probe remains prohibited in this setup task. M5-G2
+remains locked. Exactly one next task is:
+
+**M5-G1R2**

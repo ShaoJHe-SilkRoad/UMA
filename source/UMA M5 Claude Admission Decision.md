@@ -93,3 +93,27 @@ M5-G2 remains locked. This decision does not authorize:
 That task must be separately authorized. It may establish provider-managed
 subscription authentication and repair the missing user launcher before a
 later capability recheck, but M5-G1R itself does not start it.
+
+## M5-SETUP-G1 completion addendum
+
+The M5-G1R decision above remains the historical source-admission result.
+Founder-authorized M5-SETUP-G1 later resolved both setup conditions:
+
+- provider-managed paid-subscription authentication is active through
+  `claude.ai`;
+- the official native `~/.local/bin/claude` launcher resolves in a fresh Zsh
+  login shell.
+
+The launcher reports Claude Code 2.1.220 arm64. Strict Anthropic Developer ID
+signature verification and `claude doctor` passed. All prohibited secret,
+token, and cloud-provider route names remained absent from both the setup
+process and the final fresh shell.
+
+This setup result does not admit the status-line source and makes no quota
+claim. No prompt, provider task, status-line configuration, status-line event,
+usage value, credential, account identity, or UMA runtime was accessed or
+created.
+
+M5-G2 remains locked. Exactly one next task is:
+
+**M5-G1R2**
