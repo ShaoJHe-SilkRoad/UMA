@@ -2,7 +2,27 @@
 
 Date: 2026-07-28
 
-## Decision
+## Current M5-G1R2 decision
+
+**SETUP REQUIRED — AUTHENTICATED CLI STATUS-LINE EVENT NOT OBSERVED**
+
+The official native Claude Code 2.1.220 CLI is trusted and authenticated
+through a provider-managed Claude.ai subscription. One normal Human-initiated
+response completed in that CLI after a temporary allowlist-only status-line
+probe was installed, but the probe was not invoked and no sanitized evidence
+object was created. Therefore no five-hour or seven-day quota window can be
+classified as present, absent, or malformed from current-device evidence.
+
+The original user settings state was absence. That state was restored
+immediately after the checkpoint, and the temporary settings file, absence
+marker, probe, and evidence location were deleted. No prompt, response,
+provider task content, raw status-line JSON, live quota value, reset time,
+credential, or account identity was read or retained.
+
+This result does not admit a production connector. M5-G2 remains locked, and
+the only next task is M5-SETUP-G1.
+
+## Historical M5-G1R decision
 
 **SETUP REQUIRED — CLAUDE CODE CLI PRESENT BUT NOT AUTHENTICATED**
 
@@ -303,3 +323,79 @@ was accessed or created.
 M5-G2 remains locked. Exactly one next task is permitted:
 
 **M5-G1R2**
+
+## M5-G1R2 authenticated recheck
+
+Repository gate:
+
+- starting HEAD: `8b825d181205fd8d484364405044005a53bbd6ba`;
+- starting tree: `0057ae69495cd32ed68454aba545cd5fead0b795`;
+- worktree and index: clean;
+- branch: `codex/uma-m5-claude`;
+- M4 closed and Manus unsupported;
+- M5 governing-source hashes unchanged.
+
+Installed source:
+
+- launcher: `~/.local/bin/claude`;
+- native executable version: 2.1.220;
+- architecture: arm64;
+- SHA-256:
+  `8addc857f3fe64d5a0368af9ee50321b50afb4a6918ba3ef018ab84f5dbbe081`;
+- signature: valid Anthropic Developer ID, Team ID `Q6L2SF6YDW`;
+- doctor: PASS with no installation issues.
+
+Authentication is provider-managed Claude.ai subscription authentication.
+All prohibited API-key, copied-token, setup-token, Bedrock, Vertex, and
+Foundry route names were absent. No credential value or identity was read.
+
+The user settings file was initially absent. Local managed-settings and
+managed-preferences files were also absent. No existing status line or
+`disableAllHooks` key required preservation. Global server-managed policy was
+not enumerated, and no local managed-policy blocker was observed.
+
+The temporary probe accepted at most 64 KiB of JSON through standard input,
+discarded unknown and forbidden fields, made no network request, opened no
+payload-supplied path, and could persist only generic presence, validation,
+conversion, and reset-validity states. A synthetic self-check passed before
+the live checkpoint. The Human then completed one normal response in the
+installed CLI without disclosing the prompt or response.
+
+No probe invocation was observed. The sanitized capability table is:
+
+| Field | Current-device classification |
+|---|---|
+| Five-hour used percentage | unsupported; no status-line event observed |
+| Five-hour remaining percentage | unavailable; no validated used value |
+| Five-hour reset | unsupported; no status-line event observed |
+| Seven-day used percentage | unsupported; no status-line event observed |
+| Seven-day remaining percentage | unavailable; no validated used value |
+| Seven-day reset | unsupported; no status-line event observed |
+| Claude Code version payload field | unsupported as payload evidence; CLI version independently verified |
+
+The probe persisted neither raw payload nor forbidden fields. Because it was
+not invoked, no live percentage or reset timestamp entered temporary evidence,
+Git, fixtures, screenshots, or reports.
+
+Restoration was exact for the original absence state:
+
+- prior settings existence: absent;
+- prior `statusLine`: absent;
+- temporary settings permissions: owner-only;
+- temporary settings hash matched the installed temporary file before removal;
+- final settings existence: absent;
+- final `statusLine`: absent;
+- backup marker, probe directory, and evidence path: deleted.
+
+No synthetic Claude task was initiated. The provider response was entirely
+Human controlled. The setup condition that remains is an effective official
+status-line callback that produces the documented `rate_limits` projection.
+Until that condition is proven, no quota source is admitted.
+
+M5-G2 remains locked. Exactly one next task is:
+
+**M5-SETUP-G1**
+
+For this Completion Lock, `M5-SETUP-G1` denotes a separately authorized
+status-line activation setup revision. The earlier launcher-installation and
+subscription-authentication setup remains closed and must not be repeated.

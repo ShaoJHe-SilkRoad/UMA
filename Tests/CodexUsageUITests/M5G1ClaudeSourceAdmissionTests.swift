@@ -334,6 +334,7 @@ struct M5G1ClaudeSourceAdmissionTests {
                 cliTrusted: true,
                 authentication: .loggedOut,
                 secretOrEnterpriseRoutePresent: false,
+                providerEventObserved: false,
                 validWindowCount: 0
             ) == .setupRequired
         )
@@ -346,6 +347,7 @@ struct M5G1ClaudeSourceAdmissionTests {
                 cliTrusted: true,
                 authentication: .providerManaged,
                 secretOrEnterpriseRoutePresent: false,
+                providerEventObserved: true,
                 validWindowCount: 2
             ) == .go
         )
@@ -354,6 +356,7 @@ struct M5G1ClaudeSourceAdmissionTests {
                 cliTrusted: true,
                 authentication: .providerManaged,
                 secretOrEnterpriseRoutePresent: false,
+                providerEventObserved: true,
                 validWindowCount: 1
             ) == .conditionalGo
         )
@@ -362,8 +365,22 @@ struct M5G1ClaudeSourceAdmissionTests {
                 cliTrusted: true,
                 authentication: .providerManaged,
                 secretOrEnterpriseRoutePresent: false,
+                providerEventObserved: true,
                 validWindowCount: 0
             ) == .noGo
+        )
+    }
+
+    @Test
+    func authenticatedSourceWithoutObservedStatusLineEventRequiresSetup() {
+        #expect(
+            ClaudeLocalSourceAdmissionHarness.decide(
+                cliTrusted: true,
+                authentication: .providerManaged,
+                secretOrEnterpriseRoutePresent: false,
+                providerEventObserved: false,
+                validWindowCount: 0
+            ) == .setupRequired
         )
     }
 
@@ -381,6 +398,7 @@ struct M5G1ClaudeSourceAdmissionTests {
                     cliTrusted: true,
                     authentication: authentication,
                     secretOrEnterpriseRoutePresent: true,
+                    providerEventObserved: true,
                     validWindowCount: 2
                 ) == .noGo
             )
@@ -592,29 +610,33 @@ struct M5G1ClaudeSourceAdmissionTests {
     }
 
     @Test
-    func durableRecordsAgreeOnSetupRequiredAndOnlyNextTask() throws {
+    func durableRecordsAgreeOnCurrentSetupRequiredAndOnlyNextTask() throws {
         let records = try durableRecords()
         let decision =
-            "SETUP REQUIRED — CLAUDE CODE CLI PRESENT BUT NOT AUTHENTICATED"
+            "SETUP REQUIRED — AUTHENTICATED CLI STATUS-LINE EVENT NOT OBSERVED"
 
         for record in records {
             #expect(record.contains(decision))
             #expect(record.contains("M5-SETUP-G1"))
+            #expect(record.contains("status-line activation"))
+            #expect(record.contains("setup revision"))
+            #expect(record.contains("subscription-authentication"))
+            #expect(record.contains("remains closed"))
             #expect(record.contains("M5-G2 remains locked"))
             #expect(!record.contains("/Users/"))
         }
     }
 
     @Test
-    func durableRecordsMakeNoLiveCapabilityClaim() throws {
+    func durableRecordsRecordAuthenticatedNoEventWithoutLiveValues() throws {
         let combined = try durableRecords().joined(separator: "\n")
 
         #expect(combined.contains("official Claude Code status-line"))
-        #expect(combined.contains("potentially admissible"))
-        #expect(combined.contains("Authentication: logged out"))
-        #expect(combined.contains("No status-line payload was observed"))
-        #expect(combined.contains("No Claude provider task"))
-        #expect(combined.contains("Settings file modified: no"))
+        #expect(combined.contains("provider-managed Claude.ai subscription"))
+        #expect(combined.contains("no status-line callback"))
+        #expect(combined.contains("final user settings file: absent"))
+        #expect(combined.contains("No synthetic Claude task"))
+        #expect(combined.contains("M5-G2 remains locked"))
         #expect(!combined.contains("Admission decision: GO"))
         #expect(!combined.contains("LIVE CLAUDE SOURCE PROVEN"))
     }
@@ -901,6 +923,7 @@ private enum ClaudeLocalSourceAdmissionHarness {
         cliTrusted: Bool,
         authentication: Authentication,
         secretOrEnterpriseRoutePresent: Bool,
+        providerEventObserved: Bool,
         validWindowCount: Int
     ) -> Decision {
         guard cliTrusted else { return .setupRequired }
@@ -908,6 +931,7 @@ private enum ClaudeLocalSourceAdmissionHarness {
         guard authentication == .providerManaged else {
             return authentication == .loggedOut ? .setupRequired : .noGo
         }
+        guard providerEventObserved else { return .setupRequired }
         switch validWindowCount {
         case 2: return .go
         case 1: return .conditionalGo

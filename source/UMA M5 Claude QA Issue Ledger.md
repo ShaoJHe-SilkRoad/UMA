@@ -2,7 +2,11 @@
 
 Date: 2026-07-28
 
-## Decision
+## Current M5-G1R2 decision
+
+**SETUP REQUIRED — AUTHENTICATED CLI STATUS-LINE EVENT NOT OBSERVED**
+
+## Historical M5-G1R decision
 
 **SETUP REQUIRED — CLAUDE CODE CLI PRESENT BUT NOT AUTHENTICATED**
 
@@ -106,3 +110,48 @@ M5-SETUP-G1 verification:
 M5-G2 remains locked. Exactly one next task is:
 
 **M5-G1R2**
+
+## M5-G1R2 issue ledger
+
+| ID | First evidence | Severity | Root cause / classification | Repair / decision | Focused retest | Affected retest | Status |
+|---|---|---:|---|---|---|---|---|
+| M5G1R2-001 | Native 2.1.220 launcher, signature, authentication, and doctor checks pass | High | Prior installation and login setup conditions are resolved | Admit trust and authentication only; do not infer quota capability | 26/26 PASS | Trust and auth checks PASS | Closed |
+| M5G1R2-002 | User settings and local managed-policy files were absent | High | No existing status line required preservation | Record absence, install one owner-only temporary probe, restore absence exactly | 26/26 PASS | Exact restore PASS | Closed |
+| M5G1R2-003 | One normal Human CLI response completed but no probe evidence object appeared | Blocker | Effective official status-line callback was not observed | Return SETUP REQUIRED; classify all quota fields unsupported on current evidence | 26/26 PASS | No provider content accessed | Open setup condition |
+| M5G1R2-004 | Used values and reset epochs require strict validation | High | Provider used semantics differ from UMA remaining semantics | Preserve finite range checks, independent windows, and one-time conversion | 26/26 PASS | Affected 48/48 PASS | Closed |
+| M5G1R2-005 | Probe received no callback | High | No live object exists to sanitize or classify | Persist no value; retain only the event-absence result in durable records | 26/26 PASS | Raw/private data scan PASS | Closed |
+| M5G1R2-006 | Temporary user settings changed original absence state | High | A status-line command was required for the bounded probe | Verify temporary hash, remove the file, prove final absence, delete marker/probe/evidence path | 26/26 PASS | Restoration PASS | Closed |
+| M5G1R2-007 | Delivery must remain documentation/test-only | High | Runtime work would prematurely begin M5-G2 | Lock six exact paths and independently audit the staged index | 26/26 PASS | Affected 48/48 PASS | Closed on exact delivery |
+
+Required final verification:
+
+- focused M5-G1R2 admission tests;
+- used-to-remaining conversion matrix;
+- malformed, missing, nonfinite, and private-field rejection;
+- owner-only backup and byte-exact/absence-state restore fixtures;
+- affected provider-neutral percentage and Maximum Decrement tests;
+- secret, private-data, raw-payload, and generated-artifact scans;
+- production runtime and package-configuration unchanged audit;
+- `git diff --check`;
+- exact staged-index and independent reviews.
+
+The durable result contains no live quota percentage, reset timestamp,
+credential, account identity, prompt, response, session, transcript,
+workspace path, or raw provider object.
+
+Completed verification:
+
+- focused M5-G1R2 suite: 26/26 PASS;
+- affected provider-neutral and retirement suites: 48/48 PASS;
+- used-to-remaining, Maximum Decrement, malformed-value, forbidden-field,
+  settings, and restoration coverage: PASS;
+- exact configuration restoration and temporary-artifact deletion: PASS;
+- independent privacy and unstaged-scope audit: PASS, no material findings.
+
+M5-G2 remains locked. Exactly one next task is:
+
+**M5-SETUP-G1**
+
+This is a new status-line activation setup revision under the required task
+label. The earlier launcher-installation and subscription-authentication
+setup remains closed.

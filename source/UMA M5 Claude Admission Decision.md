@@ -2,7 +2,23 @@
 
 Date: 2026-07-28
 
-## Final decision
+## Current M5-G1R2 decision
+
+**SETUP REQUIRED — AUTHENTICATED CLI STATUS-LINE EVENT NOT OBSERVED**
+
+Authentication, installation trust, and shell access now pass. The bounded
+temporary status-line probe did not receive an event after one normal
+Human-controlled response in the installed Claude Code CLI. With no sanitized
+callback evidence, neither quota window can be admitted.
+
+This is not GO or CONDITIONAL GO because no valid quota window was observed.
+It is not NO-GO because the official local protocol remains documented and
+the missing evidence is one exact provider/runtime-controlled callback
+condition. No private or account-web alternative is authorized.
+
+M5-G2 remains locked. Exactly one next task is **M5-SETUP-G1**.
+
+## Historical M5-G1R decision
 
 **SETUP REQUIRED — CLAUDE CODE CLI PRESENT BUT NOT AUTHENTICATED**
 
@@ -117,3 +133,55 @@ created.
 M5-G2 remains locked. Exactly one next task is:
 
 **M5-G1R2**
+
+## M5-G1R2 decision basis
+
+The recheck proved:
+
+1. the official native Claude Code 2.1.220 arm64 executable is trusted;
+2. `claude doctor` passes;
+3. provider-managed Claude.ai subscription authentication is active;
+4. prohibited secret and cloud-provider routes are inactive;
+5. the original user settings file and `statusLine` were absent;
+6. local managed-settings and managed-preferences files were absent;
+7. a temporary owner-only allowlist probe was synthetically validated;
+8. one normal Human-controlled CLI response completed;
+9. no status-line callback reached the probe;
+10. no valid five-hour or seven-day quota window was observed;
+11. exact absence-state restoration and temporary-artifact deletion passed.
+
+The used-to-remaining rule remains locked as:
+
+`remainingPercent = 100 - usedPercentage`
+
+It is applied exactly once only after a finite 0-through-100 provider value
+passes validation. Missing, malformed, negative, over-100, and nonfinite
+values fail closed. The two windows and their reset epochs remain independent.
+Maximum Decrement receives remaining percentages only.
+
+The current classification is:
+
+| Capability | Result |
+|---|---|
+| Five-hour used and reset | unsupported on current evidence |
+| Five-hour remaining | unavailable |
+| Seven-day used and reset | unsupported on current evidence |
+| Seven-day remaining | unavailable |
+| Version payload field | unsupported on current evidence |
+| Independent CLI version | verified |
+
+No raw payload, live value, reset timestamp, session identifier, transcript
+path, workspace path, prompt, response, task, tool data, credential, or
+account identity entered Git or durable evidence.
+
+The prior settings state was restored to file absence and `statusLine`
+absence. The temporary settings file, absence marker, probe, and evidence
+location were deleted. There is no permanent Claude configuration change.
+
+Exactly one next task is:
+
+**M5-SETUP-G1**
+
+For this Completion Lock, `M5-SETUP-G1` is a new, separately authorized
+status-line activation setup revision. The completed launcher-installation
+and subscription-authentication setup remains closed and is not reopened.

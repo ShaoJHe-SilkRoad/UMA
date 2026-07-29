@@ -1,8 +1,16 @@
-# UMA M5-G1R Scope Lock
+# UMA M5-G1R2 Scope Lock
 
 Date: 2026-07-28
 
-## Decision
+## Current decision
+
+**SETUP REQUIRED — AUTHENTICATED CLI STATUS-LINE EVENT NOT OBSERVED**
+
+M5-G1R2 remains documentation/test-only. No production relay, connector,
+model, UI, package configuration, installed application, or account-web path
+is authorized or changed.
+
+## Historical M5-G1R decision
 
 **SETUP REQUIRED — CLAUDE CODE CLI PRESENT BUT NOT AUTHENTICATED**
 
@@ -133,3 +141,37 @@ Exactly one next task is permitted:
 
 Stop after the M5-G1R report and local commit. Do not start M5-SETUP-G1
 automatically.
+
+## M5-G1R2 execution lock
+
+Accepted starting state:
+
+- branch: `codex/uma-m5-claude`;
+- HEAD: `8b825d181205fd8d484364405044005a53bbd6ba`;
+- tree: `0057ae69495cd32ed68454aba545cd5fead0b795`;
+- worktree: clean;
+- index: empty.
+
+The exact tracked scope remains the same six paths listed above. Temporary
+Claude configuration and probe artifacts were permitted only outside Git and
+were deleted after exact absence-state restoration.
+
+The Human-controlled response did not produce a status-line callback. This
+locks the result to SETUP REQUIRED and forbids inferring a quota window,
+running another provider task, inspecting Human task content, activating
+account-web fallback, or beginning production implementation.
+
+Delivery is limited to exact staging of the six authorized files,
+independent cached-diff review, and one local commit:
+
+`docs(m5): admit authenticated Claude local source`
+
+Do not amend or push.
+
+M5-G2 remains locked. Exactly one next task is:
+
+**M5-SETUP-G1**
+
+This denotes a separately authorized status-line activation setup revision.
+The completed launcher-installation and subscription-authentication setup
+remains closed and cannot be repeated under this lock.

@@ -2,7 +2,21 @@
 
 Date: 2026-07-28
 
-## Current decision
+## Current M5-G1R2 decision
+
+**SETUP REQUIRED — AUTHENTICATED CLI STATUS-LINE EVENT NOT OBSERVED**
+
+M5-G1R2 exercised the absence-state branch of this contract. The original
+user settings file and `statusLine` were absent. A temporary owner-only
+settings file referenced one task-owned allowlist probe, then was removed
+after the Human CLI checkpoint produced no callback evidence. Final settings
+file and `statusLine` state are again absent.
+
+No existing command required wrapping, no raw payload was written, and every
+task-owned configuration, backup-marker, probe, and evidence artifact was
+deleted.
+
+## Historical M5-G1R decision
 
 **SETUP REQUIRED — CLAUDE CODE CLI PRESENT BUT NOT AUTHENTICATED**
 
@@ -175,3 +189,54 @@ The temporary status-line probe remains prohibited in this setup task. M5-G2
 remains locked. Exactly one next task is:
 
 **M5-G1R2**
+
+## M5-G1R2 exercised restore record
+
+Pre-mutation state:
+
+- user settings file: absent;
+- user `statusLine`: absent;
+- local `disableAllHooks`: absent;
+- local managed-settings file: absent;
+- local managed-preferences files: absent;
+- existing status-line output and exit behavior: not applicable;
+- exact absence-state restoration: feasible.
+
+Temporary mutation:
+
+- affected settings source: user settings only;
+- file permissions: owner-only;
+- status-line type: command;
+- command content: not retained in this record;
+- input limit: 64 KiB;
+- network access: none;
+- payload-supplied path access: none;
+- raw input logging or persistence: none;
+- evidence projection: generic allowlisted validity states only.
+
+The original file did not exist, so byte-hash equality is not applicable to
+the restore target. Its exact backup state was recorded as absence in an
+owner-only marker. The temporary settings file was verified against its
+task-owned source hash before removal.
+
+Post-checkpoint restoration:
+
+- temporary settings file: removed;
+- final user settings file: absent;
+- final `statusLine`: absent;
+- absence marker: deleted;
+- probe: deleted;
+- sanitized evidence location: deleted;
+- raw provider payload: never written;
+- persistent Claude configuration change: none.
+
+The Human completed one normal response in the installed CLI. The probe was
+not invoked, so this contract records no quota-field capability claim.
+
+M5-G2 remains locked. Exactly one next task is:
+
+**M5-SETUP-G1**
+
+This next-task label means a separately authorized status-line activation
+setup revision only. The prior launcher and subscription-authentication setup
+remains closed and must not be repeated.
