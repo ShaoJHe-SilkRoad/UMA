@@ -198,6 +198,31 @@ contains no `statusLine`, credential, session, token, identity, hook, API-key
 route, enterprise-cloud route, provider route, or UMA probe configuration.
 No other Claude file was modified or deleted.
 
+## M5-G3 live acceptance addendum
+
+The live acceptance record contains classifications only. It contains no real
+quota value, reset timestamp, raw payload, credential, identity, prompt,
+response, transcript, task, tool, workspace, or repository content.
+
+| ID | First evidence | Severity | Acceptance impact | Repair / decision | Focused retest | Regression retest | Status |
+|---|---|---:|---|---|---|---|---|
+| M5G3-001 | Visible Disable Integration restored the exact Claude settings but left the last Claude card admitted | High | Relay-disabled and exact-restore state matrix failed | Publish an inactive connector snapshot on disconnect so the registry withdraws Claude immediately without affecting other providers | Disconnect/withdrawal and failure-to-fresh tests PASS | Full 409/409 provider and UI regression PASS | Closed |
+| M5G3-002 | One Human-controlled response produced a current Claude card with both plan windows | Blocker gate | Live source admission was previously unproven | Accept only the sanitized provider event and record classifications, never values | Live callback and field classification PASS | Main-panel order and Assistant exclusion PASS | Closed |
+| M5G3-003 | WorkBuddy current read briefly failed during shared Refresh | Medium | Cross-provider failure isolation and stable order required proof | Preserve Claude and Codex, use the existing bounded WorkBuddy recovery control, and verify the three-provider order after recovery | Failure isolation PASS | WorkBuddy recovery PASS | Closed |
+| M5G3-004 | The preflight package helper only admitted the historical G2 final path | High | Commit-exact M5-G3 preflight/final paths could not be certified | Add exact phase-bound output paths and G3 provenance states while retaining the G2 contract | M5-G3 package-contract test PASS | G2 compatibility contract and preflight package audit PASS; final commit-exact audit remains the delivery gate | Closed |
+
+Current M5-G3 verification:
+
+- M5-G3 focused suite: 6/6 PASS;
+- combined M5 setup, relay, configuration, connector, Settings, and live
+  acceptance suites: 84/84 PASS;
+- full regression suite: 409/409 PASS across 45 suites;
+- Debug, Release, strict-concurrency Release, and strict relay-helper builds:
+  PASS;
+- final exact Claude settings restoration: PASS;
+- final commit-exact package, staged-index audit, and clean Git proof remain
+  delivery gates.
+
 Completed pre-staging verification:
 
 - focused M5-SETUP-G1R suite: 30/30 PASS;

@@ -29,16 +29,18 @@ readonly SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk"
 
 usage() {
     printf '%s\n' \
-        "Usage: $0 --commit <40-hex-sha> [--build <12-digit-number>] --output /private/tmp/uma-m5-g2-final-<commit>/UMA.app"
+        "Usage: $0 --commit <40-hex-sha> [--build <12-digit-number>] [--phase g2-final|g3-preflight|g3-final] --output <phase-exact-path>/UMA.app"
 }
 
 commit=""
 build_number="$DEFAULT_BUILD"
+phase="g2-final"
 output=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --commit) commit="${2:-}"; shift 2 ;;
         --build) build_number="${2:-}"; shift 2 ;;
+        --phase) phase="${2:-}"; shift 2 ;;
         --output) output="${2:-}"; shift 2 ;;
         *) usage >&2; exit 2 ;;
     esac
@@ -50,7 +52,34 @@ done
     printf 'Required offline SDK is unavailable: %s\n' "$SDK" >&2
     exit 1
 }
-readonly expected_output="/private/tmp/uma-m5-g2-final-$commit/UMA.app"
+case "$phase" in
+    g2-final)
+        expected_output="/private/tmp/uma-m5-g2-final-$commit/UMA.app"
+        provenance_name="UMA-M5-G2-Provenance.plist"
+        integration_status="OFFLINE-READY-LIVE-NOT-VALIDATED"
+        report_status="LIVE-CLAUDE-QUOTA-NOT-YET-VALIDATED"
+        ;;
+    g3-preflight)
+        expected_output="/private/tmp/uma-m5-g3-preflight-${commit:0:12}/UMA.app"
+        provenance_name="UMA-M5-G3-Provenance.plist"
+        integration_status="LIVE-PREFLIGHT"
+        report_status="$integration_status"
+        ;;
+    g3-final)
+        expected_output="/private/tmp/uma-m5-g3-final-$commit/UMA.app"
+        provenance_name="UMA-M5-G3-Provenance.plist"
+        integration_status="LIVE-VALIDATED-SETTINGS-RESTORED"
+        report_status="$integration_status"
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac
+readonly expected_output
+readonly provenance_name
+readonly integration_status
+readonly report_status
 [[ "$output" == "$expected_output" ]] || {
     printf 'Refusing output outside %s\n' "$expected_output" >&2
     exit 2
@@ -74,7 +103,7 @@ readonly canonical_parent_base="$(cd "$(dirname "$output_parent")" && pwd -P)"
 mkdir "$output_parent"
 
 git -C "$REPO_ROOT" cat-file -e "$commit^{commit}"
-package_root="/private/tmp/uma-m5-g2-package-$commit"
+package_root="/private/tmp/uma-m5-package-$phase-$commit"
 readonly source_root="$package_root/source"
 readonly source_archive="$package_root/source-$commit.tar"
 readonly scratch_root="$package_root/swift"
@@ -173,19 +202,19 @@ install -m 644 \
     "$source_root/Assets/AppIcon.icns" \
     "$contents/Resources/AppIcon.icns"
 
-cat > "$contents/Resources/UMA-M5-G2-Provenance.plist" <<PLIST
+cat > "$contents/Resources/$provenance_name" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Revision</key><string>$commit</string>
 <key>SourceArchiveSHA256</key><string>$archive_sha256</string>
 <key>SourceState</key><string>commit-exact</string>
-<key>ClaudeIntegrationStatus</key><string>OFFLINE-READY-LIVE-NOT-VALIDATED</string>
+<key>ClaudeIntegrationStatus</key><string>$integration_status</string>
 <key>ClaudeSource</key><string>Official local status line</string>
 </dict></plist>
 PLIST
 chmod 644 \
-    "$contents/Resources/UMA-M5-G2-Provenance.plist"
+    "$contents/Resources/$provenance_name"
 
 cat > "$contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -210,7 +239,7 @@ chmod 644 "$contents/Info.plist"
 
 /usr/bin/plutil -lint "$contents/Info.plist" >/dev/null
 /usr/bin/plutil -lint \
-    "$contents/Resources/UMA-M5-G2-Provenance.plist" >/dev/null
+    "$contents/Resources/$provenance_name" >/dev/null
 /usr/bin/codesign --force --deep --sign - "$output"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$output"
 
@@ -240,7 +269,7 @@ readonly expected_manifest="$(
         "Contents/Info.plist" \
         "Contents/MacOS/$PRODUCT" \
         "Contents/Resources/AppIcon.icns" \
-        "Contents/Resources/UMA-M5-G2-Provenance.plist" \
+        "Contents/Resources/$provenance_name" \
         "Contents/_CodeSignature/CodeResources"
 )"
 readonly actual_manifest="$(
@@ -308,5 +337,5 @@ printf 'PACKAGED output=%s commit=%s archive_sha256=%s executable_sha256=%s help
     "$MARKETING_VERSION" \
     "$build_number" \
     "$BUNDLE_ID" \
-    "LIVE-CLAUDE-QUOTA-NOT-YET-VALIDATED"
+    "$report_status"
 completed=1

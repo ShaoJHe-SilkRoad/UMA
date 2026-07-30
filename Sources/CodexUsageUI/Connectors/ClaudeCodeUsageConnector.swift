@@ -199,11 +199,11 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
     func stop() async {
         server.stop()
         listenerStarted = false
-        lifecycle = .installedWaiting
+        lifecycle = .notInstalled
         replace(
             Self.unavailableSnapshot(
-                state: .waitingForFirstResponse,
-                failure: nil,
+                state: .inactive,
+                failure: .unavailable,
                 capturedAt: now()
             )
         )
