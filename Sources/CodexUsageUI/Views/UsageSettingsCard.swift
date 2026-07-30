@@ -10,6 +10,7 @@ struct UsageSettingsCard: View {
     @Binding var showRecentTasks: Bool
     @Binding var showAPICost: Bool
     @Binding var language: AppLanguage
+    let claudeSettings: ClaudeStatusLineSettingsModel?
     let workBuddySettings: WorkBuddySettingsModel?
     let workBuddyLogin: WorkBuddyLoginCoordinator?
     let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
@@ -99,6 +100,7 @@ struct UsageSettingsCard: View {
                     showUsageSummary: $showUsageSummary,
                     showRecentTasks: $showRecentTasks,
                     showAPICost: $showAPICost,
+                    claudeSettings: claudeSettings,
                     workBuddySettings: workBuddySettings,
                     workBuddyLogin: workBuddyLogin,
                     workBuddyAccountWebSync: workBuddyAccountWebSync,
@@ -375,6 +377,7 @@ private struct AgentSpecificSettingsContent: View {
     @Binding var showUsageSummary: Bool
     @Binding var showRecentTasks: Bool
     @Binding var showAPICost: Bool
+    let claudeSettings: ClaudeStatusLineSettingsModel?
     let workBuddySettings: WorkBuddySettingsModel?
     let workBuddyLogin: WorkBuddyLoginCoordinator?
     let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
@@ -476,6 +479,15 @@ private struct AgentSpecificSettingsContent: View {
                 )
             }
 
+            if providerID == AgentPreferenceRecord.claudeProviderID,
+               let claudeSettings {
+                Divider().opacity(0.35)
+                ClaudeStatusLineSettingsSection(
+                    model: claudeSettings,
+                    language: language
+                )
+            }
+
             if providerID == AgentPreferenceRecord.workBuddyProviderID,
                let workBuddySettings {
                 Divider().opacity(0.35)
@@ -511,6 +523,143 @@ private struct AgentSpecificSettingsContent: View {
                 coordinator.setCodexDetails(details, for: providerID)
             }
         )
+    }
+}
+
+private struct ClaudeStatusLineSettingsSection: View {
+    @ObservedObject var model: ClaudeStatusLineSettingsModel
+    let language: AppLanguage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(language.claudeOfficialLocalStatusLine)
+                .font(
+                    AppTypography.font(
+                        10.5,
+                        weight: .semibold,
+                        language: language
+                    )
+                )
+            stateSummary
+
+            HStack(spacing: 8) {
+                primaryAction
+                if shouldOfferDisable {
+                    Button(language.claudeDisableIntegration) {
+                        model.disableIntegration()
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier(
+                        "claude.status-line.disable"
+                    )
+                }
+            }
+            .disabled(model.actionInProgress)
+
+            if let safeError = model.safeError {
+                Text(safeError)
+                    .font(AppTypography.font(9, language: language))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Divider().opacity(0.35)
+            Text(language.claudeSourceTransparency)
+                .font(
+                    AppTypography.font(
+                        10,
+                        weight: .semibold,
+                        language: language
+                    )
+                )
+            VStack(alignment: .leading, spacing: 3) {
+                Text(language.claudeCredentialsTransparency)
+                Text(language.claudeNetworkTransparency)
+                Text(language.claudeTranscriptTransparency)
+                Text(language.claudeRawPayloadTransparency)
+                Text(language.claudeAuthenticationTransparency)
+            }
+            .font(AppTypography.font(9, language: language))
+            .foregroundStyle(.secondary)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier(
+                "claude.status-line.source-transparency"
+            )
+        }
+        .onAppear {
+            model.checkClaudeCode()
+        }
+    }
+
+    @ViewBuilder
+    private var stateSummary: some View {
+        switch model.state {
+        case .unconfigured:
+            Text(language.claudeOfficialLocalStatusLine)
+        case .ready:
+            VStack(alignment: .leading, spacing: 2) {
+                Text(language.claudeDetected)
+                Text(language.claudeNoCredentialsRequired)
+            }
+        case .waiting:
+            Text(language.claudeWaitingForActivity)
+        case let .fresh(updated):
+            VStack(alignment: .leading, spacing: 2) {
+                Text(language.claudeConnected)
+                Text(language.claudeUpdated(updated))
+            }
+        case let .stale(updated):
+            Text(language.claudeUpdated(updated))
+        case .unsupported:
+            Text(language.agentSetupRequired)
+        case .failed:
+            Text(language.failureStatus)
+        case .repairRequired:
+            Text(language.claudeRepairRelay)
+        }
+    }
+
+    @ViewBuilder
+    private var primaryAction: some View {
+        switch model.state {
+        case .unconfigured:
+            Button(
+                language.claudeCheckCode,
+                action: model.checkClaudeCode
+            )
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("claude.status-line.check")
+        case .ready:
+            Button(
+                language.claudeEnableIntegration,
+                action: model.enableIntegration
+            )
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("claude.status-line.enable")
+        case .waiting, .fresh, .stale, .repairRequired:
+            Button(
+                language.claudeRepairRelay,
+                action: model.repairRelay
+            )
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("claude.status-line.repair")
+        case .unsupported, .failed:
+            Button(
+                language.claudeCheckCode,
+                action: model.checkClaudeCode
+            )
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("claude.status-line.check")
+        }
+    }
+
+    private var shouldOfferDisable: Bool {
+        switch model.state {
+        case .waiting, .fresh, .stale, .repairRequired:
+            true
+        default:
+            false
+        }
     }
 }
 

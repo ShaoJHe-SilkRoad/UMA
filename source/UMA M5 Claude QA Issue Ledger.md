@@ -209,3 +209,39 @@ Completed pre-staging verification:
 - production runtime and package configuration: unchanged.
 
 **Admission: GO. Exactly one next task: M5-G2.**
+
+## M5-G2 issue ledger
+
+M5-G2 uses only synthetic fixtures and sanitized classifications. No real
+quota value, reset timestamp, raw payload, provider content, command,
+credential, account identity, or settings backup is recorded.
+
+| ID | First evidence | Severity | Acceptance impact | Repair | Focused retest | Regression retest | Final status |
+|---|---|---:|---|---|---|---|---|
+| M5G2-001 | A synthesized packet could bypass validating initializers and accept unknown shape | Blocker | A malformed or expanded schema could cross the socket boundary | Added strict root/window key validation and reconstructed every decoded window through its validating initializer | Strict malformed, private, unknown, range, reset, and packet-size cases PASS | Full suite 403/403 PASS | Closed |
+| M5G2-002 | A second listener or a short callback burst could contend for the socket | Major | More than one listener or lost callbacks would violate lifecycle requirements | Probe live sockets before stale replacement, validate peer ownership, use one listener, and set a bounded 32-connection backlog | Active takeover, stale recovery, permissions, burst, and single-listener cases PASS | Full suite 403/403 PASS | Closed |
+| M5G2-003 | Prior-command output capture was bounded by failing after reading the whole output | Major | Large valid status output could be suppressed or retained unnecessarily | Stream prior stdout directly to the original output while keeping only a bounded optional test capture; preserve stdin and exit behavior | Success, failure, complex quoting, large streaming output, cancellation, and bounded capture PASS | Full suite 403/403 PASS | Closed |
+| M5G2-004 | Settings presentation did not observe connector changes after an action completed | Major | Waiting could remain visible after the first current event | Added one reactive connector snapshot observer with bounded actions | Waiting-to-fresh fixture PASS | Full suite 403/403 PASS | Closed |
+| M5G2-005 | A failed passive admission could cancel the path required for later recovery | Blocker | Claude could not recover after one malformed event | Keep passive listeners alive while withdrawing only the current Claude admission | Real socket failure-to-fresh and registry withdraw/recover cases PASS | Full suite 403/403 PASS | Closed |
+| M5G2-006 | Settings reads and mutation checks had filesystem race and link hazards | Blocker | Exact restore or unrelated settings preservation could not be certified | Added no-follow bounded reads, owner/type/link checks, before-mutation identity rechecks, exclusive backup creation, atomic replacement, and exact byte/mode restoration | Absent, theme-only, existing command/options, concurrent drift, link, repair, disable, and restore cases PASS | Full suite 403/403 PASS | Closed |
+| M5G2-007 | Package scratch permissions and artifact scans were incomplete | Major | A package or scratch directory could retain a backup, socket, fixture, or private field | Added owner-only umask, cleanup trap, commit archive build, helper and app scans, manifest, signature, dependency, fixture, socket, and backup exclusions | Package contract source test PASS | Commit-exact audit pending final gate | Closed |
+| M5G2-008 | Tool-level sandboxing blocked Unix-domain socket execution | Infrastructure | A sandbox failure could be mistaken for a product defect | Retained SwiftPM's isolated build sandbox settings and ran only the task-owned socket suite outside the outer tool sandbox | 48/48 focused tests PASS | Full suite 403/403 PASS | Closed |
+| M5G2-009 | The first passive-start wiring entered `UsageStore` and violated its neutral source-ownership contract | Major | Provider lifecycle ownership would have leaked into the shared store | Moved passive startup to the composition root and kept `UsageStore` provider-neutral | Exact source-ownership regression PASS | Affected 141/141 PASS | Closed |
+| M5G2-010 | Preflight review found Info.plist permission ordering and an overbroad legacy-source private-field scan in the package helper | Major | The final commit-exact package would fail before completing its audit | Apply permissions after plist creation; scan credential/retired routes across production while limiting Claude private-field checks to the relay source/helper | Script syntax and package contract PASS | Commit-exact audit pending final gate | Closed |
+| M5G2-011 | Final privacy review found that status-line-only drift could be overwritten during repair or restore | Blocker | A concurrent Human status-line edit could be lost | Require the exact installed settings hash before repair or restore, while still supporting a changed packaged relay from an unchanged installed document | Status-line-only drift and changed-relay fixtures PASS | Full suite 403/403 PASS | Closed |
+| M5G2-012 | Final lifecycle review found that shutdown unlinked the socket pathname without proving it still named the listener-owned inode | Blocker | A same-user replacement created during shutdown could be deleted | Record the bound socket device and inode, and unlink only when the current owner/type/identity still match | Replacement-path preservation and socket lifecycle fixtures PASS | Full suite 403/403 PASS | Closed |
+
+Current focused result:
+
+- M5-G2 focused suites: 48/48 PASS across three suites;
+- affected Codex, WorkBuddy, registry, shared-presentation, and Desktop
+  Assistant suites: 141/141 PASS across 13 suites;
+- full regression suite: 403/403 PASS across 44 suites;
+- Debug, Release, and strict-concurrency Release builds: PASS;
+- decoder, relay, configuration, connector, registry, Settings, localization,
+  privacy-source, and package-contract coverage: PASS;
+- live Claude configuration mutation: none;
+- installed Desktop application operation: none.
+
+Final full-suite, build, package, staged-index, and commit results are recorded
+in the shared sanitized evidence packet after those gates complete.

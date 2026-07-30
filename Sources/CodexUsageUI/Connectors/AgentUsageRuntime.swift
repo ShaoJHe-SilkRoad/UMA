@@ -32,6 +32,7 @@ enum AgentUsageRuntime {
 @MainActor
 public struct UsageMonitorRuntime {
     public let store: UsageStore
+    public let claudeSettings: ClaudeStatusLineSettingsModel
     public let workBuddySettings: WorkBuddySettingsModel
     public let workBuddyLogin: WorkBuddyLoginCoordinator
     public let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController
@@ -44,6 +45,10 @@ public struct UsageMonitorRuntime {
             WorkBuddyManualAvailabilityStore(fileURL: $0)
         } ?? WorkBuddyManualAvailabilityStore()
         let manualSource = ManualWorkBuddyAvailabilitySource(store: manualStore)
+        let claudeConnector = ClaudeCodeUsageConnector.production()
+        let claudeSettings = ClaudeStatusLineSettingsModel.production(
+            connector: claudeConnector
+        )
         let workBuddyConnector = WorkBuddyAvailabilityConnector(source: manualSource)
         let accountWebSync = WorkBuddyAccountWebSessionController()
         let accountWebConnector = WorkBuddyAccountWebCreditsConnector(
@@ -64,7 +69,11 @@ public struct UsageMonitorRuntime {
         let registry = AgentUsageRuntime.makeCodexRegistry(
             snapshotStore: snapshotStoreURL.map { AgentConnectorSnapshotStore(url: $0) }
                 ?? AgentConnectorSnapshotStore(),
-            additionalConnectors: [workBuddyConnector, accountWebConnector]
+            additionalConnectors: [
+                claudeConnector,
+                workBuddyConnector,
+                accountWebConnector,
+            ]
         )
         accountWebSync.configureAutoRefresh {
             guard await MainActor.run(body: {
@@ -85,10 +94,14 @@ public struct UsageMonitorRuntime {
             consentDefaults: .standard,
             agentSettings: agentSettings
         )
+        Task {
+            await registry.startPassiveConnectors()
+        }
         let settings = WorkBuddySettingsModel(source: manualSource)
         let login = WorkBuddyLoginCoordinator()
         return UsageMonitorRuntime(
             store: usageStore,
+            claudeSettings: claudeSettings,
             workBuddySettings: settings,
             workBuddyLogin: login,
             workBuddyAccountWebSync: accountWebSync

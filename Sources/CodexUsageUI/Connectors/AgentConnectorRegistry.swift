@@ -14,6 +14,7 @@ actor AgentConnectorRegistry {
     private let snapshotStore: AgentConnectorSnapshotStore?
     private let eligibilityScanner: LocalProviderEligibilityScanner
     private var currentAdmissionSet: ProviderSurfaceAdmissionSet?
+    private var excludedProviderIDs: Set<AgentConnectorID> = []
 
     init(
         connectors initialConnectors: [any AgentUsageConnector] = [],
@@ -70,11 +71,15 @@ actor AgentConnectorRegistry {
             excludedProviderIDs: excludedProviderIDs,
             trigger: trigger
         )
+        self.excludedProviderIDs = excludedProviderIDs
 
         let admittedIDs = Set(result.admittedProviderIDs)
         let previouslyAdmittedIDs = Set(latest.keys)
         let hiddenListenerIDs = listeners.keys.filter {
             !admittedIDs.contains($0)
+                && connectors[$0]?.descriptor.capabilities.contains(
+                    .passiveLocalAvailability
+                ) != true
         }
         for id in hiddenListenerIDs {
             listeners[id]?.cancel()
@@ -91,7 +96,10 @@ actor AgentConnectorRegistry {
                 listen(to: connector)
             } else if connector.descriptor.hasSurfaceAdmissibleReadContract,
                       !excludedProviderIDs.contains(id)
-                        || previouslyAdmittedIDs.contains(id) {
+                        || previouslyAdmittedIDs.contains(id),
+                      !connector.descriptor.capabilities.contains(
+                        .passiveLocalAvailability
+                      ) {
                 await connector.stop()
             }
         }
@@ -176,6 +184,7 @@ actor AgentConnectorRegistry {
         }
         latest.removeAll()
         currentAdmissionSet = nil
+        excludedProviderIDs.removeAll()
         publish()
     }
 
@@ -197,6 +206,11 @@ actor AgentConnectorRegistry {
 
     private func receive(_ snapshot: AgentUsageSnapshot) async {
         guard let connector = connectors[snapshot.id] else { return }
+        guard !excludedProviderIDs.contains(snapshot.id) else {
+            latest[snapshot.id] = nil
+            publish()
+            return
+        }
         guard connector.descriptor.hasSurfaceAdmissibleReadContract else {
             latest[snapshot.id] = nil
             return
@@ -218,8 +232,13 @@ actor AgentConnectorRegistry {
             )
             guard case .admitted = admission else {
                 latest[snapshot.id] = nil
-                listeners[snapshot.id]?.cancel()
-                listeners[snapshot.id] = nil
+                let isPassive = connector.descriptor.capabilities.contains(
+                    .passiveLocalAvailability
+                )
+                if !isPassive {
+                    listeners[snapshot.id]?.cancel()
+                    listeners[snapshot.id] = nil
+                }
                 self.currentAdmissionSet = ProviderSurfaceAdmissionSet(
                     trigger: currentAdmissionSet.trigger,
                     scanGeneration: currentAdmissionSet.scanGeneration,
@@ -237,7 +256,7 @@ actor AgentConnectorRegistry {
                         )
                     }
                 )
-                if snapshot.state != .inactive {
+                if snapshot.state != .inactive && !isPassive {
                     await connector.stop()
                 }
                 publish()

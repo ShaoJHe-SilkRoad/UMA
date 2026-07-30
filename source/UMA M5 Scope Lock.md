@@ -229,3 +229,82 @@ cached-diff review, and one local commit:
 Do not amend or push.
 
 **Exactly one next task: M5-G2.**
+
+## M5-G2 execution lock
+
+Accepted starting state:
+
+- branch: `codex/uma-m5-claude`;
+- HEAD: `2c7db84aa98dbf8056a2184fc7f4f7d28b5914be`;
+- tree: `85490a87c6bcbcb7c51418dc7a052640447e8a16`;
+- worktree: clean;
+- index: empty.
+
+M5-G2 is an offline production implementation. It does not install, enable,
+or test the relay in the Human's real Claude configuration. It does not run a
+Claude task, read provider content, or change Claude authentication.
+
+The exact implementation scope is:
+
+- `Package.swift`;
+- `Sources/ClaudeStatusLineCore/`;
+- `Sources/ClaudeStatusLineRelay/`;
+- `Sources/CodexUsageUI/Connectors/ClaudeCodeUsageConnector.swift`;
+- `Sources/CodexUsageUI/Stores/ClaudeStatusLineSettingsModel.swift`;
+- `Sources/CodexUsageUI/Models/AppLanguage+Claude.swift`;
+- bounded Claude registration, lifecycle, Settings, and main-panel readiness
+  changes under `Sources/CodexUsageMonitor/` and `Sources/CodexUsageUI/`;
+- `Tests/CodexUsageUITests/M5G2ClaudeRelayProtocolTests.swift`;
+- `Tests/CodexUsageUITests/M5G2ClaudeConfigurationTests.swift`;
+- `Tests/CodexUsageUITests/M5G2ClaudeConnectorSettingsTests.swift`;
+- `script/package_uma_m5_g2.sh`;
+- this scope lock, the M5 QA ledger, and the sanitized M5-G2 evidence packet.
+
+The relay accepts only the documented five-hour and seven-day used
+percentages, their own reset epochs, and the bounded Claude version. It
+publishes a small versioned packet over one owner-only Unix-domain socket.
+The connector retains provider used percentages, and
+`SharedUsagePresentationPolicy` is the single used-to-remaining conversion
+owner. Views and the connector do not repeat the conversion.
+
+The integration is passive:
+
+- one helper process per provider status-line callback;
+- no helper daemon;
+- one app-owned socket listener;
+- one Claude connector;
+- no provider request or background provider polling;
+- Manual Refresh checks only local configuration health;
+- no persisted quota snapshot or event queue;
+- no Desktop Assistant-owned Claude component;
+- no provider-name branch in `UsageStore`.
+
+Configuration management is fixture-tested only. It supports exact enable,
+check, repair, disable, and restoration of absent, theme-only, and existing
+status-line settings. It preserves unrelated bytes and permissions, keeps an
+owner-only backup outside Git and the application package, rejects unsafe or
+unsupported sources, and persists only nonsecret integration metadata.
+
+The accepted provider-owned onboarding preference remains unchanged:
+
+**ACCEPTED PROVIDER-OWNED ONBOARDING PREFERENCE — NOT A PROBE ARTIFACT**
+
+No real quota value, reset timestamp, raw provider payload, prior command,
+settings backup, credential, identity, prompt, response, transcript, session,
+workspace, repository, or task data may enter Git or the package.
+
+Delivery is limited to exact staging of M5-G2 paths, independent cached-diff
+review, one local commit:
+
+`feat(connectors): add Claude Code status-line relay`
+
+and one commit-exact offline package under `/private/tmp`. Do not install the
+package or modify the Desktop application.
+
+Final live status must remain:
+
+**LIVE CLAUDE QUOTA NOT YET VALIDATED**
+
+Exactly one next task is:
+
+**M5-G3**

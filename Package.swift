@@ -9,11 +9,22 @@ let package = Package(
     ],
     products: [
         .executable(name: "CodexUsageMonitor", targets: ["CodexUsageMonitor"]),
+        .executable(name: "ClaudeStatusLineRelay", targets: ["ClaudeStatusLineRelay"]),
         .executable(name: "PreviewRendererTool", targets: ["PreviewRendererTool"])
     ],
     targets: [
         .target(
+            name: "ClaudeStatusLineCore",
+            path: "Sources/ClaudeStatusLineCore"
+        ),
+        .executableTarget(
+            name: "ClaudeStatusLineRelay",
+            dependencies: ["ClaudeStatusLineCore"],
+            path: "Sources/ClaudeStatusLineRelay"
+        ),
+        .target(
             name: "CodexUsageUI",
+            dependencies: ["ClaudeStatusLineCore"],
             path: "Sources/CodexUsageUI"
         ),
         .executableTarget(
@@ -28,7 +39,11 @@ let package = Package(
         ),
         .testTarget(
             name: "CodexUsageUITests",
-            dependencies: ["CodexUsageUI", "CodexUsageMonitor"],
+            dependencies: [
+                "ClaudeStatusLineCore",
+                "CodexUsageUI",
+                "CodexUsageMonitor",
+            ],
             path: "Tests/CodexUsageUITests"
         )
     ]

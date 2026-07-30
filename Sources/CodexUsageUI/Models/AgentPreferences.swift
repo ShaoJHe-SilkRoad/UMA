@@ -40,6 +40,7 @@ struct AgentProviderSettingsPayload: Codable, Equatable, Sendable {
 struct AgentPreferenceRecord: Codable, Equatable, Identifiable, Sendable {
     static let currentSourceConfigurationVersion = 1
     static let codexProviderID = AgentConnectorID(rawValue: "codex")!
+    static let claudeProviderID = AgentConnectorID(rawValue: "claude")!
     static let workBuddyProviderID = AgentConnectorID(rawValue: "workbuddy")!
 
     let providerID: AgentConnectorID

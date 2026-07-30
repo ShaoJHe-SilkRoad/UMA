@@ -42,6 +42,7 @@ public struct UsagePanelView: View {
     private let preferencesEnabled: Bool
     private let onHeightChange: ((CGFloat) -> Void)?
     private let localAccessConfirmationAction: CodexLocalAccessConfirmationAction?
+    private let claudeSettings: ClaudeStatusLineSettingsModel?
     private let workBuddySettings: WorkBuddySettingsModel?
     private let workBuddyLogin: WorkBuddyLoginCoordinator?
     private let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
@@ -59,6 +60,7 @@ public struct UsagePanelView: View {
         navigation: UsagePanelNavigationCoordinator? = nil,
         onHeightChange: ((CGFloat) -> Void)? = nil,
         localAccessConfirmationAction: CodexLocalAccessConfirmationAction? = nil,
+        claudeSettings: ClaudeStatusLineSettingsModel? = nil,
         workBuddySettings: WorkBuddySettingsModel? = nil,
         workBuddyLogin: WorkBuddyLoginCoordinator? = nil,
         workBuddyAccountWebSync: WorkBuddyAccountWebSessionController? = nil,
@@ -74,6 +76,7 @@ public struct UsagePanelView: View {
         self.preferencesEnabled = preferencesEnabled
         self.onHeightChange = onHeightChange
         self.localAccessConfirmationAction = localAccessConfirmationAction
+        self.claudeSettings = claudeSettings
         self.workBuddySettings = workBuddySettings
         self.workBuddyLogin = workBuddyLogin
         self.workBuddyAccountWebSync = workBuddyAccountWebSync
@@ -200,6 +203,7 @@ public struct UsagePanelView: View {
                             get: { store.language },
                             set: { store.setLanguage($0) }
                         ),
+                        claudeSettings: claudeSettings,
                         workBuddySettings: workBuddySettings,
                         workBuddyLogin: workBuddyLogin,
                         workBuddyAccountWebSync: workBuddyAccountWebSync,

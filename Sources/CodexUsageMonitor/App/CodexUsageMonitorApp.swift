@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         statusBarController = StatusBarController(
             store: store,
+            claudeSettings: runtime.claudeSettings,
             workBuddySettings: runtime.workBuddySettings,
             workBuddyLogin: runtime.workBuddyLogin,
             workBuddyAccountWebSync: runtime.workBuddyAccountWebSync

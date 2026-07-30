@@ -15,6 +15,7 @@ final class StatusBarController: NSObject {
 
     init(
         store: UsageStore,
+        claudeSettings: ClaudeStatusLineSettingsModel,
         workBuddySettings: WorkBuddySettingsModel,
         workBuddyLogin: WorkBuddyLoginCoordinator,
         workBuddyAccountWebSync: WorkBuddyAccountWebSessionController
@@ -28,6 +29,7 @@ final class StatusBarController: NSObject {
         panelController = TransparentUsagePanelController(
             store: store,
             statusItem: statusItem,
+            claudeSettings: claudeSettings,
             workBuddySettings: workBuddySettings,
             workBuddyLogin: workBuddyLogin,
             workBuddyAccountWebSync: workBuddyAccountWebSync,
