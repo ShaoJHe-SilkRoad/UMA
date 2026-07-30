@@ -117,6 +117,7 @@ enum AgentMetricProvenance: String, Codable, Sendable {
 
 enum AgentConnectorFreshness: String, Codable, Sendable {
     case fresh
+    case cached
     case stale
     case unavailable
 }
@@ -140,6 +141,7 @@ enum AgentConnectorCapability: String, Codable, CaseIterable, Hashable, Sendable
     case rateLimits
     case accountUsage
     case passiveLocalAvailability
+    case sanitizedLastValidRestore
     case hiddenFromProviderSurfaces
     case hiddenFromDesktopAssistant
 }
@@ -292,8 +294,47 @@ struct AgentRateLimitWindow: Codable, Sendable, Equatable, Identifiable {
     let id: String
     let kind: Kind
     let usedPercent: Double?
+    /// A normalized provider value restored from UMA's sanitized last-valid
+    /// cache. Live providers continue to publish `usedPercent`; exactly one of
+    /// these percentage fields may be populated.
+    let remainingPercent: Double?
     let isUnlimited: Bool
     let resetsAt: Date?
+
+    init(
+        id: String,
+        kind: Kind,
+        usedPercent: Double?,
+        remainingPercent: Double? = nil,
+        isUnlimited: Bool,
+        resetsAt: Date?
+    ) {
+        self.id = id
+        self.kind = kind
+        self.usedPercent = usedPercent
+        self.remainingPercent = remainingPercent
+        self.isUnlimited = isUnlimited
+        self.resetsAt = resetsAt
+    }
+
+    /// One normalization owner for both live presentation and sanitized
+    /// persistence. Restored remaining values are returned directly and are
+    /// never converted a second time.
+    var normalizedRemainingPercent: Double? {
+        if let remainingPercent,
+           remainingPercent.isFinite,
+           (0...100).contains(remainingPercent),
+           usedPercent == nil {
+            return remainingPercent
+        }
+        if let usedPercent,
+           usedPercent.isFinite,
+           (0...100).contains(usedPercent),
+           remainingPercent == nil {
+            return 100 - usedPercent
+        }
+        return nil
+    }
 }
 
 struct AgentAccountMetrics: Codable, Sendable, Equatable {
@@ -388,9 +429,40 @@ struct AgentUsageSnapshot: Codable, Sendable, Equatable, Identifiable {
     let channels: [AgentUsageChannel]
     let capabilities: Set<AgentConnectorCapability>
     let safeFailure: AgentSafeFailure?
+    /// Stable presentation hint used only when a sanitized last-valid
+    /// snapshot is restored before any current-process provider event.
+    let selectedWindowID: String?
+
+    init(
+        id: AgentConnectorID,
+        providerName: String,
+        state: AgentConnectorState,
+        capturedAt: Date,
+        lastSuccessfulAt: Date?,
+        freshness: AgentConnectorFreshness,
+        channels: [AgentUsageChannel],
+        capabilities: Set<AgentConnectorCapability>,
+        safeFailure: AgentSafeFailure?,
+        selectedWindowID: String? = nil
+    ) {
+        self.id = id
+        self.providerName = providerName
+        self.state = state
+        self.capturedAt = capturedAt
+        self.lastSuccessfulAt = lastSuccessfulAt
+        self.freshness = freshness
+        self.channels = channels
+        self.capabilities = capabilities
+        self.safeFailure = safeFailure
+        self.selectedWindowID = selectedWindowID
+    }
 
     var hasValidData: Bool {
-        channels.contains { $0.freshness == .fresh || $0.freshness == .stale }
+        channels.contains {
+            $0.freshness == .fresh
+                || $0.freshness == .cached
+                || $0.freshness == .stale
+        }
     }
 }
 

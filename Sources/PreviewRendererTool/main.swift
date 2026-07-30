@@ -116,6 +116,12 @@ struct PreviewRendererTool {
                 arguments: arguments,
                 language: language
             )
+            let claudeCard = arguments.contains("--claude")
+                ? makeClaudeCard(
+                    arguments: arguments,
+                    language: language
+                )
+                : nil
             let previewScenario = arguments.contains("--workbuddy-only")
                 ? CodexPreviewScenario.permission
                 : try codexPreviewScenario(arguments)
@@ -128,6 +134,7 @@ struct PreviewRendererTool {
                 )
                 : nil
             let extraCards = (codexCard.map { [$0] } ?? [])
+                + (claudeCard.map { [$0] } ?? [])
                 + (workBuddyCard.map { [$0] } ?? [])
                 + makeSyntheticCards(
                     count: syntheticProviderCount(arguments),
@@ -146,6 +153,8 @@ struct PreviewRendererTool {
             let expandedProviderIDs: Set<String>
             if arguments.contains("--all-expanded") {
                 expandedProviderIDs = Set(store.presentationCards.map(\.id))
+            } else if arguments.contains("--claude-expanded") {
+                expandedProviderIDs = ["claude.statusLine"]
             } else if arguments.contains("--workbuddy-expanded") {
                 expandedProviderIDs = [
                     arguments.contains("--workbuddy-account-web")
@@ -407,6 +416,90 @@ struct PreviewRendererTool {
                 : "Codex 官方本机用量",
             severity: SharedUsagePresentationPolicy.severity(for: remaining),
             isRetainingLastValidValue: isStale
+        )
+    }
+
+    private static func makeClaudeCard(
+        arguments: [String],
+        language: AppLanguage
+    ) -> SharedUsageCardPresentation {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let fiveHourPercent = arguments
+            .first(where: { $0.hasPrefix("--claude-five-percent=") })
+            .flatMap {
+                Double($0.dropFirst("--claude-five-percent=".count))
+            }
+            .map { min(100, max(0, $0)) }
+            ?? 62
+        let sevenDayPercent = arguments
+            .first(where: { $0.hasPrefix("--claude-seven-percent=") })
+            .flatMap {
+                Double($0.dropFirst("--claude-seven-percent=".count))
+            }
+            .map { min(100, max(0, $0)) }
+            ?? 74
+        let fiveHour = SharedUsageWindowPresentation(
+            id: "claude-five-hour",
+            kind: .fiveHour,
+            compactLabel: "5H",
+            accessibilityLabel: language == .english
+                ? "five-hour window"
+                : "五小时额度窗口",
+            remaining: .finite(fiveHourPercent),
+            resetsAt: now.addingTimeInterval(7_200),
+            resetText: language == .english
+                ? "Resets in 2 hr"
+                : "2 小时后重置"
+        )
+        let sevenDay = SharedUsageWindowPresentation(
+            id: "claude-seven-day",
+            kind: .sevenDay,
+            compactLabel: "7D",
+            accessibilityLabel: language == .english
+                ? "seven-day window"
+                : "七天额度窗口",
+            remaining: .finite(sevenDayPercent),
+            resetsAt: now.addingTimeInterval(172_800),
+            resetText: language == .english
+                ? "Resets in 2 days"
+                : "2 天后重置"
+        )
+        let windows: [SharedUsageWindowPresentation]
+        if arguments.contains("--claude-five-hour-only") {
+            windows = [fiveHour]
+        } else if arguments.contains("--claude-seven-day-only") {
+            windows = [sevenDay]
+        } else {
+            windows = [fiveHour, sevenDay]
+        }
+        let selectedWindow = windows.min {
+            ($0.remaining.finitePercent ?? .infinity)
+                < ($1.remaining.finitePercent ?? .infinity)
+        }
+        let isFailed = arguments.contains("--claude-failed")
+        let isCached = arguments.contains("--claude-cached")
+        let isStale = arguments.contains("--claude-stale") || isFailed
+        let remaining = selectedWindow?.remaining ?? .unavailable
+        return SharedUsageCardPresentation(
+            id: "claude.statusLine",
+            providerName: "Claude Code",
+            planLabel: nil,
+            connectionStatus: isFailed
+                ? .failed
+                : (isStale ? .stale : .connected),
+            freshness: isCached ? .cached : (isStale ? .stale : .fresh),
+            windows: windows,
+            selectedWindowID: selectedWindow?.id,
+            remaining: remaining,
+            sourceDescription: language == .english
+                ? "Official local status line"
+                : "官方本机状态栏",
+            isVisibleInDesktopAssistant: false,
+            severity: isCached || isStale
+                ? .neutral
+                : SharedUsagePresentationPolicy.severity(for: remaining),
+            isRetainingLastValidValue: isCached || isStale,
+            capturedAt: now
         )
     }
 

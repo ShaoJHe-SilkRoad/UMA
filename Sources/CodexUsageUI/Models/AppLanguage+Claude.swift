@@ -52,6 +52,34 @@ extension AppLanguage {
         }
     }
 
+    var claudeCached: String {
+        switch self {
+        case .simplifiedChinese: "已缓存"
+        case .english: "Cached"
+        }
+    }
+
+    var claudeStale: String {
+        switch self {
+        case .simplifiedChinese: "较早数据"
+        case .english: "Stale"
+        }
+    }
+
+    var claudeFresh: String {
+        switch self {
+        case .simplifiedChinese: "新鲜"
+        case .english: "Fresh"
+        }
+    }
+
+    var claudeUpdatesAutomatically: String {
+        switch self {
+        case .simplifiedChinese: "下次使用 Claude Code 时会自动更新。"
+        case .english: "Updates automatically the next time Claude Code is used."
+        }
+    }
+
     var claudeRepairRelay: String {
         switch self {
         case .simplifiedChinese: "修复中继"
@@ -98,6 +126,13 @@ extension AppLanguage {
         switch self {
         case .simplifiedChinese: "存储原始提供方载荷：否"
         case .english: "Raw provider payload stored: No"
+        }
+    }
+
+    var claudeStoredLocallyTransparency: String {
+        switch self {
+        case .simplifiedChinese: "本地存储：仅经净化的最后有效额度"
+        case .english: "Stored locally: Sanitized last-valid quota only"
         }
     }
 

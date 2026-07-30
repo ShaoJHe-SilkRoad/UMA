@@ -577,6 +577,7 @@ private struct ClaudeStatusLineSettingsSection: View {
                 Text(language.claudeNetworkTransparency)
                 Text(language.claudeTranscriptTransparency)
                 Text(language.claudeRawPayloadTransparency)
+                Text(language.claudeStoredLocallyTransparency)
                 Text(language.claudeAuthenticationTransparency)
             }
             .font(AppTypography.font(9, language: language))
@@ -608,8 +609,18 @@ private struct ClaudeStatusLineSettingsSection: View {
                 Text(language.claudeConnected)
                 Text(language.claudeUpdated(updated))
             }
+        case let .cached(updated):
+            VStack(alignment: .leading, spacing: 2) {
+                Text(language.claudeCached)
+                Text(language.claudeUpdated(updated))
+                Text(language.claudeUpdatesAutomatically)
+            }
         case let .stale(updated):
-            Text(language.claudeUpdated(updated))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(language.claudeStale)
+                Text(language.claudeUpdated(updated))
+                Text(language.claudeUpdatesAutomatically)
+            }
         case .unsupported:
             Text(language.agentSetupRequired)
         case .failed:
@@ -636,7 +647,7 @@ private struct ClaudeStatusLineSettingsSection: View {
             )
             .buttonStyle(.borderedProminent)
             .accessibilityIdentifier("claude.status-line.enable")
-        case .waiting, .fresh, .stale, .repairRequired:
+        case .waiting, .fresh, .cached, .stale, .repairRequired:
             Button(
                 language.claudeRepairRelay,
                 action: model.repairRelay
@@ -655,7 +666,7 @@ private struct ClaudeStatusLineSettingsSection: View {
 
     private var shouldOfferDisable: Bool {
         switch model.state {
-        case .waiting, .fresh, .stale, .repairRequired:
+        case .waiting, .fresh, .cached, .stale, .repairRequired:
             true
         default:
             false

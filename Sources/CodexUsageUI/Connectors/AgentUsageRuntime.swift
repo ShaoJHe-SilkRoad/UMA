@@ -45,7 +45,12 @@ public struct UsageMonitorRuntime {
             WorkBuddyManualAvailabilityStore(fileURL: $0)
         } ?? WorkBuddyManualAvailabilityStore()
         let manualSource = ManualWorkBuddyAvailabilitySource(store: manualStore)
-        let claudeConnector = ClaudeCodeUsageConnector.production()
+        let snapshotStore = snapshotStoreURL.map {
+            AgentConnectorSnapshotStore(url: $0)
+        } ?? AgentConnectorSnapshotStore()
+        let claudeConnector = ClaudeCodeUsageConnector.production(
+            snapshotStore: snapshotStore
+        )
         let claudeSettings = ClaudeStatusLineSettingsModel.production(
             connector: claudeConnector
         )
@@ -67,8 +72,7 @@ public struct UsageMonitorRuntime {
         )
         let agentSettings = AgentSettingsCoordinator()
         let registry = AgentUsageRuntime.makeCodexRegistry(
-            snapshotStore: snapshotStoreURL.map { AgentConnectorSnapshotStore(url: $0) }
-                ?? AgentConnectorSnapshotStore(),
+            snapshotStore: snapshotStore,
             additionalConnectors: [
                 claudeConnector,
                 workBuddyConnector,

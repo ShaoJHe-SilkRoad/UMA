@@ -211,6 +211,54 @@ response, transcript, task, tool, workspace, or repository content.
 | M5G3-003 | WorkBuddy current read briefly failed during shared Refresh | Medium | Cross-provider failure isolation and stable order required proof | Preserve Claude and Codex, use the existing bounded WorkBuddy recovery control, and verify the three-provider order after recovery | Failure isolation PASS | WorkBuddy recovery PASS | Closed |
 | M5G3-004 | The preflight package helper only admitted the historical G2 final path | High | Commit-exact M5-G3 preflight/final paths could not be certified | Add exact phase-bound output paths and G3 provenance states while retaining the G2 contract | M5-G3 package-contract test PASS | G2 compatibility contract and preflight package audit PASS; final commit-exact audit remains the delivery gate | Closed |
 
+## M5DBG-G1 issue ledger
+
+This addendum contains no live quota value, reset timestamp, raw payload,
+credential, account identity, prompt, response, session, transcript, task,
+tool, workspace, or settings backup.
+
+| ID | First evidence | Severity | Root cause | Repair / decision | Focused retest | Regression retest | Status |
+|---|---|---:|---|---|---|---|---|
+| M5DBG-001 | Source audit showed one shared Manual Refresh called Claude's configuration-aware probe and then its configuration refresh | Major | The provider-neutral scanner treated passive local event sources like active read sources | Use the completed passive-source probe as the sole health check while active providers retain one read | 30 scans produced exactly 30 Codex reads, 30 WorkBuddy reads, 30 Claude health checks, and zero Claude provider events | Physical 30-action matrix and 412-test full suite PASS | Closed |
+| M5DBG-002 | The live task required an exact 50-event classification and duplicate-publication proof | High | Prior focused coverage did not lock the combined acceptance/rejection totals | Add bounded diagnostic publication count and an exact synthetic 50-event matrix | Exact 45 accepted / 3 connector rejected / 2 relay rejected matrix PASS | Physical bounded stress and 412-test full suite PASS | Closed |
+| M5DBG-003 | M5DBG final output had no phase-exact package contract | High | Package helper ended at M5-G3 | Add M5DBG preflight/final paths and dedicated provenance state | Package contract and preflight audit PASS | Final commit-exact package audit remains the delivery gate | Repaired; final package pending |
+| M5DBG-004 | Physical Light and macOS accessibility-state transitions were previously denied by the execution permission boundary | Gate | The required temporary system-wide transitions needed explicit Human authority and exact restoration | Run one setting at a time against the task-owned candidate; restore and verify after every case; stop VoiceOver when its Accessibility Tutorial appears | Light → Dark → Light, Reduce Transparency Off → On → Off, Increase Contrast Off → On → Off, and Reduce Motion Off → On → Off PASS with stable panel and Settings geometry, readable content, and no clipping or overlap; actual startup cache restored Cached and aged to Stale without provider activity | VoiceOver was immediately restored after the macOS tutorial appeared and then explicitly bypassed by the Founder; final Light / Off / Off / Off / Off state, theme-only Claude settings, no relay socket, and no task-owned process verified | Closed under Founder VoiceOver bypass |
+
+## M5DBG-N1 natural startup addendum
+
+This addendum records only synthetic fixture classifications. It contains no
+live quota, reset value, provider payload, account identity, prompt, response,
+session, transcript, task, tool, workspace, repository, credential, token, or
+authentication data.
+
+| ID | First evidence | Severity | Root cause | Repair / decision | Focused retest | Regression retest | Status |
+|---|---|---:|---|---|---|---|---|
+| M5DBGN1-001 | A valid Claude card disappeared on the next UMA launch until another normal Claude response occurred | Major | The relay source was correctly event-driven but no privacy-safe last-valid startup state existed | Persist one bounded, versioned Claude-only remaining-quota record and restore it without launching Claude or generating provider activity | Fresh-to-Cached, Cached-to-Stale, and next-event-to-Fresh fixtures PASS | M5-G2 connector/Settings 18/18, combined M5 95/95, and full 420/420 PASS | Repaired; automated gate PASS |
+| M5DBGN1-002 | A whole-record expiry policy could hide one still-valid window | Major | Five-hour and seven-day reset lifecycles are independent | Validate and prune each window independently; delete the record only when neither window remains valid | Both single-window expiry directions, exact reset boundary, missing reset, malformed reset, and both-expired deletion PASS | Combined M5 95/95 and full 420/420 PASS | Repaired; automated gate PASS |
+| M5DBGN1-003 | Restored remaining values could be mistaken for provider used percentages | Blocker | The original rate-window shape represented only live used percentage | Add an exclusive normalized remaining field and one normalization owner; cached load never subtracts a second time | Live conversion and cached no-second-conversion fixtures PASS | Restored-selection, no-fake-decrement, neutral-severity, and alert-suppression coverage PASS; full 420/420 PASS | Repaired; automated gate PASS |
+| M5DBGN1-004 | General connector persistence was too broad for a Claude startup cache | Blocker | The generic store can retain provider-neutral snapshot fields that are outside the Claude allowlist | Keep generic restore disabled for Claude and add one strict sibling record with exact keys, 4 KiB limit, atomic replacement, owner-only permissions, backup exclusion, and fail-closed deletion | Strict key, schema, type, size, time, permissions, replacement, and deletion fixtures PASS | Package contract, explicit cache-record exclusion, privacy scans, and arm64 Release dependency audit PASS | Repaired; automated exclusion gate PASS |
+
+M5DBG-N1 did not broaden the physical matrix boundary recorded by M5DBG-004.
+The later explicit Human authorization permitted the bounded transitions, and
+the Founder subsequently bypassed only the VoiceOver case after macOS opened
+the Accessibility Tutorial. All completed transitions were restored to their
+verified original values before delivery.
+
+M5DBG-N1 automated verification:
+
+- focused sanitized-snapshot suite: 8/8 PASS;
+- M5-G2 connector and Settings regression suite: 18/18 PASS;
+- combined M5 suites: 95/95 PASS across seven suites;
+- full regression suite: 420/420 PASS across 47 suites;
+- Debug, Release, and strict-concurrency warnings-as-errors Release: PASS;
+- eleven-state synthetic renderer matrix: PASS for Cached, Stale, retained
+  failure, independently surviving windows, Light, Dark, Reduce Transparency,
+  Increase Contrast, Reduce Motion, and Simplified Chinese;
+- script syntax, package contract, explicit cache-record exclusion, secret and
+  private-field scans, arm64 executable checks, and Release dependency audit:
+  PASS;
+- final commit-exact package remains a post-physical, post-commit delivery gate.
+
 Current M5-G3 verification:
 
 - M5-G3 focused suite: 6/6 PASS;

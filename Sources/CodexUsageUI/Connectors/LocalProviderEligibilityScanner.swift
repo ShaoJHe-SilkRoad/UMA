@@ -207,13 +207,15 @@ actor LocalProviderEligibilityScanner {
         }
 
         await candidate.connector.start()
-        switch probe.state {
-        case .ready, .stale:
-            await candidate.connector.refresh(trigger: .manual)
-        case .inactive, .waitingForFirstResponse, .failed:
-            await candidate.connector.perform(.connect)
-        case .authenticationRequired, .unsupported:
-            break
+        if !descriptor.capabilities.contains(.passiveLocalAvailability) {
+            switch probe.state {
+            case .ready, .stale:
+                await candidate.connector.refresh(trigger: .manual)
+            case .inactive, .waitingForFirstResponse, .failed:
+                await candidate.connector.perform(.connect)
+            case .authenticationRequired, .unsupported:
+                break
+            }
         }
 
         let snapshot = await candidate.connector.currentSnapshot()
@@ -227,6 +229,9 @@ actor LocalProviderEligibilityScanner {
         for snapshot: AgentUsageSnapshot,
         descriptor: AgentConnectorDescriptor
     ) -> ProviderSurfaceAdmission {
+        let permitsSanitizedLastValid = descriptor.capabilities.contains(
+            .sanitizedLastValidRestore
+        )
         switch snapshot.state {
         case .inactive:
             return .hiddenNotRunning
@@ -234,21 +239,37 @@ actor LocalProviderEligibilityScanner {
             return .hiddenNotAuthenticated
         case .unsupported:
             return .hiddenUnsupported
-        case .waitingForFirstResponse, .stale, .failed:
+        case .waitingForFirstResponse, .failed:
             return .hiddenCurrentReadFailed
+        case .stale where !permitsSanitizedLastValid:
+            return .hiddenCurrentReadFailed
+        case .stale:
+            break
         case .ready:
             break
         }
 
         guard descriptor.hasSurfaceAdmissibleReadContract,
-              snapshot.safeFailure == nil,
-              snapshot.freshness == .fresh,
               let account = snapshot.channels.first(where: { $0.id == .account }),
               account.sourceTier != .manualUserConfirmed,
               account.provenance == .providerReported,
-              account.freshness == .fresh,
-              account.safeFailure == nil,
               validatesCurrentUsage(account)
+        else {
+            return .hiddenCurrentReadFailed
+        }
+        if permitsSanitizedLastValid,
+           [.cached, .stale].contains(snapshot.freshness),
+           account.freshness == snapshot.freshness,
+           snapshot.safeFailure == nil
+                || snapshot.safeFailure == .malformedResponse,
+           account.safeFailure == nil
+                || account.safeFailure == .malformedResponse {
+            return .admitted(LocalLiveProviderSnapshot(snapshot: snapshot))
+        }
+        guard snapshot.safeFailure == nil,
+              snapshot.freshness == .fresh,
+              account.freshness == .fresh,
+              account.safeFailure == nil
         else {
             return .hiddenCurrentReadFailed
         }
@@ -267,8 +288,7 @@ actor LocalProviderEligibilityScanner {
         }
         return channel.rateLimitWindows.allSatisfy { window in
             if window.isUnlimited { return true }
-            guard let used = window.usedPercent else { return false }
-            return used.isFinite && (0...100).contains(used)
+            return window.normalizedRemainingPercent != nil
         }
     }
 

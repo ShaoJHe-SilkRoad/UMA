@@ -595,7 +595,7 @@ public final class UsageStore: ObservableObject {
     ) -> UsageFreshness {
         switch freshness {
         case .fresh: .fresh
-        case .stale: .stale
+        case .cached, .stale: .stale
         case .unavailable: .noRealData
         }
     }

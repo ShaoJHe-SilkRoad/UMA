@@ -6,7 +6,7 @@ import Testing
 @Suite("M5-G2 Claude connector and Settings")
 struct M5G2ClaudeConnectorSettingsTests {
     @Test
-    func descriptorLocksPrivacySourceAndNoRestore() {
+    func descriptorLocksPrivacySourceAndSanitizedRestoreBoundary() {
         let descriptor = ClaudeCodeUsageConnector.production().descriptor
         #expect(descriptor.id.rawValue == "claude.statusLine")
         #expect(descriptor.providerName == "Claude Code")
@@ -18,6 +18,11 @@ struct M5G2ClaudeConnectorSettingsTests {
                 == .currentStructuredLocalRead
         )
         #expect(!descriptor.supportsRestore)
+        #expect(
+            descriptor.capabilities.contains(
+                .sanitizedLastValidRestore
+            )
+        )
         #expect(descriptor.supportsUninstall)
         #expect(
             descriptor.capabilities.contains(
@@ -108,7 +113,7 @@ struct M5G2ClaudeConnectorSettingsTests {
     }
 
     @Test
-    func invalidPacketWithdrawsOnlyClaudeCurrentAdmission() async throws {
+    func invalidPacketRetainsLastValidOnlyAsStale() async throws {
         let fixture = ConnectorFixture(configuration: .installed)
         defer { fixture.cleanup() }
         let connector = fixture.connector()
@@ -121,19 +126,20 @@ struct M5G2ClaudeConnectorSettingsTests {
         #expect((await connector.currentSnapshot()).state == .ready)
         await connector.receiveEncodedPacket(Data("{".utf8))
         let failed = await connector.currentSnapshot()
-        #expect(failed.state == .failed)
+        #expect(failed.state == .stale)
+        #expect(failed.freshness == .stale)
         #expect(failed.safeFailure == .malformedResponse)
-        #expect(failed.channels.isEmpty)
+        #expect(!failed.channels.isEmpty)
         #expect(
             LocalProviderEligibilityScanner.admission(
                 for: failed,
                 descriptor: connector.descriptor
-            ) == .hiddenCurrentReadFailed
+            ).admittedSnapshot == failed
         )
     }
 
     @Test
-    func packetAgesToStaleAndRelaunchBeginsWaitingNotFresh() async throws {
+    func packetAgesToStaleAndRelaunchRestoresWithoutPrompt() async throws {
         let fixture = ConnectorFixture(configuration: .installed)
         defer { fixture.cleanup() }
         let connector = fixture.connector()
@@ -153,9 +159,10 @@ struct M5G2ClaudeConnectorSettingsTests {
 
         let relaunched = fixture.connector()
         let probe = await relaunched.probe()
-        #expect(probe.state == .waitingForFirstResponse)
-        #expect(await relaunched.lifecycleState() == .installedWaiting)
-        #expect((await relaunched.currentSnapshot()).channels.isEmpty)
+        #expect(probe.state == .stale)
+        #expect(await relaunched.lifecycleState() == .stale)
+        #expect(!(await relaunched.currentSnapshot()).channels.isEmpty)
+        #expect((await relaunched.diagnostics()).acceptedPackets == 0)
     }
 
     @Test
@@ -204,7 +211,7 @@ struct M5G2ClaudeConnectorSettingsTests {
         #expect((await connector.diagnostics()).listenerCount == 1)
 
         await connector.receiveEncodedPacket(Data("{".utf8))
-        #expect((await connector.currentSnapshot()).state == .failed)
+        #expect((await connector.currentSnapshot()).state == .stale)
         #expect(
             client.send(
                 try fixture.packet(
@@ -226,7 +233,7 @@ struct M5G2ClaudeConnectorSettingsTests {
     }
 
     @Test
-    func passiveRegistryAdmissionWithdrawsAndRecoversWithoutAnotherListener()
+    func passiveRegistryRetainsStaleAndRecoversWithoutAnotherListener()
     async throws {
         let fixture = ConnectorFixture(configuration: .installed)
         defer { fixture.cleanup() }
@@ -260,10 +267,10 @@ struct M5G2ClaudeConnectorSettingsTests {
 
         await connector.receiveEncodedPacket(Data("{".utf8))
         for _ in 0..<100
-        where !(await registry.orderedSnapshots()).isEmpty {
+        where (await registry.orderedSnapshots()).first?.state != .stale {
             try await Task.sleep(for: .milliseconds(10))
         }
-        #expect(await registry.orderedSnapshots().isEmpty)
+        #expect((await registry.orderedSnapshots()).first?.state == .stale)
 
         #expect(
             client.send(
@@ -489,7 +496,9 @@ struct M5G2ClaudeConnectorSettingsTests {
             "Network requests made by UMA: None",
             "Transcript read: No",
             "Raw provider payload stored: No",
+            "Stored locally: Sanitized last-valid quota only",
             "Authentication managed by: Claude Code",
+            "Updates automatically the next time Claude Code is used.",
         ] {
             #expect(language.contains(english))
         }
@@ -500,6 +509,8 @@ struct M5G2ClaudeConnectorSettingsTests {
             "等待 Claude 活动",
             "修复中继",
             "停用集成",
+            "本地存储：仅经净化的最后有效额度",
+            "下次使用 Claude Code 时会自动更新。",
         ] {
             #expect(language.contains(chinese))
         }
@@ -640,6 +651,7 @@ private final class ConnectorFixture: @unchecked Sendable {
     let socketURL: URL
     let clock = ConnectorClock()
     let configuration: ClaudeStatusLineConfigurationState
+    let snapshotStore: AgentConnectorSnapshotStore
 
     init(configuration: ClaudeStatusLineConfigurationState) {
         self.configuration = configuration
@@ -647,8 +659,11 @@ private final class ConnectorFixture: @unchecked Sendable {
             .appendingPathComponent(
                 "m5g2-connector-\(UUID().uuidString)",
                 isDirectory: true
-            )
+        )
         socketURL = root.appendingPathComponent("usage.sock")
+        snapshotStore = AgentConnectorSnapshotStore(
+            url: root.appendingPathComponent("connector-snapshots.json")
+        )
     }
 
     func connector() -> ClaudeCodeUsageConnector {
@@ -662,6 +677,7 @@ private final class ConnectorFixture: @unchecked Sendable {
                     priorStatusLinePresent: false
                 )
             },
+            snapshotStore: snapshotStore,
             now: { clock.now }
         )
     }

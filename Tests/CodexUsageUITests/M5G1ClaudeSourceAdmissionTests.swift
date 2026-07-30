@@ -110,10 +110,19 @@ struct M5G1ClaudeSourceAdmissionTests {
 
     @Test
     func conversionIsCentralizedAndViewsDoNotRepeatIt() throws {
+        let connectorModel = try source(
+            "Sources/CodexUsageUI/Connectors/AgentUsageConnector.swift"
+        )
         let model = try source(
             "Sources/CodexUsageUI/Models/SharedUsagePresentation.swift"
         )
-        #expect(model.components(separatedBy: "100 - used").count - 1 == 1)
+        #expect(
+            connectorModel.components(
+                separatedBy: "return 100 - usedPercent"
+            ).count - 1 == 1
+        )
+        #expect(!model.contains("100 - used"))
+        #expect(model.contains("window.normalizedRemainingPercent"))
 
         let viewRoot = repositoryRoot()
             .appendingPathComponent("Sources/CodexUsageUI/Views")

@@ -260,7 +260,7 @@ extension UsageSnapshot {
     private static func presentationFreshness(_ freshness: AgentConnectorFreshness) -> UsageSourceStatus.Freshness {
         switch freshness {
         case .fresh: .fresh
-        case .stale: .stale
+        case .cached, .stale: .stale
         case .unavailable: .unavailable
         }
     }

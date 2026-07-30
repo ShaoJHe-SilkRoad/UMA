@@ -7,6 +7,7 @@ enum ClaudeSettingsPresentationState: Equatable, Sendable {
     case ready
     case waiting
     case fresh(Date)
+    case cached(Date)
     case stale(Date?)
     case unsupported
     case failed
@@ -18,6 +19,7 @@ struct ClaudeSourceTransparency: Equatable, Sendable {
     let networkRequestsMade = false
     let transcriptRead = false
     let rawProviderPayloadStored = false
+    let storedLocally = "Sanitized last-valid quota only"
     let authenticationManager = "Claude Code"
 }
 
@@ -180,6 +182,8 @@ public final class ClaudeStatusLineSettingsModel: ObservableObject {
             state = switch connectorState {
             case .fresh:
                 .fresh(snapshot.lastSuccessfulAt ?? snapshot.capturedAt)
+            case .cached:
+                .cached(snapshot.lastSuccessfulAt ?? snapshot.capturedAt)
             case .stale:
                 .stale(snapshot.lastSuccessfulAt)
             case .repairRequired:

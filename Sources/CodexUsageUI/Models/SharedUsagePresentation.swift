@@ -14,6 +14,7 @@ public enum SharedConnectionStatus: String, Codable, Sendable {
 
 public enum SharedUsageFreshness: String, Codable, Sendable {
     case fresh
+    case cached
     case stale
     case unavailable
 }
@@ -301,7 +302,13 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
         case .unlimited: value = "unlimited"
         case .unavailable: value = "usage unavailable"
         }
-        return "\(providerName), \(connectionStatus.accessibilityText), \(window), \(value)."
+        let sourceState = switch freshness {
+        case .fresh: ""
+        case .cached: "cached, "
+        case .stale: "stale, "
+        case .unavailable: ""
+        }
+        return "\(providerName), \(connectionStatus.accessibilityText), \(sourceState)\(window), \(value)."
     }
 
     public var accessibilityLabel: String { tooltipText }
@@ -495,6 +502,21 @@ public enum SharedUsagePresentationPolicy {
         guard !snapshot.capabilities.contains(.hiddenFromProviderSurfaces) else {
             return false
         }
+        let permitsSanitizedLastValid = snapshot.capabilities.contains(
+            .sanitizedLastValidRestore
+        )
+        if permitsSanitizedLastValid,
+           (snapshot.state == .ready || snapshot.state == .stale),
+           [.cached, .stale].contains(snapshot.freshness),
+           let account = snapshot.channels.first(where: { $0.id == .account }),
+           account.provenance == .providerReported,
+           account.freshness == snapshot.freshness,
+           !account.rateLimitWindows.isEmpty,
+           account.rateLimitWindows.allSatisfy({
+               $0.isUnlimited || $0.normalizedRemainingPercent != nil
+           }) {
+            return true
+        }
         guard snapshot.state == .ready,
               snapshot.freshness == .fresh,
               snapshot.safeFailure == nil,
@@ -524,15 +546,24 @@ public enum SharedUsagePresentationPolicy {
         let freshWindows = accountChannel?.rateLimitWindows.map {
             makeWindow($0, language: language, now: now)
         } ?? []
+        let sourceIsCached = snapshot.freshness == .cached
+            || accountChannel?.freshness == .cached
         let sourceIsStale = snapshot.freshness == .stale
             || accountChannel?.freshness == .stale
             || snapshot.state == .stale
+        let sourceIsRetained = sourceIsCached || sourceIsStale
+        let usesSanitizedLastValid = snapshot.capabilities.contains(
+            .sanitizedLastValidRestore
+        ) && sourceIsRetained
         let sourceIsUnavailable = accountChannel == nil
             || accountChannel?.freshness == .unavailable
 
         let windows: [SharedUsageWindowPresentation]
         let retainedWindows: Bool
-        if sourceIsStale, let previous, !previous.windows.isEmpty {
+        if usesSanitizedLastValid {
+            windows = freshWindows
+            retainedWindows = true
+        } else if sourceIsRetained, let previous, !previous.windows.isEmpty {
             windows = previous.windows
             retainedWindows = true
         } else if sourceIsUnavailable,
@@ -543,7 +574,7 @@ public enum SharedUsagePresentationPolicy {
             retainedWindows = true
         } else {
             windows = freshWindows
-            retainedWindows = sourceIsStale
+            retainedWindows = sourceIsRetained
         }
 
         let freshAvailability = accountChannel?.availability.map {
@@ -573,7 +604,7 @@ public enum SharedUsagePresentationPolicy {
             availability = freshAvailability
             retainedAvailability = false
         } else if (
-            sourceIsStale
+            sourceIsRetained
                 || (sourceIsUnavailable && availabilityLifecycle == nil)
         ),
                   let previousAvailability = previous?.availability {
@@ -590,7 +621,8 @@ public enum SharedUsagePresentationPolicy {
         let selectedID = selectedWindowID(
             windows: windows,
             previous: previous,
-            isStale: sourceIsStale,
+            preferredID: snapshot.selectedWindowID,
+            isStale: sourceIsRetained,
             now: now
         )
         let remaining: SharedRemainingValue
@@ -633,12 +665,14 @@ public enum SharedUsagePresentationPolicy {
             availabilityLifecycle: availabilityLifecycle,
             sourceDescription: availability?.sourceState == .authenticatedAccountWeb
                 ? language.workBuddyAccountWebSource
-                : nil,
+                : snapshot.capabilities.contains(.sanitizedLastValidRestore)
+                    ? accountChannel?.coverageNote
+                    : nil,
             isVisibleInDesktopAssistant: !snapshot.capabilities.contains(
                 .hiddenFromDesktopAssistant
             ),
-            severity: severity(for: remaining),
-            isRetainingLastValidValue: retained,
+            severity: sourceIsRetained ? .neutral : severity(for: remaining),
+            isRetainingLastValidValue: retained || sourceIsRetained,
             capturedAt: snapshot.capturedAt
         )
     }
@@ -661,8 +695,8 @@ public enum SharedUsagePresentationPolicy {
         let remaining: SharedRemainingValue
         if window.isUnlimited {
             remaining = .unlimited
-        } else if let used = window.usedPercent, used.isFinite, (0...100).contains(used) {
-            remaining = .finite(100 - used)
+        } else if let normalized = window.normalizedRemainingPercent {
+            remaining = .finite(normalized)
         } else {
             remaining = .unavailable
         }
@@ -681,6 +715,7 @@ public enum SharedUsagePresentationPolicy {
     private static func selectedWindowID(
         windows: [SharedUsageWindowPresentation],
         previous: SharedUsageCardPresentation?,
+        preferredID: String?,
         isStale: Bool,
         now: Date
     ) -> String? {
@@ -694,6 +729,12 @@ public enum SharedUsagePresentationPolicy {
         let finite = eligibleWindows.compactMap { window -> (SharedUsageWindowPresentation, Double)? in
             guard case let .finite(value) = window.remaining else { return nil }
             return (window, value)
+        }
+
+        if isStale,
+           let preferredID,
+           eligibleWindows.contains(where: { $0.id == preferredID }) {
+            return preferredID
         }
 
         if isStale,
@@ -801,6 +842,7 @@ public enum SharedUsagePresentationPolicy {
     private static func freshness(_ value: AgentConnectorFreshness) -> SharedUsageFreshness {
         switch value {
         case .fresh: .fresh
+        case .cached: .cached
         case .stale: .stale
         case .unavailable: .unavailable
         }

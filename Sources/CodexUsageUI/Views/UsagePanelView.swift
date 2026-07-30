@@ -557,11 +557,25 @@ private struct LocalLiveProviderCard: View {
         card.availability?.sourceState == .authenticatedAccountWeb
     }
 
+    private var isClaudeCode: Bool {
+        card.id == ClaudeCodeUsageConnector.connectorID.rawValue
+    }
+
     private var selectedWindowLabel: String? {
         card.selectedWindowCompactLabel
     }
 
     private var providerSubtitle: String {
+        if isClaudeCode {
+            switch card.freshness {
+            case .cached:
+                return "\(language.claudeCached) · \(language.claudeUpdated(card.capturedAt))"
+            case .stale:
+                return "\(language.claudeStale) · \(language.claudeUpdated(card.capturedAt))"
+            case .fresh, .unavailable:
+                break
+            }
+        }
         if isAccountWebCredits {
             return "\(language.workBuddyAccountWebSource) · \(connectionLabel)"
         }
@@ -740,6 +754,20 @@ private struct LocalLiveProviderCard: View {
 
     private var percentageDetails: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if isClaudeCode {
+                detailRow(
+                    language == .english ? "Source" : "来源",
+                    value: language.claudeOfficialLocalStatusLine
+                )
+                detailRow(
+                    language == .english ? "State" : "状态",
+                    value: claudeFreshnessLabel
+                )
+                detailRow(
+                    language == .english ? "Observation" : "观测时间",
+                    value: language.claudeUpdated(card.capturedAt)
+                )
+            }
             ForEach(card.windows) { window in
                 detailRow(
                     window.accessibilityLabel,
@@ -749,9 +777,25 @@ private struct LocalLiveProviderCard: View {
             if card.windows.isEmpty {
                 detailRow(connectionLabel, value: card.remaining.displayText)
             }
+            if isClaudeCode {
+                Text(language.claudeUpdatesAutomatically)
+                    .font(AppTypography.font(9.5, language: language))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
+    }
+
+    private var claudeFreshnessLabel: String {
+        switch card.freshness {
+        case .fresh: language.claudeFresh
+        case .cached: language.claudeCached
+        case .stale: language.claudeStale
+        case .unavailable:
+            language == .english ? "Unavailable" : "不可用"
+        }
     }
 
     private var detailsLabel: String {

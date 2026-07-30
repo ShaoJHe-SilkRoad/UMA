@@ -29,7 +29,7 @@ readonly SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk"
 
 usage() {
     printf '%s\n' \
-        "Usage: $0 --commit <40-hex-sha> [--build <12-digit-number>] [--phase g2-final|g3-preflight|g3-final] --output <phase-exact-path>/UMA.app"
+        "Usage: $0 --commit <40-hex-sha> [--build <12-digit-number>] [--phase g2-final|g3-preflight|g3-final|m5dbg-preflight|m5dbg-final] --output <phase-exact-path>/UMA.app"
 }
 
 commit=""
@@ -69,6 +69,18 @@ case "$phase" in
         expected_output="/private/tmp/uma-m5-g3-final-$commit/UMA.app"
         provenance_name="UMA-M5-G3-Provenance.plist"
         integration_status="LIVE-VALIDATED-SETTINGS-RESTORED"
+        report_status="$integration_status"
+        ;;
+    m5dbg-preflight)
+        expected_output="/private/tmp/uma-m5dbg-preflight-${commit:0:12}/UMA.app"
+        provenance_name="UMA-M5DBG-Provenance.plist"
+        integration_status="THREE-PROVIDER-DEBUG-PREFLIGHT"
+        report_status="$integration_status"
+        ;;
+    m5dbg-final)
+        expected_output="/private/tmp/uma-m5dbg-final-$commit/UMA.app"
+        provenance_name="UMA-M5DBG-Provenance.plist"
+        integration_status="THREE-PROVIDER-DEBUG-ACCEPTED-SETTINGS-RESTORED"
         report_status="$integration_status"
         ;;
     *)
@@ -254,7 +266,8 @@ if /usr/bin/find "$output" -type l -print -quit | /usr/bin/grep -q .; then
     exit 1
 fi
 if /usr/bin/find "$output" -type f \
-    \( -iname '*.json' -o -iname '*.sqlite*' -o -iname '*.db' \
+    \( -iname '*.json' -o -iname 'claude-last-valid-quota.json' \
+       -o -iname '*.sqlite*' -o -iname '*.db' \
        -o -iname '*.log' -o -iname '*.png' -o -iname '*.jpg' \
        -o -iname '*.md' -o -iname '*.txt' -o -iname '*.sock' \
        -o -iname '*backup*' \) \
