@@ -25,7 +25,6 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         .rateLimits,
         .passiveLocalAvailability,
         .sanitizedLastValidRestore,
-        .hiddenFromDesktopAssistant,
     ]
 
     nonisolated let id = connectorID

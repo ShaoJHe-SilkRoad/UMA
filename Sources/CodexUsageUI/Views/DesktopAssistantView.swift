@@ -105,6 +105,15 @@ public enum DesktopAssistantSourceMark: Equatable, Sendable {
     case manual
 }
 
+public enum DesktopAssistantFreshnessState: String, Equatable, Sendable {
+    case fresh
+    case cached
+    case stale
+    case waiting
+    case failed
+    case unavailable
+}
+
 public enum DesktopAssistantUsageSeverity: String, Equatable, Sendable {
     case normal
     case warning
@@ -121,8 +130,13 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
     public let planLabel: String?
     public let connectionState: DesktopAssistantConnectionState
     public let sourceMark: DesktopAssistantSourceMark
+    public let providerMarkText: String
+    public let freshnessState: DesktopAssistantFreshnessState
+    public let sourceDescription: String?
+    public let observationAgeText: String?
     public let selectedWindowShortLabel: String
     public let selectedWindowAccessibilityLabel: String
+    public let selectedWindowResetAt: Date?
     public let resetText: String
     public let detailText: String?
     public let usageValue: DesktopAssistantUsageValue
@@ -138,8 +152,13 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         planLabel: String? = nil,
         connectionState: DesktopAssistantConnectionState,
         sourceMark: DesktopAssistantSourceMark = .connection,
+        providerMarkText: String? = nil,
+        freshnessState: DesktopAssistantFreshnessState? = nil,
+        sourceDescription: String? = nil,
+        observationAgeText: String? = nil,
         selectedWindowShortLabel: String,
         selectedWindowAccessibilityLabel: String,
+        selectedWindowResetAt: Date? = nil,
         resetText: String = "",
         detailText: String? = nil,
         usageValue: DesktopAssistantUsageValue,
@@ -155,8 +174,19 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         self.planLabel = planLabel
         self.connectionState = connectionState
         self.sourceMark = sourceMark
+        self.providerMarkText = providerMarkText
+            ?? Self.providerMarkText(for: providerName)
+        self.freshnessState = freshnessState
+            ?? Self.inferredFreshnessState(
+                connectionState: connectionState,
+                usageValue: usageValue,
+                isStale: isStale
+            )
+        self.sourceDescription = sourceDescription
+        self.observationAgeText = observationAgeText
         self.selectedWindowShortLabel = selectedWindowShortLabel
         self.selectedWindowAccessibilityLabel = selectedWindowAccessibilityLabel
+        self.selectedWindowResetAt = selectedWindowResetAt
         self.resetText = resetText
         self.detailText = detailText
         self.usageValue = usageValue
@@ -170,7 +200,10 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
             connectionState: connectionState,
             selectedWindowAccessibilityLabel: selectedWindowAccessibilityLabel,
             usageValue: usageValue,
-            isStale: isStale,
+            freshnessState: self.freshnessState,
+            resetText: resetText,
+            sourceDescription: sourceDescription,
+            observationAgeText: observationAgeText,
             language: language
         )
     }
@@ -186,7 +219,8 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
 
     public init(
         shared card: SharedUsageCardPresentation,
-        language: AppLanguage = .english
+        language: AppLanguage = .english,
+        now: Date = Date()
     ) {
         let connectionState: DesktopAssistantConnectionState = switch card.connectionStatus {
         case .connected:
@@ -220,6 +254,19 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         case .neutral:
             .neutral
         }
+        let freshnessState = Self.freshnessState(
+            freshness: card.freshness,
+            connectionState: connectionState,
+            usageValue: percentageUsageValue,
+            isRetainingLastValidValue: card.isRetainingLastValidValue
+        )
+        let observationAgeText = card.sourceDescription.map { _ in
+            Self.observationAgeText(
+                capturedAt: card.capturedAt,
+                now: now,
+                language: language
+            )
+        }
         let isManualAvailability = card.availabilityLifecycle != nil
             || card.availability?.sourceState == .manualConfirmed
         if isManualAvailability {
@@ -246,6 +293,7 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
                 planLabel: card.planLabel,
                 connectionState: connectionState,
                 sourceMark: .manual,
+                freshnessState: freshnessState,
                 selectedWindowShortLabel: "",
                 selectedWindowAccessibilityLabel: "",
                 detailText: hasManualSnapshot
@@ -286,6 +334,7 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
                 sourceMark: availability.sourceState == .authenticatedAccountWeb
                     ? .accountWeb
                     : .connection,
+                freshnessState: freshnessState,
                 selectedWindowShortLabel: "",
                 selectedWindowAccessibilityLabel: "",
                 detailText: availability.sourceState == .authenticatedAccountWeb
@@ -320,14 +369,23 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
             providerName: card.providerName,
             planLabel: card.planLabel,
             connectionState: connectionState,
+            freshnessState: freshnessState,
+            sourceDescription: card.sourceDescription,
+            observationAgeText: observationAgeText,
             selectedWindowShortLabel: card.selectedWindow?.compactLabel ?? "",
             selectedWindowAccessibilityLabel: card.selectedWindow?.accessibilityLabel
                 ?? "usage window unavailable",
+            selectedWindowResetAt: card.selectedWindow?.resetsAt,
             resetText: card.selectedWindow?.resetText ?? "",
+            detailText: Self.percentageDetailText(
+                card: card,
+                freshnessState: freshnessState,
+                language: language
+            ),
             usageValue: percentageUsageValue,
             tintFraction: card.remaining.tintFraction,
             severity: percentageSeverity,
-            isStale: card.freshness == .stale || card.isRetainingLastValidValue,
+            isStale: card.freshness == .stale,
             language: language
         )
     }
@@ -337,7 +395,10 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         connectionState: DesktopAssistantConnectionState,
         selectedWindowAccessibilityLabel: String,
         usageValue: DesktopAssistantUsageValue,
-        isStale: Bool,
+        freshnessState: DesktopAssistantFreshnessState,
+        resetText: String,
+        sourceDescription: String?,
+        observationAgeText: String?,
         language: AppLanguage
     ) -> String {
         let status: String = switch (language, connectionState) {
@@ -366,16 +427,164 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         case (.simplifiedChinese, .unlimited): "无限额度"
         case (.simplifiedChinese, .unavailable): "额度不可用"
         }
-        let freshness: String
-        switch (language, isStale) {
-        case (.english, true): freshness = ", stale"
-        case (.simplifiedChinese, true): freshness = "，数据已过期"
-        default: freshness = ""
+        let freshness = if sourceDescription == nil
+            && observationAgeText == nil
+            && freshnessState == .stale {
+            language == .english ? "stale" : "已过期"
+        } else if sourceDescription != nil
+            || observationAgeText != nil {
+            localizedFreshness(
+                freshnessState,
+                language: language
+            )
+        } else {
+            ""
+        }
+        let components: [String] = [
+            providerName,
+            status,
+            freshness,
+            selectedWindowAccessibilityLabel,
+            usage,
+            resetText,
+            sourceDescription,
+            observationAgeText,
+        ].compactMap { value in
+            guard let value, !value.isEmpty else { return nil }
+            return value
         }
         if language == .simplifiedChinese {
-            return "\(providerName)，\(status)，\(selectedWindowAccessibilityLabel)，\(usage)\(freshness)。"
+            return components.joined(separator: "，") + "。"
         }
-        return "\(providerName), \(status), \(selectedWindowAccessibilityLabel), \(usage)\(freshness)."
+        return components.joined(separator: ", ") + "."
+    }
+
+    private static func providerMarkText(for providerName: String) -> String {
+        let words = providerName.split(whereSeparator: \.isWhitespace)
+        if words.count > 1 {
+            return words.prefix(2).compactMap(\.first).map(String.init).joined()
+        }
+        return words.first?.first.map(String.init) ?? "?"
+    }
+
+    private static func inferredFreshnessState(
+        connectionState: DesktopAssistantConnectionState,
+        usageValue: DesktopAssistantUsageValue,
+        isStale: Bool
+    ) -> DesktopAssistantFreshnessState {
+        if connectionState == .failed { return .failed }
+        if isStale { return .stale }
+        if connectionState == .reconnecting,
+           usageValue == .unavailable {
+            return .waiting
+        }
+        if connectionState == .unavailable
+            || connectionState == .disconnected
+            || usageValue == .unavailable {
+            return .unavailable
+        }
+        return .fresh
+    }
+
+    private static func freshnessState(
+        freshness: SharedUsageFreshness,
+        connectionState: DesktopAssistantConnectionState,
+        usageValue: DesktopAssistantUsageValue,
+        isRetainingLastValidValue: Bool
+    ) -> DesktopAssistantFreshnessState {
+        if connectionState == .failed { return .failed }
+        if freshness == .cached { return .cached }
+        if freshness == .stale || isRetainingLastValidValue { return .stale }
+        if connectionState == .reconnecting,
+           usageValue == .unavailable {
+            return .waiting
+        }
+        if freshness == .unavailable || usageValue == .unavailable {
+            return .unavailable
+        }
+        return .fresh
+    }
+
+    private static func localizedFreshness(
+        _ state: DesktopAssistantFreshnessState,
+        language: AppLanguage
+    ) -> String {
+        switch (language, state) {
+        case (.english, .fresh): "Fresh"
+        case (.english, .cached): "Cached"
+        case (.english, .stale): "Stale"
+        case (.english, .waiting): "Waiting"
+        case (.english, .failed): "Failed"
+        case (.english, .unavailable): "Unavailable"
+        case (.simplifiedChinese, .fresh): "新鲜"
+        case (.simplifiedChinese, .cached): "已缓存"
+        case (.simplifiedChinese, .stale): "较早数据"
+        case (.simplifiedChinese, .waiting): "等待中"
+        case (.simplifiedChinese, .failed): "失败"
+        case (.simplifiedChinese, .unavailable): "不可用"
+        }
+    }
+
+    private static func observationAgeText(
+        capturedAt: Date,
+        now: Date,
+        language: AppLanguage
+    ) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(capturedAt)))
+        return switch (language, seconds) {
+        case (.english, 0..<60): "Updated just now"
+        case (.english, 60..<3_600): "Updated \(seconds / 60) min ago"
+        case (.english, 3_600..<86_400): "Updated \(seconds / 3_600) hr ago"
+        case (.english, _): "Updated \(seconds / 86_400) d ago"
+        case (.simplifiedChinese, 0..<60): "刚刚更新"
+        case (.simplifiedChinese, 60..<3_600): "\(seconds / 60) 分钟前更新"
+        case (.simplifiedChinese, 3_600..<86_400): "\(seconds / 3_600) 小时前更新"
+        case (.simplifiedChinese, _): "\(seconds / 86_400) 天前更新"
+        }
+    }
+
+    private static func percentageDetailText(
+        card: SharedUsageCardPresentation,
+        freshnessState: DesktopAssistantFreshnessState,
+        language: AppLanguage
+    ) -> String? {
+        guard card.sourceDescription != nil else { return nil }
+        let values: [String] = [
+            card.selectedWindow?.compactLabel,
+            (card.selectedWindow?.resetText).map {
+                compactResetText($0, language: language)
+            },
+            localizedFreshness(freshnessState, language: language),
+        ].compactMap { value in
+            guard let value, !value.isEmpty else { return nil }
+            return value
+        }
+        return values.joined(separator: " · ")
+    }
+
+    private static func compactResetText(
+        _ resetText: String,
+        language: AppLanguage
+    ) -> String {
+        switch language {
+        case .english:
+            return resetText
+                .replacingOccurrences(of: "Resets in ", with: "")
+                .replacingOccurrences(of: " hours", with: "h")
+                .replacingOccurrences(of: " hour", with: "h")
+                .replacingOccurrences(of: " hrs", with: "h")
+                .replacingOccurrences(of: " hr", with: "h")
+                .replacingOccurrences(of: " days", with: "d")
+                .replacingOccurrences(of: " day", with: "d")
+                .replacingOccurrences(of: " minutes", with: "m")
+                .replacingOccurrences(of: " minute", with: "m")
+                .replacingOccurrences(of: " mins", with: "m")
+                .replacingOccurrences(of: " min", with: "m")
+        case .simplifiedChinese:
+            return resetText
+                .replacingOccurrences(of: "后重置", with: "")
+                .replacingOccurrences(of: " ", with: "")
+        }
     }
 
     private static func makeStructuredCreditAccessibilityLabel(
@@ -632,8 +841,13 @@ private struct DesktopAssistantCardView: View {
             ZStack {
                 Circle()
                     .stroke(connectionColor, lineWidth: 1.5)
-                Text("C")
-                    .font(AppTypography.systemFont(diameter * 0.56, weight: .semibold))
+                Text(card.providerMarkText)
+                    .font(
+                        AppTypography.systemFont(
+                            diameter * (card.providerMarkText.count > 1 ? 0.42 : 0.56),
+                            weight: .semibold
+                        )
+                    )
                     .foregroundStyle(connectionColor)
             }
             .frame(width: diameter, height: diameter)

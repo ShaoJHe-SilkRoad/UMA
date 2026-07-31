@@ -30,7 +30,7 @@ struct M5G2ClaudeConnectorSettingsTests {
             )
         )
         #expect(
-            descriptor.capabilities.contains(
+            !descriptor.capabilities.contains(
                 .hiddenFromDesktopAssistant
             )
         )
@@ -108,7 +108,7 @@ struct M5G2ClaudeConnectorSettingsTests {
         #expect(card.windows[1].remaining == .finite(99))
         #expect(card.selectedWindowID == "claude-five-hour")
         #expect(card.remaining == .finite(63.75))
-        #expect(!card.isVisibleInDesktopAssistant)
+        #expect(card.isVisibleInDesktopAssistant)
         await connector.stop()
     }
 
@@ -532,7 +532,7 @@ struct M5G2ClaudeConnectorSettingsTests {
     }
 
     @Test
-    func desktopAssistantHasNoClaudeOwnedSourceAndFiltersCapability() throws {
+    func desktopAssistantHasNoClaudeOwnedSourceAndRetainsGenericCapabilityFilter() throws {
         let assistant = try source(
             "Sources/CodexUsageUI/Views/DesktopAssistantView.swift"
         )

@@ -107,7 +107,11 @@ struct M5DBGThreeProviderAcceptanceTests {
                     now: fixture.now
                 )
             ).map(\.id)
-                == ["codex.local", "workbuddy.accountWebCredits"]
+                == [
+                    "codex.local",
+                    "claude.statusLine",
+                    "workbuddy.accountWebCredits",
+                ]
         )
         await registry.stopAll()
     }
@@ -136,7 +140,8 @@ struct M5DBGThreeProviderAcceptanceTests {
             "--claude-stale",
             "--claude-failed",
             "claude.statusLine",
-            "isVisibleInDesktopAssistant: false",
+            "isVisibleInDesktopAssistant: true",
+            "--assistant-claude",
         ] {
             #expect(renderer.contains(required))
         }

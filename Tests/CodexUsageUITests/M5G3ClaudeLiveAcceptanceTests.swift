@@ -142,7 +142,7 @@ struct M5G3ClaudeLiveAcceptanceTests {
                 ]
         )
         #expect(
-            ClaudeCodeUsageConnector.production().descriptor.capabilities
+            !ClaudeCodeUsageConnector.production().descriptor.capabilities
                 .contains(.hiddenFromDesktopAssistant)
         )
     }

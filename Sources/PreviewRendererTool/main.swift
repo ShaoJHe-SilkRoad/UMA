@@ -71,25 +71,36 @@ struct PreviewRendererTool {
                 arguments: arguments,
                 language: language
             )
-            var assistantCards: [DesktopAssistantCard] = []
+            var sharedAssistantCards: [SharedUsageCardPresentation] = []
             if !arguments.contains("--assistant-workbuddy-only") {
-                assistantCards.append(
-                    DesktopAssistantCard(shared: shared, language: language)
+                sharedAssistantCards.append(shared)
+            }
+            if arguments.contains("--assistant-claude") {
+                sharedAssistantCards.append(
+                    makeClaudeCard(
+                        arguments: arguments,
+                        language: language
+                    )
                 )
             }
             if let workBuddyCard {
-                assistantCards.append(
-                    DesktopAssistantCard(shared: workBuddyCard, language: language)
-                )
+                sharedAssistantCards.append(workBuddyCard)
             }
-            assistantCards.append(
+            sharedAssistantCards.append(
                 contentsOf: makeSyntheticCards(
                     count: syntheticProviderCount(arguments),
                     language: language
-                ).map {
-                    DesktopAssistantCard(shared: $0, language: language)
-                }
+                )
             )
+            let assistantCards = SharedUsagePresentationPolicy.assistantCards(
+                from: sharedAssistantCards
+            ).map {
+                DesktopAssistantCard(
+                    shared: $0,
+                    language: language,
+                    now: Date(timeIntervalSince1970: 1_800_000_300)
+                )
+            }
             let size = DesktopAssistantMetrics.stackSize(
                 for: density,
                 rowCount: assistantCards.count
@@ -494,7 +505,7 @@ struct PreviewRendererTool {
             sourceDescription: language == .english
                 ? "Official local status line"
                 : "官方本机状态栏",
-            isVisibleInDesktopAssistant: false,
+            isVisibleInDesktopAssistant: true,
             severity: isCached || isStale
                 ? .neutral
                 : SharedUsagePresentationPolicy.severity(for: remaining),

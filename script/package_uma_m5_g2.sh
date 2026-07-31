@@ -29,7 +29,7 @@ readonly SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk"
 
 usage() {
     printf '%s\n' \
-        "Usage: $0 --commit <40-hex-sha> [--build <12-digit-number>] [--phase g2-final|g3-preflight|g3-final|m5dbg-preflight|m5dbg-final] --output <phase-exact-path>/UMA.app"
+        "Usage: $0 --commit <40-hex-sha> [--build <12-digit-number>] [--phase g2-final|g3-preflight|g3-final|m5dbg-preflight|m5dbg-final|m5a-final] --output <phase-exact-path>/UMA.app"
 }
 
 commit=""
@@ -81,6 +81,12 @@ case "$phase" in
         expected_output="/private/tmp/uma-m5dbg-final-$commit/UMA.app"
         provenance_name="UMA-M5DBG-Provenance.plist"
         integration_status="THREE-PROVIDER-DEBUG-ACCEPTED-SETTINGS-RESTORED"
+        report_status="$integration_status"
+        ;;
+    m5a-final)
+        expected_output="/private/tmp/uma-m5a-final-$commit/UMA.app"
+        provenance_name="UMA-M5A-Provenance.plist"
+        integration_status="CLAUDE-SHARED-ASSISTANT-ACCEPTED"
         report_status="$integration_status"
         ;;
     *)

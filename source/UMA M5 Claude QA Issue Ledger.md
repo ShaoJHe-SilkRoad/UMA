@@ -221,7 +221,7 @@ tool, workspace, or settings backup.
 |---|---|---:|---|---|---|---|---|
 | M5DBG-001 | Source audit showed one shared Manual Refresh called Claude's configuration-aware probe and then its configuration refresh | Major | The provider-neutral scanner treated passive local event sources like active read sources | Use the completed passive-source probe as the sole health check while active providers retain one read | 30 scans produced exactly 30 Codex reads, 30 WorkBuddy reads, 30 Claude health checks, and zero Claude provider events | Physical 30-action matrix and 412-test full suite PASS | Closed |
 | M5DBG-002 | The live task required an exact 50-event classification and duplicate-publication proof | High | Prior focused coverage did not lock the combined acceptance/rejection totals | Add bounded diagnostic publication count and an exact synthetic 50-event matrix | Exact 45 accepted / 3 connector rejected / 2 relay rejected matrix PASS | Physical bounded stress and 412-test full suite PASS | Closed |
-| M5DBG-003 | M5DBG final output had no phase-exact package contract | High | Package helper ended at M5-G3 | Add M5DBG preflight/final paths and dedicated provenance state | Package contract and preflight audit PASS | Final commit-exact package audit remains the delivery gate | Repaired; final package pending |
+| M5DBG-003 | M5DBG final output had no phase-exact package contract | High | Package helper ended at M5-G3 | Add M5DBG preflight/final paths and dedicated provenance state | Package contract and preflight audit PASS | Accepted final commit-exact package audit PASS | Closed — PASS |
 | M5DBG-004 | Physical Light and macOS accessibility-state transitions were previously denied by the execution permission boundary | Gate | The required temporary system-wide transitions needed explicit Human authority and exact restoration | Run one setting at a time against the task-owned candidate; restore and verify after every case; stop VoiceOver when its Accessibility Tutorial appears | Light → Dark → Light, Reduce Transparency Off → On → Off, Increase Contrast Off → On → Off, and Reduce Motion Off → On → Off PASS with stable panel and Settings geometry, readable content, and no clipping or overlap; actual startup cache restored Cached and aged to Stale without provider activity | VoiceOver was immediately restored after the macOS tutorial appeared and then explicitly bypassed by the Founder; final Light / Off / Off / Off / Off state, theme-only Claude settings, no relay socket, and no task-owned process verified | Closed under Founder VoiceOver bypass |
 
 ## M5DBG-N1 natural startup addendum
@@ -258,6 +258,40 @@ M5DBG-N1 automated verification:
   private-field scans, arm64 executable checks, and Release dependency audit:
   PASS;
 - final commit-exact package remains a post-physical, post-commit delivery gate.
+
+## M5A-G1 issue ledger
+
+This addendum records only deterministic shared-presentation fixtures. It
+contains no live quota, provider payload, account identity, prompt, response,
+session, transcript, task, tool, workspace, credential, token, authentication
+material, settings backup, or sanitized production snapshot.
+
+| ID | First evidence | Severity | Root cause | Repair / decision | Focused retest | Regression retest | Status |
+|---|---|---:|---|---|---|---|---|
+| M5A-001 | The accepted Claude connector still declared the historical Desktop Assistant exclusion capability | Blocking | M5DBG intentionally admitted Claude only to the main panel | Remove only the obsolete Assistant exclusion while retaining one connector, one shared snapshot, one normalization owner, and the stable provider order | Deterministic 0/1/2/3-provider visibility and ordering matrix PASS | Full Desktop Assistant, Codex, WorkBuddy, Claude and 431-test regression PASS | Closed |
+| M5A-002 | The Assistant card collapsed shared freshness to a stale Boolean and omitted reset epoch, source identity, and observation age | Major | The predecessor Assistant contract predated Claude Cached and Waiting semantics | Extend only the immutable presentation value with explicit freshness, reset epoch, provider mark, source description, and deterministic observation age | Fresh/Cached/Stale/Waiting/Failed/Unavailable and English/Chinese semantic matrices PASS | Regular/Minimalist, geometry, accessibility and 431-test regression PASS | Closed |
+| M5A-003 | Assistant preview and package contracts ended at the two-provider/M5DBG baseline | High | No Claude Assistant fixture or phase-exact M5A package existed | Add in-memory Claude Assistant fixtures and one exact `m5a-final` package phase without changing live settings or installing the Desktop app | Eight-state renderer and package-contract tests PASS | Commit-exact package privacy, signature, dependency and provenance audits remain the post-commit delivery gate | Automated gate PASS |
+| M5A-004 | The first Cached renderer shortened the final state word at fixed Regular width | Major | The full reset sentence plus the longer Cached label exceeded the accepted one-line detail width | Keep the full reset sentence in Tooltip and VoiceOver, but use a deterministic compact reset token in the visible Claude detail row | Cached, Stale, Light, Dark, English, Chinese, Reduce Transparency, Increase Contrast and Minimalist renders PASS with no clipping | Accepted Desktop Assistant contract and focused M5A suites PASS | Closed |
+
+Physical VoiceOver interaction remains a bounded M5ADBG-G1 confirmation item.
+M5A-G1 performs deterministic accessibility semantics only and does not change
+the system VoiceOver setting.
+
+M5A-G1 pre-commit verification:
+
+- focused M5A and accepted Desktop Assistant suites: 23/23 PASS;
+- affected Desktop Assistant, Codex, WorkBuddy and Claude suites: 99/99 PASS;
+- full regression suite: 431/431 PASS across 48 suites;
+- Debug, Release and strict-concurrency warnings-as-errors Release: PASS;
+- eight-state synthetic renderer matrix: PASS for Light, Dark, Regular,
+  Minimalist, Cached, Stale, Reduce Transparency, Increase Contrast and
+  Simplified Chinese, with stable order and no clipping;
+- one immutable shared presentation, stable provider-ID routing, 100 Assistant
+  cycles, and a 2,000-update burst below the 500 ms target: PASS;
+- live Claude settings, provider tasks, relay ownership, socket ownership,
+  installed Desktop application and provider cadence: unchanged;
+- final staged-index, commit-exact package and clean-Git proofs remain delivery
+  gates.
 
 Current M5-G3 verification:
 
