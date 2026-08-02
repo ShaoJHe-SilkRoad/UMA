@@ -39,6 +39,9 @@ public enum ClaudeBrowserFileHandoffWriter {
         uid: uid_t = getuid()
     ) throws {
         _ = try ClaudeBrowserMessageDecoder.decode(payload)
+        guard hasNoSymlinkTraversal(endpoint.directoryPath) else {
+            throw ClaudeBrowserBridgeError.socketUnsafe
+        }
         try validatePrivateDirectory(endpoint.directoryPath, uid: uid)
         try requireActiveListener(endpoint.listenerLockPath, uid: uid)
         try removeOwnedRegularFileIfPresent(endpoint.temporaryPath, uid: uid)
@@ -63,7 +66,14 @@ public enum ClaudeBrowserFileHandoffWriter {
         else { throw ClaudeBrowserBridgeError.socketUnsafe }
         try writeAllBytes(payload, to: descriptor)
         guard fsync(descriptor) == 0 else { throw ClaudeBrowserBridgeError.socketWriteFailed }
-        guard rename(endpoint.temporaryPath, endpoint.pendingPath) == 0 else {
+        // Publish without replacing an unread observation. This keeps rapid
+        // toolbar actions bounded to one in-flight native handoff instead of
+        // silently overwriting an earlier message.
+        guard renamex_np(
+            endpoint.temporaryPath,
+            endpoint.pendingPath,
+            UInt32(RENAME_EXCL)
+        ) == 0 else {
             throw ClaudeBrowserBridgeError.socketWriteFailed
         }
         shouldRemoveTemporary = false
@@ -205,9 +215,11 @@ public final class ClaudeBrowserFileHandoffServer: @unchecked Sendable {
               metadata.st_size <= ClaudeBrowserBridgeContract.maximumMessageBytes
         else { throw ClaudeBrowserBridgeError.socketUnsafe }
         let payload = try readExactly(Int(metadata.st_size), from: descriptor)
-        guard unlink(endpoint.pendingPath) == 0 else {
-            throw ClaudeBrowserBridgeError.socketUnsafe
-        }
+        try removeOwnedRegularFileMatching(
+            endpoint.pendingPath,
+            descriptor: descriptor,
+            uid: uid
+        )
         return payload
     }
 }
@@ -232,6 +244,9 @@ private func openListenerLock(_ path: String, uid: uid_t) throws -> Int32 {
 }
 
 private func preparePrivateDirectory(_ path: String, uid: uid_t) throws {
+    guard hasNoSymlinkTraversal(path) else {
+        throw ClaudeBrowserBridgeError.socketUnsafe
+    }
     var existing = stat()
     if lstat(path, &existing) == 0 {
         guard (existing.st_mode & S_IFMT) == S_IFDIR, existing.st_uid == uid else {
@@ -261,6 +276,21 @@ private func validatePrivateDirectory(_ path: String, uid: uid_t) throws {
           metadata.st_uid == uid,
           (metadata.st_mode & 0o777) == 0o700
     else { throw ClaudeBrowserBridgeError.socketUnsafe }
+}
+
+private func hasNoSymlinkTraversal(_ path: String) -> Bool {
+    guard path.hasPrefix("/") else { return false }
+    var current = "/"
+    for component in (path as NSString).pathComponents.dropFirst() {
+        current = (current as NSString).appendingPathComponent(component)
+        var metadata = stat()
+        if lstat(current, &metadata) == 0 {
+            if (metadata.st_mode & S_IFMT) == S_IFLNK { return false }
+        } else if errno != ENOENT {
+            return false
+        }
+    }
+    return true
 }
 
 private func validateOwnedRegularFile(descriptor: Int32, uid: uid_t) throws {

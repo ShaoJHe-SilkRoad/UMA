@@ -14,10 +14,14 @@
     "Shared/claude-usage-extractor.js",
     "Shared/content-script.js",
   ]);
+  let injectionInFlight = false;
+  let nativeSendInFlight = false;
 
   async function injectExactUsageRoute(tab) {
     if (!Number.isInteger(tab?.id) || !allowedSenderURL(tab?.url || "")) return false;
     if (!api.scripting?.executeScript) return false;
+    if (injectionInFlight) return false;
+    injectionInFlight = true;
     try {
       await api.scripting.executeScript({
         target: { tabId: tab.id, allFrames: false },
@@ -26,6 +30,8 @@
       return true;
     } catch (_) {
       return false;
+    } finally {
+      injectionInFlight = false;
     }
   }
 
@@ -34,6 +40,7 @@
     if (message.type !== "umaClaudeUsageObservation") return;
     if (!allowedSenderURL(sender?.url || sender?.tab?.url || "")) return;
     if (!extractor.validateObservation(message.observation)) return;
+    if (nativeSendInFlight) return;
 
     const envelope = {
       kind: "claudeUsageObservation",
@@ -43,11 +50,14 @@
       routeState: "verifiedUsage",
       observation: message.observation,
     };
+    nativeSendInFlight = true;
     try {
       await api.runtime.sendNativeMessage(config.nativeApplication, envelope);
     } catch (_) {
       // UMA not running or the exact native companion is unavailable. No data
       // is persisted in the extension and no alternate destination is tried.
+    } finally {
+      nativeSendInFlight = false;
     }
   }
 

@@ -15,7 +15,7 @@
     path: "/new",
     hash: "#settings/usage",
     href: "https://claude.ai/new#settings/usage",
-    maximumHeadingCount: 40,
+    maximumLabelElementCount: 4096,
     maximumCandidateCount: 64,
   });
 
@@ -76,11 +76,16 @@
   }
 
   function matchingLabelCards(documentLike, patterns) {
-    const labels = Array.from(documentLike.querySelectorAll(
+    const labels = documentLike.querySelectorAll(
       'h1, h2, h3, h4, h5, h6, [role="heading"], div, p, span'
-    ));
+    );
     const cards = [];
-    for (const label of labels) {
+    // The settings SPA contains many structural div/span nodes before its
+    // Usage cards. Keep the search bounded without truncating it to the first
+    // few page nodes, which can exclude every allowlisted Usage landmark.
+    const upperBound = Math.min(labels.length, CONTRACT.maximumLabelElementCount);
+    for (let index = 0; index < upperBound; index += 1) {
+      const label = labels[index];
       // Claude currently renders "Current session" as a leaf label rather
       // than a semantic heading. Match only exact allowlisted leaf text; no
       // unrelated page copy is retained or allowed across the boundary.
@@ -124,8 +129,15 @@
       const aria = candidate.getAttribute("aria-valuenow");
       const data = candidate.getAttribute("data-used-percentage");
       const text = boundedOwnText(candidate, 16);
-      for (const raw of [aria, data, text]) {
+      for (const raw of [aria, data]) {
         const parsed = finitePercentage(raw);
+        if (parsed !== null) values.push(parsed);
+      }
+      // Visible copy must include the percent sign. This keeps promotional
+      // multipliers, Credit counts, dates, and other plain numbers from ever
+      // becoming quota merely because they sit inside a Usage card.
+      if (text && text.includes("%")) {
+        const parsed = finitePercentage(text);
         if (parsed !== null) values.push(parsed);
       }
     }
@@ -146,20 +158,28 @@
     const candidates = Array.from(card.querySelectorAll('time[datetime], [data-reset-at]'))
       .slice(0, 8);
     for (const candidate of candidates) {
-      const normalized = normalizedTimestamp(
-        candidate.getAttribute("datetime") || candidate.getAttribute("data-reset-at")
-      );
-      if (normalized) values.push(normalized);
+      for (const raw of [
+        candidate.getAttribute("datetime"),
+        candidate.getAttribute("data-reset-at"),
+      ]) {
+        if (!raw) continue;
+        const normalized = normalizedTimestamp(raw);
+        if (!normalized) return { valid: false, value: null };
+        values.push(normalized);
+      }
     }
     const unique = Array.from(new Set(values));
-    return unique.length === 1 ? unique[0] : null;
+    if (unique.length > 1) return { valid: false, value: null };
+    return { valid: true, value: unique.length === 1 ? unique[0] : null };
   }
 
   function quotaWindow(card) {
     if (!card) return null;
     const usedPercentage = readPercentage(card);
     if (usedPercentage === null) return null;
-    return { usedPercentage, resetAt: readReset(card) };
+    const reset = readReset(card);
+    if (!reset.valid) return null;
+    return { usedPercentage, resetAt: reset.value };
   }
 
   function modelSpecificWindow(documentLike) {
@@ -212,6 +232,10 @@
       observedAt: (now || new Date()).toISOString(),
       extractorSchemaVersion: CONTRACT.schemaVersion,
     };
+    // The SPA may navigate while extraction is in progress. Revalidate both
+    // route and login absence after reading the bounded landmarks so a click
+    // cannot carry a result from a tab that changed underneath the extractor.
+    if (!exactUsageURL(locationLike) || hasLoginForm(documentLike)) return null;
     return validateObservation(observation) ? observation : null;
   }
 

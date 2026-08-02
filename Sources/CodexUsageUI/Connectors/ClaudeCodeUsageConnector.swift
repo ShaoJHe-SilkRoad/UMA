@@ -209,10 +209,23 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         }
         await loadSanitizedCacheIfNeeded()
         await refreshAge()
+        let health = await integration.checkHealth()
+        guard health == .ready else {
+            apply(health)
+            if snapshot.hasValidData {
+                return AgentConnectorProbe(
+                    state: snapshot.state,
+                    safeFailure: snapshot.safeFailure
+                )
+            }
+            return AgentConnectorProbe(
+                state: probeState(for: health),
+                safeFailure: snapshot.safeFailure
+            )
+        }
         if snapshot.hasValidData {
             return AgentConnectorProbe(state: snapshot.state, safeFailure: snapshot.safeFailure)
         }
-        let health = await integration.checkHealth()
         apply(health)
         return AgentConnectorProbe(state: probeState(for: health), safeFailure: snapshot.safeFailure)
     }
@@ -428,6 +441,9 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
                  .socketConnectionFailed,
                  .socketWriteFailed,
                  .socketReadFailed:
+                // A local-listener start failure must be recoverable on the
+                // next explicit action; do not leave a phantom started flag.
+                listenerStarted = false
                 retainOrFail(.unavailable, routeChanged: false)
             case .messageEmpty,
                  .messageTooLarge,
@@ -478,7 +494,7 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
     private func refreshAge() async {
         guard let lastGood, let lastSuccessfulAt = lastGood.lastSuccessfulAt else { return }
         let age = now().timeIntervalSince(lastSuccessfulAt)
-        if age > Self.maximumRetainedAge {
+        if age >= Self.maximumRetainedAge {
             self.lastGood = nil
             await clearCache()
             lifecycle = .failed
@@ -487,29 +503,39 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
                 failure: .unavailable,
                 capturedAt: now()
             ))
-        } else if age > Self.freshnessInterval, snapshot.freshness != .stale {
+        } else if age >= Self.freshnessInterval, snapshot.freshness != .stale {
             let stale = Self.retained(lastGood, freshness: .stale, failure: .unavailable, now: now())
             self.lastGood = stale
             lifecycle = .stale(lastSuccessfulAt)
             replace(stale)
+            scheduleRetention(from: lastSuccessfulAt)
         }
     }
 
     private func scheduleRetention(from observedAt: Date) {
         retentionTask?.cancel()
         let connector = self
-        let delay = max(0, Self.freshnessInterval - now().timeIntervalSince(observedAt))
+        let age = max(0, now().timeIntervalSince(observedAt))
+        let nextBoundary = age < Self.freshnessInterval
+            ? Self.freshnessInterval
+            : Self.maximumRetainedAge
+        let delay = max(0, nextBoundary - age)
         retentionTask = Task {
             try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled else { return }
-            await connector.refreshAge()
+            await connector.retentionTimerFired()
         }
+    }
+
+    private func retentionTimerFired() async {
+        retentionTask = nil
+        await refreshAge()
     }
 
     private func retainOrFail(_ failure: AgentSafeFailure, routeChanged: Bool) {
         if currentSessionValidated, let lastGood {
             let freshness: AgentConnectorFreshness = (lastGood.lastSuccessfulAt.map {
-                now().timeIntervalSince($0) > Self.freshnessInterval
+                now().timeIntervalSince($0) >= Self.freshnessInterval
             } ?? true) ? .stale : .cached
             let retained = Self.retained(lastGood, freshness: freshness, failure: failure, now: now())
             self.lastGood = retained

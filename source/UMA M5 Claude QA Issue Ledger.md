@@ -439,3 +439,64 @@ project, billing, or screenshot data.
 | M5BROWSER-014 | Safari rejected the original local socket bridge from the extension sandbox | Blocking | A Unix-domain socket under Application Support was not reachable from the Safari extension process | Replace the socket with an atomic owner-only file handoff in one private Application Support directory | Live Safari callback, filesystem-mode, no-network, and cleanup tests | Closed |
 | M5BROWSER-015 | Listener shutdown could remove coordination state before completing cleanup | Major | Unlocking and unlinking the listener marker before final cleanup created a lifecycle race | Hold the exclusive lock through pending-file cleanup and remove the marker only when its descriptor identity still matches | Focused lifecycle and identity tests | Closed |
 | M5BROWSER-016 | A second listener could replace the active listener marker | Blocking | Marker replacement could disrupt the active owner and permit ambiguous delivery | Acquire a nonblocking exclusive lock before cleanup and reject a second listener without changing the active marker | Second-listener rejection plus first-listener delivery test | Closed |
+
+## M5ADBG-G1 combined defect-closure ledger
+
+This section contains classifications and sanitized counts only. It contains no
+live percentage, reset timestamp, identity, URL, credential, cookie, token,
+browser data, raw page content, screenshot, prompt, response, chat, project, or
+billing data.
+
+| ID | Found by | Severity | Evidence / acceptance impact | Repair | Focused retest | Regression retest | Final status |
+|---|---|---:|---|---|---|---|---|
+| M5ADBG-001 | Source audit | Blocking | Plain numeric text inside an allowlisted Usage card could be interpreted as a percentage, so a promotional multiplier or Credit count could make quota ambiguous | Visible quota text now requires `%`; only explicit percentage attributes may omit it; label and candidate scans are bounded | Exact extractor fixtures for promotional values and one explicit percentage: PASS | Full Browser Sync, bridge, and 465-test suite: PASS | Closed — PASS |
+| M5ADBG-002 | Source audit | Blocking | A hash-routed SPA could leave the exact Usage route during extraction, and malformed or conflicting reset attributes could degrade silently | Revalidate route and login absence after bounded DOM reads; reject malformed or conflicting reset attributes without fabricating a reset | Route-change, malformed-reset, conflicting-reset, duplicate-card fixtures: PASS | Manifest, route, privacy, and bounded live Safari audits: PASS | Closed — PASS |
+| M5ADBG-003 | Lifecycle audit | Major | Concurrent injections/native sends and replacement of an unread pending observation could create duplicate or lost handoff state | Add one-in-flight injection and native-send gates; publish with exclusive rename; remove a consumed observation only when descriptor and path identity match | Pending-observation exclusion and repeated-message checks: PASS | Native-host strict build, lifecycle matrix, five relaunches, and process/resource checks: PASS | Closed — PASS |
+| M5ADBG-004 | Filesystem audit | Blocking | Intermediate symlinks, dangling cache links, path/descriptor replacement, or permissive cache state could cross the owner-only boundary | Reject symlink traversal, use owner/mode/type/identity checks, bounded descriptor reads, exclusive `0600` temporary writes, `fsync`, atomic rename, and identity-safe clear | Cache round-trip, wrong-mode, intermediate-link, dangling-link, and handoff-link tests: PASS | Privacy/package scans and idle cache metadata check: PASS | Closed — PASS |
+| M5ADBG-005 | State-machine audit | Major | A valid snapshot could outlive a disabled/missing companion; listener-start failure could leave a phantom started flag; the retention timer did not schedule deterministic final expiry | Health-check every probe, withdraw unsafe health states, retain browser-closed data only same-session, make listener start retryable, and schedule exact Fresh→Stale→expired boundaries | Health matrix, five availability transitions, start recovery, and exact-boundary tests: PASS | Provider registry, UsageStore, Codex, WorkBuddy, full-suite, and five-relaunch regressions: PASS | Closed — PASS |
+| M5ADBG-006 | Settings audit | Minor required for acceptance | Recovery could leave a stale English-only error, waiting state duplicated Open Usage, and explicit actions lacked visible progress | Centralize localized safe errors and action states, clear errors on recovery, remove duplicate waiting action, and expose Refreshing/other action progress | EN/zh-CN action/error and recovery tests: PASS | Settings, localization, deterministic accessibility, and UI source audit: PASS | Closed — PASS |
+| M5ADBG-007 | Inventory audit | Gate | The reported 445 and accepted 435 counts compared unlike target scopes and milestones, creating an apparent ten-test deletion | Reconcile exact arithmetic and inspect every removed test name against replacement coverage | Source inventory parser and focused closure suite: PASS | Authoritative post-repair runner: 449 UI plus 16 bridge tests, 465 total PASS | Closed — reconciled with no coverage loss |
+| M5ADBG-008 | Delivery audit | Gate | The accepted package helper lacked task-specific preflight/final phases | Add exact `m5adbg-preflight` and `m5adbg-final` output contracts while preserving commit-exact archive behavior and audits | Script argument/output rejection matrix and exact preflight phase: PASS | Preflight structure, nested signature, manifest, privacy, and provenance audits: PASS; final phase pending commit | Preflight PASS; final package pending |
+| M5ADBG-009 | Goal acceptance | Gate | Current code and fixtures cannot replace a bounded same-time Safari validation and mandatory security restoration | Build exact preflight, perform one Human toolbar action without retaining values, then unregister and restore Safari unsigned mode Off | Exact preflight registered with `pluginkit`; Human-triggered callback produced a strictly sanitized current observation; Safari unsigned mode independently confirmed Off after relaunch | Fresh-to-Stale transition, main/Assistant parity, disconnect cleanup, extension unregister, and process cleanup: PASS | Closed — PASS |
+| M5ADBG-010 | Affected-suite retest | Major | The first current toolbar observation could arrive after the connector started but before the registry's fire-and-forget stream task installed its continuation, leaving Claude hidden | Await connector stream establishment before the registry returns from listener setup, so the first current observation cannot fall into a subscription gap | Registry first-toolbar-read test: PASS | Browser suites and 465-test full suite: PASS | Closed — PASS |
+| M5ADBG-011 | Affected-suite retest | Minor required for acceptance | A symlink at the cache-file leaf was rejected safely but reported the generic traversal error instead of the contract's precise nonregular-file error | Validate parent traversal separately and retain `lstat`/`O_NOFOLLOW` type checks for the leaf | Leaf, dangling, and intermediate symlink matrix: PASS | Browser suites, full suite, and package privacy audit: PASS | Closed — PASS |
+| M5ADBG-012 | Founder physical Settings review | Major / live-gate blocking | The visible Continue control in the native SwiftUI consent alert did not respond to a physical pointer press in the transient status-panel Settings context; an Accessibility action invoked the same model operation successfully, isolating the defect to modal presentation and hit testing rather than the consent function | Replace the panel-hosted alert with an inline consent card in the same Settings hierarchy, with direct Cancel and Continue buttons, stable accessibility identifiers, the unchanged disclosure, and a direct `connectWithConsent()` action | Inline-control structure plus consent persistence/listener-start/Usage-open tests: 10/10 PASS | Rebuilt-candidate physical pointer press: PASS; 465/465 tests, Debug, Release, strict main, strict native-host, preflight package, manifest, signature, privacy, secret, and retired-route audits: PASS | Closed — PASS |
+| M5ADBG-013 | Founder bounded live Safari acceptance | Blocking | The Human completed the first toolbar action while UMA's owner-only listener was healthy, but no sanitized observation or cache arrived and the native handler emitted no forwarding event | The M5ADBG hardening had limited label fallback to the first 40 structural elements, excluding the real Usage landmarks later in Claude's settings SPA; replace the prefix truncation with a bounded 4,096-element scan that retains only exact allowlisted leaf labels and stops after ambiguity | Structural-prefix extractor fixture plus affected Browser Sync suites: 23/23 PASS | Human retry delivered both account-level windows without retaining values; Fresh-to-Stale shared-surface parity, disconnect cleanup, 465-test regression matrix, and privacy checks: PASS | Closed — PASS |
+
+### Test-inventory reconciliation
+
+The apparent ten-test difference is a reporting-scope mismatch, not a deletion:
+
+```text
+previous intermediate report: 431 UI tests + 14 bridge tests = 445
+accepted final UI target only: 435 UI tests                         = 435
+accepted final complete inventory: 435 UI + 14 bridge tests        = 449
+```
+
+The final Browser Sync commit therefore had four more UI tests than the
+431-test predecessor and fourteen tests in the new bridge target. Comparing
+the intermediate all-target count with the final UI-only count omitted those
+fourteen bridge tests while also including the four net-new UI tests, producing
+the apparent difference of ten. A direct predecessor-to-final source audit
+found 36 retired or consolidated names and 54 replacements/additions, for a net
+increase of 18 and no active coverage loss.
+
+Exact removed names, grouped by former file:
+
+- `M5AG1ClaudeAssistantTests`: `rendererPackageAndQALedgerCarryM5AContracts`.
+- `M5DBGN1ClaudeSnapshotTests`: `validEventsAtomicallyReplaceOneRemainingOnlyOwnerRecord`, `relaunchRestoresCachedWithoutProviderReadThenTransitionsFresh`, `recentCacheAgesToStaleWithoutPromptOrProviderRead`, `expiryPrunesEachWindowIndependentlyAndBothExpiredDelete`, `malformedOversizedUnknownAndFutureRecordsFailClosed`, `disableRepairAndOwnershipLossInvalidateTheSnapshot`, `malformedNewEventRetainsCacheAndRestoreDoesNotCreateDecrementOrAlert`, `copyRendererAndPackageContractsExposeCachedStateWithoutPrivateData`.
+- `M5DBGThreeProviderAcceptanceTests`: `fiftyEventMatrixHasExactAcceptanceAndPublicationBoundaries`, `thirtyGlobalRefreshesReadCodexAndWorkBuddyOnceAndOnlyHealthCheckClaude`, `m5dbgPackagingAndDurableRecordsAreExactAndPrivacyBounded`.
+- `M5G2ClaudeConnectorSettingsTests`: `descriptorLocksPrivacySourceAndSanitizedRestoreBoundary`, `configurationStatesMapToRequiredConnectorLifecycle`, `currentPacketAdmitsClaudeAndConvertsExactlyOnceInSharedModel`, `invalidPacketRetainsLastValidOnlyAsStale`, `packetAgesToStaleAndRelaunchRestoresWithoutPrompt`, `manualRefreshChecksConfigurationWithoutGeneratingProviderData`, `socketTransportDrivesFreshStateAndRecoversAfterInvalidPacket`, `passiveRegistryRetainsStaleAndRecoversWithoutAnotherListener`, `staleSnapshotSurvivesHealthRefreshUntilACurrentEventArrives`, `concurrentHealthRefreshesAreCoalesced`, `missingOptionalWindowIsNotInvented`, `providerOrderIsCodexClaudeWorkBuddyWithoutPlaceholders`, `agentSettingsListsClaudeBetweenCodexAndWorkBuddy`, `settingsModelReactsFromWaitingToFreshWithoutAnotherAction`, `settingsSourceHasBoundedActionsTransparencyLocalizationAndNoCredentialControls`, `desktopAssistantHasNoClaudeOwnedSourceAndRetainsGenericCapabilityFilter`, `packageContractIncludesHelperAndExcludesArtifacts`, `relayAndConnectorSourcesContainNoNetworkOrCredentialPath`.
+- `M5G3ClaudeLiveAcceptanceTests`: `disableAfterLiveAdmissionWithdrawsClaudeImmediately`, `deterministicMatrixKeepsWindowsIndependentAndConvertsOnce`, `malformedFailureRecoversWithoutAnotherListener`, `providerOrderAndAssistantBoundaryRemainLocked`, `g3PackagingPhasesAreExactAndPrivacyBounded`, `liveAcceptanceRecordContainsClassificationsNotValues`.
+
+The removed snapshot/packet/socket names belonged to the retired status-line
+relay and socket transport or were consolidated into the accepted Browser Sync
+contract. Current equivalents are located in
+`ClaudeBrowserBridgeCoreTests`, `M5G2ClaudeConnectorSettingsTests`,
+`M5G3ClaudeLiveAcceptanceTests`, `M5DBGN1ClaudeSnapshotTests`,
+`M5DBGThreeProviderAcceptanceTests`, `M5AG1ClaudeAssistantTests`,
+`SharedUsagePresentationPolicyTests`, and
+`M5ADBGG1BrowserSyncClosureTests`. They cover exact route and permissions,
+strict schema/privacy, owner-only handoff, cache admission and expiry,
+Fresh/Cached/Stale, provider isolation/order, shared presentation, Maximum
+Decrement, Settings/localization, and bounded lifecycle stress.

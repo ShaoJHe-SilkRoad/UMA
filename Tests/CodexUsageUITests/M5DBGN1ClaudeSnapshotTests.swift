@@ -154,19 +154,27 @@ actor BrowserTestConsent {
 actor BrowserTestBridge {
     private var handler: ClaudeBrowserProductionIntegration.ObservationHandler?
     private(set) var health: ClaudeBrowserCompanionHealth = .ready
+    private var startError: ClaudeBrowserBridgeError?
     private(set) var openCount = 0
     private(set) var repairCount = 0
     private(set) var startCount = 0
     private(set) var stopCount = 0
 
-    func start(_ handler: @escaping ClaudeBrowserProductionIntegration.ObservationHandler) {
+    func start(
+        _ handler: @escaping ClaudeBrowserProductionIntegration.ObservationHandler
+    ) async {
         self.handler = handler
         startCount += 1
+        if let startError {
+            self.handler = nil
+            await handler(.failure(startError))
+        }
     }
 
     func stop() { stopCount += 1; handler = nil }
     func currentHealth() -> ClaudeBrowserCompanionHealth { health }
     func setHealth(_ next: ClaudeBrowserCompanionHealth) { health = next }
+    func setStartError(_ next: ClaudeBrowserBridgeError?) { startError = next }
     func open() -> Bool { openCount += 1; return true }
     func repair() -> ClaudeBrowserCompanionHealth { repairCount += 1; return health }
     func send(_ envelope: ClaudeBrowserObservationEnvelope) async {

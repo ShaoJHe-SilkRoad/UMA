@@ -108,6 +108,220 @@ struct M5G3ClaudeLiveAcceptanceTests {
         #expect(result == true)
     }
 
+    @Test @MainActor
+    func extractorFindsUsageLandmarkAfterStructuralPageNodes() throws {
+        let context = try #require(JSContext())
+        let source = try String(
+            contentsOf: browserRepositoryRoot().appendingPathComponent(
+                "BrowserExtension/Shared/claude-usage-extractor.js"
+            ),
+            encoding: .utf8
+        )
+        context.evaluateScript(source)
+        let result = context.evaluateScript(
+            """
+            (() => {
+              const percentage = { textContent: "44%", getAttribute: () => null };
+              const card = {
+                querySelectorAll: selector => selector.includes("time[") ? [] : [percentage],
+              };
+              const decoys = Array.from({ length: 48 }, () => ({
+                childElementCount: 0,
+                textContent: "unrelated structural node",
+                closest: () => null,
+              }));
+              const label = {
+                childElementCount: 0,
+                textContent: "Current session",
+                closest: () => card,
+              };
+              const documentLike = {
+                querySelector: () => null,
+                querySelectorAll: selector => selector.includes("h1, h2")
+                  ? [...decoys, label]
+                  : [],
+              };
+              const locationLike = {
+                protocol: "https:", origin: "https://claude.ai", pathname: "/new",
+                search: "", hash: "#settings/usage",
+              };
+              const observation = UMAClaudeUsageExtractor.extract(
+                documentLike,
+                locationLike,
+                new Date("2026-08-01T14:00:00Z")
+              );
+              return observation !== null
+                && observation.fiveHour.usedPercentage === 44
+                && UMAClaudeUsageExtractor.CONTRACT.maximumLabelElementCount === 4096;
+            })()
+            """
+        )?.toBool()
+        #expect(result == true)
+    }
+
+    @Test @MainActor
+    func extractorRevalidatesTheExactRouteAfterReadingThePage() throws {
+        let context = try #require(JSContext())
+        let source = try String(
+            contentsOf: browserRepositoryRoot().appendingPathComponent(
+                "BrowserExtension/Shared/claude-usage-extractor.js"
+            ),
+            encoding: .utf8
+        )
+        context.evaluateScript(source)
+        let result = context.evaluateScript(
+            """
+            (() => {
+              const percentage = { textContent: "44%", getAttribute: () => null };
+              const card = {
+                querySelectorAll: selector => selector.includes("time[") ? [] : [percentage],
+              };
+              const label = {
+                childElementCount: 0,
+                textContent: "Current session",
+                closest: () => card,
+              };
+              const documentLike = {
+                querySelector: () => null,
+                querySelectorAll: selector => selector.includes("h1, h2") ? [label] : [],
+              };
+              let hashReads = 0;
+              const locationLike = {
+                protocol: "https:",
+                origin: "https://claude.ai",
+                pathname: "/new",
+                search: "",
+                get hash() {
+                  hashReads += 1;
+                  return hashReads === 1 ? "#settings/usage" : "#settings/account";
+                },
+              };
+              return UMAClaudeUsageExtractor.extract(
+                documentLike,
+                locationLike,
+                new Date("2026-08-01T14:00:00Z")
+              ) === null;
+            })()
+            """
+        )?.toBool()
+        #expect(result == true)
+    }
+
+    @Test @MainActor
+    func extractorIgnoresPromotionalNumbersButAcceptsOneExplicitPercentage() throws {
+        let context = try #require(JSContext())
+        let source = try String(
+            contentsOf: browserRepositoryRoot().appendingPathComponent(
+                "BrowserExtension/Shared/claude-usage-extractor.js"
+            ),
+            encoding: .utf8
+        )
+        context.evaluateScript(source)
+        let result = context.evaluateScript(
+            """
+            (() => {
+              const percentage = {
+                textContent: "44%",
+                getAttribute: () => null,
+              };
+              const promotion = {
+                textContent: "100 Credits",
+                getAttribute: () => null,
+              };
+              const multiplier = {
+                textContent: "5",
+                getAttribute: () => null,
+              };
+              const card = {
+                querySelectorAll: selector => selector.includes("time[")
+                  ? []
+                  : [percentage, promotion, multiplier],
+              };
+              const label = {
+                childElementCount: 0,
+                textContent: "Current session",
+                closest: () => card,
+              };
+              const documentLike = {
+                querySelector: () => null,
+                querySelectorAll: selector => selector.includes("h1, h2") ? [label] : [],
+              };
+              const locationLike = {
+                protocol: "https:", origin: "https://claude.ai", pathname: "/new",
+                search: "", hash: "#settings/usage",
+              };
+              const observation = UMAClaudeUsageExtractor.extract(
+                documentLike,
+                locationLike,
+                new Date("2026-08-01T14:00:00Z")
+              );
+              return observation !== null
+                && observation.fiveHour.usedPercentage === 44;
+            })()
+            """
+        )?.toBool()
+        #expect(result == true)
+    }
+
+    @Test @MainActor
+    func extractorRejectsMalformedAmbiguousResetsAndDuplicateCards() throws {
+        let context = try #require(JSContext())
+        let source = try String(
+            contentsOf: browserRepositoryRoot().appendingPathComponent(
+                "BrowserExtension/Shared/claude-usage-extractor.js"
+            ),
+            encoding: .utf8
+        )
+        context.evaluateScript(source)
+        let result = context.evaluateScript(
+            """
+            (() => {
+              const locationLike = {
+                protocol: "https:", origin: "https://claude.ai", pathname: "/new",
+                search: "", hash: "#settings/usage",
+              };
+              const percentage = { textContent: "44%", getAttribute: () => null };
+              const reset = {
+                textContent: "",
+                getAttribute: name => name === "datetime"
+                  ? "2026-08-01T15:00:00Z"
+                  : (name === "data-reset-at" ? "2026-08-01T16:00:00Z" : null),
+              };
+              const card = {
+                querySelectorAll: selector => selector.includes("time[") ? [reset] : [percentage],
+              };
+              const label = {
+                childElementCount: 0,
+                textContent: "Current session",
+                closest: () => card,
+              };
+              const ambiguousDocument = {
+                querySelector: () => null,
+                querySelectorAll: selector => selector.includes("h1, h2") ? [label] : [],
+              };
+              const duplicateLabel = { ...label, closest: () => ({ ...card }) };
+              const duplicateDocument = {
+                querySelector: () => null,
+                querySelectorAll: selector => selector.includes("h1, h2")
+                  ? [label, duplicateLabel]
+                  : [],
+              };
+              return UMAClaudeUsageExtractor.extract(
+                ambiguousDocument,
+                locationLike,
+                new Date("2026-08-01T14:00:00Z")
+              ) === null
+                && UMAClaudeUsageExtractor.extract(
+                  duplicateDocument,
+                  locationLike,
+                  new Date("2026-08-01T14:00:00Z")
+                ) === null;
+            })()
+            """
+        )?.toBool()
+        #expect(result == true)
+    }
+
     @Test
     func toolbarClickIsTheOnlyInjectionTrigger() throws {
         let root = browserRepositoryRoot()

@@ -30,7 +30,7 @@ readonly SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk"
 
 usage() {
     printf '%s\n' \
-        "Usage: $0 --commit <40-hex-sha> [--build <12-digit-number>] --phase <m5-browser-preflight|m5-browser-final> --output <exact-path>"
+        "Usage: $0 --commit <40-hex-sha> [--build <12-digit-number>] --phase <m5-browser-preflight|m5-browser-final|m5adbg-preflight|m5adbg-final> --output <exact-path>"
 }
 
 commit=""
@@ -63,6 +63,18 @@ case "$phase" in
         integration_status="SYSTEM-BROWSER-USAGE-SYNC-ACCEPTED"
         commit_exact=1
         ;;
+    m5adbg-preflight)
+        expected_output="/private/tmp/uma-m5adbg-preflight-${commit:0:12}/UMA.app"
+        source_state="working-tree-m5adbg-preflight"
+        integration_status="BROWSER-SYNC-DEFECT-CLOSURE-PREFLIGHT"
+        commit_exact=0
+        ;;
+    m5adbg-final)
+        expected_output="/private/tmp/uma-m5adbg-final-$commit/UMA.app"
+        source_state="commit-exact"
+        integration_status="BROWSER-SYNC-DEFECT-CLOSURE-PASS"
+        commit_exact=1
+        ;;
     *) usage >&2; exit 2 ;;
 esac
 readonly expected_output source_state integration_status commit_exact
@@ -93,7 +105,10 @@ git -C "$REPO_ROOT" cat-file -e "$commit^{commit}"
 }
 mkdir "$output_parent"
 
-package_root="/private/tmp/uma-m5-browser-package-$phase-$commit"
+case "$phase" in
+    m5adbg-*) package_root="/private/tmp/uma-m5adbg-package-$phase-$commit" ;;
+    *) package_root="/private/tmp/uma-m5-browser-package-$phase-$commit" ;;
+esac
 [[ ! -e "$package_root" && ! -L "$package_root" ]] || {
     printf 'Refusing to reuse %s\n' "$package_root" >&2
     exit 2

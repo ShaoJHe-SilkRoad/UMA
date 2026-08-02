@@ -488,3 +488,72 @@ Final delivery remains one exact local commit and one commit-exact `/private/tmp
 package. Safari unsigned-development mode and the temporary extension must be
 restored/removed after final smoke. The Desktop UMA, browser login state, and
 browser data remain protected.
+
+## M5ADBG-G1 defect-closure scope lock
+
+Date: 2026-08-02
+
+M5ADBG-G1 preserves the accepted user-triggered Browser Sync architecture and
+may change only exact-route extraction, native handoff, sanitized cache and
+lifecycle behavior, Settings/localization, focused regression coverage, this
+scope record, the M5 QA ledger, and the existing package helper. It does not
+authorize a new Claude source, automatic polling, tab monitoring, persistent
+host access, Keychain/OAuth/cookie access, Chrome live validation, signed
+distribution, or a visual redesign.
+
+The only current-read flow remains:
+
+```text
+Open Claude Usage
+→ click UMA Browser Companion once
+→ accept one bounded sanitized observation
+→ publish one shared Fresh snapshot
+```
+
+The extension permission set remains exactly `activeTab`, `nativeMessaging`,
+and `scripting`, with no host permissions or static content scripts. A cold
+cache never admits Claude. A later transient browser-closed failure may retain
+same-session data as Cached/Stale; route, extension, native-host, schema, or
+authentication uncertainty withdraws it. Disconnect clears UMA-owned Claude
+consent, cache, listener state, and pending handoff artifacts without touching
+Safari login or website data.
+
+One bounded unsigned Safari validation is allowed only with mandatory final
+restoration: disable and unregister the task extension, restore Allow unsigned
+extensions to Off, restart Safari, and prove no task-owned listener, native
+host, process, or temporary evidence remains. Physical VoiceOver interaction,
+Chromium live validation, and signed/store distribution remain deferred.
+
+Delivery is one local commit:
+
+`fix(m5): close Claude browser sync defects`
+
+and one commit-exact package:
+
+`/private/tmp/uma-m5adbg-final-<commit>/UMA.app`
+
+The installed Desktop UMA remains protected. No push, PR, merge, tag, release,
+notarization, deployment, publication, or later Goal is authorized.
+
+### M5ADBG-G1 live acceptance and restoration addendum
+
+The repaired bounded Safari callback passed without retaining any Founder quota
+or reset value. The native handoff accepted one current observation containing
+both account-level windows, exact allowlisted keys, finite percentage-used
+values, and valid-or-unavailable reset classifications. The resulting shared
+snapshot became Fresh, appeared in both the main panel and Desktop Assistant in
+Codex → Claude Code → WorkBuddy order, and later became Stale on the same
+freshness boundary with matching selected-window remaining semantics.
+
+Disconnect withdrew Claude and removed UMA-owned cache, pending observation,
+listener lock, and socket state. The task-owned extension was disabled and
+unregistered, Safari unsigned-development mode was restored to Off, Safari was
+restarted, and no task-owned application, extension, listener, or native-host
+process remained. Safari login and website data were untouched. No Keychain,
+OAuth, token, cookie, identity, raw HTML, broad DOM, chat, project, billing, or
+screenshot path was used or retained.
+
+The final verified automated inventory is 449 UI tests plus 16 bridge tests,
+465 total. The final commit-exact package remains the post-commit delivery
+artifact; Chromium live behavior, signed Safari distribution, and automatic
+background polling remain explicitly deferred.

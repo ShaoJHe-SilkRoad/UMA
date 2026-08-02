@@ -82,6 +82,40 @@ extension AppLanguage {
         }
     }
 
+    func claudeBrowserActionStatus(_ action: ClaudeSettingsAction) -> String {
+        switch (self, action) {
+        case (.english, .checking): "Checking Browser Companion…"
+        case (.english, .connecting): "Opening Claude Usage…"
+        case (.english, .refreshing): "Refreshing…"
+        case (.english, .openingUsage): "Opening Claude Usage…"
+        case (.english, .repairing): "Repairing Browser Companion…"
+        case (.english, .disconnecting): "Disconnecting…"
+        case (.simplifiedChinese, .checking): "正在检查浏览器伴侣…"
+        case (.simplifiedChinese, .connecting): "正在打开 Claude 使用量页面…"
+        case (.simplifiedChinese, .refreshing): "正在刷新…"
+        case (.simplifiedChinese, .openingUsage): "正在打开 Claude 使用量页面…"
+        case (.simplifiedChinese, .repairing): "正在修复浏览器伴侣…"
+        case (.simplifiedChinese, .disconnecting): "正在断开…"
+        }
+    }
+
+    func claudeBrowserError(_ error: ClaudeSettingsSafeError) -> String {
+        switch (self, error) {
+        case (.english, .routeChanged):
+            "Claude's Usage page changed. Browser Sync stopped safely."
+        case (.english, .timedOut):
+            "Claude Browser Sync timed out."
+        case (.english, .ambiguousUsagePage):
+            "Claude Browser Sync rejected an ambiguous Usage page."
+        case (.simplifiedChinese, .routeChanged):
+            "Claude 使用量页面已更改；浏览器同步已安全停止。"
+        case (.simplifiedChinese, .timedOut):
+            "Claude 浏览器同步已超时。"
+        case (.simplifiedChinese, .ambiguousUsagePage):
+            "Claude 浏览器同步已拒绝含糊的使用量页面。"
+        }
+    }
+
     func claudeUpdated(_ date: Date?) -> String {
         guard let date else {
             return switch self {

@@ -97,7 +97,7 @@ actor AgentConnectorRegistry {
         for id in orderedIDs {
             guard let connector = connectors[id] else { continue }
             if admittedIDs.contains(id) {
-                listen(to: connector)
+                await listen(to: connector)
             } else if connector.descriptor.localSourceClass
                         == .browserCompanionUsage,
                       !excludedProviderIDs.contains(id),
@@ -106,7 +106,7 @@ actor AgentConnectorRegistry {
                 // toolbar gesture. Keep the consent-owned listener alive while
                 // the provider remains hidden awaiting that first current read.
                 stoppedSnapshots[id] = nil
-                listen(to: connector)
+                await listen(to: connector)
             } else if connector.descriptor.hasSurfaceAdmissibleReadContract,
                       !excludedProviderIDs.contains(id)
                         || previouslyAdmittedIDs.contains(id),
@@ -145,7 +145,7 @@ actor AgentConnectorRegistry {
                 && $0.descriptor.localSourceClass
                     == .admittedStructuredLocal
         }
-        for connector in passive { listen(to: connector) }
+        for connector in passive { await listen(to: connector) }
         for connector in passive { stoppedSnapshots[connector.id] = nil }
         await withTaskGroup(of: Void.self) { group in
             for connector in passive {
@@ -160,7 +160,7 @@ actor AgentConnectorRegistry {
 
     func startAll() async {
         let registered = orderedIDs.compactMap { connectors[$0] }
-        for connector in registered { listen(to: connector) }
+        for connector in registered { await listen(to: connector) }
         for connector in registered { stoppedSnapshots[connector.id] = nil }
         await withTaskGroup(of: Void.self) { group in
             for connector in registered {
@@ -179,7 +179,7 @@ actor AgentConnectorRegistry {
     ) async throws {
         guard let connector = connectors[id] else { throw AgentConnectorRegistryError.unknownConnector(id) }
         stoppedSnapshots[id] = nil
-        listen(to: connector)
+        await listen(to: connector)
         await connector.refresh(trigger: trigger)
         await receive(await connector.currentSnapshot())
     }
@@ -187,7 +187,7 @@ actor AgentConnectorRegistry {
     func perform(_ command: AgentConnectorCommand, for id: AgentConnectorID) async throws {
         guard let connector = connectors[id] else { throw AgentConnectorRegistryError.unknownConnector(id) }
         stoppedSnapshots[id] = nil
-        listen(to: connector)
+        await listen(to: connector)
         await connector.perform(command)
         let snapshot = await connector.currentSnapshot()
         if command == .disconnect {
@@ -214,11 +214,15 @@ actor AgentConnectorRegistry {
         orderedIDs.compactMap { latest[$0] }
     }
 
-    private func listen(to connector: any AgentUsageConnector) {
+    private func listen(to connector: any AgentUsageConnector) async {
         let id = connector.id
         guard listeners[id] == nil else { return }
+        // Establish the connector-side continuation before returning. The first
+        // browser callback can arrive immediately after an admission scan, so a
+        // fire-and-forget stream subscription could otherwise lose that one
+        // current observation and keep the provider hidden.
+        let stream = await connector.snapshots()
         listeners[id] = Task { [weak self] in
-            let stream = await connector.snapshots()
             for await snapshot in stream {
                 guard !Task.isCancelled else { return }
                 await self?.receive(snapshot)

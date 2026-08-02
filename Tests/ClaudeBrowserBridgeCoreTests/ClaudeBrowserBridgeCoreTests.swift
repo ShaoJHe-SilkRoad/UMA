@@ -140,9 +140,9 @@ struct ClaudeBrowserBridgeCoreTests {
 
     @Test("owner-only file handoff delivers one normalized observation without network access")
     func fileHandoffRoundTrip() throws {
-        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        let root = URL(fileURLWithPath: "/private/tmp", isDirectory: true)
             .appendingPathComponent(
-                "com.silkrd.uma.claude-browser.handoff.\(getpid())",
+                "uma-m5adbg-bridge-handoff.\(getpid())",
                 isDirectory: true
             )
         try? FileManager.default.removeItem(at: root)
@@ -167,9 +167,9 @@ struct ClaudeBrowserBridgeCoreTests {
 
     @Test("a second listener cannot replace or disrupt the active listener lock")
     func fileHandoffRejectsSecondListener() throws {
-        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        let root = URL(fileURLWithPath: "/private/tmp", isDirectory: true)
             .appendingPathComponent(
-                "com.silkrd.uma.claude-browser.handoff-lock.\(getpid())",
+                "uma-m5adbg-bridge-handoff-lock.\(getpid())",
                 isDirectory: true
             )
         try? FileManager.default.removeItem(at: root)
@@ -194,6 +194,72 @@ struct ClaudeBrowserBridgeCoreTests {
         try ClaudeBrowserFileHandoffWriter.write(payload, endpoint: endpoint)
         #expect(signal.wait(timeout: .now() + 2) == .success)
         #expect(received.value == envelope())
+    }
+
+    @Test("pending observations are never replaced before the listener consumes them")
+    func fileHandoffRejectsPendingReplacement() throws {
+        let root = URL(fileURLWithPath: "/private/tmp", isDirectory: true)
+            .appendingPathComponent(
+                "uma-m5adbg-bridge-pending-exclusion.\(getpid())",
+                isDirectory: true
+            )
+        try? FileManager.default.removeItem(at: root)
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let endpoint = ClaudeBrowserFileHandoffEndpoint(directoryPath: root.path)
+        let lockDescriptor = open(
+            endpoint.listenerLockPath,
+            O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC,
+            mode_t(0o600)
+        )
+        #expect(lockDescriptor >= 0)
+        defer {
+            flock(lockDescriptor, LOCK_UN)
+            close(lockDescriptor)
+        }
+        #expect(flock(lockDescriptor, LOCK_EX | LOCK_NB) == 0)
+
+        let first = try ClaudeBrowserMessageDecoder.encode(envelope(fiveHour: 11, weekly: 22))
+        try first.write(to: URL(fileURLWithPath: endpoint.pendingPath))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: endpoint.pendingPath
+        )
+        let second = try ClaudeBrowserMessageDecoder.encode(envelope(fiveHour: 33, weekly: 44))
+
+        #expect(throws: ClaudeBrowserBridgeError.socketWriteFailed) {
+            try ClaudeBrowserFileHandoffWriter.write(second, endpoint: endpoint)
+        }
+        #expect(try Data(contentsOf: URL(fileURLWithPath: endpoint.pendingPath)) == first)
+        #expect(!FileManager.default.fileExists(atPath: endpoint.temporaryPath))
+    }
+
+    @Test("handoff rejects a symlink in the task-owned path")
+    func fileHandoffRejectsSymlinkTraversal() throws {
+        let base = URL(fileURLWithPath: "/private/tmp", isDirectory: true)
+            .appendingPathComponent(
+                "uma-m5adbg-bridge-symlink.\(getpid())",
+                isDirectory: true
+            )
+        try? FileManager.default.removeItem(at: base)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let actual = base.appendingPathComponent("actual", isDirectory: true)
+        let alias = base.appendingPathComponent("alias", isDirectory: true)
+        try FileManager.default.createDirectory(at: actual, withIntermediateDirectories: false)
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: actual)
+
+        let server = ClaudeBrowserFileHandoffServer(
+            endpoint: ClaudeBrowserFileHandoffEndpoint(directoryPath: alias.path)
+        ) { _ in }
+        #expect(throws: ClaudeBrowserBridgeError.socketUnsafe) {
+            try server.start()
+        }
     }
 
     @Test("production handoff remains inside one user-private Application Support directory")

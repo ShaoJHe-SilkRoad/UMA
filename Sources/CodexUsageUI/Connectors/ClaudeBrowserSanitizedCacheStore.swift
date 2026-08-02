@@ -38,14 +38,32 @@ actor ClaudeBrowserSanitizedCacheStore {
     }
 
     func load() -> Data? {
+        let directory = url.deletingLastPathComponent()
         guard validateNoSymlinkTraversal(to: url),
               (try? validateItem(
+                  at: directory,
+                  expectedType: .typeDirectory,
+                  permissions: Self.directoryPermissions
+              )) != nil
+        else { return nil }
+
+        let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        guard descriptor >= 0 else { return nil }
+        defer { Darwin.close(descriptor) }
+
+        guard let metadata = try? validateDescriptor(
+            descriptor,
+            expectedType: .typeRegular,
+            permissions: Self.filePermissions
+        ),
+              metadata.st_size > 0,
+              metadata.st_size <= ClaudeBrowserBridgeContract.maximumMessageBytes,
+              let data = try? readExactly(Int(metadata.st_size), from: descriptor),
+              (try? validateItemMatchesDescriptor(
                   at: url,
-                  expectedType: .typeRegular,
+                  descriptorMetadata: metadata,
                   permissions: Self.filePermissions
               )) != nil,
-              let data = try? Data(contentsOf: url),
-              data.count <= ClaudeBrowserBridgeContract.maximumMessageBytes,
               let envelope = try? ClaudeBrowserMessageDecoder.decode(data),
               let canonical = try? ClaudeBrowserMessageDecoder.encode(envelope)
         else { return nil }
@@ -60,7 +78,7 @@ actor ClaudeBrowserSanitizedCacheStore {
         else { throw StoreError.rejectedPayload }
 
         let directory = url.deletingLastPathComponent()
-        guard validateNoSymlinkTraversal(to: directory) else {
+        guard validateNoSymlinkTraversal(to: url) else {
             throw StoreError.invalidPath
         }
         if fileManager.fileExists(atPath: directory.path) {
@@ -93,11 +111,30 @@ actor ClaudeBrowserSanitizedCacheStore {
                 permissions: Self.filePermissions
             )
         }
-        try canonical.write(to: url, options: .atomic)
-        try fileManager.setAttributes(
-            [.posixPermissions: Self.filePermissions],
-            ofItemAtPath: url.path
+
+        let temporaryURL = URL(fileURLWithPath: url.path + ".tmp")
+        try removeOwnedRegularFileIfPresent(at: temporaryURL)
+        let descriptor = open(
+            temporaryURL.path,
+            O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+            mode_t(Self.filePermissions)
         )
+        guard descriptor >= 0 else { throw StoreError.invalidPath }
+        var removeTemporary = true
+        defer {
+            Darwin.close(descriptor)
+            if removeTemporary { unlink(temporaryURL.path) }
+        }
+        _ = try validateDescriptor(
+            descriptor,
+            expectedType: .typeRegular,
+            permissions: Self.filePermissions
+        )
+        try writeAll(canonical, to: descriptor)
+        guard fsync(descriptor) == 0,
+              rename(temporaryURL.path, url.path) == 0
+        else { throw StoreError.invalidPath }
+        removeTemporary = false
         try validateItem(
             at: url,
             expectedType: .typeRegular,
@@ -106,16 +143,114 @@ actor ClaudeBrowserSanitizedCacheStore {
     }
 
     func clear() throws {
-        guard fileManager.fileExists(atPath: url.path) else { return }
+        var initial = stat()
+        if lstat(url.path, &initial) != 0 {
+            guard errno == ENOENT else { throw StoreError.invalidPath }
+            return
+        }
+        guard (initial.st_mode & S_IFMT) == S_IFREG else {
+            throw StoreError.wrongType
+        }
+        let directory = url.deletingLastPathComponent()
         guard validateNoSymlinkTraversal(to: url) else {
             throw StoreError.invalidPath
         }
         try validateItem(
-            at: url,
+            at: directory,
+            expectedType: .typeDirectory,
+            permissions: Self.directoryPermissions
+        )
+        let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        guard descriptor >= 0 else { throw StoreError.invalidPath }
+        defer { Darwin.close(descriptor) }
+        let opened = try validateDescriptor(
+            descriptor,
             expectedType: .typeRegular,
             permissions: Self.filePermissions
         )
-        try fileManager.removeItem(at: url)
+        var current = stat()
+        guard lstat(url.path, &current) == 0,
+              (current.st_mode & S_IFMT) == S_IFREG,
+              current.st_uid == ownerID,
+              Int(current.st_mode & 0o777) == Self.filePermissions,
+              current.st_dev == opened.st_dev,
+              current.st_ino == opened.st_ino,
+              unlink(url.path) == 0
+        else { throw StoreError.invalidPath }
+    }
+
+    private func validateDescriptor(
+        _ descriptor: Int32,
+        expectedType: FileAttributeType,
+        permissions: Int
+    ) throws -> stat {
+        var metadata = stat()
+        guard fstat(descriptor, &metadata) == 0 else {
+            throw StoreError.invalidPath
+        }
+        let expectedMode: mode_t = expectedType == .typeDirectory ? S_IFDIR : S_IFREG
+        guard metadata.st_mode & S_IFMT == expectedMode else {
+            throw StoreError.wrongType
+        }
+        guard metadata.st_uid == ownerID else {
+            throw StoreError.wrongOwner
+        }
+        guard Int(metadata.st_mode & 0o777) == permissions else {
+            throw StoreError.wrongPermissions
+        }
+        return metadata
+    }
+
+    private func removeOwnedRegularFileIfPresent(at location: URL) throws {
+        var metadata = stat()
+        if lstat(location.path, &metadata) != 0 {
+            guard errno == ENOENT else { throw StoreError.invalidPath }
+            return
+        }
+        guard (metadata.st_mode & S_IFMT) == S_IFREG else {
+            throw StoreError.wrongType
+        }
+        guard metadata.st_uid == ownerID else { throw StoreError.wrongOwner }
+        guard Int(metadata.st_mode & 0o777) == Self.filePermissions else {
+            throw StoreError.wrongPermissions
+        }
+        guard unlink(location.path) == 0 else { throw StoreError.invalidPath }
+    }
+
+    private func writeAll(_ data: Data, to descriptor: Int32) throws {
+        try data.withUnsafeBytes { bytes in
+            guard let base = bytes.baseAddress else { throw StoreError.invalidPath }
+            var offset = 0
+            while offset < bytes.count {
+                let written = Darwin.write(
+                    descriptor,
+                    base.advanced(by: offset),
+                    bytes.count - offset
+                )
+                guard written > 0 else { throw StoreError.invalidPath }
+                offset += written
+            }
+        }
+    }
+
+    private func readExactly(_ count: Int, from descriptor: Int32) throws -> Data {
+        var data = Data(count: count)
+        let bytesRead = data.withUnsafeMutableBytes { bytes -> Int in
+            guard let base = bytes.baseAddress else { return -1 }
+            var offset = 0
+            while offset < count {
+                let current = Darwin.read(
+                    descriptor,
+                    base.advanced(by: offset),
+                    count - offset
+                )
+                guard current > 0 else { return -1 }
+                offset += current
+            }
+            return offset
+        }
+        guard bytesRead == count else { throw StoreError.invalidPath }
+        return data
     }
 
     private func validateItem(
@@ -143,9 +278,34 @@ actor ClaudeBrowserSanitizedCacheStore {
         }
     }
 
+    private func validateItemMatchesDescriptor(
+        at location: URL,
+        descriptorMetadata: stat,
+        permissions: Int
+    ) throws {
+        var pathMetadata = stat()
+        let result = location.withUnsafeFileSystemRepresentation { path in
+            guard let path else { return Int32(-1) }
+            return Darwin.lstat(path, &pathMetadata)
+        }
+        guard result == 0,
+              (pathMetadata.st_mode & S_IFMT) == S_IFREG,
+              pathMetadata.st_uid == ownerID,
+              Int(pathMetadata.st_mode & 0o777) == permissions,
+              pathMetadata.st_dev == descriptorMetadata.st_dev,
+              pathMetadata.st_ino == descriptorMetadata.st_ino
+        else { throw StoreError.invalidPath }
+    }
+
     private func validateNoSymlinkTraversal(to location: URL) -> Bool {
         var current = "/"
-        for component in (location.path as NSString).pathComponents.dropFirst() {
+        // Validate every parent component. The leaf is checked separately with
+        // lstat/open(O_NOFOLLOW), which preserves the more precise wrongType
+        // failure for a symlink placed at the cache file itself.
+        for component in (location.path as NSString).pathComponents
+            .dropFirst()
+            .dropLast()
+        {
             current = (current as NSString).appendingPathComponent(component)
             var metadata = stat()
             let result = current.withCString { Darwin.lstat($0, &metadata) }

@@ -18,6 +18,21 @@ enum ClaudeSettingsPresentationState: Equatable, Sendable {
     case failed
 }
 
+enum ClaudeSettingsAction: Equatable, Sendable {
+    case checking
+    case connecting
+    case refreshing
+    case openingUsage
+    case repairing
+    case disconnecting
+}
+
+enum ClaudeSettingsSafeError: Equatable, Sendable {
+    case routeChanged
+    case timedOut
+    case ambiguousUsagePage
+}
+
 struct ClaudeSourceTransparency: Equatable, Sendable {
     let source = "Claude official Usage page · Browser Sync · Experimental"
     let login = "System default browser"
@@ -52,7 +67,8 @@ final class ClaudeBrowserConsentStore {
 public final class ClaudeBrowserSettingsModel: ObservableObject {
     @Published private(set) var state: ClaudeSettingsPresentationState
     @Published private(set) var actionInProgress = false
-    @Published private(set) var safeError: String?
+    @Published private(set) var activeAction: ClaudeSettingsAction?
+    @Published private(set) var safeError: ClaudeSettingsSafeError?
     @Published private(set) var consentGranted: Bool
 
     let sourceTransparency = ClaudeSourceTransparency()
@@ -89,36 +105,38 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     deinit { observationTask?.cancel() }
 
     func checkCompanion() {
-        run { connector in await connector.checkCompanion() }
+        run(.checking) { connector in await connector.checkCompanion() }
     }
 
     func connectWithConsent() {
         consentStore.consentGranted = true
         consentGranted = true
-        run { connector in await connector.connect(openUsagePage: true) }
+        run(.connecting) { connector in await connector.connect(openUsagePage: true) }
     }
 
     func syncNow() {
-        run { connector in await connector.syncNow() }
+        run(.refreshing) { connector in await connector.syncNow() }
     }
 
     func openUsagePage() {
-        run { connector in await connector.openUsagePage() }
+        run(.openingUsage) { connector in await connector.openUsagePage() }
     }
 
     func repairCompanion() {
-        run { connector in await connector.repairCompanion() }
+        run(.repairing) { connector in await connector.repairCompanion() }
     }
 
     func disconnect() {
-        run { connector in await connector.disconnect() }
+        run(.disconnecting) { connector in await connector.disconnect() }
     }
 
     private func run(
+        _ action: ClaudeSettingsAction,
         _ operation: @escaping @Sendable (ClaudeCodeUsageConnector) async -> Void
     ) {
         guard !actionInProgress else { return }
         actionInProgress = true
+        activeAction = action
         safeError = nil
         let connector = self.connector
         Task {
@@ -130,6 +148,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
                 snapshot: snapshot
             )
             await refreshAdmissions()
+            activeAction = nil
             actionInProgress = false
         }
     }
@@ -138,6 +157,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         lifecycle: ClaudeConnectorLifecycleState,
         snapshot: AgentUsageSnapshot
     ) {
+        safeError = nil
         state = switch lifecycle {
         case .disconnected: .disconnected
         case .checking: .checking
@@ -155,11 +175,11 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         case .failed: .failed
         }
         if lifecycle == .routeChanged {
-            safeError = "Claude's Usage page changed. Browser Sync stopped safely."
+            safeError = .routeChanged
         } else if snapshot.safeFailure == .timedOut {
-            safeError = "Claude Browser Sync timed out."
+            safeError = .timedOut
         } else if snapshot.safeFailure == .malformedResponse {
-            safeError = "Claude Browser Sync rejected an ambiguous Usage page."
+            safeError = .ambiguousUsagePage
         }
     }
 }

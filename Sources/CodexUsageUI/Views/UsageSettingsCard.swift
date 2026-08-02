@@ -552,7 +552,8 @@ private struct ClaudeBrowserSettingsSection: View {
 
             HStack(spacing: 8) {
                 primaryAction
-                if model.consentGranted {
+                if model.consentGranted,
+                   model.state != .waitingForUsagePage {
                     Button(language == .simplifiedChinese ? "打开使用量页面" : "Open Usage Page") {
                         model.openUsagePage()
                     }
@@ -573,8 +574,12 @@ private struct ClaudeBrowserSettingsSection: View {
             }
             .disabled(model.actionInProgress)
 
+            if showingConsent, !model.consentGranted {
+                consentConfirmation
+            }
+
             if let safeError = model.safeError {
-                Text(safeError)
+                Text(language.claudeBrowserError(safeError))
                     .font(AppTypography.font(9, language: language))
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
@@ -618,23 +623,68 @@ private struct ClaudeBrowserSettingsSection: View {
         .onAppear {
             model.checkCompanion()
         }
-        .alert(
-            language == .simplifiedChinese
-                ? "启用 Claude 浏览器同步？"
-                : "Enable Claude Browser Sync?",
-            isPresented: $showingConsent
-        ) {
-            Button(language == .simplifiedChinese ? "取消" : "Cancel", role: .cancel) {}
-            Button(language == .simplifiedChinese ? "继续" : "Continue") {
-                model.connectWithConsent()
-            }
-        } message: {
+    }
+
+    private var consentConfirmation: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(
+                language == .simplifiedChinese
+                    ? "启用 Claude 浏览器同步？"
+                    : "Enable Claude Browser Sync?"
+            )
+            .font(AppTypography.font(10.5, weight: .semibold, language: language))
+
             Text(language.claudeConsentDisclosure)
+                .font(AppTypography.font(9, language: language))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Button(language == .simplifiedChinese ? "取消" : "Cancel") {
+                    showingConsent = false
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("claude.browser.consent.cancel")
+
+                Button(language == .simplifiedChinese ? "继续" : "Continue") {
+                    showingConsent = false
+                    model.connectWithConsent()
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("claude.browser.consent.continue")
+            }
         }
+        .padding(9)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(.quaternary.opacity(0.7))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(
+                    Color(nsColor: .separatorColor).opacity(0.45),
+                    lineWidth: 0.5
+                )
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("claude.browser.consent")
     }
 
     @ViewBuilder
     private var stateSummary: some View {
+        if let action = model.activeAction {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(language.claudeBrowserActionStatus(action))
+            }
+            .accessibilityElement(children: .combine)
+        } else {
+            stateSummaryContent
+        }
+    }
+
+    @ViewBuilder
+    private var stateSummaryContent: some View {
         switch model.state {
         case .disconnected:
             Text(language.claudeNotConfigured)
