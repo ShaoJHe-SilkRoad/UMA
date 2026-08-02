@@ -1,6 +1,44 @@
 # UMA M5 Claude Admission Decision
 
-Date: 2026-07-28
+Date: 2026-07-31
+
+## Current M5-DESKTOP-D1 decision
+
+**DESKTOP LOCAL NO-GO — STATUSLINE NOT EXECUTED**
+
+The bounded invocation-first diagnostic conclusively classified the completed
+Human-controlled Claude Desktop Code Local response as **Outcome A**:
+
+- invocation marker: absent;
+- JSON parse: not reached;
+- `rate_limits`: unobserved;
+- five-hour window: unobserved;
+- seven-day window: unobserved;
+- production relay delivery: not attempted;
+- connector delivery: no packet existed to accept, reject, or lose.
+
+The temporary command was correctly installed before the newly opened Desktop
+Local session, its marker-first behavior was proven independently of quota
+validity, and no managed-policy or neutral-folder override blocked it. The
+absence is therefore a Desktop callback absence, not evidence that the
+Desktop payload lacks quota fields and not an UMA relay defect.
+
+The exact prior Claude settings bytes, owner, and mode were restored. All
+task-owned probe, marker, backup, temporary settings, and neutral-folder
+artifacts were removed, and the task-owned UMA candidate was stopped. No
+prompt, response, raw payload, exact quota, reset time, credential, identity,
+session, transcript, private data, or account-web state was accessed or
+retained.
+
+The command-line local source remains separately proven. The Desktop Local
+route is NO-GO for automatic status-line delivery on current evidence. An
+account-web fallback is now genuinely required if automatic Claude Desktop
+usage remains a product requirement, but no fallback was activated or
+implemented in M5-DESKTOP-D1.
+
+The existing 18-file M5-LIVE-R1 product diff remains preserved and unstaged;
+this decision adds only the two M5 source-admission records. Exactly one next
+task is **M5-WEB-G1 — Claude isolated account-web usage-source dossier**.
 
 ## Current M5-SETUP-G1R decision
 
@@ -240,3 +278,66 @@ session, transcript, workspace content, credential, or provider task content
 entered Git.
 
 Exactly one next task is **M5-G2**.
+
+## M5-WEB-G1 superseding account-web decision
+
+The account-web fallback is rejected. The provider's Google sign-in failed in
+the embedded WebKit user agent, and no retry or bypass is allowed. No
+authenticated Usage route or live Usage observation was obtained.
+
+The isolated prototype used a nonpersistent store and cleared to zero retained
+records, but source audit found two admission blockers: App Sandbox was absent,
+and periodic `evaluateJavaScript` inspected bounded login-page DOM text before
+route admission. It did not inspect credential values or persist cookies,
+storage, identity, raw HTML, DOM, or screenshots. The exact prototype and its
+task-owned artifacts were deleted.
+
+`ASWebAuthenticationSession` remains only a documented Apple capability.
+Without an official Claude callback and Usage authorization contract, it is
+not implemented or admitted.
+
+**NO-GO — SAFE ACCOUNT-WEB AUTHENTICATION NOT AVAILABLE**
+
+Exactly one next task is a **Founder decision** about retaining the optional
+terminal CLI integration, marking Claude Desktop usage unsupported, or closing
+M5 without Claude production support.
+
+## M5-OAUTH-G1 Founder override
+
+The Founder has superseded the preceding product-source conclusion for the
+bounded M5-OAUTH-G1 scope. Claude remains an UMA provider through one
+Experimental provider-managed OAuth quota source, subject to complete offline,
+live, privacy, and package acceptance.
+
+The selectable production source is now `claude.providerManagedOAuthQuota`
+with display source `Existing Claude login`. The status-line transport and
+embedded account-web route remain retired. No API key, copied token, manual
+quota, browser-cookie import, embedded login, provider task, or account mutation
+is admitted.
+
+Final GO, PASS WITH RISKS, or FAIL remains pending implementation and the
+Founder-authorized live gate. Historical decisions above remain evidence and
+are not rewritten.
+
+## M5-BROWSER-G1 Founder replacement
+
+The Founder permanently rejects the M5-OAUTH-G1 Keychain/broker route. Its
+implementation and privacy records remain historical evidence only. No
+provider credential, token-derived continuity value, bearer header, or private
+quota request is admitted.
+
+The embedded account-web NO-GO also remains in force. Browser Sync is a new
+system-browser architecture: the browser controls official authentication, an
+UMA Browser Companion runs only on the exact verified personal Usage route,
+and UMA receives only a bounded normalized quota message.
+
+**PASS WITH RISKS — CURRENT SAFARI BROWSER SYNC ADMITTED**
+
+Initial admission still requires explicit Browser Sync consent, a supported
+and verified companion, exact-route verification, a current valid observation,
+at least one account-level window, and main/Assistant parity. Old cache alone
+cannot establish admission. The current Safari live gate produced matching
+five-hour and seven-day windows, honestly unavailable resets, Fresh shared
+surface parity, and provider isolation without retaining exact values. The
+remaining bounded risks are unverified Chromium and signed production/store
+distribution; no rejected historical route is a fallback.

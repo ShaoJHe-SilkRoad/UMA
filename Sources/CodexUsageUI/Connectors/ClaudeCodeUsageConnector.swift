@@ -1,29 +1,83 @@
-import ClaudeStatusLineCore
+import ClaudeBrowserBridgeProtocol
+import ClaudeBrowserNativeHostCore
 import Foundation
 
-enum ClaudeConnectorLifecycleState: String, Equatable, Sendable {
-    case notInstalled
-    case installedWaiting
-    case fresh
-    case cached
-    case stale
-    case unsupported
+enum ClaudeConnectorLifecycleState: Equatable, Sendable {
+    case disconnected
+    case checking
+    case waitingForUsagePage
+    case fresh(Date)
+    case cached(Date)
+    case stale(Date)
+    case companionDisabled
+    case companionOutdated
+    case unsupportedBrowser
+    case browserUnavailable
+    case nativeHostMissing
+    case nativeHostMismatched
+    case routeChanged
     case failed
-    case repairRequired
+}
+
+enum ClaudeBrowserCompanionHealth: Equatable, Sendable {
+    case ready
+    case disabled
+    case outdated
+    case unsupportedBrowser
+    case browserUnavailable
+    case nativeHostMissing
+    case nativeHostMismatched
+}
+
+struct ClaudeBrowserProductionIntegration: Sendable {
+    typealias ObservationHandler = @Sendable (
+        Result<ClaudeBrowserObservationEnvelope, ClaudeBrowserBridgeError>
+    ) async -> Void
+
+    let startListening: @Sendable (@escaping ObservationHandler) async -> Void
+    let stopListening: @Sendable () async -> Void
+    let checkHealth: @Sendable () async -> ClaudeBrowserCompanionHealth
+    let openUsagePage: @Sendable () async -> Bool
+    let repairCompanion: @Sendable () async -> ClaudeBrowserCompanionHealth
+
+    static func unavailable() -> Self {
+        Self(
+            startListening: { _ in },
+            stopListening: {},
+            checkHealth: { .nativeHostMissing },
+            openUsagePage: { false },
+            repairCompanion: { .nativeHostMissing }
+        )
+    }
+}
+
+struct ClaudeBrowserConnectorDiagnostics: Equatable, Sendable {
+    let acceptedObservationCount: Int
+    let rejectedObservationCount: Int
+    let pageOpenCount: Int
+    let coalescedActionCount: Int
+    let listenerStartCount: Int
 }
 
 actor ClaudeCodeUsageConnector: AgentUsageConnector {
-    static let connectorID = AgentConnectorID(
-        rawValue: "claude.statusLine"
-    )!
+    typealias ConsentReader = @Sendable () async -> Bool
+    typealias ConsentClearer = @Sendable () async -> Void
+    typealias CacheReader = @Sendable () async -> Data?
+    typealias CacheWriter = @Sendable (Data) async -> Void
+    typealias CacheClearer = @Sendable () async -> Void
+    typealias Now = @Sendable () -> Date
+
+    static let connectorID = AgentConnectorID(rawValue: "claude.browserSync")!
     static let freshnessInterval: TimeInterval = 5 * 60
+    static let maximumRetainedAge: TimeInterval = 30 * 60
+    static let maximumFutureSkew: TimeInterval = 30
+
     private static let capabilities: Set<AgentConnectorCapability> = [
         .connect,
         .reconnect,
         .refresh,
         .disconnect,
         .rateLimits,
-        .passiveLocalAvailability,
         .sanitizedLastValidRestore,
     ]
 
@@ -31,201 +85,253 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
     nonisolated let descriptor = AgentConnectorDescriptor(
         id: connectorID,
         providerName: "Claude Code",
-        officialSource: "Official local status line",
-        sourceTier: .officialStructuredHook,
-        sourceVersion: "1",
+        officialSource: "Claude official Usage page · Browser Sync · Experimental",
+        sourceTier: .authorizedReadOnlyRemote,
+        sourceVersion: "browser-1",
         supportedScopes: [.account],
         capabilities: capabilities,
         configurationRequirements: [
+            .userAuthorization,
             .officialManagedSession,
-            .privacySafeLocalMetadataAccess,
+            .explicitlyAuthorizedReadOnlyRemoteAccess,
         ],
         privacyAllowlist: [
-            "schemaVersion",
-            "claudeVersion",
             "fiveHourUsedPercentage",
-            "fiveHourResetEpoch",
+            "fiveHourResetAt",
             "sevenDayUsedPercentage",
-            "sevenDayResetEpoch",
+            "sevenDayResetAt",
+            "modelSpecificWeeklyUsedPercentage",
+            "modelSpecificWeeklyResetAt",
             "observedAt",
         ],
         supportsRestore: false,
-        supportsUninstall: true,
+        supportsUninstall: false,
         unsupportedFields: [
-            "sessionID",
-            "sessionName",
-            "promptID",
-            "transcriptPath",
-            "workspacePath",
-            "repository",
             "accountIdentity",
-            "prompt",
-            "response",
-            "task",
-            "toolData",
-            "rawJSON",
+            "billing",
+            "payment",
             "credentials",
             "tokens",
+            "cookies",
+            "browserSession",
+            "prompt",
+            "response",
+            "transcript",
+            "project",
+            "sourceCode",
+            "rawHTML",
+            "rawDOM",
+            "rawJSON",
         ],
         expectedRuntime: .none,
-        localSourceClass: .admittedStructuredLocal,
-        authenticationMethod: .officialApplicationOwnedSession,
-        usageReadContract: .currentStructuredLocalRead,
+        localSourceClass: .browserCompanionUsage,
+        authenticationMethod: .systemBrowserSession,
+        usageReadContract: .currentBrowserCompanionUsageRead,
         loginAssistance: .none
     )!
 
-    typealias ConfigurationCheck =
-        @Sendable () async -> ClaudeStatusLineConfigurationCheck
+    private let integration: ClaudeBrowserProductionIntegration
+    private let hasConsent: ConsentReader
+    private let clearConsent: ConsentClearer
+    private let readCache: CacheReader
+    private let writeCache: CacheWriter
+    private let clearCache: CacheClearer
+    private let now: Now
 
-    private let server: ClaudeStatusLineSocketServer
-    private let configurationCheck: ConfigurationCheck
-    private let snapshotStore: AgentConnectorSnapshotStore?
-    private let now: @Sendable () -> Date
     private var snapshot: AgentUsageSnapshot
-    private var lifecycle: ClaudeConnectorLifecycleState = .notInstalled
+    private var lastGood: AgentUsageSnapshot?
+    private var priorSessionCache: AgentUsageSnapshot?
+    private var currentSessionValidated = false
+    private var lifecycle: ClaudeConnectorLifecycleState = .disconnected
     private var continuation: AsyncStream<AgentUsageSnapshot>.Continuation?
     private var listenerStarted = false
-    private var acceptedPacketCount = 0
-    private var rejectedPacketCount = 0
-    private var publishedSnapshotCount = 0
-    private var restoredSnapshotCount = 0
-    private var didAttemptCacheRestore = false
-    private var configurationRefreshTask:
-        Task<ClaudeStatusLineConfigurationCheck, Never>?
+    private var cacheLoaded = false
+    private var actionInFlight = false
+    private var retentionTask: Task<Void, Never>?
+    private var acceptedObservationCount = 0
+    private var rejectedObservationCount = 0
+    private var pageOpenCount = 0
+    private var coalescedActionCount = 0
+    private var listenerStartCount = 0
 
     init(
-        socketURL: URL = ClaudeStatusLineSocketPaths.socketURL(),
-        configurationCheck: @escaping ConfigurationCheck,
-        snapshotStore: AgentConnectorSnapshotStore? = nil,
-        now: @escaping @Sendable () -> Date = Date.init
+        integration: ClaudeBrowserProductionIntegration,
+        hasConsent: @escaping ConsentReader,
+        clearConsent: @escaping ConsentClearer = {},
+        readCache: @escaping CacheReader = { nil },
+        writeCache: @escaping CacheWriter = { _ in },
+        clearCache: @escaping CacheClearer = {},
+        now: @escaping Now = Date.init
     ) {
-        server = ClaudeStatusLineSocketServer(socketURL: socketURL)
-        self.configurationCheck = configurationCheck
-        self.snapshotStore = snapshotStore
+        self.integration = integration
+        self.hasConsent = hasConsent
+        self.clearConsent = clearConsent
+        self.readCache = readCache
+        self.writeCache = writeCache
+        self.clearCache = clearCache
         self.now = now
         snapshot = Self.unavailableSnapshot(
-            state: .inactive,
-            failure: .unavailable,
+            state: .authenticationRequired,
+            failure: .authorizationRequired,
             capturedAt: now()
         )
     }
 
     static func production(
-        snapshotStore: AgentConnectorSnapshotStore = AgentConnectorSnapshotStore()
+        integration: ClaudeBrowserProductionIntegration = .unavailable(),
+        hasConsent: @escaping ConsentReader = { false },
+        clearConsent: @escaping ConsentClearer = {},
+        readCache: @escaping CacheReader = { nil },
+        writeCache: @escaping CacheWriter = { _ in },
+        clearCache: @escaping CacheClearer = {}
     ) -> ClaudeCodeUsageConnector {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let applicationSupport = home
-            .appendingPathComponent("Library", isDirectory: true)
-            .appendingPathComponent(
-                "Application Support",
-                isDirectory: true
-            )
-        let helper = Bundle.main.bundleURL
-            .appendingPathComponent("Contents", isDirectory: true)
-            .appendingPathComponent("Helpers", isDirectory: true)
-            .appendingPathComponent(
-                "ClaudeStatusLineRelay",
-                isDirectory: false
-            )
-        let command = "'"
-            + helper.path.replacingOccurrences(
-                of: "'",
-                with: "'\"'\"'"
-            )
-            + "'"
-        let manager = ClaudeStatusLineConfigurationManager(
-            paths: ClaudeStatusLineConfigurationPaths(
-                homeDirectory: home,
-                applicationSupportDirectory: applicationSupport
-            ),
-            relayCommand: command
-        )
-        return ClaudeCodeUsageConnector(
-            configurationCheck: {
-                manager.check()
-            },
-            snapshotStore: snapshotStore
+        ClaudeCodeUsageConnector(
+            integration: integration,
+            hasConsent: hasConsent,
+            clearConsent: clearConsent,
+            readCache: readCache,
+            writeCache: writeCache,
+            clearCache: clearCache
         )
     }
 
     func permitsRead(for trigger: ProviderEligibilityScanTrigger) async -> Bool {
         _ = trigger
-        return true
+        return await hasConsent()
     }
 
     func probe() async -> AgentConnectorProbe {
-        await refreshConfigurationState()
-        return AgentConnectorProbe(
-            state: snapshot.state,
-            safeFailure: snapshot.safeFailure
-        )
+        guard await hasConsent() else {
+            return AgentConnectorProbe(
+                state: .authenticationRequired,
+                safeFailure: .authorizationRequired
+            )
+        }
+        await loadSanitizedCacheIfNeeded()
+        await refreshAge()
+        if snapshot.hasValidData {
+            return AgentConnectorProbe(state: snapshot.state, safeFailure: snapshot.safeFailure)
+        }
+        let health = await integration.checkHealth()
+        apply(health)
+        return AgentConnectorProbe(state: probeState(for: health), safeFailure: snapshot.safeFailure)
     }
 
+    /// Starting the connector starts only the local listener. It never opens,
+    /// focuses, reloads, or authenticates a browser page.
     func start() async {
+        guard await hasConsent() else { return }
+        await loadSanitizedCacheIfNeeded()
         guard !listenerStarted else { return }
-        do {
-            try server.start { [weak self] packet in
-                await self?.receive(packet)
-            } invalidHandler: { [weak self] in
-                await self?.receiveInvalidPacket()
-            }
-            listenerStarted = true
-            if lifecycle == .notInstalled {
-                await refreshConfigurationState()
-            }
-        } catch {
-            lifecycle = .failed
-            replace(
-                Self.unavailableSnapshot(
-                    state: .failed,
-                    failure: .unavailable,
-                    capturedAt: now()
-                )
-            )
+        listenerStarted = true
+        listenerStartCount += 1
+        if !snapshot.hasValidData {
+            lifecycle = .waitingForUsagePage
+            replace(Self.unavailableSnapshot(
+                state: .waitingForFirstResponse,
+                failure: nil,
+                capturedAt: now()
+            ))
+        }
+        let connector = self
+        await integration.startListening { result in
+            await connector.receive(result)
         }
     }
 
-    func refresh() async {
-        await refreshConfigurationState()
-    }
+    func refresh() async { await syncNow() }
 
     func refresh(trigger: CodexRefreshTrigger) async {
-        _ = trigger
-        await refreshConfigurationState()
+        // Page extraction is interaction-driven. Timer refreshes never open or
+        // focus the browser and cannot multiply provider reads.
+        guard trigger != .timer else {
+            await refreshAge()
+            return
+        }
+        await syncNow()
     }
 
     func perform(_ command: AgentConnectorCommand) async {
         switch command {
         case .connect:
             await start()
-            await refreshConfigurationState()
         case .reconnect:
-            await invalidateSanitizedSnapshot()
-            await start()
-            await refreshConfigurationState()
+            await connect(openUsagePage: true)
         case .refresh:
-            await refreshConfigurationState()
+            await syncNow()
         case .disconnect:
-            await invalidateSanitizedSnapshot()
-            await stop()
+            await disconnect()
         }
     }
 
-    func stop() async {
-        server.stop()
+    func checkCompanion() async {
+        guard await hasConsent() else {
+            transitionToDisconnected()
+            return
+        }
+        lifecycle = .checking
+        apply(await integration.checkHealth())
+    }
+
+    func connect(openUsagePage: Bool) async {
+        guard await hasConsent() else {
+            transitionToDisconnected()
+            return
+        }
+        await start()
+        await runCoalescedAction(openUsagePage: openUsagePage, repairing: false)
+    }
+
+    func syncNow() async {
+        guard await hasConsent() else {
+            transitionToDisconnected()
+            return
+        }
+        await start()
+        await runCoalescedAction(openUsagePage: true, repairing: false)
+    }
+
+    func openUsagePage() async {
+        guard await hasConsent() else {
+            transitionToDisconnected()
+            return
+        }
+        await start()
+        await runCoalescedAction(openUsagePage: true, repairing: false)
+    }
+
+    func repairCompanion() async {
+        guard await hasConsent() else {
+            transitionToDisconnected()
+            return
+        }
+        await start()
+        await runCoalescedAction(openUsagePage: false, repairing: true)
+    }
+
+    func disconnect() async {
+        retentionTask?.cancel()
+        retentionTask = nil
+        await integration.stopListening()
         listenerStarted = false
-        lifecycle = .notInstalled
-        replace(
-            Self.unavailableSnapshot(
-                state: .inactive,
-                failure: .unavailable,
-                capturedAt: now()
-            )
-        )
+        cacheLoaded = false
+        lastGood = nil
+        priorSessionCache = nil
+        currentSessionValidated = false
+        await clearCache()
+        await clearConsent()
+        transitionToDisconnected()
+    }
+
+    func stop() async {
+        retentionTask?.cancel()
+        retentionTask = nil
+        await integration.stopListening()
+        listenerStarted = false
     }
 
     func currentSnapshot() async -> AgentUsageSnapshot {
-        await refreshSnapshotStateIfNeeded()
+        await refreshAge()
         return snapshot
     }
 
@@ -233,604 +339,367 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             self.continuation = continuation
             continuation.yield(snapshot)
-            continuation.onTermination = { [weak self] _ in
-                Task { await self?.clearContinuation() }
-            }
         }
     }
 
     func lifecycleState() async -> ClaudeConnectorLifecycleState {
-        await refreshSnapshotStateIfNeeded()
+        await refreshAge()
         return lifecycle
     }
 
-    func diagnostics() -> (
-        listenerCount: Int,
-        acceptedPackets: Int,
-        rejectedPackets: Int,
-        publishedSnapshots: Int,
-        restoredSnapshots: Int,
-        supportsRestore: Bool
-    ) {
-        (
-            listenerStarted ? 1 : 0,
-            acceptedPacketCount,
-            rejectedPacketCount,
-            publishedSnapshotCount,
-            restoredSnapshotCount,
-            descriptor.supportsRestore
+    func diagnostics() -> ClaudeBrowserConnectorDiagnostics {
+        ClaudeBrowserConnectorDiagnostics(
+            acceptedObservationCount: acceptedObservationCount,
+            rejectedObservationCount: rejectedObservationCount,
+            pageOpenCount: pageOpenCount,
+            coalescedActionCount: coalescedActionCount,
+            listenerStartCount: listenerStartCount
         )
     }
 
-    func receiveEncodedPacket(_ data: Data) async {
-        do {
-            try await receive(
-                ClaudeStatusLinePacket.decodePacket(data)
-            )
-        } catch {
-            await receiveInvalidPacket()
+    func hasHiddenPriorSessionCache() -> Bool {
+        priorSessionCache != nil
+    }
+
+    private func runCoalescedAction(openUsagePage: Bool, repairing: Bool) async {
+        guard !actionInFlight else {
+            coalescedActionCount += 1
+            return
+        }
+        actionInFlight = true
+        defer { actionInFlight = false }
+        lifecycle = .checking
+        let health = repairing
+            ? await integration.repairCompanion()
+            : await integration.checkHealth()
+        guard health == .ready else {
+            apply(health)
+            return
+        }
+        guard openUsagePage else {
+            lifecycle = snapshot.hasValidData
+                ? lifecycleForCurrentSnapshot()
+                : .waitingForUsagePage
+            return
+        }
+        if await integration.openUsagePage() {
+            pageOpenCount += 1
+            lifecycle = snapshot.hasValidData
+                ? lifecycleForCurrentSnapshot()
+                : .waitingForUsagePage
+        } else {
+            apply(.browserUnavailable)
         }
     }
 
-    private func receiveInvalidPacket() async {
-        rejectedPacketCount += 1
-        await refreshSnapshotStateIfNeeded()
-        guard snapshot.hasValidData else {
-            lifecycle = .failed
-            replace(
-                Self.unavailableSnapshot(
-                    state: .failed,
-                    failure: .malformedResponse,
-                    capturedAt: now()
-                )
-            )
-            return
-        }
-        lifecycle = .failed
-        replace(
-            Self.withState(
-                snapshot,
-                state: .stale,
-                freshness: .stale,
-                failure: .malformedResponse
-            )
-        )
-    }
-
-    private func receive(_ packet: ClaudeStatusLinePacket) async {
-        let current = now()
-        guard packet.observedAt <= current.addingTimeInterval(5),
-              current.timeIntervalSince(packet.observedAt)
-                <= Self.freshnessInterval,
-              packet.fiveHour != nil || packet.sevenDay != nil
-        else {
-            await receiveInvalidPacket()
-            return
-        }
-        let next = Self.snapshot(
-            for: packet,
-            now: current,
-            previous: snapshot
-        )
-        guard next.hasValidData,
-              next.channels.contains(where: {
-                  !$0.rateLimitWindows.isEmpty
-              })
-        else {
-            await receiveInvalidPacket()
-            return
-        }
-        acceptedPacketCount += 1
-        lifecycle = .fresh
-        replace(next)
-        if let snapshotStore,
-           let record = Self.sanitizedRecord(from: next) {
-            try? await snapshotStore.saveClaudeSanitizedSnapshot(
-                record,
-                now: current
-            )
-        }
-    }
-
-    private func refreshConfigurationState() async {
-        let check = await coalescedConfigurationCheck()
-        switch check.state {
-        case .unconfigured:
-            await invalidateSanitizedSnapshot()
-            lifecycle = .notInstalled
-            replace(Self.unavailableSnapshot(
-                state: .inactive,
-                failure: .unavailable,
-                capturedAt: now()
-            ))
-        case .ready:
-            await invalidateSanitizedSnapshot()
-            lifecycle = .notInstalled
-            replace(Self.unavailableSnapshot(
-                state: .inactive,
-                failure: .unavailable,
-                capturedAt: now()
-            ))
-        case .installed:
-            await restoreSanitizedSnapshotIfNeeded()
-            await refreshSnapshotStateIfNeeded()
-            if snapshot.state != .ready && snapshot.state != .stale {
-                lifecycle = .installedWaiting
-                replace(Self.unavailableSnapshot(
-                    state: .waitingForFirstResponse,
-                    failure: nil,
-                    capturedAt: now()
-                ))
+    private func receive(
+        _ result: Result<ClaudeBrowserObservationEnvelope, ClaudeBrowserBridgeError>
+    ) async {
+        guard await hasConsent() else { return }
+        switch result {
+        case let .success(envelope):
+            do {
+                try ClaudeBrowserMessageDecoder.validate(envelope)
+                guard let observedAt = Self.parseTimestamp(envelope.observation.observedAt),
+                      now().timeIntervalSince(observedAt) >= -Self.maximumFutureSkew,
+                      now().timeIntervalSince(observedAt) <= Self.freshnessInterval
+                else {
+                    throw ClaudeBrowserBridgeError.invalidTimestamp
+                }
+                let next = try Self.snapshot(from: envelope, observedAt: observedAt)
+                acceptedObservationCount += 1
+                currentSessionValidated = true
+                priorSessionCache = nil
+                lastGood = next
+                replace(next)
+                lifecycle = .fresh(observedAt)
+                if let data = try? ClaudeBrowserMessageDecoder.encode(envelope) {
+                    await writeCache(data)
+                }
+                scheduleRetention(from: observedAt)
+            } catch {
+                rejectedObservationCount += 1
+                retainOrFail(.malformedResponse, routeChanged: true)
             }
-        case .repairRequired:
-            await invalidateSanitizedSnapshot()
-            lifecycle = .repairRequired
-            replace(Self.unavailableSnapshot(
-                state: .failed,
-                failure: .malformedResponse,
-                capturedAt: now()
-            ))
-        case .unsupported:
-            await invalidateSanitizedSnapshot()
-            lifecycle = .unsupported
-            replace(Self.unavailableSnapshot(
-                state: .unsupported,
-                failure: .unsupported,
-                capturedAt: now()
-            ))
-        case .failed:
-            await invalidateSanitizedSnapshot()
-            lifecycle = .failed
-            replace(Self.unavailableSnapshot(
-                state: .failed,
-                failure: .unavailable,
-                capturedAt: now()
-            ))
+        case let .failure(error):
+            rejectedObservationCount += 1
+            switch error {
+            case .socketUnavailable,
+                 .socketConnectionFailed,
+                 .socketWriteFailed,
+                 .socketReadFailed:
+                retainOrFail(.unavailable, routeChanged: false)
+            case .messageEmpty,
+                 .messageTooLarge,
+                 .malformedJSON,
+                 .invalidTopLevel,
+                 .unexpectedField,
+                 .missingField,
+                 .invalidContract,
+                 .invalidPercentage,
+                 .invalidReset,
+                 .invalidTimestamp,
+                 .noAccountWindow,
+                 .invalidBrowserOrigin,
+                 .nativeMessagingFrameMalformed,
+                 .socketUnsafe:
+                invalidateCurrentSession(
+                    failure: .malformedResponse,
+                    routeChanged: true
+                )
+            }
         }
     }
 
-    private func coalescedConfigurationCheck()
-    async -> ClaudeStatusLineConfigurationCheck {
-        if let configurationRefreshTask {
-            return await configurationRefreshTask.value
-        }
-        let configurationCheck = self.configurationCheck
-        let task = Task {
-            await configurationCheck()
-        }
-        configurationRefreshTask = task
-        let result = await task.value
-        configurationRefreshTask = nil
-        return result
-    }
-
-    private func restoreSanitizedSnapshotIfNeeded() async {
-        guard !didAttemptCacheRestore else { return }
-        didAttemptCacheRestore = true
-        guard let snapshotStore,
-              let record = await snapshotStore.loadClaudeSanitizedSnapshot(
-                now: now()
+    private func loadSanitizedCacheIfNeeded() async {
+        guard !cacheLoaded else { return }
+        cacheLoaded = true
+        guard let data = await readCache(),
+              let envelope = try? ClaudeBrowserMessageDecoder.decode(data),
+              let observedAt = Self.parseTimestamp(envelope.observation.observedAt)
+        else { return }
+        let age = now().timeIntervalSince(observedAt)
+        guard age >= -Self.maximumFutureSkew, age <= Self.maximumRetainedAge,
+              let restored = try? Self.snapshot(
+                from: envelope,
+                observedAt: observedAt,
+                freshness: age <= Self.freshnessInterval ? .cached : .stale
               )
         else {
+            await clearCache()
             return
         }
-        let freshness: AgentConnectorFreshness =
-            now().timeIntervalSince(record.observationTimestamp)
-                <= Self.freshnessInterval ? .cached : .stale
-        lifecycle = freshness == .cached ? .cached : .stale
-        restoredSnapshotCount += 1
-        replace(Self.snapshot(for: record, freshness: freshness))
+        // A prior-session cache is decoded and retained internally only. It
+        // cannot admit Claude or render quota until this process receives a
+        // current verified Usage-page observation.
+        priorSessionCache = restored
     }
 
-    private func refreshSnapshotStateIfNeeded() async {
-        guard snapshot.hasValidData else { return }
-        let current = now()
-        let survivingChannels = snapshot.channels.compactMap { channel -> AgentUsageChannel? in
-            let windows = channel.rateLimitWindows.filter {
-                guard let reset = $0.resetsAt else { return false }
-                return reset > current
-            }
-            guard !windows.isEmpty else { return nil }
-            return AgentUsageChannel(
-                id: channel.id,
-                sourceTier: channel.sourceTier,
-                sourceVersion: channel.sourceVersion,
-                scopes: channel.scopes,
-                provenance: channel.provenance,
-                freshness: channel.freshness,
-                capturedAt: channel.capturedAt,
-                coverageNote: channel.coverageNote,
-                rateLimitWindows: windows,
-                accountMetrics: channel.accountMetrics,
-                localActivityMetrics: nil,
-                safeFailure: channel.safeFailure,
-                availability: channel.availability
-            )
-        }
-        guard !survivingChannels.isEmpty else {
-            try? await snapshotStore?.removeClaudeSanitizedSnapshot()
-            lifecycle = .installedWaiting
+    private func refreshAge() async {
+        guard let lastGood, let lastSuccessfulAt = lastGood.lastSuccessfulAt else { return }
+        let age = now().timeIntervalSince(lastSuccessfulAt)
+        if age > Self.maximumRetainedAge {
+            self.lastGood = nil
+            await clearCache()
+            lifecycle = .failed
             replace(Self.unavailableSnapshot(
-                state: .waitingForFirstResponse,
-                failure: nil,
-                capturedAt: current
+                state: .failed,
+                failure: .unavailable,
+                capturedAt: now()
             ))
-            return
-        }
-
-        let aged = current.timeIntervalSince(snapshot.capturedAt)
-            > Self.freshnessInterval
-        let nextFreshness: AgentConnectorFreshness
-        if snapshot.freshness == .fresh && !aged {
-            nextFreshness = .fresh
-        } else if snapshot.freshness == .cached && !aged {
-            nextFreshness = .cached
-        } else {
-            nextFreshness = .stale
-        }
-        let nextState: AgentConnectorState = nextFreshness == .stale
-            ? .stale
-            : .ready
-        if lifecycle != .failed {
-            lifecycle = switch nextFreshness {
-            case .fresh: .fresh
-            case .cached: .cached
-            case .stale: .stale
-            case .unavailable: .installedWaiting
-            }
-        }
-        let next = AgentUsageSnapshot(
-            id: snapshot.id,
-            providerName: snapshot.providerName,
-            state: nextState,
-            capturedAt: snapshot.capturedAt,
-            lastSuccessfulAt: snapshot.lastSuccessfulAt,
-            freshness: nextFreshness,
-            channels: survivingChannels.map {
-                Self.channel($0, freshness: nextFreshness)
-            },
-            capabilities: snapshot.capabilities,
-            safeFailure: snapshot.safeFailure,
-            selectedWindowID: survivingChannels
-                .flatMap(\.rateLimitWindows)
-                .contains(where: { $0.id == snapshot.selectedWindowID })
-                ? snapshot.selectedWindowID
-                : nil
-        )
-        let windowsChanged = next.channels.flatMap(\.rateLimitWindows).count
-            != snapshot.channels.flatMap(\.rateLimitWindows).count
-        replace(next)
-        if windowsChanged, let snapshotStore {
-            if let record = Self.sanitizedRecord(from: next) {
-                try? await snapshotStore.saveClaudeSanitizedSnapshot(
-                    record,
-                    now: current
-                )
-            } else {
-                try? await snapshotStore.removeClaudeSanitizedSnapshot()
-            }
+        } else if age > Self.freshnessInterval, snapshot.freshness != .stale {
+            let stale = Self.retained(lastGood, freshness: .stale, failure: .unavailable, now: now())
+            self.lastGood = stale
+            lifecycle = .stale(lastSuccessfulAt)
+            replace(stale)
         }
     }
 
-    private func invalidateSanitizedSnapshot() async {
-        try? await snapshotStore?.removeClaudeSanitizedSnapshot()
-        didAttemptCacheRestore = true
+    private func scheduleRetention(from observedAt: Date) {
+        retentionTask?.cancel()
+        let connector = self
+        let delay = max(0, Self.freshnessInterval - now().timeIntervalSince(observedAt))
+        retentionTask = Task {
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled else { return }
+            await connector.refreshAge()
+        }
+    }
+
+    private func retainOrFail(_ failure: AgentSafeFailure, routeChanged: Bool) {
+        if currentSessionValidated, let lastGood {
+            let freshness: AgentConnectorFreshness = (lastGood.lastSuccessfulAt.map {
+                now().timeIntervalSince($0) > Self.freshnessInterval
+            } ?? true) ? .stale : .cached
+            let retained = Self.retained(lastGood, freshness: freshness, failure: failure, now: now())
+            self.lastGood = retained
+            lifecycle = freshness == .stale
+                ? .stale(lastGood.lastSuccessfulAt ?? now())
+                : .cached(lastGood.lastSuccessfulAt ?? now())
+            replace(retained)
+        } else {
+            lifecycle = routeChanged ? .routeChanged : .failed
+            replace(Self.unavailableSnapshot(
+                state: .failed,
+                failure: failure,
+                capturedAt: now()
+            ))
+        }
+    }
+
+    private func invalidateCurrentSession(
+        failure: AgentSafeFailure,
+        routeChanged: Bool
+    ) {
+        retentionTask?.cancel()
+        retentionTask = nil
+        lastGood = nil
+        currentSessionValidated = false
+        lifecycle = routeChanged ? .routeChanged : .failed
+        replace(Self.unavailableSnapshot(
+            state: .failed,
+            failure: failure,
+            capturedAt: now()
+        ))
+    }
+
+    private func apply(_ health: ClaudeBrowserCompanionHealth) {
+        switch health {
+        case .ready:
+            lifecycle = snapshot.hasValidData ? lifecycleForCurrentSnapshot() : .waitingForUsagePage
+        case .browserUnavailable:
+            retainOrFail(.unavailable, routeChanged: false)
+            lifecycle = snapshot.hasValidData
+                ? lifecycleForCurrentSnapshot()
+                : .browserUnavailable
+        case .disabled:
+            invalidateCurrentSession(failure: .unavailable, routeChanged: false)
+            lifecycle = .companionDisabled
+        case .outdated:
+            invalidateCurrentSession(failure: .unavailable, routeChanged: false)
+            lifecycle = .companionOutdated
+        case .unsupportedBrowser:
+            invalidateCurrentSession(failure: .unavailable, routeChanged: false)
+            lifecycle = .unsupportedBrowser
+        case .nativeHostMissing:
+            invalidateCurrentSession(failure: .unavailable, routeChanged: false)
+            lifecycle = .nativeHostMissing
+        case .nativeHostMismatched:
+            invalidateCurrentSession(failure: .unavailable, routeChanged: false)
+            lifecycle = .nativeHostMismatched
+        }
+    }
+
+    private func probeState(for health: ClaudeBrowserCompanionHealth) -> AgentConnectorState {
+        switch health {
+        case .ready: .waitingForFirstResponse
+        case .disabled, .outdated, .nativeHostMissing, .nativeHostMismatched: .waitingForFirstResponse
+        case .unsupportedBrowser: .unsupported
+        case .browserUnavailable: .inactive
+        }
+    }
+
+    private func lifecycleForCurrentSnapshot() -> ClaudeConnectorLifecycleState {
+        let date = snapshot.lastSuccessfulAt ?? snapshot.capturedAt
+        return switch snapshot.freshness {
+        case .fresh: .fresh(date)
+        case .cached: .cached(date)
+        case .stale: .stale(date)
+        case .unavailable: .failed
+        }
+    }
+
+    private func transitionToDisconnected() {
+        lifecycle = .disconnected
+        replace(Self.unavailableSnapshot(
+            state: .authenticationRequired,
+            failure: .authorizationRequired,
+            capturedAt: now()
+        ))
     }
 
     private func replace(_ next: AgentUsageSnapshot) {
-        guard snapshot != next else { return }
         snapshot = next
-        publishedSnapshotCount += 1
         continuation?.yield(next)
     }
 
-    private func clearContinuation() {
-        continuation = nil
-    }
-
     private static func snapshot(
-        for packet: ClaudeStatusLinePacket,
-        now: Date,
-        previous: AgentUsageSnapshot
-    ) -> AgentUsageSnapshot {
+        from envelope: ClaudeBrowserObservationEnvelope,
+        observedAt: Date,
+        freshness: AgentConnectorFreshness = .fresh
+    ) throws -> AgentUsageSnapshot {
         var windows: [AgentRateLimitWindow] = []
-        if let fiveHour = packet.fiveHour {
-            let reset = Date(
-                timeIntervalSince1970:
-                    TimeInterval(fiveHour.resetsAtEpochSeconds)
-            )
-            if reset > now {
-                windows.append(
-                    AgentRateLimitWindow(
-                        id: "claude-five-hour",
-                        kind: .fiveHour,
-                        usedPercent: fiveHour.usedPercentage,
-                        isUnlimited: false,
-                        resetsAt: reset
-                    )
-                )
-            }
+        if let five = envelope.observation.fiveHour {
+            windows.append(AgentRateLimitWindow(
+                id: "five-hour",
+                kind: .fiveHour,
+                usedPercent: five.usedPercentage,
+                isUnlimited: false,
+                resetsAt: try resetDate(five.resetAt)
+            ))
         }
-        if let sevenDay = packet.sevenDay {
-            let reset = Date(
-                timeIntervalSince1970:
-                    TimeInterval(sevenDay.resetsAtEpochSeconds)
-            )
-            if reset > now {
-                windows.append(
-                    AgentRateLimitWindow(
-                        id: "claude-seven-day",
-                        kind: .sevenDay,
-                        usedPercent: sevenDay.usedPercentage,
-                        isUnlimited: false,
-                        resetsAt: reset
-                    )
-                )
-            }
+        if let seven = envelope.observation.weeklyAllModels {
+            windows.append(AgentRateLimitWindow(
+                id: "seven-day",
+                kind: .sevenDay,
+                usedPercent: seven.usedPercentage,
+                isUnlimited: false,
+                resetsAt: try resetDate(seven.resetAt)
+            ))
         }
-        let sourceVersion = safeSourceVersion(packet.claudeVersion)
+        if let model = envelope.observation.modelSpecificWeekly {
+            windows.append(AgentRateLimitWindow(
+                id: "weekly-\(model.modelFamily.rawValue)",
+                kind: .other,
+                usedPercent: model.window.usedPercentage,
+                isUnlimited: false,
+                resetsAt: try resetDate(model.window.resetAt)
+            ))
+        }
+        guard !windows.isEmpty else { throw ClaudeBrowserBridgeError.noAccountWindow }
+        let failure: AgentSafeFailure? = freshness == .fresh ? nil : .unavailable
         let channel = AgentUsageChannel(
             id: .account,
-            sourceTier: .officialStructuredHook,
-            sourceVersion: sourceVersion,
-            scopes: [.account],
-            provenance: .providerReported,
-            freshness: .fresh,
-            capturedAt: packet.observedAt,
-            coverageNote: "Official local status line",
-            rateLimitWindows: windows,
-            accountMetrics: nil,
-            localActivityMetrics: nil,
-            safeFailure: nil
-        )
-        return AgentUsageSnapshot(
-            id: connectorID,
-            providerName: "Claude Code",
-            state: .ready,
-            capturedAt: packet.observedAt,
-            lastSuccessfulAt: packet.observedAt,
-            freshness: .fresh,
-            channels: [channel],
-            capabilities: capabilities,
-            safeFailure: nil,
-            selectedWindowID: selectedWindowID(
-                windows: windows,
-                previous: previous,
-                now: now
-            )
-        )
-    }
-
-    private static func snapshot(
-        for record: AgentConnectorSnapshotStore.ClaudeSanitizedQuotaSnapshot,
-        freshness: AgentConnectorFreshness
-    ) -> AgentUsageSnapshot {
-        var windows: [AgentRateLimitWindow] = []
-        if let remaining = record.fiveHourRemainingPercent,
-           let reset = record.fiveHourResetEpoch {
-            windows.append(
-                AgentRateLimitWindow(
-                    id: "claude-five-hour",
-                    kind: .fiveHour,
-                    usedPercent: nil,
-                    remainingPercent: remaining,
-                    isUnlimited: false,
-                    resetsAt: Date(timeIntervalSince1970: TimeInterval(reset))
-                )
-            )
-        }
-        if let remaining = record.sevenDayRemainingPercent,
-           let reset = record.sevenDayResetEpoch {
-            windows.append(
-                AgentRateLimitWindow(
-                    id: "claude-seven-day",
-                    kind: .sevenDay,
-                    usedPercent: nil,
-                    remainingPercent: remaining,
-                    isUnlimited: false,
-                    resetsAt: Date(timeIntervalSince1970: TimeInterval(reset))
-                )
-            )
-        }
-        let channel = AgentUsageChannel(
-            id: .account,
-            sourceTier: .officialStructuredHook,
-            sourceVersion: record.sourceVersion ?? "schema-1",
+            sourceTier: .authorizedReadOnlyRemote,
+            sourceVersion: "browser-1",
             scopes: [.account],
             provenance: .providerReported,
             freshness: freshness,
-            capturedAt: record.observationTimestamp,
-            coverageNote: "Official local status line",
+            capturedAt: observedAt,
+            coverageNote: "Claude official Usage page · Browser Sync · Experimental",
             rateLimitWindows: windows,
             accountMetrics: nil,
             localActivityMetrics: nil,
-            safeFailure: nil
+            safeFailure: failure
         )
         return AgentUsageSnapshot(
             id: connectorID,
             providerName: "Claude Code",
             state: freshness == .stale ? .stale : .ready,
-            capturedAt: record.observationTimestamp,
-            lastSuccessfulAt: record.observationTimestamp,
+            capturedAt: observedAt,
+            lastSuccessfulAt: observedAt,
             freshness: freshness,
             channels: [channel],
             capabilities: capabilities,
-            safeFailure: nil,
-            selectedWindowID: record.selectedWindowIdentifier
+            safeFailure: failure
         )
     }
 
-    private static func sanitizedRecord(
-        from snapshot: AgentUsageSnapshot
-    ) -> AgentConnectorSnapshotStore.ClaudeSanitizedQuotaSnapshot? {
-        guard let channel = snapshot.channels.first(where: { $0.id == .account })
-        else {
-            return nil
-        }
-        let fiveHour = channel.rateLimitWindows.first(where: {
-            $0.kind == .fiveHour
-        })
-        let sevenDay = channel.rateLimitWindows.first(where: {
-            $0.kind == .sevenDay
-        })
-        guard fiveHour != nil || sevenDay != nil else { return nil }
-        return AgentConnectorSnapshotStore.ClaudeSanitizedQuotaSnapshot(
-            fiveHourRemainingPercent: fiveHour?.normalizedRemainingPercent,
-            fiveHourResetEpoch: fiveHour?.resetsAt.map {
-                Int64($0.timeIntervalSince1970.rounded(.down))
-            },
-            sevenDayRemainingPercent: sevenDay?.normalizedRemainingPercent,
-            sevenDayResetEpoch: sevenDay?.resetsAt.map {
-                Int64($0.timeIntervalSince1970.rounded(.down))
-            },
-            selectedWindowIdentifier: snapshot.selectedWindowID,
-            observationTimestamp: snapshot.capturedAt,
-            sourceVersion: safeSourceVersion(channel.sourceVersion)
-        )
-    }
-
-    private static func channel(
-        _ channel: AgentUsageChannel,
-        freshness: AgentConnectorFreshness,
-        failure: AgentSafeFailure? = nil
-    ) -> AgentUsageChannel {
-        AgentUsageChannel(
-            id: channel.id,
-            sourceTier: channel.sourceTier,
-            sourceVersion: channel.sourceVersion,
-            scopes: channel.scopes,
-            provenance: channel.provenance,
-            freshness: freshness,
-            capturedAt: channel.capturedAt,
-            coverageNote: channel.coverageNote,
-            rateLimitWindows: channel.rateLimitWindows,
-            accountMetrics: channel.accountMetrics,
-            localActivityMetrics: nil,
-            safeFailure: failure,
-            availability: channel.availability
-        )
-    }
-
-    private static func withState(
+    private static func retained(
         _ snapshot: AgentUsageSnapshot,
-        state: AgentConnectorState,
         freshness: AgentConnectorFreshness,
-        failure: AgentSafeFailure?
+        failure: AgentSafeFailure,
+        now: Date
     ) -> AgentUsageSnapshot {
         AgentUsageSnapshot(
             id: snapshot.id,
             providerName: snapshot.providerName,
-            state: state,
-            capturedAt: snapshot.capturedAt,
+            state: freshness == .stale ? .stale : .ready,
+            capturedAt: now,
             lastSuccessfulAt: snapshot.lastSuccessfulAt,
             freshness: freshness,
-            channels: snapshot.channels.map {
-                channel($0, freshness: freshness, failure: failure)
+            channels: snapshot.channels.map { channel in
+                AgentUsageChannel(
+                    id: channel.id,
+                    sourceTier: channel.sourceTier,
+                    sourceVersion: channel.sourceVersion,
+                    scopes: channel.scopes,
+                    provenance: channel.provenance,
+                    freshness: freshness,
+                    capturedAt: channel.capturedAt,
+                    coverageNote: channel.coverageNote,
+                    rateLimitWindows: channel.rateLimitWindows,
+                    accountMetrics: channel.accountMetrics,
+                    localActivityMetrics: channel.localActivityMetrics,
+                    safeFailure: failure,
+                    availability: channel.availability,
+                    accountCreditSnapshot: channel.accountCreditSnapshot
+                )
             },
             capabilities: snapshot.capabilities,
             safeFailure: failure,
             selectedWindowID: snapshot.selectedWindowID
         )
-    }
-
-    private static func selectedWindowID(
-        windows: [AgentRateLimitWindow],
-        previous: AgentUsageSnapshot,
-        now: Date
-    ) -> String? {
-        let eligible = windows.filter { $0.resetsAt.map { $0 > now } ?? false }
-        let finite = eligible.compactMap {
-            window -> (AgentRateLimitWindow, remaining: Double)? in
-            guard let remaining = window.normalizedRemainingPercent else {
-                return nil
-            }
-            return (window, remaining)
-        }
-        if let depleted = finite.filter({ $0.remaining == 0 })
-            .sorted(by: selectionOrder).first {
-            return depleted.0.id
-        }
-        if let critical = finite.filter({
-            $0.remaining > 0 && $0.remaining <= 10
-        }).sorted(by: {
-            $0.remaining == $1.remaining
-                ? selectionOrder($0, $1)
-                : $0.remaining < $1.remaining
-        }).first {
-            return critical.0.id
-        }
-
-        let previousWindows = previous.channels
-            .flatMap(\.rateLimitWindows)
-        let previousByID = Dictionary(
-            uniqueKeysWithValues: previousWindows.map {
-                ($0.id, ($0.normalizedRemainingPercent, $0.resetsAt))
-            }
-        )
-        let decrements = finite.compactMap {
-            current -> (AgentRateLimitWindow, remaining: Double, decrement: Double)? in
-            guard let old = previousByID[current.0.id],
-                  old.1 == current.0.resetsAt,
-                  let oldRemaining = old.0
-            else {
-                return nil
-            }
-            let decrement = max(0, oldRemaining - current.remaining)
-            return decrement > 0 ? (current.0, current.remaining, decrement) : nil
-        }
-        if let winner = decrements.sorted(by: {
-            if $0.decrement != $1.decrement {
-                return $0.decrement > $1.decrement
-            }
-            if $0.remaining != $1.remaining {
-                return $0.remaining < $1.remaining
-            }
-            return selectionOrder(
-                ($0.0, $0.remaining),
-                ($1.0, $1.remaining)
-            )
-        }).first {
-            return winner.0.id
-        }
-        if let previousID = previous.selectedWindowID,
-           finite.contains(where: { $0.0.id == previousID }) {
-            return previousID
-        }
-        return finite.sorted(by: {
-            $0.remaining == $1.remaining
-                ? selectionOrder($0, $1)
-                : $0.remaining < $1.remaining
-        }).first?.0.id
-    }
-
-    private static func selectionOrder(
-        _ lhs: (AgentRateLimitWindow, remaining: Double),
-        _ rhs: (AgentRateLimitWindow, remaining: Double)
-    ) -> Bool {
-        func rank(_ kind: AgentRateLimitWindow.Kind) -> Int {
-            switch kind {
-            case .sevenDay: 0
-            case .fiveHour: 1
-            case .other: 2
-            }
-        }
-        let lhsRank = rank(lhs.0.kind)
-        let rhsRank = rank(rhs.0.kind)
-        return lhsRank == rhsRank ? lhs.0.id < rhs.0.id : lhsRank < rhsRank
-    }
-
-    private static func safeSourceVersion(_ value: String?) -> String {
-        guard let value,
-              !value.isEmpty,
-              value.count <= 32,
-              value.range(
-                of: "^[A-Za-z0-9 ._-]+$",
-                options: .regularExpression
-              ) != nil
-        else {
-            return "schema-1"
-        }
-        return value
     }
 
     private static func unavailableSnapshot(
@@ -844,10 +713,25 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
             state: state,
             capturedAt: capturedAt,
             lastSuccessfulAt: nil,
-            freshness: state == .stale ? .stale : .unavailable,
+            freshness: .unavailable,
             channels: [],
             capabilities: capabilities,
             safeFailure: failure
         )
+    }
+
+    private static func resetDate(_ raw: String?) throws -> Date? {
+        guard let raw else { return nil }
+        guard let date = parseTimestamp(raw) else { throw ClaudeBrowserBridgeError.invalidReset }
+        return date
+    }
+
+    private static func parseTimestamp(_ raw: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: raw) { return date }
+        let standard = ISO8601DateFormatter()
+        standard.formatOptions = [.withInternetDateTime]
+        return standard.date(from: raw)
     }
 }

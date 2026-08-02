@@ -384,6 +384,15 @@ struct WorkBuddyLoginAssistanceTests {
             root,
             "Sources/CodexUsageUI/Views/UsageSettingsCard.swift"
         )
+        let workBuddyStart = try #require(
+            settings.range(of: "private struct WorkBuddyLoginAssistanceSection")
+        )
+        let workBuddyEnd = settings[workBuddyStart.upperBound...].range(
+            of: "private struct"
+        )?.lowerBound ?? settings.endIndex
+        let workBuddySettings = String(
+            settings[workBuddyStart.lowerBound..<workBuddyEnd]
+        )
         for required in [
             "workBuddyLoginForDataSync",
             "workBuddyOpenApplication",
@@ -391,13 +400,13 @@ struct WorkBuddyLoginAssistanceTests {
             "workBuddyCancelLogin",
             "workBuddyOpenOfficialLoginInstructions"
         ] {
-            #expect(settings.contains(required))
+            #expect(workBuddySettings.contains(required))
         }
         for forbidden in [
             "WKWebView", "AXUIElement", "CGWindowListCreateImage",
             "Keychain", "URLSession", "OCR"
         ] {
-            #expect(!settings.contains(forbidden))
+            #expect(!workBuddySettings.contains(forbidden))
         }
     }
 

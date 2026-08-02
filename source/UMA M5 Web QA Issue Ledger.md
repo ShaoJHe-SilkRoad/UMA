@@ -1,0 +1,24 @@
+# UMA M5 Web QA Issue Ledger
+
+Date: 2026-08-01
+Goal: M5-WEB-G1 historical record and M5-BROWSER-G1 closeout
+
+This ledger contains no live usage value, reset timestamp, credential, cookie,
+token, session, account identity, raw HTML, DOM dump, provider screenshot,
+chat, project, or billing data.
+
+| ID | First evidence | Severity | Root cause | Repair / decision | Focused retest | Status |
+|---|---|---:|---|---|---|---|
+| M5WEB-001 | Google sign-in rejected the embedded user agent | Blocking | The provider login path is incompatible with embedded WebKit | Stop immediately; no retry, alternate factor, or bypass; reject embedded account-web auth | Process terminated; no further login attempted | Closed as NO-GO |
+| M5WEB-002 | Prototype signature contained no App Sandbox entitlement | Blocking | The isolated local research bundle was ad-hoc and unsandboxed | Do not admit or reuse the prototype; record ambient capability honestly | Entitlement and source audit completed | Closed as admission failure |
+| M5WEB-003 | Periodic JavaScript ran while the login page was visible | Blocking | Route admission happened inside the extractor instead of before any DOM access | Delete prototype; prohibit login-page DOM inspection; require route-before-script in any future separately authorized design | Source audit classified DOM access and confirmed no credential input-value query | Closed as privacy-contract failure |
+| M5WEB-004 | System-browser authentication was proposed as a safer capability | Gate | Apple supplies a mechanism, but Claude supplies no documented UMA callback or Usage authorization contract | Document only; do not implement, copy sessions, or infer a private OAuth flow | Official Apple and Anthropic documentation rechecked | NO-GO |
+| M5WEB-005 | Task required proof that no session survived the failed login | Blocking | WebKit may otherwise retain website data or process state | Execute Disconnect & Clear, verify zero records, terminate, audit exact bundle paths, then delete exact task root | Zero records; exact persistence paths, crash reports, process, and root absent | Closed |
+| M5BROWSER-001 | Safari Settings initially showed no UMA Browser Companion even though LaunchServices and `pluginkit` recorded the embedded `.appex` | Blocking | The local preflight package is ad-hoc and has no Team ID; Safari therefore requires its explicit unsigned-development gate for this temporary candidate | Keep application-extension compile/link hardening, require explicit Human-controlled unsigned-development enablement for preflight only, and keep store/distribution signing outside this Goal | The exact embedded `.appex` became visible and enabled in Safari; its toolbar action registered; permissions remained `activeTab`, `nativeMessaging`, and `scripting` only | Closed for local preflight; distribution signing remains a risk |
+| M5BROWSER-002 | The enabled toolbar action reached the exact Usage route and produced a valid normalized account window, but UMA remained in Setup required | Blocking | A sandboxed Safari extension could see but could not connect to the private Unix socket without a broader network-client entitlement | Replace Safari production forwarding with one exact owner-only `0700` Application Support directory, a live `0600` listener lock, and an atomic `0600` pending observation; keep the extension network-client entitlement absent; admit only Claude's exact `Current session` leaf label | Focused bridge/extractor tests PASS; rebuilt entitlements PASS; live sanitized acknowledgement and Fresh main/Assistant parity PASS | Closed |
+| M5BROWSER-003 | The first live callback arrived while Claude was hidden awaiting admission, but the registry had already stopped its listener | Blocking | Listener lifetime was incorrectly coupled only to visible-provider membership instead of explicit Browser Sync consent plus waiting state | Keep the Browser Companion listener active while consented and waiting for the first current Usage-page observation | Registry lifecycle regression PASS; live first-observation admission PASS | Closed |
+| M5BROWSER-004 | Source review showed that a second server start could unlink and replace a live listener lock | Major | Startup removed the lock path before attempting exclusive ownership, so a second inode could bypass the first process's lock | Open or create the exact lock safely, acquire nonblocking exclusive ownership before cleanup, remove it only when descriptor and path identities match, and test that a rejected second listener cannot disrupt delivery | Focused competing-listener and handoff round-trip tests PASS | Closed |
+
+The M5-WEB prototype remained non-product historical evidence. M5-BROWSER-G1
+repaired only the admitted Browser Companion production path and kept all
+credential, cookie, embedded-login, and private-endpoint routes absent.

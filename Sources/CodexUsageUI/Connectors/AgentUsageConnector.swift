@@ -74,6 +74,7 @@ enum AgentSourceTier: String, Codable, CaseIterable, Sendable {
 enum ProviderLocalSourceClass: String, Codable, Sendable {
     case admittedStructuredLocal
     case authenticatedAccountWeb
+    case browserCompanionUsage
     case manualOnly
     case unsupported
 }
@@ -87,12 +88,14 @@ enum ProviderAuthenticationMethod: String, Codable, Sendable {
     case existingLocalSession
     case officialApplicationOwnedSession
     case umaOwnedAuthenticatedAccountWebSession
+    case systemBrowserSession
     case none
 }
 
 enum ProviderUsageReadContract: String, Codable, Sendable {
     case currentStructuredLocalRead
     case currentAuthenticatedAccountWebRead
+    case currentBrowserCompanionUsageRead
     case none
 }
 
@@ -255,6 +258,8 @@ struct AgentConnectorDescriptor: Codable, Sendable, Equatable {
                 .currentStructuredLocalRead
             case .authenticatedAccountWeb:
                 .currentAuthenticatedAccountWebRead
+            case .browserCompanionUsage:
+                .currentBrowserCompanionUsageRead
             case .manualOnly, .unsupported:
                 .none
             }

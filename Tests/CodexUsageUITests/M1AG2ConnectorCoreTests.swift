@@ -159,6 +159,25 @@ struct M1AG2ConnectorCoreTests {
     }
 
     @Test
+    func registryStopsRegisteredConnectorThatNeverAcquiredListener() async throws {
+        let connector = TestConnector(
+            id: "claude.browserSync",
+            snapshot: Self.snapshot(
+                id: "claude.browserSync",
+                state: .inactive,
+                failure: nil
+            )
+        )
+        let registry = try AgentConnectorRegistry(connectors: [connector])
+
+        #expect(!(await connector.hasListener))
+        await registry.stopAll()
+
+        #expect(await connector.stopCount == 1)
+        #expect(!(await connector.hasListener))
+    }
+
+    @Test
     func snapshotContractRetainsScopeAndProvenanceWithoutPrivateIdentitySerialization() throws {
         let snapshot = Self.snapshot(id: "alpha.agent", state: .ready, failure: nil)
         let account = try #require(snapshot.channels.first(where: { $0.id == .account }))

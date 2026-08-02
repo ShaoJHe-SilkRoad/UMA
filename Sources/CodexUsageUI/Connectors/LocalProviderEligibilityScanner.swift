@@ -208,13 +208,20 @@ actor LocalProviderEligibilityScanner {
 
         await candidate.connector.start()
         if !descriptor.capabilities.contains(.passiveLocalAvailability) {
-            switch probe.state {
-            case .ready, .stale:
-                await candidate.connector.refresh(trigger: .manual)
-            case .inactive, .waitingForFirstResponse, .failed:
-                await candidate.connector.perform(.connect)
-            case .authenticationRequired, .unsupported:
-                break
+            if descriptor.localSourceClass == .browserCompanionUsage,
+               (await candidate.connector.currentSnapshot()).freshness == .fresh {
+                // A consent-driven Settings connection already completed the
+                // current read. Admission must not multiply that provider
+                // request merely to publish the same immutable snapshot.
+            } else {
+                switch probe.state {
+                case .ready, .stale:
+                    await candidate.connector.refresh(trigger: .manual)
+                case .inactive, .waitingForFirstResponse, .failed:
+                    await candidate.connector.perform(.connect)
+                case .authenticationRequired, .unsupported:
+                    break
+                }
             }
         }
 
@@ -260,10 +267,8 @@ actor LocalProviderEligibilityScanner {
         if permitsSanitizedLastValid,
            [.cached, .stale].contains(snapshot.freshness),
            account.freshness == snapshot.freshness,
-           snapshot.safeFailure == nil
-                || snapshot.safeFailure == .malformedResponse,
-           account.safeFailure == nil
-                || account.safeFailure == .malformedResponse {
+           Self.isAdmissibleRetainedFailure(snapshot.safeFailure),
+           Self.isAdmissibleRetainedFailure(account.safeFailure) {
             return .admitted(LocalLiveProviderSnapshot(snapshot: snapshot))
         }
         guard snapshot.safeFailure == nil,
@@ -274,6 +279,17 @@ actor LocalProviderEligibilityScanner {
             return .hiddenCurrentReadFailed
         }
         return .admitted(LocalLiveProviderSnapshot(snapshot: snapshot))
+    }
+
+    private static func isAdmissibleRetainedFailure(
+        _ failure: AgentSafeFailure?
+    ) -> Bool {
+        switch failure {
+        case nil, .unavailable, .timedOut, .malformedResponse:
+            true
+        default:
+            false
+        }
     }
 
     private static func validatesCurrentUsage(
@@ -317,7 +333,8 @@ extension AgentConnectorDescriptor {
     var hasSurfaceAdmissibleReadContract: Bool {
         switch (localSourceClass, usageReadContract) {
         case (.admittedStructuredLocal, .currentStructuredLocalRead),
-             (.authenticatedAccountWeb, .currentAuthenticatedAccountWebRead):
+             (.authenticatedAccountWeb, .currentAuthenticatedAccountWebRead),
+             (.browserCompanionUsage, .currentBrowserCompanionUsageRead):
             true
         default:
             false

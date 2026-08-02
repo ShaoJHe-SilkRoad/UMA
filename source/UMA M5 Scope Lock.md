@@ -308,3 +308,183 @@ Final live status must remain:
 Exactly one next task is:
 
 **M5-G3**
+
+## M5-OAUTH-G1 superseding scope lock
+
+The Founder authorizes one coherent OAuth implementation from accepted HEAD
+`9535fc020ffaea18d9df981a3bb98dfa61020e9b` while preserving the current dirty
+worktree by exact path and hunk.
+
+Authorized product scope:
+
+- provider contracts and registry admission for
+  `claude.providerManagedOAuthQuota`;
+- one connection controller, refresh scheduler, provider login activator, and
+  immutable shared Claude presentation source;
+- one parent-owned, session-lived quota broker and sanitized bounded protocol;
+- exact Keychain and ephemeral-network implementation only inside the broker;
+- Claude Settings, English/zh-CN, accessibility, tests, package helper, and
+  bounded OAuth records;
+- exact retirement of the production status-line relay/socket/configuration
+  route and its selectable UI.
+
+Historical local-source and account-web records remain retained. Provider-
+neutral Codex/Claude/WorkBuddy presentation remains retained. The Desktop app
+at `~/Desktop/UMA_0.11.app` is protected and must not be replaced.
+
+No API key, copied token, refresh-token access, browser-cookie import, embedded
+login, custom UMA OAuth client, provider prompt, identity/private-data access,
+push, PR, merge, release, notarization, deployment, publication, or next Goal
+is included.
+
+Accepted starting tree:
+
+`6b8b3533e46b4addd687bfc37add8ada16e3ae06`
+
+The only admitted Claude product source is Existing Claude login,
+Experimental. Initial and every cross-launch admission require a current
+successful read. Same-process transient failure may retain only sanitized
+Cached/Stale quota: Cached through five minutes, Stale thereafter, and hard
+withdrawal after 30 minutes. Authentication failure withdraws the provider
+immediately.
+
+The Founder directly accepts one memory-only continuity boundary: the
+parent-owned broker may retain a random per-session secret and one keyed digest
+of the exact access-credential bytes. Only fixed same, changed, or unknown
+continuity classifications cross IPC. The digest, key, credential, Keychain
+metadata, and identity never leave the broker and never persist. This
+authorization supersedes the former one-shot-only blocker without weakening
+any other privacy restriction.
+
+The bounded runtime contract is one package-relative, signed child broker for
+the connected UMA session; broker-side validation of the live parent PID,
+exact package-relative host/helper paths, owner UID, bundle identifier, live
+host code and strict nested package signatures before Keychain access;
+owner-only bounded IPC; parent-death termination;
+one exact allowlisted two-stage Keychain lookup per read after consent; one
+bodyless read-only quota GET; one in-flight request; a 180-second
+completion-relative cadence; bounded Retry-After; and stable shared Codex →
+Claude Code → WorkBuddy presentation. No Claude quota snapshot, continuity
+digest, or digest key is persisted.
+
+Live validation is capped at 12 read-only quota requests in 60 minutes. Exact
+Founder quota and reset values may not enter Git, package, screenshots, logs,
+tests, or the final report.
+
+Delivery is one local commit:
+
+`feat(claude): add provider-managed OAuth quota source`
+
+and one commit-exact package:
+
+`/private/tmp/uma-m5-oauth-final-<commit>/UMA.app`
+
+No Desktop replacement or M5ADBG work is authorized.
+
+## M5-BROWSER-G1 superseding scope lock
+
+Date: 2026-08-01
+
+This section supersedes every earlier M5 source-direction statement where the
+two conflict. Historical sections remain intact as evidence.
+
+### Active source architecture
+
+The only active Claude product-source direction is:
+
+```text
+system default browser
+→ official Claude authentication
+→ exact current personal Usage page
+→ UMA Browser Companion WebExtension
+→ bounded native messaging
+→ sanitized shared snapshot
+```
+
+The Keychain/OAuth broker route is permanently rejected. The embedded
+WKWebView account-web route remains rejected. Neither may remain as a runtime,
+fallback, consent migration, package component, test authority, or user-facing
+instruction.
+
+### Authorized M5-BROWSER-G1 scope
+
+- reconcile the preserved dirty M5 implementation without resetting unrelated
+  or reusable shared presentation work;
+- remove the Claude broker, provider Keychain reads, credential parsing,
+  continuity digests, bearer transport, and private endpoint;
+- implement public default-browser detection and supported-browser health;
+- implement shared bounded WebExtension extraction, Safari packaging, and
+  Chromium Manifest V3/native messaging;
+- implement exact-route admission, normalized quota messaging, Fresh/Cached/
+  Stale lifecycle, Settings, localization, accessibility, and shared surface
+  presentation;
+- add focused, regression, build, package, permission, privacy, secret, fixture,
+  and provenance verification;
+- maintain these durable records:
+  - `source/UMA M5 Claude Browser Source Dossier.md`;
+  - `source/UMA M5 Claude Browser Privacy Contract.md`;
+  - `source/UMA M5 Claude Browser Admission Decision.md`;
+  - `source/UMA M5 Scope Lock.md`;
+  - `source/UMA M5 Claude QA Issue Ledger.md`.
+
+### Locked privacy exclusions
+
+No Keychain access, Security.framework credential read, token access, cookie
+API/export, browser-profile or database access, WKWebView login, custom OAuth,
+callback impersonation, request interception, private endpoint replay,
+authorization-header inspection, login-page DOM access, broad host permission,
+identity/billing/chat/project access, manual quota, or inferred quota is
+authorized.
+
+Extension permissions are exactly `activeTab`, `scripting`, and
+`nativeMessaging`. There is no persistent host permission, static content
+script, `tabs` permission, tab query, tab/navigation listener, or automatic
+injection. One Human toolbar click on the exact live-verified Usage route grants
+temporary current-tab access for one bounded extraction attempt. `<all_urls>`,
+cookies, history, bookmarks, downloads, `webRequest`, `webNavigation`, proxy,
+debugger, clipboard, file URL, incognito, broad tab inventory, and login-page
+injection are excluded.
+
+### Admission and evidence lock
+
+Initial admission requires explicit new Browser Sync consent, a supported exact
+companion, exact-route verification, a current bounded observation, and at
+least one valid account-level window. A historical snapshot cannot establish
+first admission. A later safely validated snapshot is Cached/Stale only.
+
+No exact live Founder percentage, reset, identity, URL, credential, cookie,
+token, raw page content, or screenshot may enter Git, package, logs, reports,
+or durable evidence. Fixture-only proof is not live source proof.
+
+The user-click-triggered flow does not prove automatic refresh. Automatic
+background refresh is not implemented, and signed production extension
+distribution remains unverified within M5-BROWSER-G1.
+
+### Delivery boundary
+
+One local commit is authorized only after complete acceptance:
+
+`feat(claude): add system-browser usage sync`
+
+One commit-exact package may be built under the task-owned `/private/tmp`
+destination. The installed Desktop UMA is protected. No push, PR, merge, tag,
+release, notarization, deployment, publication, or M5ADBG start is authorized.
+
+### M5-BROWSER-G1 live acceptance addendum
+
+The current default-browser Safari path passed the Human-controlled live gate:
+both account-level windows matched UMA without retaining exact values; reset
+fields were honestly unavailable; main panel and Desktop Assistant shared one
+Fresh snapshot in Codex → Claude Code → WorkBuddy order; and the other
+providers remained independent.
+
+The Safari transport is an owner-only file handoff with a `0700` directory,
+`0600` live-listener lock and atomic observation, no network-client entitlement,
+and no background polling. A competing listener cannot replace the active
+lock. Automatic background refresh remains intentionally absent. Chromium and
+signed production/store distribution remain unverified.
+
+Final delivery remains one exact local commit and one commit-exact `/private/tmp`
+package. Safari unsigned-development mode and the temporary extension must be
+restored/removed after final smoke. The Desktop UMA, browser login state, and
+browser data remain protected.

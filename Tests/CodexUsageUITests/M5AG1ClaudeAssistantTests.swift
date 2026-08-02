@@ -14,7 +14,7 @@ struct M5AG1ClaudeAssistantTests {
                 .contains(.hiddenFromDesktopAssistant)
         )
         let codex = card(id: "codex.local", provider: "Codex")
-        let claude = card(id: "claude.statusLine", provider: "Claude Code")
+        let claude = card(id: "claude.browserSync", provider: "Claude Code")
         let workBuddy = card(
             id: "workbuddy.accountWebCredits",
             provider: "WorkBuddy"
@@ -22,12 +22,12 @@ struct M5AG1ClaudeAssistantTests {
         let cases: [([SharedUsageCardPresentation], [String])] = [
             ([], []),
             ([codex], ["codex.local"]),
-            ([claude], ["claude.statusLine"]),
+            ([claude], ["claude.browserSync"]),
             ([workBuddy], ["workbuddy.accountWebCredits"]),
-            ([claude, codex], ["codex.local", "claude.statusLine"]),
+            ([claude, codex], ["codex.local", "claude.browserSync"]),
             (
                 [workBuddy, claude],
-                ["claude.statusLine", "workbuddy.accountWebCredits"]
+                ["claude.browserSync", "workbuddy.accountWebCredits"]
             ),
             (
                 [workBuddy, codex],
@@ -37,7 +37,7 @@ struct M5AG1ClaudeAssistantTests {
                 [workBuddy, claude, codex],
                 [
                     "codex.local",
-                    "claude.statusLine",
+                    "claude.browserSync",
                     "workbuddy.accountWebCredits",
                 ]
             ),
@@ -69,7 +69,7 @@ struct M5AG1ClaudeAssistantTests {
         ]
         for (connection, freshness, remaining, retained, expected) in cases {
             let shared = card(
-                id: "claude.statusLine",
+                id: "claude.browserSync",
                 provider: "Claude Code",
                 connection: connection,
                 freshness: freshness,
@@ -95,7 +95,7 @@ struct M5AG1ClaudeAssistantTests {
     func claudeParityRetainsSharedIDValueWindowResetSourceFreshnessAndAge() {
         let reset = now.addingTimeInterval(7_200)
         let shared = card(
-            id: "claude.statusLine",
+            id: "claude.browserSync",
             provider: "Claude Code",
             freshness: .cached,
             remaining: .finite(38),
@@ -129,7 +129,7 @@ struct M5AG1ClaudeAssistantTests {
             "seven-day window",
             "38 percent remaining",
             "Resets in 2 hr",
-            "Official local status line",
+            "Existing Claude login",
             "Updated 5 min ago",
         ] {
             #expect(assistant.toolTip.contains(required))
@@ -144,7 +144,7 @@ struct M5AG1ClaudeAssistantTests {
             now: now
         )
         let claude = DesktopAssistantCard(
-            shared: card(id: "claude.statusLine", provider: "Claude Code"),
+            shared: card(id: "claude.browserSync", provider: "Claude Code"),
             now: now
         )
         #expect(codex.providerMarkText == "C")
@@ -161,7 +161,7 @@ struct M5AG1ClaudeAssistantTests {
     @Test
     func englishAndChineseAccessibilityKeepStateSourceResetAndAge() {
         let shared = card(
-            id: "claude.statusLine",
+            id: "claude.browserSync",
             provider: "Claude Code",
             freshness: .stale,
             remaining: .finite(9),
@@ -173,7 +173,7 @@ struct M5AG1ClaudeAssistantTests {
             now: now.addingTimeInterval(3_600)
         )
         let chineseShared = card(
-            id: "claude.statusLine",
+            id: "claude.browserSync",
             provider: "Claude Code",
             freshness: .stale,
             remaining: .finite(9),
@@ -185,7 +185,7 @@ struct M5AG1ClaudeAssistantTests {
             language: .simplifiedChinese,
             now: now.addingTimeInterval(3_600)
         )
-        for required in ["Stale", "9 percent remaining", "Official local status line"] {
+        for required in ["Stale", "9 percent remaining", "Existing Claude login"] {
             #expect(english.accessibilityLabel.contains(required))
         }
         for required in ["较早数据", "剩余 9%", "官方本地状态栏", "1 小时前更新"] {
@@ -220,7 +220,7 @@ struct M5AG1ClaudeAssistantTests {
         ]
         for (windows, selectedID, expected) in cases {
             let shared = SharedUsageCardPresentation(
-                id: "claude.statusLine",
+                id: "claude.browserSync",
                 providerName: "Claude Code",
                 connectionStatus: windows.isEmpty ? .transitional : .connected,
                 freshness: windows.isEmpty ? .unavailable : .fresh,
@@ -229,7 +229,7 @@ struct M5AG1ClaudeAssistantTests {
                 remaining: selectedID.flatMap {
                     id in windows.first(where: { $0.id == id })?.remaining
                 } ?? .unavailable,
-                sourceDescription: "Official local status line",
+                sourceDescription: "Existing Claude login",
                 severity: .normal,
                 capturedAt: now
             )
@@ -246,7 +246,7 @@ struct M5AG1ClaudeAssistantTests {
     func crossProviderFailuresNeverReorderOrMutateHealthyRows() {
         let providers = [
             card(id: "codex.local", provider: "Codex"),
-            card(id: "claude.statusLine", provider: "Claude Code"),
+            card(id: "claude.browserSync", provider: "Claude Code"),
             card(id: "workbuddy.manualAvailability", provider: "WorkBuddy"),
         ]
         for failedID in providers.map(\.id) {
@@ -267,7 +267,7 @@ struct M5AG1ClaudeAssistantTests {
             #expect(
                 ordered.map(\.id) == [
                     "codex.local",
-                    "claude.statusLine",
+                    "claude.browserSync",
                     "workbuddy.manualAvailability",
                 ]
             )
@@ -301,7 +301,7 @@ struct M5AG1ClaudeAssistantTests {
                 now: now
             ),
             DesktopAssistantCard(
-                shared: card(id: "claude.statusLine", provider: "Claude Code"),
+                shared: card(id: "claude.browserSync", provider: "Claude Code"),
                 now: now
             ),
             DesktopAssistantCard(
@@ -320,8 +320,8 @@ struct M5AG1ClaudeAssistantTests {
         #expect(controller.isVisible)
         #expect(controller.isAlwaysOnTop)
         #expect(controller.density == .automatic)
-        controller.handleSelection(providerID: "claude.statusLine")
-        #expect(selections == ["claude.statusLine"])
+        controller.handleSelection(providerID: "claude.browserSync")
+        #expect(selections == ["claude.browserSync"])
         controller.update(cards: [])
         #expect(!controller.isVisible)
         controller.tearDown()
@@ -339,7 +339,7 @@ struct M5AG1ClaudeAssistantTests {
                     remaining: .finite(Double(value % 101))
                 ),
                 card(
-                    id: "claude.statusLine",
+                    id: "claude.browserSync",
                     provider: "Claude Code",
                     remaining: .finite(Double(value % 101))
                 ),
@@ -356,7 +356,7 @@ struct M5AG1ClaudeAssistantTests {
         #expect(
             finalIDs == [
                 "codex.local",
-                "claude.statusLine",
+                "claude.browserSync",
                 "workbuddy.manualAvailability",
             ]
         )
@@ -391,7 +391,7 @@ struct M5AG1ClaudeAssistantTests {
     }
 
     @Test
-    func rendererPackageAndQALedgerCarryM5AContracts() throws {
+    func rendererPackageAndQALedgerCarryCurrentClaudeContracts() throws {
         let renderer = try source("Sources/PreviewRendererTool/main.swift")
         let package = try source("script/package_uma_m5_g2.sh")
         let ledger = try source("source/UMA M5 Claude QA Issue Ledger.md")
@@ -403,16 +403,21 @@ struct M5AG1ClaudeAssistantTests {
             #expect(renderer.contains(required))
         }
         for required in [
-            "m5a-final",
-            "uma-m5a-final-$commit",
-            "UMA-M5A-Provenance.plist",
-            "CLAUDE-SHARED-ASSISTANT-ACCEPTED",
+            "m5-browser-final",
+            "uma-m5-browser-final-$commit",
+            "UMA-M5-BROWSER-Provenance.plist",
+            "SYSTEM-BROWSER-USAGE-SYNC-ACCEPTED",
         ] {
             #expect(package.contains(required))
         }
+        #expect(package.contains("SAFARI_EXTENSION=\"ClaudeBrowserCompanion\""))
+        #expect(package.contains("$SAFARI_EXTENSION.appex"))
+        #expect(package.contains("-application-extension"))
+        #expect(package.contains("-Xlinker -application_extension"))
         #expect(ledger.contains("## M5A-G1 issue ledger"))
         #expect(ledger.contains("M5A-001"))
         #expect(ledger.contains("Physical VoiceOver"))
+        #expect(ledger.contains("## M5-BROWSER-G1 superseding issue ledger"))
     }
 
     private func card(
@@ -443,8 +448,8 @@ struct M5AG1ClaudeAssistantTests {
             windows: selected.map { [$0] } ?? [],
             selectedWindowID: selected?.id,
             remaining: remaining,
-            sourceDescription: id == "claude.statusLine"
-                ? (sourceDescription ?? "Official local status line")
+            sourceDescription: id == "claude.browserSync"
+                ? (sourceDescription ?? "Existing Claude login")
                 : nil,
             isVisibleInDesktopAssistant: true,
             severity: SharedUsagePresentationPolicy.severity(for: remaining),

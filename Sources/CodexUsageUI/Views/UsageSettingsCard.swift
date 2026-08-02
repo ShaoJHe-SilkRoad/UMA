@@ -10,7 +10,7 @@ struct UsageSettingsCard: View {
     @Binding var showRecentTasks: Bool
     @Binding var showAPICost: Bool
     @Binding var language: AppLanguage
-    let claudeSettings: ClaudeStatusLineSettingsModel?
+    let claudeSettings: ClaudeBrowserSettingsModel?
     let workBuddySettings: WorkBuddySettingsModel?
     let workBuddyLogin: WorkBuddyLoginCoordinator?
     let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
@@ -377,7 +377,7 @@ private struct AgentSpecificSettingsContent: View {
     @Binding var showUsageSummary: Bool
     @Binding var showRecentTasks: Bool
     @Binding var showAPICost: Bool
-    let claudeSettings: ClaudeStatusLineSettingsModel?
+    let claudeSettings: ClaudeBrowserSettingsModel?
     let workBuddySettings: WorkBuddySettingsModel?
     let workBuddyLogin: WorkBuddyLoginCoordinator?
     let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
@@ -482,7 +482,7 @@ private struct AgentSpecificSettingsContent: View {
             if providerID == AgentPreferenceRecord.claudeProviderID,
                let claudeSettings {
                 Divider().opacity(0.35)
-                ClaudeStatusLineSettingsSection(
+                ClaudeBrowserSettingsSection(
                     model: claudeSettings,
                     language: language
                 )
@@ -526,13 +526,14 @@ private struct AgentSpecificSettingsContent: View {
     }
 }
 
-private struct ClaudeStatusLineSettingsSection: View {
-    @ObservedObject var model: ClaudeStatusLineSettingsModel
+private struct ClaudeBrowserSettingsSection: View {
+    @ObservedObject var model: ClaudeBrowserSettingsModel
     let language: AppLanguage
+    @State private var showingConsent = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(language.claudeOfficialLocalStatusLine)
+            Text(language == .simplifiedChinese ? "浏览器同步 · 实验性" : "Browser Sync · Experimental")
                 .font(
                     AppTypography.font(
                         10.5,
@@ -540,17 +541,33 @@ private struct ClaudeStatusLineSettingsSection: View {
                         language: language
                     )
                 )
+            Text(
+                language == .simplifiedChinese
+                    ? "通过 Claude 官方使用量页面读取准确套餐配额。登录保留在您的默认浏览器中。无需 API 密钥或钥匙串访问。"
+                    : "Exact plan quota through Claude's official Usage page. Login stays in your default browser. No API key or Keychain access."
+            )
+            .font(AppTypography.font(9, language: language))
+            .foregroundStyle(.secondary)
             stateSummary
 
             HStack(spacing: 8) {
                 primaryAction
-                if shouldOfferDisable {
-                    Button(language.claudeDisableIntegration) {
-                        model.disableIntegration()
+                if model.consentGranted {
+                    Button(language == .simplifiedChinese ? "打开使用量页面" : "Open Usage Page") {
+                        model.openUsagePage()
                     }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier(
-                        "claude.status-line.disable"
+                        "claude.browser.open-usage"
+                    )
+                }
+                if model.consentGranted {
+                    Button(language.claudeDisableIntegration) {
+                        model.disconnect()
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier(
+                        "claude.browser.disconnect"
                     )
                 }
             }
@@ -563,6 +580,15 @@ private struct ClaudeStatusLineSettingsSection: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Text(
+                language == .simplifiedChinese
+                    ? "UMA 会打开 Claude 官方使用量页面。在该页面点按一次 UMA 浏览器伴侣工具栏按钮后，伴侣仅对当前标签页执行一次读取，并向 UMA 发送规范化结果。"
+                    : "UMA opens Claude's official Usage page. After you choose the UMA Browser Companion toolbar button there, it performs one read of that tab and sends UMA a normalized result."
+            )
+            .font(AppTypography.font(9, language: language))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
             Divider().opacity(0.35)
             Text(language.claudeSourceTransparency)
                 .font(
@@ -573,37 +599,49 @@ private struct ClaudeStatusLineSettingsSection: View {
                     )
                 )
             VStack(alignment: .leading, spacing: 3) {
-                Text(language.claudeCredentialsTransparency)
-                Text(language.claudeNetworkTransparency)
-                Text(language.claudeTranscriptTransparency)
-                Text(language.claudeRawPayloadTransparency)
-                Text(language.claudeStoredLocallyTransparency)
-                Text(language.claudeAuthenticationTransparency)
+                Text(language == .simplifiedChinese ? "来源：Claude 官方使用量页面 · 浏览器同步 · 实验性" : "Source: Claude official Usage page · Browser Sync · Experimental")
+                Text(language == .simplifiedChinese ? "登录：系统默认浏览器" : "Login: System default browser")
+                Text(language == .simplifiedChinese ? "Google / Claude 密码：未访问" : "Google / Claude password: Not accessed")
+                Text(language == .simplifiedChinese ? "API 密钥：不需要" : "API key: Not required")
+                Text(language == .simplifiedChinese ? "钥匙串：未访问" : "Keychain: Not accessed")
+                Text(language == .simplifiedChinese ? "Cookie：保留在浏览器中；UMA 不读取或导出" : "Cookies: Remain inside the browser; not read or exported by UMA")
+                Text(language == .simplifiedChinese ? "页面数据：仅规范化配额百分比与重置时间" : "Page data: Normalized quota percentages and reset times only")
+                Text(language == .simplifiedChinese ? "聊天、项目、身份与账单：未访问" : "Chats, projects, identity, and billing: Not accessed")
             }
             .font(AppTypography.font(9, language: language))
             .foregroundStyle(.secondary)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier(
-                "claude.status-line.source-transparency"
+                "claude.browser.source-transparency"
             )
         }
         .onAppear {
-            model.checkClaudeCode()
+            model.checkCompanion()
+        }
+        .alert(
+            language == .simplifiedChinese
+                ? "启用 Claude 浏览器同步？"
+                : "Enable Claude Browser Sync?",
+            isPresented: $showingConsent
+        ) {
+            Button(language == .simplifiedChinese ? "取消" : "Cancel", role: .cancel) {}
+            Button(language == .simplifiedChinese ? "继续" : "Continue") {
+                model.connectWithConsent()
+            }
+        } message: {
+            Text(language.claudeConsentDisclosure)
         }
     }
 
     @ViewBuilder
     private var stateSummary: some View {
         switch model.state {
-        case .unconfigured:
-            Text(language.claudeOfficialLocalStatusLine)
-        case .ready:
-            VStack(alignment: .leading, spacing: 2) {
-                Text(language.claudeDetected)
-                Text(language.claudeNoCredentialsRequired)
-            }
-        case .waiting:
-            Text(language.claudeWaitingForActivity)
+        case .disconnected:
+            Text(language.claudeNotConfigured)
+        case .checking:
+            Text(language == .simplifiedChinese ? "正在检查浏览器伴侣…" : "Checking Browser Companion…")
+        case .waitingForUsagePage:
+            Text(language == .simplifiedChinese ? "打开 Claude 使用量页面，然后点按一次 UMA 浏览器伴侣工具栏按钮" : "Open Claude Usage, then choose the UMA Browser Companion toolbar button once")
         case let .fresh(updated):
             VStack(alignment: .leading, spacing: 2) {
                 Text(language.claudeConnected)
@@ -613,63 +651,74 @@ private struct ClaudeStatusLineSettingsSection: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(language.claudeCached)
                 Text(language.claudeUpdated(updated))
-                Text(language.claudeUpdatesAutomatically)
+                Text(language.claudeUpdatesPageDriven)
             }
         case let .stale(updated):
             VStack(alignment: .leading, spacing: 2) {
                 Text(language.claudeStale)
                 Text(language.claudeUpdated(updated))
-                Text(language.claudeUpdatesAutomatically)
+                Text(language.claudeUpdatesPageDriven)
             }
-        case .unsupported:
-            Text(language.agentSetupRequired)
+        case .companionDisabled:
+            Text(language == .simplifiedChinese ? "浏览器伴侣未启用" : "Browser Companion is disabled")
+        case .companionOutdated:
+            Text(language == .simplifiedChinese ? "浏览器伴侣需要更新" : "Browser Companion needs an update")
+        case .unsupportedBrowser:
+            Text(language == .simplifiedChinese ? "默认浏览器暂不受支持" : "The default browser is not supported")
+        case .browserUnavailable:
+            Text(language == .simplifiedChinese ? "默认浏览器不可用" : "The default browser is unavailable")
+        case .nativeHostMissing:
+            Text(language == .simplifiedChinese ? "浏览器伴侣需要修复" : "Browser Companion needs repair")
+        case .nativeHostMismatched:
+            Text(language == .simplifiedChinese ? "浏览器伴侣版本不匹配" : "Browser Companion version mismatch")
+        case .routeChanged:
+            Text(language == .simplifiedChinese ? "Claude 使用量页面已更改；同步已安全停止" : "Claude's Usage page changed; sync stopped safely")
         case .failed:
             Text(language.failureStatus)
-        case .repairRequired:
-            Text(language.claudeRepairRelay)
         }
     }
 
     @ViewBuilder
     private var primaryAction: some View {
         switch model.state {
-        case .unconfigured:
-            Button(
-                language.claudeCheckCode,
-                action: model.checkClaudeCode
-            )
-            .buttonStyle(.bordered)
-            .accessibilityIdentifier("claude.status-line.check")
-        case .ready:
+        case .disconnected:
             Button(
                 language.claudeEnableIntegration,
-                action: model.enableIntegration
+                action: { showingConsent = true }
             )
             .buttonStyle(.borderedProminent)
-            .accessibilityIdentifier("claude.status-line.enable")
-        case .waiting, .fresh, .cached, .stale, .repairRequired:
+            .accessibilityIdentifier("claude.browser.connect")
+        case .fresh, .cached, .stale:
             Button(
-                language.claudeRepairRelay,
-                action: model.repairRelay
+                language == .simplifiedChinese ? "立即同步" : "Sync Now",
+                action: model.syncNow
             )
             .buttonStyle(.bordered)
-            .accessibilityIdentifier("claude.status-line.repair")
-        case .unsupported, .failed:
+            .accessibilityIdentifier("claude.browser.sync-now")
+        case .waitingForUsagePage:
             Button(
-                language.claudeCheckCode,
-                action: model.checkClaudeCode
+                language == .simplifiedChinese ? "打开使用量页面" : "Open Usage Page",
+                action: model.openUsagePage
             )
             .buttonStyle(.bordered)
-            .accessibilityIdentifier("claude.status-line.check")
-        }
-    }
-
-    private var shouldOfferDisable: Bool {
-        switch model.state {
-        case .waiting, .fresh, .cached, .stale, .repairRequired:
-            true
-        default:
-            false
+            .accessibilityIdentifier("claude.browser.open-usage")
+        case .companionDisabled, .companionOutdated,
+             .nativeHostMissing, .nativeHostMismatched:
+            Button(
+                language == .simplifiedChinese ? "修复伴侣" : "Repair Companion",
+                action: model.repairCompanion
+            )
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("claude.browser.repair")
+        case .unsupportedBrowser, .browserUnavailable, .routeChanged, .failed:
+            Button(
+                language == .simplifiedChinese ? "重新检查" : "Check Again",
+                action: model.checkCompanion
+            )
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("claude.browser.check-again")
+        case .checking:
+            ProgressView().controlSize(.small)
         }
     }
 }

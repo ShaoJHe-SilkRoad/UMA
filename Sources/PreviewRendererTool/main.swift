@@ -165,7 +165,7 @@ struct PreviewRendererTool {
             if arguments.contains("--all-expanded") {
                 expandedProviderIDs = Set(store.presentationCards.map(\.id))
             } else if arguments.contains("--claude-expanded") {
-                expandedProviderIDs = ["claude.statusLine"]
+                expandedProviderIDs = ["claude.browserSync"]
             } else if arguments.contains("--workbuddy-expanded") {
                 expandedProviderIDs = [
                     arguments.contains("--workbuddy-account-web")
@@ -492,7 +492,7 @@ struct PreviewRendererTool {
         let isStale = arguments.contains("--claude-stale") || isFailed
         let remaining = selectedWindow?.remaining ?? .unavailable
         return SharedUsageCardPresentation(
-            id: "claude.statusLine",
+            id: "claude.browserSync",
             providerName: "Claude Code",
             planLabel: nil,
             connectionStatus: isFailed
@@ -503,7 +503,7 @@ struct PreviewRendererTool {
             selectedWindowID: selectedWindow?.id,
             remaining: remaining,
             sourceDescription: language == .english
-                ? "Official local status line"
+                ? "Existing Claude login"
                 : "官方本机状态栏",
             isVisibleInDesktopAssistant: true,
             severity: isCached || isStale

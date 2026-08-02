@@ -34,7 +34,7 @@ final class TransparentUsagePanelController {
     private let panel: TransparentUsagePanel
     private let tuning: GlassTuning
     private let store: UsageStore
-    private let claudeSettings: ClaudeStatusLineSettingsModel
+    private let claudeSettings: ClaudeBrowserSettingsModel
     private let workBuddySettings: WorkBuddySettingsModel
     private let workBuddyLogin: WorkBuddyLoginCoordinator
     private let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController
@@ -47,7 +47,7 @@ final class TransparentUsagePanelController {
     init(
         store: UsageStore,
         statusItem: NSStatusItem,
-        claudeSettings: ClaudeStatusLineSettingsModel,
+        claudeSettings: ClaudeBrowserSettingsModel,
         workBuddySettings: WorkBuddySettingsModel,
         workBuddyLogin: WorkBuddyLoginCoordinator,
         workBuddyAccountWebSync: WorkBuddyAccountWebSessionController,
@@ -115,7 +115,7 @@ final class TransparentUsagePanelController {
 
     private func configurePanel(
         store: UsageStore,
-        claudeSettings: ClaudeStatusLineSettingsModel,
+        claudeSettings: ClaudeBrowserSettingsModel,
         workBuddySettings: WorkBuddySettingsModel,
         workBuddyLogin: WorkBuddyLoginCoordinator,
         workBuddyAccountWebSync: WorkBuddyAccountWebSessionController,

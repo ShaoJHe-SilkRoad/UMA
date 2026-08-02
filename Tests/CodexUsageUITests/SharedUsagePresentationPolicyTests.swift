@@ -292,6 +292,43 @@ struct SharedUsagePresentationPolicyTests {
     }
 
     @Test
+    func cachedAndStaleSamplesCannotDriveDecrementSelectionOrAlerts() {
+        let fresh = card(snapshot(fiveHourRemaining: 60, sevenDayRemaining: 44))
+        let priorFiveHour = SharedUsageCardPresentation(
+            id: fresh.id,
+            providerName: fresh.providerName,
+            connectionStatus: fresh.connectionStatus,
+            freshness: fresh.freshness,
+            windows: fresh.windows,
+            selectedWindowID: "five-hour",
+            remaining: .finite(60),
+            severity: .normal,
+            capturedAt: fresh.capturedAt
+        )
+
+        for retainedFreshness in [
+            AgentConnectorFreshness.cached,
+            AgentConnectorFreshness.stale,
+        ] {
+            let retained = card(
+                snapshot(
+                    fiveHourRemaining: 1,
+                    sevenDayRemaining: 43,
+                    state: .stale,
+                    freshness: retainedFreshness,
+                    capturedAt: epoch.addingTimeInterval(60)
+                ),
+                previous: priorFiveHour
+            )
+
+            #expect(retained.selectedWindowID == "five-hour")
+            #expect(retained.remaining == .finite(60))
+            #expect(retained.severity == .neutral)
+            #expect(retained.isRetainingLastValidValue)
+        }
+    }
+
+    @Test
     func olderSamplesCannotReplaceNewerPresentation() {
         let newest = card(
             snapshot(

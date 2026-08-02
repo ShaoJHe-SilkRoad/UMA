@@ -15,6 +15,7 @@ actor AgentConnectorRegistry {
     private let eligibilityScanner: LocalProviderEligibilityScanner
     private var currentAdmissionSet: ProviderSurfaceAdmissionSet?
     private var excludedProviderIDs: Set<AgentConnectorID> = []
+    private var stoppedSnapshots: [AgentConnectorID: AgentUsageSnapshot] = [:]
 
     init(
         connectors initialConnectors: [any AgentUsageConnector] = [],
@@ -74,12 +75,15 @@ actor AgentConnectorRegistry {
         self.excludedProviderIDs = excludedProviderIDs
 
         let admittedIDs = Set(result.admittedProviderIDs)
+        for id in admittedIDs { stoppedSnapshots[id] = nil }
         let previouslyAdmittedIDs = Set(latest.keys)
         let hiddenListenerIDs = listeners.keys.filter {
             !admittedIDs.contains($0)
                 && connectors[$0]?.descriptor.capabilities.contains(
                     .passiveLocalAvailability
                 ) != true
+                && connectors[$0]?.descriptor.localSourceClass
+                    != .browserCompanionUsage
         }
         for id in hiddenListenerIDs {
             listeners[id]?.cancel()
@@ -94,13 +98,22 @@ actor AgentConnectorRegistry {
             guard let connector = connectors[id] else { continue }
             if admittedIDs.contains(id) {
                 listen(to: connector)
+            } else if connector.descriptor.localSourceClass
+                        == .browserCompanionUsage,
+                      !excludedProviderIDs.contains(id),
+                      await connector.permitsRead(for: trigger) {
+                // Browser-companion reads are completed by a later explicit
+                // toolbar gesture. Keep the consent-owned listener alive while
+                // the provider remains hidden awaiting that first current read.
+                stoppedSnapshots[id] = nil
+                listen(to: connector)
             } else if connector.descriptor.hasSurfaceAdmissibleReadContract,
                       !excludedProviderIDs.contains(id)
                         || previouslyAdmittedIDs.contains(id),
                       !connector.descriptor.capabilities.contains(
                         .passiveLocalAvailability
                       ) {
-                await connector.stop()
+                await stopIfNeeded(connector)
             }
         }
         await persistCurrentAdmittedSnapshots()
@@ -133,6 +146,7 @@ actor AgentConnectorRegistry {
                     == .admittedStructuredLocal
         }
         for connector in passive { listen(to: connector) }
+        for connector in passive { stoppedSnapshots[connector.id] = nil }
         await withTaskGroup(of: Void.self) { group in
             for connector in passive {
                 group.addTask {
@@ -147,6 +161,7 @@ actor AgentConnectorRegistry {
     func startAll() async {
         let registered = orderedIDs.compactMap { connectors[$0] }
         for connector in registered { listen(to: connector) }
+        for connector in registered { stoppedSnapshots[connector.id] = nil }
         await withTaskGroup(of: Void.self) { group in
             for connector in registered {
                 group.addTask {
@@ -163,6 +178,7 @@ actor AgentConnectorRegistry {
         trigger: CodexRefreshTrigger = .manual
     ) async throws {
         guard let connector = connectors[id] else { throw AgentConnectorRegistryError.unknownConnector(id) }
+        stoppedSnapshots[id] = nil
         listen(to: connector)
         await connector.refresh(trigger: trigger)
         await receive(await connector.currentSnapshot())
@@ -170,18 +186,24 @@ actor AgentConnectorRegistry {
 
     func perform(_ command: AgentConnectorCommand, for id: AgentConnectorID) async throws {
         guard let connector = connectors[id] else { throw AgentConnectorRegistryError.unknownConnector(id) }
+        stoppedSnapshots[id] = nil
         listen(to: connector)
         await connector.perform(command)
-        await receive(await connector.currentSnapshot())
+        let snapshot = await connector.currentSnapshot()
+        if command == .disconnect {
+            stoppedSnapshots[id] = snapshot
+        }
+        await receive(snapshot)
     }
 
     func stopAll() async {
-        let registered = listeners.keys.compactMap { connectors[$0] }
+        // Stop every registered connector, including a consent-owned connector
+        // that may have started a helper before it became surface-admitted and
+        // therefore never acquired a snapshot listener.
+        let registered = orderedIDs.compactMap { connectors[$0] }
         listeners.values.forEach { $0.cancel() }
         listeners.removeAll()
-        await withTaskGroup(of: Void.self) { group in
-            for connector in registered { group.addTask { await connector.stop() } }
-        }
+        for connector in registered { await stopIfNeeded(connector) }
         latest.removeAll()
         currentAdmissionSet = nil
         excludedProviderIDs.removeAll()
@@ -257,7 +279,7 @@ actor AgentConnectorRegistry {
                     }
                 )
                 if snapshot.state != .inactive && !isPassive {
-                    await connector.stop()
+                    await stopIfNeeded(connector, observedSnapshot: snapshot)
                 }
                 publish()
                 return
@@ -276,6 +298,7 @@ actor AgentConnectorRegistry {
                     )
                 }
             )
+            stoppedSnapshots[snapshot.id] = nil
         }
         guard latest[snapshot.id] != snapshot else { return }
         latest[snapshot.id] = snapshot
@@ -290,6 +313,21 @@ actor AgentConnectorRegistry {
         }
         guard !restorableSnapshots.isEmpty else { return }
         try? await snapshotStore.save(restorableSnapshots)
+    }
+
+    private func stopIfNeeded(
+        _ connector: any AgentUsageConnector,
+        observedSnapshot: AgentUsageSnapshot? = nil
+    ) async {
+        let before: AgentUsageSnapshot
+        if let observedSnapshot {
+            before = observedSnapshot
+        } else {
+            before = await connector.currentSnapshot()
+        }
+        guard stoppedSnapshots[connector.id] != before else { return }
+        await connector.stop()
+        stoppedSnapshots[connector.id] = await connector.currentSnapshot()
     }
 
     private func publish() { continuation?.yield(orderedSnapshots()) }

@@ -42,7 +42,7 @@ public struct UsagePanelView: View {
     private let preferencesEnabled: Bool
     private let onHeightChange: ((CGFloat) -> Void)?
     private let localAccessConfirmationAction: CodexLocalAccessConfirmationAction?
-    private let claudeSettings: ClaudeStatusLineSettingsModel?
+    private let claudeSettings: ClaudeBrowserSettingsModel?
     private let workBuddySettings: WorkBuddySettingsModel?
     private let workBuddyLogin: WorkBuddyLoginCoordinator?
     private let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
@@ -60,7 +60,7 @@ public struct UsagePanelView: View {
         navigation: UsagePanelNavigationCoordinator? = nil,
         onHeightChange: ((CGFloat) -> Void)? = nil,
         localAccessConfirmationAction: CodexLocalAccessConfirmationAction? = nil,
-        claudeSettings: ClaudeStatusLineSettingsModel? = nil,
+        claudeSettings: ClaudeBrowserSettingsModel? = nil,
         workBuddySettings: WorkBuddySettingsModel? = nil,
         workBuddyLogin: WorkBuddyLoginCoordinator? = nil,
         workBuddyAccountWebSync: WorkBuddyAccountWebSessionController? = nil,
@@ -757,7 +757,7 @@ private struct LocalLiveProviderCard: View {
             if isClaudeCode {
                 detailRow(
                     language == .english ? "Source" : "来源",
-                    value: language.claudeOfficialLocalStatusLine
+                    value: language.claudeBrowserSourceLabel
                 )
                 detailRow(
                     language == .english ? "State" : "状态",
@@ -778,7 +778,7 @@ private struct LocalLiveProviderCard: View {
                 detailRow(connectionLabel, value: card.remaining.displayText)
             }
             if isClaudeCode {
-                Text(language.claudeUpdatesAutomatically)
+                Text(language.claudeUpdatesPageDriven)
                     .font(AppTypography.font(9.5, language: language))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

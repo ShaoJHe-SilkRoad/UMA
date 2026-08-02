@@ -9,22 +9,39 @@ let package = Package(
     ],
     products: [
         .executable(name: "CodexUsageMonitor", targets: ["CodexUsageMonitor"]),
-        .executable(name: "ClaudeStatusLineRelay", targets: ["ClaudeStatusLineRelay"]),
+        .executable(name: "ClaudeBrowserNativeHost", targets: ["ClaudeBrowserNativeHost"]),
         .executable(name: "PreviewRendererTool", targets: ["PreviewRendererTool"])
     ],
     targets: [
         .target(
+            name: "ClaudeBrowserBridgeProtocol",
+            path: "Sources/ClaudeBrowserBridgeProtocol"
+        ),
+        .target(
+            name: "ClaudeBrowserNativeHostCore",
+            dependencies: ["ClaudeBrowserBridgeProtocol"],
+            path: "Sources/ClaudeBrowserNativeHostCore"
+        ),
+        .executableTarget(
+            name: "ClaudeBrowserNativeHost",
+            dependencies: [
+                "ClaudeBrowserNativeHostCore",
+                "ClaudeBrowserBridgeProtocol",
+            ],
+            path: "Sources/ClaudeBrowserNativeHost"
+        ),
+        // Retained only so checksum-backed historical status-line tests and
+        // records remain reviewable. No relay executable target remains.
+        .target(
             name: "ClaudeStatusLineCore",
             path: "Sources/ClaudeStatusLineCore"
         ),
-        .executableTarget(
-            name: "ClaudeStatusLineRelay",
-            dependencies: ["ClaudeStatusLineCore"],
-            path: "Sources/ClaudeStatusLineRelay"
-        ),
         .target(
             name: "CodexUsageUI",
-            dependencies: ["ClaudeStatusLineCore"],
+            dependencies: [
+                "ClaudeBrowserBridgeProtocol",
+                "ClaudeBrowserNativeHostCore",
+            ],
             path: "Sources/CodexUsageUI"
         ),
         .executableTarget(
@@ -40,11 +57,21 @@ let package = Package(
         .testTarget(
             name: "CodexUsageUITests",
             dependencies: [
+                "ClaudeBrowserBridgeProtocol",
+                "ClaudeBrowserNativeHostCore",
                 "ClaudeStatusLineCore",
                 "CodexUsageUI",
                 "CodexUsageMonitor",
             ],
             path: "Tests/CodexUsageUITests"
+        ),
+        .testTarget(
+            name: "ClaudeBrowserBridgeCoreTests",
+            dependencies: [
+                "ClaudeBrowserBridgeProtocol",
+                "ClaudeBrowserNativeHostCore",
+            ],
+            path: "Tests/ClaudeBrowserBridgeCoreTests"
         )
     ]
 )

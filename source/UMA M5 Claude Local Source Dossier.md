@@ -1,6 +1,42 @@
 # UMA M5 Claude Local Source Dossier
 
-Date: 2026-07-28
+Date: 2026-07-31
+
+## Current M5-DESKTOP-D1 decision
+
+**DESKTOP LOCAL NO-GO — STATUSLINE NOT EXECUTED**
+
+One Human-controlled Claude Desktop Code response completed in a newly opened
+Local session rooted at the empty owner-only neutral folder required by
+M5-DESKTOP-D1. Before that response, the temporary user-level `statusLine`
+was verified as the exact active on-disk command, the legitimate theme was
+preserved, no managed-policy or local-project override was present, and the
+invocation-first probe had passed its synthetic classification matrix.
+
+The invocation marker remained absent after the completed response. Therefore
+the callback command was not invoked. JSON parsing did not run,
+`rate_limits` was not observed, neither the five-hour nor seven-day field was
+observed, production relay delivery was not attempted, and no packet reached
+the connector to be accepted, rejected, or lost. This is **Outcome A**, not a
+quota-payload or relay failure.
+
+The exact pre-probe Claude settings bytes, owner, and mode were restored and
+verified. The probe, marker location, settings backup, temporary settings,
+neutral folder, and task-owned UMA candidate were removed or stopped. No raw
+payload, quota value, reset time, prompt, response, credential, identity,
+session, transcript, workspace content, or account-web data was accessed or
+retained. The preserved 18-file M5-LIVE-R1 product diff remains unstaged and
+the index remains empty.
+
+The authenticated command-line status-line source remains historically
+proven, but Claude Desktop Local does not execute the user-level status-line
+command on the tested current-device route. Automatic Desktop-only quota
+refresh therefore has no admitted local callback source. If automatic Desktop
+usage remains required, the conditional account-web source class now requires
+its separately authorized admission dossier; it was not activated here.
+
+Exactly one next task is **M5-WEB-G1 — Claude isolated account-web
+usage-source dossier**.
 
 ## Current M5-SETUP-G1R decision
 
@@ -467,3 +503,65 @@ No other Claude file was modified or deleted.
 **ACCEPTED PROVIDER-OWNED ONBOARDING PREFERENCE — NOT A PROBE ARTIFACT**
 
 **Admission: GO. Exactly one next task: M5-G2.**
+
+## M5-WEB-G1 account-web security addendum
+
+The accepted Claude Desktop Local NO-GO evidence above remains unchanged.
+M5-WEB-G1 separately evaluated an isolated, nonpersistent Claude account-web
+source. The official Claude login page loaded, but Human-controlled Google
+sign-in was rejected as an embedded-user-agent compatibility failure. The
+Founder ended the login attempt and prohibited retry or bypass.
+
+Source audit then found that the deleted research prototype was unsandboxed and
+called `evaluateJavaScript` on login-page DOM text before a verified Usage
+route. It did not read credential input values, cookies, storage, or account
+identity, and no raw page data was retained. Disconnect & Clear returned zero
+website-data records; exact bundle persistence locations, crash reports,
+process state, and the task-owned prototype root were absent after cleanup.
+
+Apple documents system-browser authentication with a provider callback, but
+Anthropic does not publish a compatible third-party callback and Usage-page
+authorization contract for UMA. No such flow was implemented.
+
+**NO-GO — SAFE ACCOUNT-WEB AUTHENTICATION NOT AVAILABLE**
+
+Exactly one next task is a **Founder decision** about retaining the optional
+terminal CLI integration, marking Claude Desktop usage unsupported, or closing
+M5 without Claude production support.
+
+## M5-OAUTH-G1 product-source override
+
+The Founder has approved one new bounded source class outside the former local
+status-line and account-web alternatives: provider-managed OAuth quota through
+an isolated short-lived broker. The local-source and account-web findings above
+remain accepted history. They do not authorize a selectable fallback and do
+not run beside the OAuth source.
+
+The current implementation decision, protocol evidence, and privacy boundary
+are recorded in the M5 Claude OAuth Compromise Decision, Source Dossier, and
+Privacy Contract. The route remains Experimental because Anthropic does not
+publish the quota endpoint as a supported third-party API.
+
+## M5-BROWSER-G1 current product-source direction
+
+The Founder permanently rejected the Keychain/OAuth broker after the preceding
+record was written. The broker, provider credential item, token handling,
+continuity digest, bearer request, and private quota endpoint are historical
+investigation only and are not selectable product behavior.
+
+The embedded WKWebView account-web route remains NO-GO. M5-BROWSER-G1 does not
+revive it. Its distinct architecture keeps authentication in the user's system
+default browser and accepts only a bounded normalized message from an UMA
+Browser Companion running on the exact current official personal Usage page.
+
+The active implementation and admission boundaries are recorded in:
+
+- `UMA M5 Claude Browser Source Dossier.md`;
+- `UMA M5 Claude Browser Privacy Contract.md`;
+- `UMA M5 Claude Browser Admission Decision.md`.
+
+The current Safari Browser Sync path passed its Human-controlled checkpoint:
+both account-level windows matched UMA, reset fields were honestly unavailable,
+and no credential, cookie, identity, broad page content, private endpoint, or
+exact live value entered durable evidence. Chromium and signed production/store
+distribution remain unverified, so the accepted result is PASS WITH RISKS.

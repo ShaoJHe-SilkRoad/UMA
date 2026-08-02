@@ -32,7 +32,7 @@ enum AgentUsageRuntime {
 @MainActor
 public struct UsageMonitorRuntime {
     public let store: UsageStore
-    public let claudeSettings: ClaudeStatusLineSettingsModel
+    public let claudeSettings: ClaudeBrowserSettingsModel
     public let workBuddySettings: WorkBuddySettingsModel
     public let workBuddyLogin: WorkBuddyLoginCoordinator
     public let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController
@@ -48,11 +48,18 @@ public struct UsageMonitorRuntime {
         let snapshotStore = snapshotStoreURL.map {
             AgentConnectorSnapshotStore(url: $0)
         } ?? AgentConnectorSnapshotStore()
+        let claudeConsent = ClaudeBrowserConsentStore()
+        let claudeCache = ClaudeBrowserSanitizedCacheStore()
+        let claudeIntegration = ClaudeBrowserProductionIntegration.make()
         let claudeConnector = ClaudeCodeUsageConnector.production(
-            snapshotStore: snapshotStore
-        )
-        let claudeSettings = ClaudeStatusLineSettingsModel.production(
-            connector: claudeConnector
+            integration: claudeIntegration,
+            hasConsent: { @MainActor in claudeConsent.consentGranted },
+            clearConsent: { @MainActor in
+                claudeConsent.consentGranted = false
+            },
+            readCache: { await claudeCache.load() },
+            writeCache: { data in try? await claudeCache.save(data) },
+            clearCache: { try? await claudeCache.clear() }
         )
         let workBuddyConnector = WorkBuddyAvailabilityConnector(source: manualSource)
         let accountWebSync = WorkBuddyAccountWebSessionController()
@@ -79,6 +86,20 @@ public struct UsageMonitorRuntime {
                 accountWebConnector,
             ]
         )
+        let claudeSettings = ClaudeBrowserSettingsModel(
+            connector: claudeConnector,
+            consentStore: claudeConsent,
+            refreshAdmissions: { @MainActor in
+                let descriptors = await registry.orderedDescriptors()
+                let excluded = agentSettings.disabledConnectorIDs(
+                    from: descriptors.map(\.id)
+                )
+                _ = await registry.scanSurfaceAdmissions(
+                    trigger: .manualRefresh,
+                    excludedProviderIDs: excluded
+                )
+            }
+        )
         accountWebSync.configureAutoRefresh {
             guard await MainActor.run(body: {
                 agentSettings.isMonitoringEnabled(
@@ -100,6 +121,15 @@ public struct UsageMonitorRuntime {
         )
         Task {
             await registry.startPassiveConnectors()
+            guard claudeConsent.consentGranted else { return }
+            let descriptors = await registry.orderedDescriptors()
+            let excluded = agentSettings.disabledConnectorIDs(
+                from: descriptors.map(\.id)
+            )
+            _ = await registry.scanSurfaceAdmissions(
+                trigger: .applicationLaunch,
+                excludedProviderIDs: excluded
+            )
         }
         let settings = WorkBuddySettingsModel(source: manualSource)
         let login = WorkBuddyLoginCoordinator()

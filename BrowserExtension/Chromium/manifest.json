@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "UMA Browser Companion for Claude",
+  "version": "1.0.1",
+  "description": "Sends normalized Claude plan-limit percentages from the official Usage page to UMA.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwvAvhF+img/ispVsX97a5vmPfu6H0d686/q0SaMPG6Mm4TX4SG7chMdz4VGx0rHWXDEorzENXM/qX10yuZLWe2TLEcTgW+J2NhxHUSqbgzWYB1mf4IT8K8qCbCb3PxDVVMA/tKAUE313NlGBs52uCi79msL0UUwxJa/D4C/OW1Ol13KYWrKeiJ33tEdKoPhjtsbLXhGoJwDHBvdlde0JbxuSjCZAsXDSb6fPYIz18Gxia1mgh9JRGFZN9r2FfCt8E175pl2ptiaV0w5j6oaFC6KiVsX1NVhycZyuH4ZQGvFW0fO3zA7pmB8Y84+x/MPJHsmUhqYpYQBWdx9T6o2PgQIDAQAB",
+  "permissions": ["activeTab", "nativeMessaging", "scripting"],
+  "background": {"service_worker": "Chromium/background-loader.js"},
+  "action": {"default_title": "Read this Claude Usage page once"}
+}

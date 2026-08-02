@@ -1,0 +1,9 @@
+{
+  "name": "com.silkrd.uma.claude_browser",
+  "description": "UMA Claude Browser Companion native host",
+  "path": "__UMA_CLAUDE_BROWSER_NATIVE_HOST_PATH__",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://jgoknghcplngcnldmfenkghcbommaalj/"
+  ]
+}
