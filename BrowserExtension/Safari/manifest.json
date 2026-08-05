@@ -1,9 +1,15 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 2,
   "name": "UMA Browser Companion for Claude",
-  "version": "1.0.1",
-  "description": "Sends normalized Claude plan-limit percentages from the official Usage page to UMA.",
-  "permissions": ["activeTab", "nativeMessaging", "scripting"],
-  "background": {"service_worker": "Safari/background-loader.js"},
-  "action": {"default_title": "Read this Claude Usage page once"}
+  "version": "1.2.3",
+  "description": "Sends normalized Claude plan-limit percentages from the exact official Usage route to UMA.",
+  "permissions": ["nativeMessaging", "storage", "https://claude.ai/new*"],
+  "background": {
+    "scripts": [
+      "Shared/claude-usage-extractor.js",
+      "Safari/background-loader.js",
+      "Shared/background-core.js"
+    ],
+    "persistent": true
+  }
 }

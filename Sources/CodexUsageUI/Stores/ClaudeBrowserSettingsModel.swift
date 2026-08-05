@@ -5,6 +5,9 @@ enum ClaudeSettingsPresentationState: Equatable, Sendable {
     case disconnected
     case checking
     case waitingForUsagePage
+    case websiteAccessRequired
+    case signInRequired
+    case waitingForSafari
     case fresh(Date)
     case cached(Date)
     case stale(Date)
@@ -24,6 +27,8 @@ enum ClaudeSettingsAction: Equatable, Sendable {
     case refreshing
     case openingUsage
     case repairing
+    case grantingAccess
+    case openingAccessSettings
     case disconnecting
 }
 
@@ -48,7 +53,12 @@ struct ClaudeSourceTransparency: Equatable, Sendable {
 @MainActor
 final class ClaudeBrowserConsentStore {
     private enum Key {
-        static let consent = "ClaudeBrowserSyncConsent.v1"
+        // v2 is a deliberate migration gate: the previous v1 consent covered
+        // only a user-triggered, one-tab read and cannot silently authorize
+        // persistent website access or recurring browser automation.
+        static let consent = "ClaudeBrowserSyncConsent.v2"
+        static let autoRefresh = "ClaudeBrowserSyncAutoRefresh.v1"
+        static let allowSafariLaunch = "ClaudeBrowserSyncAllowSafariLaunch.v1"
     }
 
     private let defaults: UserDefaults
@@ -61,6 +71,16 @@ final class ClaudeBrowserConsentStore {
         get { defaults.bool(forKey: Key.consent) }
         set { defaults.set(newValue, forKey: Key.consent) }
     }
+
+    var autoRefreshEnabled: Bool {
+        get { defaults.bool(forKey: Key.autoRefresh) }
+        set { defaults.set(newValue, forKey: Key.autoRefresh) }
+    }
+
+    var allowSafariLaunch: Bool {
+        get { defaults.bool(forKey: Key.allowSafariLaunch) }
+        set { defaults.set(newValue, forKey: Key.allowSafariLaunch) }
+    }
 }
 
 @MainActor
@@ -70,6 +90,8 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     @Published private(set) var activeAction: ClaudeSettingsAction?
     @Published private(set) var safeError: ClaudeSettingsSafeError?
     @Published private(set) var consentGranted: Bool
+    @Published private(set) var autoRefreshEnabled: Bool
+    @Published private(set) var allowSafariLaunch: Bool
 
     let sourceTransparency = ClaudeSourceTransparency()
     private let connector: ClaudeCodeUsageConnector
@@ -86,6 +108,8 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         self.consentStore = consentStore
         self.refreshAdmissions = refreshAdmissions
         consentGranted = consentStore.consentGranted
+        autoRefreshEnabled = consentStore.autoRefreshEnabled
+        allowSafariLaunch = consentStore.allowSafariLaunch
         state = consentStore.consentGranted ? .checking : .disconnected
         observationTask = Task { [weak self] in
             let stream = await connector.snapshots()
@@ -109,6 +133,11 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     }
 
     func connectWithConsent() {
+        // The Continue control is the explicit in-product opt-in. Recurring
+        // automation becomes On only at this boundary, never by migration or
+        // by merely launching a previously connected build.
+        consentStore.autoRefreshEnabled = true
+        autoRefreshEnabled = true
         consentStore.consentGranted = true
         consentGranted = true
         run(.connecting) { connector in await connector.connect(openUsagePage: true) }
@@ -124,6 +153,31 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
 
     func repairCompanion() {
         run(.repairing) { connector in await connector.repairCompanion() }
+    }
+
+    func grantWebsiteAccess() {
+        run(.grantingAccess) { connector in
+            await connector.openUsagePage()
+            await connector.repairCompanion()
+        }
+    }
+
+    func openSafariAccessSettings() {
+        run(.openingAccessSettings) { connector in
+            await connector.repairCompanion()
+        }
+    }
+
+    func setAutoRefreshEnabled(_ enabled: Bool) {
+        autoRefreshEnabled = enabled
+        consentStore.autoRefreshEnabled = enabled
+        Task { await connector.automationPreferenceChanged() }
+    }
+
+    func setAllowSafariLaunch(_ allowed: Bool) {
+        allowSafariLaunch = allowed
+        consentStore.allowSafariLaunch = allowed
+        Task { await connector.automationPreferenceChanged() }
     }
 
     func disconnect() {
@@ -162,6 +216,9 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         case .disconnected: .disconnected
         case .checking: .checking
         case .waitingForUsagePage: .waitingForUsagePage
+        case .websiteAccessRequired: .websiteAccessRequired
+        case .signInRequired: .signInRequired
+        case .waitingForSafari: .waitingForSafari
         case let .fresh(date): .fresh(date)
         case let .cached(date): .cached(date)
         case let .stale(date): .stale(date)

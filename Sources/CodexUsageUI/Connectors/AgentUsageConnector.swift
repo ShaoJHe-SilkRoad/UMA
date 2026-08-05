@@ -145,6 +145,7 @@ enum AgentConnectorCapability: String, Codable, CaseIterable, Hashable, Sendable
     case accountUsage
     case passiveLocalAvailability
     case sanitizedLastValidRestore
+    case automaticRefresh
     case hiddenFromProviderSurfaces
     case hiddenFromDesktopAssistant
 }

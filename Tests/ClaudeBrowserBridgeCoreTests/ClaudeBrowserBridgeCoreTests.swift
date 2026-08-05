@@ -127,6 +127,44 @@ struct ClaudeBrowserBridgeCoreTests {
         }
     }
 
+    @Test("automatic control events contain only one request ID and safe status")
+    func automaticControlEventContract() throws {
+        let requestID = "6e6f5e38-70bf-4b1b-81b0-e0903081f980"
+        for status in ClaudeBrowserAutomationStatus.allCases {
+            let source = ClaudeBrowserAutomationEvent(
+                requestID: requestID,
+                status: status,
+                occurredAt: "2026-08-02T12:00:00Z"
+            )
+            let data = try ClaudeBrowserAutomationEventDecoder.encode(source)
+            #expect(try ClaudeBrowserAutomationEventDecoder.decode(data) == source)
+            let object = try #require(
+                JSONSerialization.jsonObject(with: data) as? [String: Any]
+            )
+            #expect(Set(object.keys) == [
+                "kind", "schemaVersion", "sourceID", "browserFamily",
+                "requestID", "status", "occurredAt",
+            ])
+        }
+
+        let valid = ClaudeBrowserAutomationEvent(
+            requestID: requestID,
+            status: .permissionRequired,
+            occurredAt: "2026-08-02T12:00:00Z"
+        )
+        var object = try #require(
+            JSONSerialization.jsonObject(
+                with: ClaudeBrowserAutomationEventDecoder.encode(valid)
+            ) as? [String: Any]
+        )
+        object["url"] = "forbidden"
+        #expect(throws: ClaudeBrowserBridgeError.unexpectedField("url")) {
+            try ClaudeBrowserAutomationEventDecoder.decode(
+                JSONSerialization.data(withJSONObject: object)
+            )
+        }
+    }
+
     @Test("only the deterministic Chromium extension origin is admitted")
     func chromiumOriginAllowlist() {
         #expect(ClaudeBrowserMessageDecoder.isAllowedChromiumOrigin(
@@ -162,6 +200,44 @@ struct ClaudeBrowserBridgeCoreTests {
         try ClaudeBrowserFileHandoffWriter.write(payload, endpoint: endpoint)
         #expect(signal.wait(timeout: .now() + 2) == .success)
         #expect(received.value == envelope())
+        #expect(!FileManager.default.fileExists(atPath: endpoint.pendingPath))
+    }
+
+    @Test("owner-only handoff delivers a content-free automation status")
+    func automationStatusHandoffRoundTrip() throws {
+        let root = URL(fileURLWithPath: "/private/tmp", isDirectory: true)
+            .appendingPathComponent(
+                "uma-m5-auto-bridge-status.\(getpid())",
+                isDirectory: true
+            )
+        try? FileManager.default.removeItem(at: root)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let endpoint = ClaudeBrowserFileHandoffEndpoint(directoryPath: root.path)
+        let received = LockedAutomationEvent()
+        let signal = DispatchSemaphore(value: 0)
+        let server = ClaudeBrowserFileHandoffServer(
+            endpoint: endpoint,
+            observationHandler: { _ in },
+            automationHandler: { value in
+                received.set(value)
+                signal.signal()
+            }
+        )
+        try server.start()
+        defer { server.stop() }
+
+        let event = ClaudeBrowserAutomationEvent(
+            requestID: "6e6f5e38-70bf-4b1b-81b0-e0903081f980",
+            status: .permissionRequired,
+            occurredAt: "2026-08-02T12:00:00Z"
+        )
+        try ClaudeBrowserFileHandoffWriter.write(
+            ClaudeBrowserAutomationEventDecoder.encode(event),
+            endpoint: endpoint
+        )
+        #expect(signal.wait(timeout: .now() + 2) == .success)
+        #expect(received.value == event)
         #expect(!FileManager.default.fileExists(atPath: endpoint.pendingPath))
     }
 
@@ -274,25 +350,48 @@ struct ClaudeBrowserBridgeCoreTests {
         #expect(!endpoint.directoryPath.hasPrefix("/tmp/"))
     }
 
-    @Test("bridge manifests require one user gesture and no persistent page access")
+    @Test("Safari uses exact persistent access while Chromium remains manual")
     func manifestPermissions() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        for family in ["Chromium", "Safari"] {
-            let data = try Data(contentsOf: root
-                .appendingPathComponent("BrowserExtension")
-                .appendingPathComponent(family)
-                .appendingPathComponent("manifest.json"))
-            let manifest = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-            #expect(manifest["permissions"] as? [String] == [
-                "activeTab",
-                "nativeMessaging",
-                "scripting",
-            ])
-            #expect(manifest["host_permissions"] == nil)
-            #expect(manifest["content_scripts"] == nil)
+        let manifestRoot = root.appendingPathComponent("BrowserExtension")
+        let safariData = try Data(contentsOf: manifestRoot
+            .appendingPathComponent("Safari/manifest.json"))
+        let safari = try #require(
+            JSONSerialization.jsonObject(with: safariData) as? [String: Any]
+        )
+        #expect(safari["manifest_version"] as? Int == 2)
+        #expect(safari["permissions"] as? [String] == [
+            "nativeMessaging",
+            "storage",
+            ClaudeBrowserBridgeContract.exactUsageHostPermission,
+        ])
+        #expect(safari["host_permissions"] == nil)
+        let safariBackground = try #require(safari["background"] as? [String: Any])
+        #expect(safariBackground["scripts"] as? [String] == [
+            "Shared/claude-usage-extractor.js",
+            "Safari/background-loader.js",
+            "Shared/background-core.js",
+        ])
+        #expect(safariBackground["persistent"] as? Bool == true)
+        #expect(safariBackground["service_worker"] == nil)
+        #expect(safari["content_scripts"] == nil)
+        #expect(safari["action"] == nil)
+
+        let chromiumData = try Data(contentsOf: manifestRoot
+            .appendingPathComponent("Chromium/manifest.json"))
+        let chromium = try #require(
+            JSONSerialization.jsonObject(with: chromiumData) as? [String: Any]
+        )
+        #expect(chromium["permissions"] as? [String] == [
+            "activeTab", "nativeMessaging", "scripting",
+        ])
+        #expect(chromium["host_permissions"] == nil)
+        #expect(chromium["action"] != nil)
+
+        for data in [safariData, chromiumData] {
             let text = String(decoding: data, as: UTF8.self)
             for forbidden in [
                 "\"tabs\"",
@@ -316,10 +415,15 @@ struct ClaudeBrowserBridgeCoreTests {
         )
         #expect(background.contains("api.action?.onClicked?.addListener((tab)"))
         #expect(background.contains("api.scripting.executeScript"))
+        #expect(background.contains("api.tabs?.executeScript"))
         #expect(background.contains("allowedSenderURL(tab?.url || \"\")"))
         #expect(!background.contains("tabs.onUpdated"))
         #expect(!background.contains("tabs.query"))
-        #expect(!background.contains("tabs.create"))
+        #expect(background.contains("api.tabs.create({ url: extractor.CONTRACT.href, active: false })"))
+        #expect(background.contains("api.tabs.remove(record.tabID)"))
+        #expect(background.contains("await proveOwnedTab(record, tab)"))
+        #expect(background.contains("ownedTabOwnershipLost"))
+        #expect(background.contains("api.runtime.connectNative(config.nativeApplication)"))
 
         let content = try String(
             contentsOf: root.appendingPathComponent(
@@ -328,10 +432,18 @@ struct ClaudeBrowserBridgeCoreTests {
             encoding: .utf8
         )
         #expect(content.contains("extractor.exactUsageURL(globalThis.location)"))
-        #expect(content.contains("const observation = extractor.extract"))
+        #expect(content.contains("result = extractor.extractResult"))
+        #expect(content.contains("const readinessTimeoutMilliseconds = 20_000"))
+        #expect(content.contains("const readinessPollMilliseconds = 500"))
+        #expect(content.contains("result.status !== \"usageUnavailable\""))
         #expect(!content.contains("MutationObserver"))
-        #expect(!content.contains("setTimeout"))
-        #expect(!content.contains("runtime.onMessage"))
+        #expect(content.contains("setTimeout"))
+        #expect(!content.contains("setInterval"))
+        #expect(content.contains("runtime.onMessage.addListener"))
+        #expect(content.contains("umaClaudeOwnedTabBind"))
+        #expect(content.contains("umaClaudeOwnedTabChallenge"))
+        #expect(content.contains("umaClaudeOwnedTabProof"))
+        #expect(content.contains("umaClaudeExtractUsage"))
 
         let entitlementURL = root.appendingPathComponent(
             "BrowserExtension/Safari/Native/ClaudeBrowserCompanion.entitlements"
@@ -386,6 +498,23 @@ private final class LockedEnvelope: @unchecked Sendable {
     }
 
     func set(_ value: ClaudeBrowserObservationEnvelope) {
+        lock.lock()
+        storage = value
+        lock.unlock()
+    }
+}
+
+private final class LockedAutomationEvent: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: ClaudeBrowserAutomationEvent?
+
+    var value: ClaudeBrowserAutomationEvent? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func set(_ value: ClaudeBrowserAutomationEvent) {
         lock.lock()
         storage = value
         lock.unlock()

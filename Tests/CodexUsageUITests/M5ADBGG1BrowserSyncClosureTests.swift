@@ -226,7 +226,7 @@ struct M5ADBGG1BrowserSyncClosureTests {
     }
 
     @Test
-    func actionAndErrorCopyIsLocalizedWithoutAutomaticRefreshClaims() {
+    func actionAndErrorCopyIsLocalizedForAutomaticBrowserSync() {
         #expect(AppLanguage.english.claudeBrowserActionStatus(.refreshing) == "Refreshing…")
         #expect(AppLanguage.simplifiedChinese.claudeBrowserActionStatus(.refreshing) == "正在刷新…")
         #expect(
@@ -240,6 +240,8 @@ struct M5ADBGG1BrowserSyncClosureTests {
             .refreshing,
             .openingUsage,
             .repairing,
+            .grantingAccess,
+            .openingAccessSettings,
             .disconnecting,
         ] {
             #expect(!AppLanguage.english.claudeBrowserActionStatus(action).isEmpty)

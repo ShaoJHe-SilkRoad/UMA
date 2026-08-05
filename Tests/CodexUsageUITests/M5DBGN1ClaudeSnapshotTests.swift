@@ -152,22 +152,25 @@ actor BrowserTestConsent {
 }
 
 actor BrowserTestBridge {
-    private var handler: ClaudeBrowserProductionIntegration.ObservationHandler?
+    private var handler: ClaudeBrowserProductionIntegration.MessageHandler?
     private(set) var health: ClaudeBrowserCompanionHealth = .ready
     private var startError: ClaudeBrowserBridgeError?
     private(set) var openCount = 0
     private(set) var repairCount = 0
     private(set) var startCount = 0
     private(set) var stopCount = 0
+    private(set) var automaticRequests: [(requestID: String, allowSafariLaunch: Bool)] = []
+    private(set) var closedRequestIDs: [String] = []
+    private var automaticDispatchResult: ClaudeBrowserAutomaticDispatchResult = .dispatched
 
     func start(
-        _ handler: @escaping ClaudeBrowserProductionIntegration.ObservationHandler
+        _ handler: @escaping ClaudeBrowserProductionIntegration.MessageHandler
     ) async {
         self.handler = handler
         startCount += 1
         if let startError {
             self.handler = nil
-            await handler(.failure(startError))
+            await handler(.observation(.failure(startError)))
         }
     }
 
@@ -177,11 +180,33 @@ actor BrowserTestBridge {
     func setStartError(_ next: ClaudeBrowserBridgeError?) { startError = next }
     func open() -> Bool { openCount += 1; return true }
     func repair() -> ClaudeBrowserCompanionHealth { repairCount += 1; return health }
+    func setAutomaticDispatchResult(_ result: ClaudeBrowserAutomaticDispatchResult) {
+        automaticDispatchResult = result
+    }
+    func requestAutomaticRefresh(
+        requestID: String,
+        allowSafariLaunch: Bool
+    ) -> ClaudeBrowserAutomaticDispatchResult {
+        automaticRequests.append((requestID, allowSafariLaunch))
+        return automaticDispatchResult
+    }
+    func closeOwnedTab(requestID: String) { closedRequestIDs.append(requestID) }
     func send(_ envelope: ClaudeBrowserObservationEnvelope) async {
-        await handler?(.success(envelope))
+        await handler?(.observation(.success(envelope)))
     }
     func reject(_ error: ClaudeBrowserBridgeError = .malformedJSON) async {
-        await handler?(.failure(error))
+        await handler?(.observation(.failure(error)))
+    }
+    func sendAutomation(
+        requestID: String,
+        status: ClaudeBrowserAutomationStatus,
+        occurredAt: String = "2030-03-01T12:00:00Z"
+    ) async {
+        await handler?(.automation(ClaudeBrowserAutomationEvent(
+            requestID: requestID,
+            status: status,
+            occurredAt: occurredAt
+        )))
     }
 }
 
@@ -208,23 +233,50 @@ final class BrowserTestClock: @unchecked Sendable {
 
 struct BrowserConnectorFixture {
     let consent: BrowserTestConsent
+    let autoRefresh: BrowserTestConsent
+    let allowSafariLaunch: BrowserTestConsent
     let bridge = BrowserTestBridge()
     let cache: BrowserTestCache
     let clock: BrowserTestClock
 
-    init(consent: Bool, clock: BrowserTestClock = BrowserTestClock()) {
-        self.init(consent: consent, clock: clock, cache: BrowserTestCache())
+    init(
+        consent: Bool,
+        autoRefresh: Bool = false,
+        allowSafariLaunch: Bool = false,
+        clock: BrowserTestClock = BrowserTestClock()
+    ) {
+        self.init(
+            consent: consent,
+            autoRefresh: autoRefresh,
+            allowSafariLaunch: allowSafariLaunch,
+            clock: clock,
+            cache: BrowserTestCache()
+        )
     }
 
-    init(consent: Bool, clock: BrowserTestClock, cache: BrowserTestCache) {
+    init(
+        consent: Bool,
+        autoRefresh: Bool = false,
+        allowSafariLaunch: Bool = false,
+        clock: BrowserTestClock,
+        cache: BrowserTestCache
+    ) {
         self.consent = BrowserTestConsent(consent)
+        self.autoRefresh = BrowserTestConsent(autoRefresh)
+        self.allowSafariLaunch = BrowserTestConsent(allowSafariLaunch)
         self.clock = clock
         self.cache = cache
     }
 
-    func connector() -> ClaudeCodeUsageConnector {
+    func connector(
+        sleep: @escaping ClaudeCodeUsageConnector.Sleeper = { interval in
+            try await Task.sleep(for: .seconds(interval))
+        }
+    ) -> ClaudeCodeUsageConnector {
         let bridge = bridge
         let consent = consent
+        let autoRefresh = autoRefresh
+        let allowSafariLaunch = allowSafariLaunch
         let cache = cache
         return ClaudeCodeUsageConnector(
             integration: ClaudeBrowserProductionIntegration(
@@ -232,14 +284,65 @@ struct BrowserConnectorFixture {
                 stopListening: { await bridge.stop() },
                 checkHealth: { await bridge.currentHealth() },
                 openUsagePage: { await bridge.open() },
-                repairCompanion: { await bridge.repair() }
+                repairCompanion: { await bridge.repair() },
+                requestAutomaticRefresh: { requestID, allowLaunch in
+                    await bridge.requestAutomaticRefresh(
+                        requestID: requestID,
+                        allowSafariLaunch: allowLaunch
+                    )
+                },
+                closeOwnedUsageTab: { requestID in
+                    await bridge.closeOwnedTab(requestID: requestID)
+                }
             ),
             hasConsent: { await consent.get() },
             clearConsent: { await consent.set(false) },
             readCache: { await cache.read() },
             writeCache: { data in await cache.write(data) },
             clearCache: { await cache.clear() },
-            now: clock.now
+            now: clock.now,
+            autoRefreshEnabled: { await autoRefresh.get() },
+            allowSafariLaunch: { await allowSafariLaunch.get() },
+            sleep: sleep
         )
+    }
+}
+
+actor BrowserTestSleeper {
+    private struct Waiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Void, any Error>
+    }
+
+    private(set) var intervals: [TimeInterval] = []
+    private var waiters: [Waiter] = []
+
+    func sleep(_ interval: TimeInterval) async throws {
+        let id = UUID()
+        intervals.append(interval)
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<Void, any Error>) in
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                } else {
+                    waiters.append(Waiter(id: id, continuation: continuation))
+                }
+            }
+        } onCancel: {
+            Task { await self.cancel(id) }
+        }
+    }
+
+    func resumeNext() {
+        guard !waiters.isEmpty else { return }
+        let waiter = waiters.removeFirst()
+        waiter.continuation.resume()
+    }
+
+    private func cancel(_ id: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        let waiter = waiters.remove(at: index)
+        waiter.continuation.resume(throwing: CancellationError())
     }
 }

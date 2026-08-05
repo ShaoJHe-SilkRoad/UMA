@@ -239,6 +239,24 @@
     return validateObservation(observation) ? observation : null;
   }
 
+  function extractResult(documentLike, locationLike, now) {
+    // The URL gate must run before the first DOM query. Persistent host access
+    // covers /new*, but UMA is allowed to inspect only the exact Usage hash.
+    if (!exactUsageURL(locationLike)) return { status: "routeRejected" };
+    // On the exact route, authentication uncertainty is classified using only
+    // narrow form landmarks. No Usage labels or other page content are read.
+    if (hasLoginForm(documentLike)) return { status: "signInRequired" };
+
+    const observation = extract(documentLike, locationLike, now);
+    if (observation) return { status: "success", observation };
+
+    // The SPA can navigate while extraction is running. Recheck the route and
+    // login guard before reporting a content-free failure classification.
+    if (!exactUsageURL(locationLike)) return { status: "routeRejected" };
+    if (hasLoginForm(documentLike)) return { status: "signInRequired" };
+    return { status: "usageUnavailable" };
+  }
+
   root.UMAClaudeUsageExtractor = Object.freeze({
     CONTRACT,
     exactUsageURL,
@@ -246,5 +264,6 @@
     normalizedTimestamp,
     validateObservation,
     extract,
+    extractResult,
   });
 })(globalThis);

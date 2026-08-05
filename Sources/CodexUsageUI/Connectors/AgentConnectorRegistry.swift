@@ -261,7 +261,13 @@ actor AgentConnectorRegistry {
                 let isPassive = connector.descriptor.capabilities.contains(
                     .passiveLocalAvailability
                 )
-                if !isPassive {
+                let browserReadPermitted = await connector.permitsRead(
+                    for: currentAdmissionSet.trigger
+                )
+                let retainsConsentOwnedBrowserListener =
+                    connector.descriptor.localSourceClass == .browserCompanionUsage
+                    && browserReadPermitted
+                if !isPassive && !retainsConsentOwnedBrowserListener {
                     listeners[snapshot.id]?.cancel()
                     listeners[snapshot.id] = nil
                 }
@@ -282,7 +288,9 @@ actor AgentConnectorRegistry {
                         )
                     }
                 )
-                if snapshot.state != .inactive && !isPassive {
+                if snapshot.state != .inactive,
+                   !isPassive,
+                   !retainsConsentOwnedBrowserListener {
                     await stopIfNeeded(connector, observedSnapshot: snapshot)
                 }
                 publish()

@@ -59,7 +59,13 @@ public struct UsageMonitorRuntime {
             },
             readCache: { await claudeCache.load() },
             writeCache: { data in try? await claudeCache.save(data) },
-            clearCache: { try? await claudeCache.clear() }
+            clearCache: { try? await claudeCache.clear() },
+            autoRefreshEnabled: { @MainActor in
+                claudeConsent.autoRefreshEnabled
+            },
+            allowSafariLaunch: { @MainActor in
+                claudeConsent.allowSafariLaunch
+            }
         )
         let workBuddyConnector = WorkBuddyAvailabilityConnector(source: manualSource)
         let accountWebSync = WorkBuddyAccountWebSessionController()
@@ -120,8 +126,16 @@ public struct UsageMonitorRuntime {
             agentSettings: agentSettings
         )
         Task {
+            let shouldStartClaude = claudeConsent.consentGranted
+            // Browser Sync is not a passive local-availability source, but a
+            // previously consented session still owns a local listener and
+            // automatic scheduler. Start it before awaiting any passive source
+            // so a slow provider cannot delay the listener or first cycle.
+            if shouldStartClaude {
+                await claudeConnector.start()
+            }
             await registry.startPassiveConnectors()
-            guard claudeConsent.consentGranted else { return }
+            guard shouldStartClaude else { return }
             let descriptors = await registry.orderedDescriptors()
             let excluded = agentSettings.disabledConnectorIDs(
                 from: descriptors.map(\.id)

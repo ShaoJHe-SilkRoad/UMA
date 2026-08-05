@@ -19,6 +19,10 @@ public enum ClaudeBrowserBridgeContract {
     public static let chromiumExtensionOrigin = "chrome-extension://\(chromiumExtensionID)/"
     public static let chromiumNativeHostName = "com.silkrd.uma.claude_browser"
     public static let safariApplicationIdentifier = "com.kevinchen.CodexUsageMonitor"
+    public static let automationMessageKind = "claudeBrowserAutomationEvent"
+    public static let automaticRefreshMessageName = "umaClaudeAutomaticRefresh"
+    public static let closeOwnedTabMessageName = "umaClaudeCloseOwnedUsageTab"
+    public static let exactUsageHostPermission = "https://claude.ai/new*"
 }
 
 public enum ClaudeBrowserFamily: String, Codable, CaseIterable, Sendable {
@@ -105,5 +109,48 @@ public struct ClaudeBrowserObservationEnvelope: Codable, Equatable, Sendable {
         self.browserFamily = browserFamily
         self.routeState = routeState
         self.observation = observation
+    }
+}
+
+/// A content-free control result for one app-owned automatic refresh request.
+/// It contains no URL, tab title, page text, account value, or browser identity.
+public enum ClaudeBrowserAutomationStatus: String, Codable, CaseIterable, Sendable {
+    case bridgeReady
+    case refreshStarted
+    case refreshCompleted
+    case permissionRequired
+    case signInRequired
+    case routeRejected
+    case usageUnavailable
+    case tabUnavailable
+    case ownedTabClosed
+    case ownedTabOwnershipLost
+}
+
+public struct ClaudeBrowserAutomationEvent: Codable, Equatable, Sendable {
+    public let kind: String
+    public let schemaVersion: Int
+    public let sourceID: String
+    public let browserFamily: ClaudeBrowserFamily
+    public let requestID: String
+    public let status: ClaudeBrowserAutomationStatus
+    public let occurredAt: String
+
+    public init(
+        requestID: String,
+        status: ClaudeBrowserAutomationStatus,
+        occurredAt: String,
+        kind: String = ClaudeBrowserBridgeContract.automationMessageKind,
+        schemaVersion: Int = ClaudeBrowserBridgeContract.schemaVersion,
+        sourceID: String = ClaudeBrowserBridgeContract.sourceID,
+        browserFamily: ClaudeBrowserFamily = .safari
+    ) {
+        self.kind = kind
+        self.schemaVersion = schemaVersion
+        self.sourceID = sourceID
+        self.browserFamily = browserFamily
+        self.requestID = requestID
+        self.status = status
+        self.occurredAt = occurredAt
     }
 }

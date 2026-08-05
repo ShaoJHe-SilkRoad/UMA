@@ -323,7 +323,7 @@ struct M5G3ClaudeLiveAcceptanceTests {
     }
 
     @Test
-    func toolbarClickIsTheOnlyInjectionTrigger() throws {
+    func chromiumKeepsManualActionWhileSafariAutomationOwnsOneInactiveTab() throws {
         let root = browserRepositoryRoot()
         let background = try String(
             contentsOf: root.appendingPathComponent(
@@ -334,11 +334,15 @@ struct M5G3ClaudeLiveAcceptanceTests {
         #expect(background.contains("api.action?.onClicked?.addListener((tab)"))
         #expect(background.contains("allowedSenderURL(tab?.url || \"\")"))
         #expect(background.contains("api.scripting.executeScript"))
+        #expect(background.contains("api.tabs.create({ url: extractor.CONTRACT.href, active: false })"))
+        #expect(background.contains("api.tabs.remove(record.tabID)"))
+        #expect(background.contains("await proveOwnedTab(record, tab)"))
+        #expect(background.contains("ownedTabOwnershipLost"))
+        #expect(background.contains("api.runtime.connectNative(config.nativeApplication)"))
         for forbidden in [
             "tabs.onUpdated",
             "tabs.onCreated",
             "tabs.query",
-            "tabs.create",
             "webNavigation",
             "setInterval",
         ] {
@@ -415,7 +419,8 @@ struct M5G3ClaudeLiveAcceptanceTests {
         let diagnostics = await connector.diagnostics()
         #expect(diagnostics.acceptedObservationCount == 1)
         #expect(diagnostics.rejectedObservationCount == 0)
-        #expect(diagnostics.pageOpenCount == 1)
+        #expect(diagnostics.pageOpenCount == 0)
+        #expect(diagnostics.automaticDispatchCount == 1)
         #expect(diagnostics.listenerStartCount == 1)
         #expect(!String(reflecting: diagnostics).lowercased().contains("identity"))
     }

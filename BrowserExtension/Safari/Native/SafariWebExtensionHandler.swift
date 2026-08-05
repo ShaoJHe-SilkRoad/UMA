@@ -21,15 +21,24 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         guard let input = context.inputItems.first as? NSExtensionItem,
               let object = input.userInfo?[SFExtensionMessageKey],
               JSONSerialization.isValidJSONObject(object),
-              let data = try? JSONSerialization.data(withJSONObject: object),
-              let envelope = try? ClaudeBrowserMessageDecoder.decode(data),
-              envelope.browserFamily == .safari
+              let data = try? JSONSerialization.data(withJSONObject: object)
         else { return }
+
+        let isObservation = (try? ClaudeBrowserMessageDecoder.decode(data))?.browserFamily == .safari
+        let automationStatus = (try? ClaudeBrowserAutomationEventDecoder.decode(data))?.status
+        let isAutomationEvent = automationStatus != nil
+        guard isObservation || isAutomationEvent else { return }
 
         do {
             try ClaudeBrowserFileHandoffWriter.write(data)
             replyItem.userInfo = [SFExtensionMessageKey: ["ok": true]]
-            logger.notice("Forwarded sanitized Claude usage observation")
+            if let automationStatus {
+                logger.notice(
+                    "Forwarded sanitized Claude browser automation status: \(automationStatus.rawValue, privacy: .public)"
+                )
+            } else {
+                logger.notice("Forwarded sanitized Claude browser observation")
+            }
         } catch let error as ClaudeBrowserBridgeError {
             logger.error("Sanitized Claude usage forwarding failed: \(Self.safeCode(for: error), privacy: .public)")
         } catch {

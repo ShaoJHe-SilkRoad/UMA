@@ -557,3 +557,88 @@ The final verified automated inventory is 449 UI tests plus 16 bridge tests,
 465 total. The final commit-exact package remains the post-commit delivery
 artifact; Chromium live behavior, signed Safari distribution, and automatic
 background polling remain explicitly deferred.
+
+## M5-AUTO-G1 automatic Browser Sync scope lock
+
+Date: 2026-08-02
+
+The Founder explicitly consented to recurring Claude Browser Sync. This
+section supersedes the earlier manual-only restriction only for the bounded
+Safari automatic-refresh design below. All rejected Claude Keychain, OAuth,
+status-line, embedded-login, Cookie, token, private-endpoint, and manual or
+estimated quota routes remain retired.
+
+The production source remains Claude's official Usage page in the system
+browser. First-time recurring consent is versioned separately from the former
+single-click consent. Pressing the in-product Continue control enables Auto
+Refresh and requests persistent Safari website access limited to
+`https://claude.ai/new*`; Safari background launch remains separately opt-in
+and Off by default. Website access can be revoked through Safari Settings.
+
+M5-AUTO-R1 supersedes the former per-cycle tab creation and closure contract.
+Each read is owned by one Claude connector and one completion-relative
+scheduler. The production interval is five minutes and is never reduced below
+three minutes. One extraction may be in flight. Automatic operation creates at
+most one inactive extension-owned tab and reuses it across successful cycles.
+The extension persists only its numeric tab identifier and a random ownership
+token in extension-local storage; it persists no URL, title, page content,
+account data, or quota. Before reuse it checks the exact
+`https://claude.ai/new#settings/usage` route and proves the matching token to the
+isolated content script. It then reloads that one tab, verifies the route again
+before any DOM query, injects only the fixed packaged bounded extractor, and
+sends only normalized quota/reset fields or a fixed rejection status. The
+extension never enumerates, adopts, activates, modifies, or closes a user-owned
+tab. Missing tabs are recreated only on the next permitted cycle; ownership,
+authentication, or permission uncertainty fails closed without adopting or
+closing the uncertain tab and suspends automatic reads.
+
+When Safari is unavailable and background launch is Off, no Fresh value is
+fabricated and the connector waits one normal cadence before retrying. When
+the separate launch preference is On, the containing app may make one public
+Safari-extension dispatch per cycle without requesting foreground activation.
+Live acceptance must prove zero focus theft; otherwise this option must remain
+disabled and be reported as an external limitation.
+
+The sanitized cache cannot admit Claude on cold launch. Only a current exact-
+route observation establishes Fresh. Same-session transient failure may retain
+the last verified snapshot as Cached or Stale, while permission,
+authentication, route, schema, or ownership uncertainty withdraws Fresh.
+Cached and Stale data remain excluded from Maximum Decrement and low-quota
+alerts. Disconnect cancels scheduler and timeout work, proves and closes the one
+owned tab even while no read is active, clears the bounded ownership record,
+UMA-owned consent, and sanitized state, and leaves Safari login data, cookies,
+and history untouched.
+
+Delivery is limited to one local commit:
+
+`feat(m5): add automatic Claude browser sync`
+
+and one commit-exact package:
+
+`/private/tmp/uma-m5-auto-final-<commit>/UMA.app`
+
+The Desktop UMA remains protected. Chrome live validation, signed Safari
+distribution, extension publication, push, PR, merge, tag, release,
+notarization, deployment, and M5-AUTO-DBG-G1 are excluded.
+
+### M5-AUTO-R1 live acceptance and restoration addendum
+
+The repaired Safari companion uses an Apple-supported persistent background
+page for Safari only, loaded from three deterministic packaged scripts;
+Chromium remains Manifest V3. The accepted Safari grant is still limited to
+`https://claude.ai/new*`, and the exact Usage hash route is revalidated before
+every bounded DOM query. No static content script, broad host access, Cookie
+API, Keychain path, OAuth transport, page-content cache, or browser-profile
+access was added.
+
+Sanitized runtime events proved one current read immediately after application
+launch and two later successful reads at the completion-relative five-minute
+cadence. No toolbar action, retry burst, extra scheduler, or programmatic Safari
+activation was used. Exact Founder quota and reset values were not retained.
+
+Final teardown disabled and unregistered the task-owned extension, removed the
+UMA-owned sanitized cache, consent flags, and handoff state, and restarted
+Safari so unsigned-development mode returned to its default Off state. Safari
+login and website data remained untouched; the installed Desktop UMA remained
+byte-identical. Final delivery remains the one authorized local commit and its
+commit-exact task-owned package.

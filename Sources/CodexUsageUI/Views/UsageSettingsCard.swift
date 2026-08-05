@@ -543,17 +543,55 @@ private struct ClaudeBrowserSettingsSection: View {
                 )
             Text(
                 language == .simplifiedChinese
-                    ? "通过 Claude 官方使用量页面读取准确套餐配额。登录保留在您的默认浏览器中。无需 API 密钥或钥匙串访问。"
-                    : "Exact plan quota through Claude's official Usage page. Login stays in your default browser. No API key or Keychain access."
+                    ? "通过 Claude 官方使用量页面自动读取套餐配额。登录保留在 Safari 中。无需 API 密钥、钥匙串或 Cookie 访问。"
+                    : "Automatic plan quota from Claude's official Usage page. Login stays in Safari. No API key, Keychain, or Cookie access."
             )
             .font(AppTypography.font(9, language: language))
             .foregroundStyle(.secondary)
             stateSummary
 
+            if model.consentGranted {
+                SettingsToggleRow(
+                    title: language == .simplifiedChinese ? "自动刷新" : "Auto Refresh",
+                    systemImage: "arrow.clockwise",
+                    language: language,
+                    isOn: Binding(
+                        get: { model.autoRefreshEnabled },
+                        set: { model.setAutoRefreshEnabled($0) }
+                    )
+                )
+                Text(
+                    model.autoRefreshEnabled
+                        ? (language == .simplifiedChinese ? "每 5 分钟" : "Every 5 minutes")
+                        : (language == .simplifiedChinese ? "仅手动" : "Manual only")
+                )
+                .font(AppTypography.font(9, language: language))
+                .foregroundStyle(.secondary)
+
+                SettingsToggleRow(
+                    title: language == .simplifiedChinese
+                        ? "需要时允许 UMA 启动 Safari"
+                        : "Allow UMA to launch Safari when needed",
+                    systemImage: "safari",
+                    language: language,
+                    isOn: Binding(
+                        get: { model.allowSafariLaunch },
+                        set: { model.setAllowSafariLaunch($0) }
+                    )
+                )
+                Text(
+                    language == .simplifiedChinese
+                        ? "默认关闭。关闭时，Safari 不可用会保留已缓存或较早状态。"
+                        : "Off by default. When Off, unavailable Safari leaves only Cached or Stale data."
+                )
+                .font(AppTypography.font(9, language: language))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
             HStack(spacing: 8) {
                 primaryAction
-                if model.consentGranted,
-                   model.state != .waitingForUsagePage {
+                if model.consentGranted, showsSecondaryOpenUsage {
                     Button(language == .simplifiedChinese ? "打开使用量页面" : "Open Usage Page") {
                         model.openUsagePage()
                     }
@@ -587,12 +625,24 @@ private struct ClaudeBrowserSettingsSection: View {
 
             Text(
                 language == .simplifiedChinese
-                    ? "UMA 会打开 Claude 官方使用量页面。在该页面点按一次 UMA 浏览器伴侣工具栏按钮后，伴侣仅对当前标签页执行一次读取，并向 UMA 发送规范化结果。"
-                    : "UMA opens Claude's official Usage page. After you choose the UMA Browser Companion toolbar button there, it performs one read of that tab and sends UMA a normalized result."
+                    ? "经您授权后，UMA 浏览器伴侣最多保留一个非活动专用标签页，在各轮之间安全复用；每次读取都会先验证精确的 Claude 使用量路由，并且断开 Claude 时会关闭该标签页。网站访问可在 Safari 设置中撤销。"
+                    : "After you grant access, the UMA Browser Companion keeps at most one inactive dedicated tab and safely reuses it across cycles; every read first verifies the exact Claude Usage route, and Disconnect Claude closes that tab. Website access can be revoked in Safari Settings."
             )
             .font(AppTypography.font(9, language: language))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+
+            if model.consentGranted {
+                Button(
+                    language == .simplifiedChinese
+                        ? "打开 Safari 访问设置"
+                        : "Open Safari Access Settings",
+                    action: model.openSafariAccessSettings
+                )
+                .buttonStyle(.plain)
+                .foregroundStyle(UsageDesign.blue)
+                .accessibilityIdentifier("claude.browser.open-access-settings")
+            }
 
             Divider().opacity(0.35)
             Text(language.claudeSourceTransparency)
@@ -622,6 +672,15 @@ private struct ClaudeBrowserSettingsSection: View {
         }
         .onAppear {
             model.checkCompanion()
+        }
+    }
+
+    private var showsSecondaryOpenUsage: Bool {
+        switch model.state {
+        case .fresh, .cached, .stale:
+            true
+        default:
+            false
         }
     }
 
@@ -691,7 +750,13 @@ private struct ClaudeBrowserSettingsSection: View {
         case .checking:
             Text(language == .simplifiedChinese ? "正在检查浏览器伴侣…" : "Checking Browser Companion…")
         case .waitingForUsagePage:
-            Text(language == .simplifiedChinese ? "打开 Claude 使用量页面，然后点按一次 UMA 浏览器伴侣工具栏按钮" : "Open Claude Usage, then choose the UMA Browser Companion toolbar button once")
+            Text(language == .simplifiedChinese ? "正在等待第一次自动使用量读取" : "Waiting for the first automatic Usage read")
+        case .websiteAccessRequired:
+            Text(language == .simplifiedChinese ? "需要网站访问权限" : "Website access required")
+        case .signInRequired:
+            Text(language == .simplifiedChinese ? "需要登录" : "Sign in required")
+        case .waitingForSafari:
+            Text(language == .simplifiedChinese ? "正在等待 Safari" : "Waiting for Safari")
         case let .fresh(updated):
             VStack(alignment: .leading, spacing: 2) {
                 Text(language.claudeConnected)
@@ -747,7 +812,21 @@ private struct ClaudeBrowserSettingsSection: View {
             .accessibilityIdentifier("claude.browser.sync-now")
         case .waitingForUsagePage:
             Button(
-                language == .simplifiedChinese ? "打开使用量页面" : "Open Usage Page",
+                language == .simplifiedChinese ? "立即同步" : "Sync Now",
+                action: model.syncNow
+            )
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("claude.browser.sync-now")
+        case .websiteAccessRequired:
+            Button(
+                language == .simplifiedChinese ? "授予访问权限" : "Grant Access",
+                action: model.grantWebsiteAccess
+            )
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("claude.browser.grant-access")
+        case .signInRequired, .waitingForSafari:
+            Button(
+                language == .simplifiedChinese ? "打开 Claude 使用量" : "Open Claude Usage",
                 action: model.openUsagePage
             )
             .buttonStyle(.bordered)

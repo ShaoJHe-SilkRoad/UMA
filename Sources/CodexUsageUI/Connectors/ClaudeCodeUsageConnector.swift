@@ -6,6 +6,9 @@ enum ClaudeConnectorLifecycleState: Equatable, Sendable {
     case disconnected
     case checking
     case waitingForUsagePage
+    case websiteAccessRequired
+    case signInRequired
+    case waitingForSafari
     case fresh(Date)
     case cached(Date)
     case stale(Date)
@@ -29,16 +32,46 @@ enum ClaudeBrowserCompanionHealth: Equatable, Sendable {
     case nativeHostMismatched
 }
 
-struct ClaudeBrowserProductionIntegration: Sendable {
-    typealias ObservationHandler = @Sendable (
-        Result<ClaudeBrowserObservationEnvelope, ClaudeBrowserBridgeError>
-    ) async -> Void
+enum ClaudeBrowserInboundEvent: Sendable {
+    case observation(Result<ClaudeBrowserObservationEnvelope, ClaudeBrowserBridgeError>)
+    case automation(ClaudeBrowserAutomationEvent)
+}
 
-    let startListening: @Sendable (@escaping ObservationHandler) async -> Void
+enum ClaudeBrowserAutomaticDispatchResult: Equatable, Sendable {
+    case dispatched
+    case browserUnavailable
+    case unsupportedBrowser
+    case companionUnavailable
+}
+
+struct ClaudeBrowserProductionIntegration: Sendable {
+    typealias MessageHandler = @Sendable (ClaudeBrowserInboundEvent) async -> Void
+
+    let startListening: @Sendable (@escaping MessageHandler) async -> Void
     let stopListening: @Sendable () async -> Void
     let checkHealth: @Sendable () async -> ClaudeBrowserCompanionHealth
     let openUsagePage: @Sendable () async -> Bool
     let repairCompanion: @Sendable () async -> ClaudeBrowserCompanionHealth
+    let requestAutomaticRefresh: @Sendable (String, Bool) async -> ClaudeBrowserAutomaticDispatchResult
+    let closeOwnedUsageTab: @Sendable (String) async -> Void
+
+    init(
+        startListening: @escaping @Sendable (@escaping MessageHandler) async -> Void,
+        stopListening: @escaping @Sendable () async -> Void,
+        checkHealth: @escaping @Sendable () async -> ClaudeBrowserCompanionHealth,
+        openUsagePage: @escaping @Sendable () async -> Bool,
+        repairCompanion: @escaping @Sendable () async -> ClaudeBrowserCompanionHealth,
+        requestAutomaticRefresh: @escaping @Sendable (String, Bool) async -> ClaudeBrowserAutomaticDispatchResult = { _, _ in .unsupportedBrowser },
+        closeOwnedUsageTab: @escaping @Sendable (String) async -> Void = { _ in }
+    ) {
+        self.startListening = startListening
+        self.stopListening = stopListening
+        self.checkHealth = checkHealth
+        self.openUsagePage = openUsagePage
+        self.repairCompanion = repairCompanion
+        self.requestAutomaticRefresh = requestAutomaticRefresh
+        self.closeOwnedUsageTab = closeOwnedUsageTab
+    }
 
     static func unavailable() -> Self {
         Self(
@@ -46,7 +79,9 @@ struct ClaudeBrowserProductionIntegration: Sendable {
             stopListening: {},
             checkHealth: { .nativeHostMissing },
             openUsagePage: { false },
-            repairCompanion: { .nativeHostMissing }
+            repairCompanion: { .nativeHostMissing },
+            requestAutomaticRefresh: { _, _ in .companionUnavailable },
+            closeOwnedUsageTab: { _ in }
         )
     }
 }
@@ -57,6 +92,10 @@ struct ClaudeBrowserConnectorDiagnostics: Equatable, Sendable {
     let pageOpenCount: Int
     let coalescedActionCount: Int
     let listenerStartCount: Int
+    let automaticDispatchCount: Int
+    let scheduledCycleCount: Int
+    let automaticRefreshInFlight: Bool
+    let schedulerActive: Bool
 }
 
 actor ClaudeCodeUsageConnector: AgentUsageConnector {
@@ -66,9 +105,14 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
     typealias CacheWriter = @Sendable (Data) async -> Void
     typealias CacheClearer = @Sendable () async -> Void
     typealias Now = @Sendable () -> Date
+    typealias PreferenceReader = @Sendable () async -> Bool
+    typealias Sleeper = @Sendable (TimeInterval) async throws -> Void
 
     static let connectorID = AgentConnectorID(rawValue: "claude.browserSync")!
     static let freshnessInterval: TimeInterval = 5 * 60
+    static let automaticRefreshInterval: TimeInterval = 5 * 60
+    static let minimumAutomaticRefreshInterval: TimeInterval = 3 * 60
+    static let automaticRefreshTimeout: TimeInterval = 45
     static let maximumRetainedAge: TimeInterval = 30 * 60
     static let maximumFutureSkew: TimeInterval = 30
 
@@ -79,6 +123,7 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         .disconnect,
         .rateLimits,
         .sanitizedLastValidRestore,
+        .automaticRefresh,
     ]
 
     nonisolated let id = connectorID
@@ -137,6 +182,9 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
     private let writeCache: CacheWriter
     private let clearCache: CacheClearer
     private let now: Now
+    private let autoRefreshEnabled: PreferenceReader
+    private let allowSafariLaunch: PreferenceReader
+    private let sleep: Sleeper
 
     private var snapshot: AgentUsageSnapshot
     private var lastGood: AgentUsageSnapshot?
@@ -148,11 +196,17 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
     private var cacheLoaded = false
     private var actionInFlight = false
     private var retentionTask: Task<Void, Never>?
+    private var automaticRefreshTask: Task<Void, Never>?
+    private var automaticTimeoutTask: Task<Void, Never>?
+    private var automaticRequestID: String?
+    private var automaticRefreshInFlight = false
     private var acceptedObservationCount = 0
     private var rejectedObservationCount = 0
     private var pageOpenCount = 0
     private var coalescedActionCount = 0
     private var listenerStartCount = 0
+    private var automaticDispatchCount = 0
+    private var scheduledCycleCount = 0
 
     init(
         integration: ClaudeBrowserProductionIntegration,
@@ -161,7 +215,12 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         readCache: @escaping CacheReader = { nil },
         writeCache: @escaping CacheWriter = { _ in },
         clearCache: @escaping CacheClearer = {},
-        now: @escaping Now = Date.init
+        now: @escaping Now = Date.init,
+        autoRefreshEnabled: @escaping PreferenceReader = { false },
+        allowSafariLaunch: @escaping PreferenceReader = { false },
+        sleep: @escaping Sleeper = { interval in
+            try await Task.sleep(for: .seconds(interval))
+        }
     ) {
         self.integration = integration
         self.hasConsent = hasConsent
@@ -170,6 +229,9 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         self.writeCache = writeCache
         self.clearCache = clearCache
         self.now = now
+        self.autoRefreshEnabled = autoRefreshEnabled
+        self.allowSafariLaunch = allowSafariLaunch
+        self.sleep = sleep
         snapshot = Self.unavailableSnapshot(
             state: .authenticationRequired,
             failure: .authorizationRequired,
@@ -183,7 +245,9 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         clearConsent: @escaping ConsentClearer = {},
         readCache: @escaping CacheReader = { nil },
         writeCache: @escaping CacheWriter = { _ in },
-        clearCache: @escaping CacheClearer = {}
+        clearCache: @escaping CacheClearer = {},
+        autoRefreshEnabled: @escaping PreferenceReader = { false },
+        allowSafariLaunch: @escaping PreferenceReader = { false }
     ) -> ClaudeCodeUsageConnector {
         ClaudeCodeUsageConnector(
             integration: integration,
@@ -191,7 +255,9 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
             clearConsent: clearConsent,
             readCache: readCache,
             writeCache: writeCache,
-            clearCache: clearCache
+            clearCache: clearCache,
+            autoRefreshEnabled: autoRefreshEnabled,
+            allowSafariLaunch: allowSafariLaunch
         )
     }
 
@@ -247,21 +313,28 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
             ))
         }
         let connector = self
-        await integration.startListening { result in
-            await connector.receive(result)
+        await integration.startListening { event in
+            await connector.receive(event)
+        }
+        if await autoRefreshEnabled() {
+            scheduleAutomaticRefresh(after: 0)
         }
     }
 
     func refresh() async { await syncNow() }
 
     func refresh(trigger: CodexRefreshTrigger) async {
-        // Page extraction is interaction-driven. Timer refreshes never open or
-        // focus the browser and cannot multiply provider reads.
-        guard trigger != .timer else {
+        switch trigger {
+        case .timer:
             await refreshAge()
-            return
+        case .wake:
+            await refreshAge()
+            if await autoRefreshEnabled() {
+                scheduleAutomaticRefresh(after: Self.automaticRefreshInterval)
+            }
+        case .providerEvent, .reconnect, .manual:
+            await syncNow()
         }
-        await syncNow()
     }
 
     func perform(_ command: AgentConnectorCommand) async {
@@ -301,7 +374,7 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
             return
         }
         await start()
-        await runCoalescedAction(openUsagePage: true, repairing: false)
+        await requestBrowserRefresh()
     }
 
     func openUsagePage() async {
@@ -323,6 +396,13 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
     }
 
     func disconnect() async {
+        automaticRefreshTask?.cancel()
+        automaticRefreshTask = nil
+        automaticTimeoutTask?.cancel()
+        automaticTimeoutTask = nil
+        await integration.closeOwnedUsageTab(automaticRequestID ?? UUID().uuidString.lowercased())
+        automaticRequestID = nil
+        automaticRefreshInFlight = false
         retentionTask?.cancel()
         retentionTask = nil
         await integration.stopListening()
@@ -337,6 +417,13 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
     }
 
     func stop() async {
+        automaticRefreshTask?.cancel()
+        automaticRefreshTask = nil
+        automaticTimeoutTask?.cancel()
+        automaticTimeoutTask = nil
+        await integration.closeOwnedUsageTab(automaticRequestID ?? UUID().uuidString.lowercased())
+        automaticRequestID = nil
+        automaticRefreshInFlight = false
         retentionTask?.cancel()
         retentionTask = nil
         await integration.stopListening()
@@ -366,12 +453,128 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
             rejectedObservationCount: rejectedObservationCount,
             pageOpenCount: pageOpenCount,
             coalescedActionCount: coalescedActionCount,
-            listenerStartCount: listenerStartCount
+            listenerStartCount: listenerStartCount,
+            automaticDispatchCount: automaticDispatchCount,
+            scheduledCycleCount: scheduledCycleCount,
+            automaticRefreshInFlight: automaticRefreshInFlight,
+            schedulerActive: automaticRefreshTask != nil
         )
     }
 
     func hasHiddenPriorSessionCache() -> Bool {
         priorSessionCache != nil
+    }
+
+    func automationPreferenceChanged() async {
+        guard await hasConsent() else { return }
+        if await autoRefreshEnabled() {
+            if listenerStarted {
+                scheduleAutomaticRefresh(after: 0)
+            } else {
+                // The Settings toggle can race the composition-root launch
+                // task. Starting here makes the preference boundary complete:
+                // one listener exists before the immediate automatic cycle.
+                await start()
+            }
+        } else {
+            automaticRefreshTask?.cancel()
+            automaticRefreshTask = nil
+        }
+    }
+
+    private func requestBrowserRefresh() async {
+        guard !actionInFlight, !automaticRefreshInFlight else {
+            coalescedActionCount += 1
+            return
+        }
+        automaticRefreshTask?.cancel()
+        automaticRefreshTask = nil
+        lifecycle = .checking
+        let health = await integration.checkHealth()
+        guard health == .ready else {
+            apply(health)
+            await finishAutomaticRefresh(scheduleNext: health == .browserUnavailable)
+            return
+        }
+
+        let requestID = UUID().uuidString.lowercased()
+        automaticRequestID = requestID
+        automaticRefreshInFlight = true
+        let result = await integration.requestAutomaticRefresh(
+            requestID,
+            await allowSafariLaunch()
+        )
+        switch result {
+        case .dispatched:
+            automaticDispatchCount += 1
+            scheduleAutomaticTimeout(for: requestID)
+        case .browserUnavailable:
+            retainOrFail(.unavailable, routeChanged: false)
+            lifecycle = snapshot.hasValidData
+                ? lifecycleForCurrentSnapshot()
+                : .waitingForSafari
+            await finishAutomaticRefresh(scheduleNext: true)
+        case .unsupportedBrowser:
+            apply(.unsupportedBrowser)
+            await finishAutomaticRefresh(scheduleNext: false)
+        case .companionUnavailable:
+            apply(.disabled)
+            await finishAutomaticRefresh(scheduleNext: false)
+        }
+    }
+
+    private func scheduleAutomaticRefresh(after interval: TimeInterval) {
+        automaticRefreshTask?.cancel()
+        let boundedInterval = interval == 0
+            ? 0
+            : max(Self.minimumAutomaticRefreshInterval, interval)
+        let connector = self
+        automaticRefreshTask = Task {
+            do {
+                try await sleep(boundedInterval)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await connector.automaticRefreshTimerFired()
+        }
+    }
+
+    private func automaticRefreshTimerFired() async {
+        automaticRefreshTask = nil
+        guard await hasConsent(), await autoRefreshEnabled() else { return }
+        scheduledCycleCount += 1
+        await requestBrowserRefresh()
+    }
+
+    private func scheduleAutomaticTimeout(for requestID: String) {
+        automaticTimeoutTask?.cancel()
+        let connector = self
+        automaticTimeoutTask = Task {
+            do {
+                try await sleep(Self.automaticRefreshTimeout)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await connector.automaticRefreshTimedOut(requestID: requestID)
+        }
+    }
+
+    private func automaticRefreshTimedOut(requestID: String) async {
+        guard automaticRefreshInFlight, automaticRequestID == requestID else { return }
+        await integration.closeOwnedUsageTab(requestID)
+        retainOrFail(.timedOut, routeChanged: false)
+        await finishAutomaticRefresh(scheduleNext: true)
+    }
+
+    private func finishAutomaticRefresh(scheduleNext: Bool) async {
+        automaticTimeoutTask?.cancel()
+        automaticTimeoutTask = nil
+        automaticRequestID = nil
+        automaticRefreshInFlight = false
+        guard scheduleNext, await hasConsent(), await autoRefreshEnabled() else { return }
+        scheduleAutomaticRefresh(after: Self.automaticRefreshInterval)
     }
 
     private func runCoalescedAction(openUsagePage: Bool, repairing: Bool) async {
@@ -405,7 +608,16 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         }
     }
 
-    private func receive(
+    private func receive(_ event: ClaudeBrowserInboundEvent) async {
+        switch event {
+        case let .observation(result):
+            await receiveObservation(result)
+        case let .automation(event):
+            await receiveAutomation(event)
+        }
+    }
+
+    private func receiveObservation(
         _ result: Result<ClaudeBrowserObservationEnvelope, ClaudeBrowserBridgeError>
     ) async {
         guard await hasConsent() else { return }
@@ -430,6 +642,7 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
                     await writeCache(data)
                 }
                 scheduleRetention(from: observedAt)
+                await finishAutomaticRefresh(scheduleNext: true)
             } catch {
                 rejectedObservationCount += 1
                 retainOrFail(.malformedResponse, routeChanged: true)
@@ -464,6 +677,43 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
                     routeChanged: true
                 )
             }
+        }
+    }
+
+    private func receiveAutomation(_ event: ClaudeBrowserAutomationEvent) async {
+        guard await hasConsent(),
+              automaticRefreshInFlight,
+              event.requestID == automaticRequestID
+        else { return }
+        switch event.status {
+        case .bridgeReady, .refreshStarted:
+            return
+        case .refreshCompleted:
+            await finishAutomaticRefresh(scheduleNext: true)
+        case .permissionRequired:
+            invalidateCurrentSession(failure: .authorizationRequired, routeChanged: false)
+            lifecycle = .websiteAccessRequired
+            await finishAutomaticRefresh(scheduleNext: false)
+        case .signInRequired:
+            invalidateCurrentSession(failure: .authorizationRequired, routeChanged: false)
+            lifecycle = .signInRequired
+            await finishAutomaticRefresh(scheduleNext: false)
+        case .routeRejected:
+            invalidateCurrentSession(failure: .malformedResponse, routeChanged: true)
+            await finishAutomaticRefresh(scheduleNext: false)
+        case .usageUnavailable:
+            // The exact route was admitted, but an inactive Safari tab may be
+            // temporarily unable to render its SPA landmarks. Retain only the
+            // last sanitized value and wait the normal cadence; never retry
+            // immediately or admit an unavailable result as zero.
+            retainOrFail(.unavailable, routeChanged: false)
+            await finishAutomaticRefresh(scheduleNext: true)
+        case .tabUnavailable, .ownedTabClosed:
+            retainOrFail(.unavailable, routeChanged: false)
+            await finishAutomaticRefresh(scheduleNext: true)
+        case .ownedTabOwnershipLost:
+            invalidateCurrentSession(failure: .malformedResponse, routeChanged: true)
+            await finishAutomaticRefresh(scheduleNext: false)
         }
     }
 

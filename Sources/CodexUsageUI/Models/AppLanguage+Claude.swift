@@ -54,8 +54,8 @@ extension AppLanguage {
 
     var claudeUpdatesPageDriven: String {
         switch self {
-        case .simplifiedChinese: "每次更新都需要在已验证的使用量页面点按一次 UMA 浏览器伴侣工具栏按钮。"
-        case .english: "Each update requires one UMA Browser Companion toolbar click on the verified Usage page."
+        case .simplifiedChinese: "自动刷新会在 Safari 可用时安全重试。"
+        case .english: "Auto Refresh will retry safely when Safari is available."
         }
     }
 
@@ -76,9 +76,9 @@ extension AppLanguage {
     var claudeConsentDisclosure: String {
         switch self {
         case .simplifiedChinese:
-            "UMA 会在您的系统默认浏览器中打开 Claude 官方使用量页面。Google 或 Claude 凭据始终保留在浏览器中；UMA 不接收您的密码、通行密钥、验证码、OAuth 令牌、Cookie、聊天、项目、身份或账单信息。在已验证的使用量页面上，请点按一次 UMA 浏览器伴侣工具栏按钮，以授予仅限当前标签页的一次性临时访问。伴侣仅读取当前用量百分比与重置时间。由于网页结构可能发生变化，此来源标记为“实验性”。"
+            "UMA 会在 Safari 中打开 Claude 官方使用量页面。登录始终保留在浏览器中；UMA 不接收密码、通行密钥、验证码、OAuth 令牌、Cookie、聊天、项目、身份或账单信息。按下“继续”会启用每五分钟一次的自动刷新，并请求仅限 https://claude.ai/new* 的持久网站访问；每次读取都必须先验证精确的 #settings/usage 路由。浏览器伴侣最多保留一个非活动专用标签页，并在各轮之间安全复用；断开 Claude 时会关闭该标签页。Safari 后台启动仍默认关闭。由于网页结构可能发生变化，此来源标记为“实验性”。"
         case .english:
-            "UMA opens Claude's official Usage page in your system default browser. Google or Claude credentials remain inside the browser; UMA does not receive your password, passkey, verification code, OAuth token, cookies, chats, projects, identity, or billing information. On the verified Usage page, choose the UMA Browser Companion toolbar button once to grant one-time temporary access to that tab. The companion reads only current usage percentages and reset times. This source is Experimental because webpage structure can change."
+            "UMA opens Claude's official Usage page in Safari. Login remains inside the browser; UMA does not receive passwords, passkeys, verification codes, OAuth tokens, cookies, chats, projects, identity, or billing information. Continue explicitly enables five-minute Auto Refresh and requests persistent website access only to https://claude.ai/new*; every read first verifies the exact #settings/usage route. The Browser Companion keeps at most one inactive dedicated tab and safely reuses it across cycles; Disconnect Claude closes it. Background Safari launch remains Off by default. This source is Experimental because webpage structure can change."
         }
     }
 
@@ -89,12 +89,16 @@ extension AppLanguage {
         case (.english, .refreshing): "Refreshing…"
         case (.english, .openingUsage): "Opening Claude Usage…"
         case (.english, .repairing): "Repairing Browser Companion…"
+        case (.english, .grantingAccess): "Opening Safari access settings…"
+        case (.english, .openingAccessSettings): "Opening Safari access settings…"
         case (.english, .disconnecting): "Disconnecting…"
         case (.simplifiedChinese, .checking): "正在检查浏览器伴侣…"
         case (.simplifiedChinese, .connecting): "正在打开 Claude 使用量页面…"
         case (.simplifiedChinese, .refreshing): "正在刷新…"
         case (.simplifiedChinese, .openingUsage): "正在打开 Claude 使用量页面…"
         case (.simplifiedChinese, .repairing): "正在修复浏览器伴侣…"
+        case (.simplifiedChinese, .grantingAccess): "正在打开 Safari 访问设置…"
+        case (.simplifiedChinese, .openingAccessSettings): "正在打开 Safari 访问设置…"
         case (.simplifiedChinese, .disconnecting): "正在断开…"
         }
     }

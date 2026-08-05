@@ -30,7 +30,7 @@ readonly SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk"
 
 usage() {
     printf '%s\n' \
-        "Usage: $0 --commit <40-hex-sha> [--build <12-digit-number>] --phase <m5-browser-preflight|m5-browser-final|m5adbg-preflight|m5adbg-final> --output <exact-path>"
+        "Usage: $0 --commit <40-hex-sha> [--build <12-digit-number>] --phase <m5-browser-preflight|m5-browser-final|m5adbg-preflight|m5adbg-final|m5-auto-preflight|m5-auto-final> --output <exact-path>"
 }
 
 commit=""
@@ -75,6 +75,18 @@ case "$phase" in
         integration_status="BROWSER-SYNC-DEFECT-CLOSURE-PASS"
         commit_exact=1
         ;;
+    m5-auto-preflight)
+        expected_output="/private/tmp/uma-m5-auto-preflight-${commit:0:12}/UMA.app"
+        source_state="working-tree-m5-auto-preflight"
+        integration_status="AUTOMATIC-BROWSER-SYNC-LIVE-PREFLIGHT"
+        commit_exact=0
+        ;;
+    m5-auto-final)
+        expected_output="/private/tmp/uma-m5-auto-final-$commit/UMA.app"
+        source_state="commit-exact"
+        integration_status="AUTOMATIC-BROWSER-SYNC-ACCEPTED"
+        commit_exact=1
+        ;;
     *) usage >&2; exit 2 ;;
 esac
 readonly expected_output source_state integration_status commit_exact
@@ -107,6 +119,7 @@ mkdir "$output_parent"
 
 case "$phase" in
     m5adbg-*) package_root="/private/tmp/uma-m5adbg-package-$phase-$commit" ;;
+    m5-auto-*) package_root="/private/tmp/uma-m5-auto-package-$phase-$commit" ;;
     *) package_root="/private/tmp/uma-m5-browser-package-$phase-$commit" ;;
 esac
 [[ ! -e "$package_root" && ! -L "$package_root" ]] || {
@@ -172,13 +185,27 @@ if /usr/bin/grep -R -E -q "$forbidden_payload" \
     printf '%s\n' "Browser boundary retained a forbidden payload field." >&2
     exit 1
 fi
-for manifest in \
-    "$source_root/BrowserExtension/Safari/manifest.json" \
-    "$source_root/BrowserExtension/Chromium/manifest.json"; do
-    /usr/bin/grep -F -q '"permissions": ["activeTab", "nativeMessaging", "scripting"]' "$manifest"
-    ! /usr/bin/grep -F -q '"host_permissions"' "$manifest"
-    ! /usr/bin/grep -F -q '"content_scripts"' "$manifest"
-done
+readonly safari_manifest="$source_root/BrowserExtension/Safari/manifest.json"
+readonly chromium_manifest="$source_root/BrowserExtension/Chromium/manifest.json"
+if [[ "$phase" == m5-auto-* ]]; then
+    /usr/bin/grep -F -q '"manifest_version": 2' "$safari_manifest"
+    /usr/bin/grep -F -q '"permissions": ["nativeMessaging", "storage", "https://claude.ai/new*"]' "$safari_manifest"
+    /usr/bin/grep -F -q '"Shared/claude-usage-extractor.js"' "$safari_manifest"
+    /usr/bin/grep -F -q '"Safari/background-loader.js"' "$safari_manifest"
+    /usr/bin/grep -F -q '"Shared/background-core.js"' "$safari_manifest"
+    /usr/bin/grep -F -q '"persistent": true' "$safari_manifest"
+    ! /usr/bin/grep -F -q '"host_permissions"' "$safari_manifest"
+    ! /usr/bin/grep -F -q '"service_worker"' "$safari_manifest"
+    ! /usr/bin/grep -F -q '"activeTab"' "$safari_manifest"
+    ! /usr/bin/grep -F -q '"content_scripts"' "$safari_manifest"
+else
+    /usr/bin/grep -F -q '"permissions": ["activeTab", "nativeMessaging", "scripting"]' "$safari_manifest"
+    ! /usr/bin/grep -F -q '"host_permissions"' "$safari_manifest"
+    ! /usr/bin/grep -F -q '"content_scripts"' "$safari_manifest"
+fi
+/usr/bin/grep -F -q '"permissions": ["activeTab", "nativeMessaging", "scripting"]' "$chromium_manifest"
+! /usr/bin/grep -F -q '"host_permissions"' "$chromium_manifest"
+! /usr/bin/grep -F -q '"content_scripts"' "$chromium_manifest"
 /usr/bin/grep -F -q 'href: "https://claude.ai/new#settings/usage"' \
     "$source_root/BrowserExtension/Shared/claude-usage-extractor.js"
 ! /usr/bin/grep -F -q 'tabs.onUpdated' \

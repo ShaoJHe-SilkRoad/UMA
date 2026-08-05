@@ -89,6 +89,37 @@ struct M5G2ClaudeConnectorSettingsTests {
     }
 
     @Test
+    func registryKeepsConsentOwnedListenerAliveAfterAHiddenFailedCycle() async throws {
+        let fixture = BrowserConnectorFixture(consent: true)
+        let connector = fixture.connector()
+        let registry = try AgentConnectorRegistry(connectors: [connector])
+
+        _ = await registry.scanSurfaceAdmissions(trigger: .applicationLaunch)
+        await fixture.bridge.reject()
+        for _ in 0..<20 {
+            if await registry.surfaceAdmissionSet()?.records.first?.admission
+                == .hiddenCurrentReadFailed {
+                break
+            }
+            await Task.yield()
+        }
+
+        #expect(await registry.orderedSnapshots().isEmpty)
+        #expect(await fixture.bridge.stopCount == 0)
+
+        await fixture.bridge.send(browserEnvelope(five: 9, seven: 71))
+        for _ in 0..<20 {
+            if await registry.orderedSnapshots().first?.freshness == .fresh {
+                break
+            }
+            await Task.yield()
+        }
+
+        #expect(await registry.orderedSnapshots().first?.freshness == .fresh)
+        #expect(await fixture.bridge.stopCount == 0)
+    }
+
+    @Test
     func acceptedObservationPublishesIndependentAccountWindows() async {
         let fixture = BrowserConnectorFixture(consent: true)
         let connector = fixture.connector()
@@ -203,13 +234,16 @@ struct M5G2ClaudeConnectorSettingsTests {
     }
 
     @Test
-    func timerRefreshNeverOpensBrowserButManualRefreshDoes() async {
+    func timerRefreshOnlyAgesWhileManualRefreshUsesTheSharedAutomaticGate() async {
         let fixture = BrowserConnectorFixture(consent: true)
         let connector = fixture.connector()
         await connector.refresh(trigger: .timer)
         #expect(await fixture.bridge.openCount == 0)
+        #expect(await fixture.bridge.automaticRequests.isEmpty)
         await connector.refresh(trigger: .manual)
-        #expect(await fixture.bridge.openCount == 1)
+        #expect(await fixture.bridge.openCount == 0)
+        #expect(await fixture.bridge.automaticRequests.count == 1)
+        await connector.disconnect()
     }
 
     @Test

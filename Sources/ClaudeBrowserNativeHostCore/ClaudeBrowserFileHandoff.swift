@@ -38,7 +38,11 @@ public enum ClaudeBrowserFileHandoffWriter {
         endpoint: ClaudeBrowserFileHandoffEndpoint = .production(),
         uid: uid_t = getuid()
     ) throws {
-        _ = try ClaudeBrowserMessageDecoder.decode(payload)
+        guard (try? ClaudeBrowserMessageDecoder.decode(payload)) != nil
+            || (try? ClaudeBrowserAutomationEventDecoder.decode(payload)) != nil
+        else {
+            throw ClaudeBrowserBridgeError.invalidContract
+        }
         guard hasNoSymlinkTraversal(endpoint.directoryPath) else {
             throw ClaudeBrowserBridgeError.socketUnsafe
         }
@@ -97,10 +101,12 @@ public enum ClaudeBrowserFileHandoffWriter {
 
 public final class ClaudeBrowserFileHandoffServer: @unchecked Sendable {
     public typealias ObservationHandler = @Sendable (ClaudeBrowserObservationEnvelope) -> Void
+    public typealias AutomationHandler = @Sendable (ClaudeBrowserAutomationEvent) -> Void
 
     private let endpoint: ClaudeBrowserFileHandoffEndpoint
     private let uid: uid_t
     private let handler: ObservationHandler
+    private let automationHandler: AutomationHandler?
     private let queue = DispatchQueue(label: "com.silkrd.uma.claude-browser.file-handoff")
     private let stateLock = NSLock()
     private var source: DispatchSourceFileSystemObject?
@@ -115,6 +121,19 @@ public final class ClaudeBrowserFileHandoffServer: @unchecked Sendable {
         self.endpoint = endpoint
         self.uid = uid
         self.handler = handler
+        automationHandler = nil
+    }
+
+    public init(
+        endpoint: ClaudeBrowserFileHandoffEndpoint = .production(),
+        uid: uid_t = getuid(),
+        observationHandler: @escaping ObservationHandler,
+        automationHandler: @escaping AutomationHandler
+    ) {
+        self.endpoint = endpoint
+        self.uid = uid
+        handler = observationHandler
+        self.automationHandler = automationHandler
     }
 
     deinit { stop() }
@@ -195,10 +214,13 @@ public final class ClaudeBrowserFileHandoffServer: @unchecked Sendable {
         let isRunning = running
         stateLock.unlock()
         guard isRunning,
-              let payload = try? readAndRemovePendingPayload(),
-              let envelope = try? ClaudeBrowserMessageDecoder.decode(payload)
+              let payload = try? readAndRemovePendingPayload()
         else { return }
-        handler(envelope)
+        if let envelope = try? ClaudeBrowserMessageDecoder.decode(payload) {
+            handler(envelope)
+        } else if let event = try? ClaudeBrowserAutomationEventDecoder.decode(payload) {
+            automationHandler?(event)
+        }
     }
 
     private func readAndRemovePendingPayload() throws -> Data {
