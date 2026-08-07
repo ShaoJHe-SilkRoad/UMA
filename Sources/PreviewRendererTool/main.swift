@@ -503,8 +503,8 @@ struct PreviewRendererTool {
             selectedWindowID: selectedWindow?.id,
             remaining: remaining,
             sourceDescription: language == .english
-                ? "Existing Claude login"
-                : "官方本机状态栏",
+                ? "Claude official Usage page · Browser Sync · Experimental"
+                : "Claude 官方使用量页面 · 浏览器同步 · 实验性",
             isVisibleInDesktopAssistant: true,
             severity: isCached || isStale
                 ? .neutral

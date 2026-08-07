@@ -178,7 +178,7 @@ struct M5AG1ClaudeAssistantTests {
             freshness: .stale,
             remaining: .finite(9),
             retaining: true,
-            sourceDescription: "官方本地状态栏"
+            sourceDescription: "Claude 官方使用量页面 · 浏览器同步 · 实验性"
         )
         let chinese = DesktopAssistantCard(
             shared: chineseShared,
@@ -188,7 +188,12 @@ struct M5AG1ClaudeAssistantTests {
         for required in ["Stale", "9 percent remaining", "Existing Claude login"] {
             #expect(english.accessibilityLabel.contains(required))
         }
-        for required in ["较早数据", "剩余 9%", "官方本地状态栏", "1 小时前更新"] {
+        for required in [
+            "较早数据",
+            "剩余 9%",
+            "Claude 官方使用量页面 · 浏览器同步 · 实验性",
+            "1 小时前更新",
+        ] {
             #expect(chinese.accessibilityLabel.contains(required))
         }
         #expect(!english.accessibilityLabel.contains("Fresh"))

@@ -30,12 +30,6 @@ let package = Package(
             ],
             path: "Sources/ClaudeBrowserNativeHost"
         ),
-        // Retained only so checksum-backed historical status-line tests and
-        // records remain reviewable. No relay executable target remains.
-        .target(
-            name: "ClaudeStatusLineCore",
-            path: "Sources/ClaudeStatusLineCore"
-        ),
         .target(
             name: "CodexUsageUI",
             dependencies: [
@@ -59,7 +53,6 @@ let package = Package(
             dependencies: [
                 "ClaudeBrowserBridgeProtocol",
                 "ClaudeBrowserNativeHostCore",
-                "ClaudeStatusLineCore",
                 "CodexUsageUI",
                 "CodexUsageMonitor",
             ],

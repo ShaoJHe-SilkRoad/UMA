@@ -160,7 +160,7 @@ readonly source_root archive_sha256
     exit 1
 }
 
-readonly forbidden_runtime='ClaudeQuotaBroker|Claude Code-credentials|SecItem(Add|CopyMatching|Update|Delete)|/api/oauth/usage|Authorization: Bearer|accessToken|refreshToken|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|setup-token'
+readonly forbidden_runtime='ClaudeQuotaBroker|ClaudeStatusLine|Claude Code-credentials|SecItem(Add|CopyMatching|Update|Delete)|/api/oauth/usage|Authorization: Bearer|accessToken|refreshToken|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|setup-token'
 readonly forbidden_extension='"cookies"|<all_urls>|"tabs"|"webRequest"|"webNavigation"|"identity"|"history"|"bookmarks"|"downloads"|accounts\.google\.com'
 readonly forbidden_payload='rawHTML|fullHTML|rawDOM|fullDOM|localStorage|sessionStorage|accountIdentity|account_identity|billing|payment|prompt|response|transcript|project|sourceCode|source_code'
 if /usr/bin/grep -R -E -q "$forbidden_runtime" \

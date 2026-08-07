@@ -437,6 +437,7 @@ struct M5G3ClaudeLiveAcceptanceTests {
         ]
         let forbidden = [
             "ClaudeQuotaBroker",
+            "ClaudeStatusLine",
             "Claude Code-credentials",
             "/api/oauth/usage",
             "Authorization: Bearer",

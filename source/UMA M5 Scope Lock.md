@@ -642,3 +642,121 @@ Safari so unsigned-development mode returned to its default Off state. Safari
 login and website data remained untouched; the installed Desktop UMA remained
 byte-identical. Final delivery remains the one authorized local commit and its
 commit-exact task-owned package.
+
+## M5-SLR-G1 status-line route removal scope lock
+
+Date: 2026-08-07
+
+The Founder closed the two-source question and directed permanent removal of the
+retired Claude status-line relay route. This section records that removal. It does
+not reopen, weaken, or replace any accepted M5-AUTO-R1 contract, and it does not
+admit a new Claude source.
+
+### Reason
+
+M5-BROWSER-G1 retired the status-line route as a product route because it required
+the Human to run a Claude Code CLI session. Its module, its `Package.swift` target,
+its focused tests, and its installed machine artifacts were never removed.
+
+Re-verified on 2026-08-07 against the current official Claude Code 2.1.220 build:
+
+- the official status-line payload still carries `rate_limits.five_hour` and
+  `rate_limits.seven_day` used percentages with their own reset epochs, and adds
+  model-scoped weekly buckets;
+- that payload is emitted only to a running Claude Code CLI status line, and only
+  after a subscriber API response, so it cannot be polled and cannot refresh
+  without provider usage the Human initiated;
+- the `claude-desktop` entrypoint does not execute the configured status-line
+  command. With the relay installed and configured continuously since 2026-07-31,
+  the relay executable was last accessed 2026-07-31 while `claude-desktop`
+  sessions ran on 2026-08-05 and 2026-08-06.
+
+A source that cannot refresh without an active CLI session, and that covers none of
+the Claude Desktop surface, cannot satisfy the automatic-measurement requirement.
+Safari Browser Sync remains the only admitted Claude source.
+
+### Removed from the repository
+
+- `Sources/ClaudeStatusLineCore/` — five files, twenty exported public symbols;
+- `Sources/ClaudeStatusLineRelay/` — one file, already an undeclared orphan
+  directory outside every declared target;
+- the `ClaudeStatusLineCore` target in `Package.swift` and its `CodexUsageUITests`
+  dependency entry;
+- `Tests/CodexUsageUITests/M5G2ClaudeConfigurationTests.swift` — thirteen tests;
+- `Tests/CodexUsageUITests/M5G2ClaudeRelayProtocolTests.swift` — seventeen tests.
+
+### Removed from the machine, outside Git
+
+- the `statusLine` key in `~/.claude/settings.json`;
+- `~/Library/Application Support/CodexUsageMonitor/ClaudeStatusLineIntegration/`,
+  containing the installed relay executable, its restoration metadata, and its
+  settings backup.
+
+Restoration of the provider settings file was surgical, not byte-exact. The
+recorded 22-byte backup predated two later Human-owned keys, and a byte-exact
+restore would have destroyed them. Only the `statusLine` key was removed; `theme`,
+`enableWorkflows`, and `skipWorkflowUsageWarning` were preserved unchanged. UMA's
+own `restore()` would have refused this case by design, because the current
+settings hash no longer matched the recorded installed hash. That fail-closed
+guard behaved correctly and is retained in the historical record.
+
+### Retained deliberately
+
+- every historical M3 and M5 record naming the status-line route, as evidence;
+- `Tests/CodexUsageUITests/M5G1ClaudeSourceAdmissionTests.swift`, which is
+  self-contained, imports no removed module, guards the durable M5 records, and
+  still covers the centralized `remaining = 100 - used` conversion and Maximum
+  Decrement shared by every provider;
+- the `M5AG1ClaudeAssistantTests` forbidden-symbol assertions naming
+  `ClaudeStatusLineSocket`, `ClaudeStatusLineConfigurationManager`, and
+  `statusLine`, which now serve as reintroduction guards.
+
+### Retirement made self-enforcing
+
+Following the existing `ClaudeQuotaBroker` precedent, `ClaudeStatusLine` was added
+to both standing retirement guards: the `forbidden_runtime` alternation in
+`script/package_uma_m5_g2.sh`, which is enforced against the active source
+directories and again against the built binary's strings, and the `forbidden` list
+in `M5G3ClaudeLiveAcceptanceTests.retiredCredentialRoutesAreAbsentFromActiveSources`.
+Both guard scopes contain zero occurrences after this removal.
+
+### Simplified Chinese residue
+
+Every ASCII search for the retired route missed CJK residue. `PreviewRendererTool`
+labelled a `claude.browserSync` card with the status-line-era description
+官方本机状态栏, and one accessibility fixture in `M5AG1ClaudeAssistantTests` used
+官方本地状态栏. Production localization in `Sources/CodexUsageUI` was verified
+clean, so no shipping Source Transparency string was affected. Both residual
+strings were replaced with the production-approved Browser Sync description
+verbatim; the renderer's English branch, which still carried the superseded
+OAuth-era label, was aligned to the same approved string.
+
+### Provider boundary
+
+Codex and WorkBuddy were explicitly excluded by direct Founder instruction. No
+Codex or WorkBuddy source, test, connector, model, service, store, view, package
+helper, or durable record was changed. The removed module exported twenty public
+symbols; a repository-wide symbol scan proved none was referenced by any production
+source file and none by any Codex or WorkBuddy file. The UMA-owned Codex and
+WorkBuddy state files beside the deleted integration directory were left untouched.
+
+### Environment note, outside this scope
+
+Command Line Tools moved to 27.0 and a default `swift test` no longer runs on this
+machine: the default SDK selection breaks the SwiftUI macro plugin,
+`libTestingMacros.dylib` moved into a `plugins/testing` subdirectory the build
+system does not search, and the Swift Testing framework and its interop library
+require explicit link-time rpaths because SIP strips `DYLD_FRAMEWORK_PATH`.
+Verification for this task used those overrides and reproduced the accepted
+499/499 baseline before the removal.
+
+This affects the test path only. `script/package_uma_m5_g2.sh` pins
+`MacOSX26.5.sdk`, which is still present, never runs tests, and only invokes
+`swift build --product`; both of its Release product builds were exercised
+directly here and passed. The package helper was not modified and was not run end
+to end in this task. Repairing the default test path is a separate task.
+
+### Delivery
+
+One local commit. No push, PR, merge, tag, release, notarization, deployment, or
+Desktop replacement. The installed Desktop UMA remains protected.
