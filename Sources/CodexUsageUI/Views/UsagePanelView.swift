@@ -314,6 +314,17 @@ public struct UsagePanelView: View {
                             == CodexUsageConnector.connectorID.rawValue
                             ? store.snapshot
                             : nil,
+                        localActivitySnapshot: card.id
+                            == ClaudeCodeUsageConnector.connectorID.rawValue
+                            ? store.providerSnapshots
+                                .first(where: { $0.id.rawValue == card.id })
+                                .map {
+                                    UsageSnapshot(
+                                        agentSnapshot: $0,
+                                        language: store.language
+                                    )
+                                }
+                            : nil,
                         codexRecovery: card.id
                             == CodexUsageConnector.connectorID.rawValue
                             ? retainedSnapshotRecovery
@@ -470,6 +481,9 @@ private struct LocalLiveProviderCard: View {
     let language: AppLanguage
     let tuning: GlassTuning
     let codexSnapshot: UsageSnapshot?
+    /// Non-nil only for a provider that publishes a local-activity channel and
+    /// is not the Codex card. Leaves the Codex and credit branches untouched.
+    var localActivitySnapshot: UsageSnapshot? = nil
     let codexRecovery: RetainedSnapshotRecoveryPresentation?
     let showUsageSummary: Bool
     let showRecentTasks: Bool
@@ -683,6 +697,28 @@ private struct LocalLiveProviderCard: View {
                     )
                 }
                 FooterView(snapshot: codexSnapshot, language: language)
+            }
+            .padding(10)
+        } else if let localActivitySnapshot,
+                  !localActivitySnapshot.recentTasks.isEmpty
+                      || localActivitySnapshot.apiCostEstimate != nil {
+            VStack(spacing: UsagePanelMetrics.cardSpacing) {
+                if showRecentTasks, !localActivitySnapshot.recentTasks.isEmpty {
+                    RecentTasksCard(
+                        tasks: localActivitySnapshot.recentTasks,
+                        language: language,
+                        tuning: tuning,
+                        showsBackground: false
+                    )
+                }
+                if showAPICost, localActivitySnapshot.apiCostEstimate != nil {
+                    APICostEstimateCard(
+                        estimate: localActivitySnapshot.apiCostEstimate,
+                        language: language,
+                        tuning: tuning,
+                        showsBackground: false
+                    )
+                }
             }
             .padding(10)
         } else if let balance = card.availability?.value.creditBalance {

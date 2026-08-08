@@ -827,3 +827,89 @@ changed. The eight package-content strings asserted by
 One local commit and one commit-exact package under the new persistent delivery
 root. No push, PR, merge, tag, release, notarization, deployment, or Desktop
 replacement. The installed Desktop UMA remains protected.
+
+## M5-LA-G1 Claude local activity scope lock
+
+Date: 2026-08-08
+
+The Founder directed completion of the Claude Code block's functionality. The
+gap was structural: Codex published two channels, an `account` channel carrying
+quota and a `localActivity` channel carrying aggregate token and cost metadata,
+while Claude published only the account channel. This section records closing
+that gap.
+
+### What was added
+
+A `localActivity` channel for Claude, sourced from Claude Code's own local
+session records under `~/.claude/projects`. The channel reports aggregate token
+volume, recent-session activity, recognized model count, an API-equivalent cost
+estimate, and pricing coverage. It uses the existing provider-neutral
+`AgentLocalActivityMetrics` type, so the persisted payload remains exactly the
+same six aggregate scalars every provider already writes, with no new persisted
+field and no change to the persistence allowlist.
+
+### What was deliberately not changed
+
+Account quota. The five-hour and seven-day remaining percentages continue to
+come only from the admitted Safari Browser Sync observation. The local channel
+publishes no rate-limit window, so local activity cannot be read as account
+remaining quota through any code path. This preserves the standing rule that
+local estimates never substitute for exact account quota.
+
+Codex and WorkBuddy. Both remain excluded by direct Founder instruction. All
+forty-one provider-owned files were verified byte-identical after the change.
+The shared presentation layer needed no modification because
+`UsageSnapshot.init(agentSnapshot:language:)` was already provider-neutral; the
+only user-interface change is one additive parameter that is non-nil solely for
+the Claude card, leaving the Codex and credit branches untouched.
+
+### Privacy boundary
+
+The reader decodes an explicit allowlist: four token counts, the model
+identifier, and the record timestamp. Prompts, responses, thinking, tool names,
+tool inputs, file paths, working directories, git branches, titles, session
+content, and account identity are never decoded into any type. The directory
+names beneath the projects root encode absolute project paths and are used only
+to open files; no name is retained or published. Records that do not match the
+assistant-usage shape contribute nothing, so unrelated files sharing the
+extension are inert rather than special-cased.
+
+No new persisted file was introduced. Claude writes per-message incremental
+usage, so summing records is already correct and no on-disk delta ledger is
+required — one fewer persistence surface than the Codex equivalent needs.
+
+### Correctness findings that shaped the implementation
+
+A single Claude API response is written once per content block, each copy
+carrying an identical usage object. Measured on live local records, summing
+without de-duplicating by request identifier over-counts by 1.99x. The reader
+therefore admits one record per request identifier.
+
+Cache-creation tokens carry a per-TTL breakdown. Five-minute and one-hour cache
+writes are priced at 1.25x and 2x the base input rate respectively, with a
+documented fallback to the undifferentiated total at the five-minute rate when
+the breakdown is absent. On live records the one-hour bucket dominates, so
+pricing every cache write at 1.25x would have understated that component
+materially.
+
+Claude reports four disjoint token buckets. The existing Codex token model
+treats cached input as a subset of input, which is correct for its source and
+arithmetically wrong for Claude; a separate four-bucket type was defined rather
+than reusing it.
+
+### Verification
+
+The implementation was cross-checked against an independent implementation of
+the same algorithm run over the same live records. Observed tokens, lifetime
+estimate, seven-day estimate, and per-session token totals matched exactly.
+
+Sixteen focused tests cover pricing families and cache multipliers, allowlist
+decoding, malformed and negative input, per-request de-duplication, the rolling
+seven-day window, coverage when a model has no published rate, inert unrelated
+files, absent roots, recent-session capping and ordering, and the connector
+capability and scope contract.
+
+### Delivery
+
+One local commit. No push, PR, merge, tag, release, notarization, deployment, or
+Desktop replacement. The installed Desktop UMA remains protected.
