@@ -27,10 +27,16 @@ readonly SAFARI_EXTENSION_ID="$BUNDLE_ID.ClaudeBrowserCompanion"
 readonly CHROMIUM_HOST_NAME="com.silkrd.uma.claude_browser"
 readonly DEFAULT_BUILD="202608010001"
 readonly SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk"
+# Delivery artifacts must outlive the operating system's periodic purge of
+# temporary items, which silently destroyed every earlier M5 package. Only the
+# scratch build tree below stays under /private/tmp, where automatic cleanup of
+# abandoned intermediates is wanted.
+readonly DELIVERY_ROOT="$HOME/Developer/UMA-Packages"
 
 usage() {
     printf '%s\n' \
-        "Usage: $0 --commit <40-hex-sha> [--build <12-digit-number>] --phase <m5-browser-preflight|m5-browser-final|m5adbg-preflight|m5adbg-final|m5-auto-preflight|m5-auto-final> --output <exact-path>"
+        "Usage: $0 --commit <40-hex-sha> [--build <12-digit-number>] --phase <m5-browser-preflight|m5-browser-final|m5adbg-preflight|m5adbg-final|m5-auto-preflight|m5-auto-final|m5-slr-final> --output <exact-path>" \
+        "Packages are delivered under $DELIVERY_ROOT and are not purged with /private/tmp."
 }
 
 commit=""
@@ -52,39 +58,45 @@ done
 [[ -d "$SDK" ]] || { printf 'Missing offline SDK: %s\n' "$SDK" >&2; exit 1; }
 case "$phase" in
     m5-browser-preflight)
-        expected_output="/private/tmp/uma-m5-browser-preflight-${commit:0:12}/UMA.app"
+        expected_output="$DELIVERY_ROOT/uma-m5-browser-preflight-${commit:0:12}/UMA.app"
         source_state="working-tree-preflight"
         integration_status="BROWSER-SYNC-LIVE-PREFLIGHT"
         commit_exact=0
         ;;
     m5-browser-final)
-        expected_output="/private/tmp/uma-m5-browser-final-$commit/UMA.app"
+        expected_output="$DELIVERY_ROOT/uma-m5-browser-final-$commit/UMA.app"
         source_state="commit-exact"
         integration_status="SYSTEM-BROWSER-USAGE-SYNC-ACCEPTED"
         commit_exact=1
         ;;
     m5adbg-preflight)
-        expected_output="/private/tmp/uma-m5adbg-preflight-${commit:0:12}/UMA.app"
+        expected_output="$DELIVERY_ROOT/uma-m5adbg-preflight-${commit:0:12}/UMA.app"
         source_state="working-tree-m5adbg-preflight"
         integration_status="BROWSER-SYNC-DEFECT-CLOSURE-PREFLIGHT"
         commit_exact=0
         ;;
     m5adbg-final)
-        expected_output="/private/tmp/uma-m5adbg-final-$commit/UMA.app"
+        expected_output="$DELIVERY_ROOT/uma-m5adbg-final-$commit/UMA.app"
         source_state="commit-exact"
         integration_status="BROWSER-SYNC-DEFECT-CLOSURE-PASS"
         commit_exact=1
         ;;
     m5-auto-preflight)
-        expected_output="/private/tmp/uma-m5-auto-preflight-${commit:0:12}/UMA.app"
+        expected_output="$DELIVERY_ROOT/uma-m5-auto-preflight-${commit:0:12}/UMA.app"
         source_state="working-tree-m5-auto-preflight"
         integration_status="AUTOMATIC-BROWSER-SYNC-LIVE-PREFLIGHT"
         commit_exact=0
         ;;
     m5-auto-final)
-        expected_output="/private/tmp/uma-m5-auto-final-$commit/UMA.app"
+        expected_output="$DELIVERY_ROOT/uma-m5-auto-final-$commit/UMA.app"
         source_state="commit-exact"
         integration_status="AUTOMATIC-BROWSER-SYNC-ACCEPTED"
+        commit_exact=1
+        ;;
+    m5-slr-final)
+        expected_output="$DELIVERY_ROOT/uma-m5-slr-final-$commit/UMA.app"
+        source_state="commit-exact"
+        integration_status="AUTOMATIC-BROWSER-SYNC-ACCEPTED-STATUS-LINE-REMOVED"
         commit_exact=1
         ;;
     *) usage >&2; exit 2 ;;
@@ -103,9 +115,20 @@ output_parent="$(dirname "$output")"
     printf 'Refusing existing package parent %s\n' "$output_parent" >&2
     exit 2
 }
-readonly canonical_tmp="$(cd /private/tmp && pwd -P)"
+[[ ! -L "$DELIVERY_ROOT" ]] || {
+    printf 'Refusing symlinked delivery root %s\n' "$DELIVERY_ROOT" >&2
+    exit 2
+}
+mkdir -p "$DELIVERY_ROOT"
+[[ -d "$DELIVERY_ROOT" \
+    && "$(/usr/bin/stat -f '%u' "$DELIVERY_ROOT")" == "$(/usr/bin/id -u)" ]] || {
+    printf 'Refusing delivery root not owned by the current user: %s\n' \
+        "$DELIVERY_ROOT" >&2
+    exit 2
+}
+readonly canonical_delivery_root="$(cd "$DELIVERY_ROOT" && pwd -P)"
 readonly canonical_parent_base="$(cd "$(dirname "$output_parent")" && pwd -P)"
-[[ "$canonical_parent_base" == "$canonical_tmp" ]] || {
+[[ "$canonical_parent_base" == "$canonical_delivery_root" ]] || {
     printf 'Refusing non-canonical package parent %s\n' "$canonical_parent_base" >&2
     exit 2
 }
@@ -120,6 +143,7 @@ mkdir "$output_parent"
 case "$phase" in
     m5adbg-*) package_root="/private/tmp/uma-m5adbg-package-$phase-$commit" ;;
     m5-auto-*) package_root="/private/tmp/uma-m5-auto-package-$phase-$commit" ;;
+    m5-slr-*) package_root="/private/tmp/uma-m5-slr-package-$phase-$commit" ;;
     *) package_root="/private/tmp/uma-m5-browser-package-$phase-$commit" ;;
 esac
 [[ ! -e "$package_root" && ! -L "$package_root" ]] || {
@@ -187,7 +211,7 @@ if /usr/bin/grep -R -E -q "$forbidden_payload" \
 fi
 readonly safari_manifest="$source_root/BrowserExtension/Safari/manifest.json"
 readonly chromium_manifest="$source_root/BrowserExtension/Chromium/manifest.json"
-if [[ "$phase" == m5-auto-* ]]; then
+if [[ "$phase" == m5-auto-* || "$phase" == m5-slr-* ]]; then
     /usr/bin/grep -F -q '"manifest_version": 2' "$safari_manifest"
     /usr/bin/grep -F -q '"permissions": ["nativeMessaging", "storage", "https://claude.ai/new*"]' "$safari_manifest"
     /usr/bin/grep -F -q '"Shared/claude-usage-extractor.js"' "$safari_manifest"

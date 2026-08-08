@@ -760,3 +760,70 @@ to end in this task. Repairing the default test path is a separate task.
 
 One local commit. No push, PR, merge, tag, release, notarization, deployment, or
 Desktop replacement. The installed Desktop UMA remains protected.
+
+## M5-INFRA-G1 verification and delivery foundation repair scope lock
+
+Date: 2026-08-08
+
+This section records repair of two defects that blocked the project's own
+evidence contract. Both were discovered during M5-SLR-G1 and recorded there as
+open: M5SLR-007 and M5SLR-011. This task closes both. It changes no provider
+behaviour, no connector, no source admission, and no user-visible product string.
+
+### Problem
+
+The project requires that every milestone be reproducible and verifiable from
+its commit. Two independent failures had removed that guarantee.
+
+A bare `swift test` no longer ran on this machine at all, so verification
+depended on four overrides that existed only in an operator's shell history.
+Command Line Tools 27.0 changed three things at once: the default SDK selection
+stopped resolving the SwiftUI macro plugin, `libTestingMacros.dylib` moved into
+a `plugins/testing` subdirectory the build system does not search, and
+`Testing.framework` with its `lib_TestingInterop.dylib` left every default
+runtime search path while SIP strips `DYLD_FRAMEWORK_PATH` from the SwiftPM test
+helper.
+
+Separately, every delivery artifact was written under `/private/tmp`, which the
+operating system purges. All M5 packages, including the accepted M5-AUTO-R1
+artifact, had already been destroyed.
+
+### Repair
+
+`script/test.sh` runs the suite with the required overrides. The three moved
+toolchain components are located by search rather than by hardcoded path, so a
+later toolchain move fails with a specific message naming the missing component
+instead of an unrelated compiler or dyld error. The SDK stays pinned to the same
+version `script/package_uma_m5_g2.sh` uses, and the script says that the two must
+be updated together. Arguments are forwarded, so focused runs still work.
+
+`script/package_uma_m5_g2.sh` now delivers to `$HOME/Developer/UMA-Packages`
+instead of `/private/tmp`. Only the scratch build tree stays under `/private/tmp`,
+where automatic cleanup of abandoned intermediates is wanted. The existing
+fail-closed guards are preserved and extended: the delivery root is refused if it
+is a symlink or is not owned by the current user, and the exact-output and
+canonical-parent checks now resolve against the delivery root.
+
+### Reproducibility verification
+
+A new `m5-slr-final` phase packages the current accepted state. Adding it exposed
+a latent branch defect: the Safari manifest audit selected the Manifest V2
+automatic-sync expectations only for `m5-auto-*`, so any later phase would have
+been audited against the superseded manual `activeTab` manifest and would have
+failed. The condition now covers both phase families.
+
+Packaging remains commit-exact. Sources come from `git archive` of the requested
+commit, and the helper still refuses any commit that is not current HEAD.
+
+### Boundary
+
+Codex and WorkBuddy remain excluded by direct Founder instruction. No provider
+source, connector, model, service, store, view, or durable provider record was
+changed. The eight package-content strings asserted by
+`M5AG1ClaudeAssistantTests` are preserved verbatim.
+
+### Delivery
+
+One local commit and one commit-exact package under the new persistent delivery
+root. No push, PR, merge, tag, release, notarization, deployment, or Desktop
+replacement. The installed Desktop UMA remains protected.
