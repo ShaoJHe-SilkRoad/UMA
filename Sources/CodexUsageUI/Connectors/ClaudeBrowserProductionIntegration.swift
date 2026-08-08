@@ -132,11 +132,11 @@ private final class ClaudeBrowserDispatchCompletion: @unchecked Sendable {
 
 extension ClaudeBrowserProductionIntegration {
     private static let logger = Logger(
-        subsystem: "com.kevinchen.CodexUsageMonitor",
+        subsystem: "com.silkrd.uma",
         category: "ClaudeAutomaticRefresh"
     )
     private static let safariExtensionIdentifier =
-        "com.kevinchen.CodexUsageMonitor.ClaudeBrowserCompanion"
+        "com.silkrd.uma.ClaudeBrowserCompanion"
     private static let safariWakeMessageName = "umaClaudeWakeBridge"
     private static let safariWorkerSettleTimeout: TimeInterval = 5
 

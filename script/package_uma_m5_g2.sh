@@ -22,7 +22,7 @@ readonly PRODUCT="CodexUsageMonitor"
 readonly NATIVE_HOST="ClaudeBrowserNativeHost"
 readonly SAFARI_EXTENSION="ClaudeBrowserCompanion"
 readonly MARKETING_VERSION="0.11"
-readonly BUNDLE_ID="com.kevinchen.CodexUsageMonitor"
+readonly BUNDLE_ID="com.silkrd.uma"
 readonly SAFARI_EXTENSION_ID="$BUNDLE_ID.ClaudeBrowserCompanion"
 readonly CHROMIUM_HOST_NAME="com.silkrd.uma.claude_browser"
 readonly DEFAULT_BUILD="202608010001"
@@ -36,22 +36,51 @@ readonly DELIVERY_ROOT="$HOME/Developer/UMA-Packages"
 usage() {
     printf '%s\n' \
         "Usage: $0 --commit <40-hex-sha> [--build <12-digit-number>] --phase <m5-browser-preflight|m5-browser-final|m5adbg-preflight|m5adbg-final|m5-auto-preflight|m5-auto-final|m5-slr-final> --output <exact-path>" \
-        "Packages are delivered under $DELIVERY_ROOT and are not purged with /private/tmp."
+        "Packages are delivered under $DELIVERY_ROOT and are not purged with /private/tmp." \
+        "" \
+        "Signing and notarization (both optional):" \
+        "  --signing-identity <name>   Developer ID Application identity. Defaults to '-'," \
+        "                              which is ad-hoc and cannot be notarized. A real" \
+        "                              identity also enables the hardened runtime and a" \
+        "                              secure timestamp, which notarization requires." \
+        "  --keychain-profile <name>   notarytool profile created once with" \
+        "                              'xcrun notarytool store-credentials'. Submits, waits," \
+        "                              staples, and assesses. Requires --signing-identity."
 }
 
 commit=""
 build_number="$DEFAULT_BUILD"
 phase=""
 output=""
+# Ad-hoc by default so every existing invocation keeps its current behaviour.
+# A real Developer ID identity additionally enables the hardened runtime and a
+# secure timestamp, both of which notarization requires.
+signing_identity="-"
+notary_profile=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --commit) commit="${2:-}"; shift 2 ;;
         --build) build_number="${2:-}"; shift 2 ;;
         --phase) phase="${2:-}"; shift 2 ;;
         --output) output="${2:-}"; shift 2 ;;
+        --signing-identity) signing_identity="${2:-}"; shift 2 ;;
+        --keychain-profile) notary_profile="${2:-}"; shift 2 ;;
         *) usage >&2; exit 2 ;;
     esac
 done
+readonly signing_identity notary_profile
+[[ -n "$signing_identity" ]] || { usage >&2; exit 2; }
+if [[ -n "$notary_profile" && "$signing_identity" == "-" ]]; then
+    printf '%s\n' \
+        "Notarization requires --signing-identity with a Developer ID Application certificate." >&2
+    exit 2
+fi
+
+codesign_options=(--force --sign "$signing_identity")
+if [[ "$signing_identity" != "-" ]]; then
+    codesign_options+=(--options runtime --timestamp)
+fi
+readonly codesign_options
 
 [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { usage >&2; exit 2; }
 [[ "$build_number" =~ ^[0-9]{12}$ ]] || { usage >&2; exit 2; }
@@ -385,14 +414,14 @@ for json in \
     /usr/bin/ruby -rjson -e 'JSON.parse(File.binread(ARGV.fetch(0)))' "$json"
 done
 
-/usr/bin/codesign --force --sign - \
+/usr/bin/codesign "${codesign_options[@]}" \
     --identifier "$BUNDLE_ID.ClaudeBrowserNativeHost" \
     "$contents/Helpers/$NATIVE_HOST"
-/usr/bin/codesign --force --sign - \
+/usr/bin/codesign "${codesign_options[@]}" \
     --identifier "$SAFARI_EXTENSION_ID" \
     --entitlements "$source_root/BrowserExtension/Safari/Native/ClaudeBrowserCompanion.entitlements" \
     "$appex"
-/usr/bin/codesign --force --sign - --identifier "$BUNDLE_ID" "$output"
+/usr/bin/codesign "${codesign_options[@]}" --identifier "$BUNDLE_ID" "$output"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$output"
 
 for executable in \
@@ -504,4 +533,20 @@ printf 'PACKAGED output=%s commit=%s source_state=%s archive_sha256=%s executabl
     "$build_number" \
     "$BUNDLE_ID" \
     "$integration_status"
+
+# Optional. Runs only when a notarization keychain profile is named, so the
+# default packaging path stays entirely offline. The profile is created once by
+# `xcrun notarytool store-credentials`; the credential itself lives in the
+# operator's keychain and is never read, echoed, or stored by this script.
+if [[ -n "$notary_profile" ]]; then
+    readonly notary_archive="$package_root/notarize.zip"
+    /usr/bin/ditto -c -k --keepParent "$output" "$notary_archive"
+    /usr/bin/xcrun notarytool submit "$notary_archive" \
+        --keychain-profile "$notary_profile" \
+        --wait
+    /usr/bin/xcrun stapler staple "$output"
+    /usr/bin/xcrun stapler validate "$output"
+    /usr/sbin/spctl --assess --type execute --verbose=4 "$output"
+    printf 'NOTARIZED output=%s bundle_id=%s\n' "$output" "$BUNDLE_ID"
+fi
 completed=1

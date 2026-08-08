@@ -5,7 +5,7 @@ set -euo pipefail
 
 readonly ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 readonly PRODUCT="CodexUsageMonitor"
-readonly BUNDLE_PREFIX="com.kevinchen.CodexUsageMonitor.m1a-g2-dbg-b.evidence."
+readonly BUNDLE_PREFIX="com.silkrd.uma.m1a-g2-dbg-b.evidence."
 
 usage() { printf '%s\n' "Usage: $0 --output <temporary.app> --bundle-id <unique-id> --build <number>"; }
 

@@ -22,7 +22,7 @@ struct M2WDBGR1RepairTests {
         let manual = reviewRoot.appendingPathComponent("manual.json")
 
         let production = try UsageMonitorRuntime.storeConfiguration(
-            bundleIdentifier: "com.kevinchen.CodexUsageMonitor",
+            bundleIdentifier: "com.silkrd.uma",
             environment: [
                 "HOME": "/private/tmp/isolated-home",
                 "UMA_M2WDBG_MANUAL_STORE":
@@ -37,7 +37,7 @@ struct M2WDBGR1RepairTests {
         #expect(production.snapshotStoreURL == nil)
 
         let review = try UsageMonitorRuntime.storeConfiguration(
-            bundleIdentifier: "com.kevinchen.CodexUsageMonitor",
+            bundleIdentifier: "com.silkrd.uma",
             environment: [
                 "HOME": "/private/tmp/isolated-home",
                 "UMA_M2WDBG_R1_MANUAL_STORE": manual.path
@@ -74,7 +74,7 @@ struct M2WDBGR1RepairTests {
 
         #expect(throws: UsageMonitorRuntimeError.self) {
             _ = try UsageMonitorRuntime.storeConfiguration(
-                bundleIdentifier: "com.kevinchen.CodexUsageMonitor",
+                bundleIdentifier: "com.silkrd.uma",
                 environment: [
                     "UMA_M2WDBG_R1_MANUAL_STORE":
                         parent.appendingPathComponent("outside.json").path
@@ -86,7 +86,7 @@ struct M2WDBGR1RepairTests {
 
         for bundleIdentifier in [
             nil,
-            "com.kevinchen.CodexUsageMonitor.unexpected",
+            "com.silkrd.uma.unexpected",
         ] {
             #expect(throws: UsageMonitorRuntimeError.self) {
                 _ = try UsageMonitorRuntime.storeConfiguration(
@@ -266,7 +266,7 @@ struct M2WDBGR1RepairTests {
             ),
             encoding: .utf8
         )
-        #expect(package.contains("BUNDLE_ID=\"com.kevinchen.CodexUsageMonitor\""))
+        #expect(package.contains("BUNDLE_ID=\"com.silkrd.uma\""))
         #expect(
             package.contains(
                 "/private/tmp/uma-m2wdbg-r1-final-$short_commit/UMA.app"

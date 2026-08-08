@@ -46,7 +46,7 @@ struct M2WDBGMainAppDebugTests {
         let allowed = stores.appendingPathComponent("manual.json").path
         #expect(
             UsageMonitorRuntime.m2wdbgStoreURL(
-                bundleIdentifier: "com.kevinchen.CodexUsageMonitor.m2wdbg.abc",
+                bundleIdentifier: "com.silkrd.uma.m2wdbg.abc",
                 environment: ["UMA_M2WDBG_MANUAL_STORE": allowed],
                 variable: "UMA_M2WDBG_MANUAL_STORE",
                 allowedRoot: root
@@ -55,7 +55,7 @@ struct M2WDBGMainAppDebugTests {
         let snapshots = stores.appendingPathComponent("snapshots.json").path
         #expect(
             UsageMonitorRuntime.m2wdbgStoreURL(
-                bundleIdentifier: "com.kevinchen.CodexUsageMonitor.m2wdbg.abc",
+                bundleIdentifier: "com.silkrd.uma.m2wdbg.abc",
                 environment: ["UMA_M2WDBG_SNAPSHOT_STORE": snapshots],
                 variable: "UMA_M2WDBG_SNAPSHOT_STORE",
                 allowedRoot: root
@@ -63,7 +63,7 @@ struct M2WDBGMainAppDebugTests {
         )
         #expect(
             UsageMonitorRuntime.m2wdbgStoreURL(
-                bundleIdentifier: "com.kevinchen.CodexUsageMonitor",
+                bundleIdentifier: "com.silkrd.uma",
                 environment: ["UMA_M2WDBG_MANUAL_STORE": allowed],
                 variable: "UMA_M2WDBG_MANUAL_STORE",
                 allowedRoot: root
@@ -71,7 +71,7 @@ struct M2WDBGMainAppDebugTests {
         )
         #expect(
             UsageMonitorRuntime.m2wdbgStoreURL(
-                bundleIdentifier: "evil.com.kevinchen.CodexUsageMonitor.m2wdbg.abc",
+                bundleIdentifier: "evil.com.silkrd.uma.m2wdbg.abc",
                 environment: ["UMA_M2WDBG_MANUAL_STORE": allowed],
                 variable: "UMA_M2WDBG_MANUAL_STORE",
                 allowedRoot: root
@@ -87,7 +87,7 @@ struct M2WDBGMainAppDebugTests {
         )
         #expect(
             UsageMonitorRuntime.m2wdbgStoreURL(
-                bundleIdentifier: "com.kevinchen.CodexUsageMonitor.not-m2wdbg.abc",
+                bundleIdentifier: "com.silkrd.uma.not-m2wdbg.abc",
                 environment: ["UMA_M2WDBG_MANUAL_STORE": allowed],
                 variable: "UMA_M2WDBG_MANUAL_STORE",
                 allowedRoot: root
@@ -100,7 +100,7 @@ struct M2WDBGMainAppDebugTests {
         ] {
             #expect(
                 UsageMonitorRuntime.m2wdbgStoreURL(
-                    bundleIdentifier: "com.kevinchen.CodexUsageMonitor.m2wdbg.abc",
+                    bundleIdentifier: "com.silkrd.uma.m2wdbg.abc",
                     environment: ["UMA_M2WDBG_MANUAL_STORE": rejected],
                     variable: "UMA_M2WDBG_MANUAL_STORE",
                     allowedRoot: root
@@ -120,7 +120,7 @@ struct M2WDBGMainAppDebugTests {
         )
         #expect(
             UsageMonitorRuntime.m2wdbgStoreURL(
-                bundleIdentifier: "com.kevinchen.CodexUsageMonitor.m2wdbg.abc",
+                bundleIdentifier: "com.silkrd.uma.m2wdbg.abc",
                 environment: [
                     "UMA_M2WDBG_MANUAL_STORE":
                         symlinkRoot.appendingPathComponent("manual.json").path
@@ -139,7 +139,7 @@ struct M2WDBGMainAppDebugTests {
         )
         #expect(
             UsageMonitorRuntime.m2wdbgStoreURL(
-                bundleIdentifier: "com.kevinchen.CodexUsageMonitor.m2wdbg.abc",
+                bundleIdentifier: "com.silkrd.uma.m2wdbg.abc",
                 environment: ["UMA_M2WDBG_MANUAL_STORE": symlinkLeaf.path],
                 variable: "UMA_M2WDBG_MANUAL_STORE",
                 allowedRoot: root
@@ -160,7 +160,7 @@ struct M2WDBGMainAppDebugTests {
             withIntermediateDirectories: true
         )
         let bundleIdentifier =
-            "com.kevinchen.CodexUsageMonitor.m2wdbg.integration"
+            "com.silkrd.uma.m2wdbg.integration"
         let manual = stores.appendingPathComponent("manual.json").path
         let snapshots = stores.appendingPathComponent("snapshots.json").path
 

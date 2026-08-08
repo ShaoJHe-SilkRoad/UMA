@@ -9,7 +9,7 @@ import SafariServices
 /// allowlisted observation object.
 final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
     private let logger = Logger(
-        subsystem: "com.kevinchen.CodexUsageMonitor.ClaudeBrowserCompanion",
+        subsystem: "com.silkrd.uma.ClaudeBrowserCompanion",
         category: "NativeBridge"
     )
 

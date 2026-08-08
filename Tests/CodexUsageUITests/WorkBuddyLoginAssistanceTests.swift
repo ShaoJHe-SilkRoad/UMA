@@ -419,7 +419,7 @@ struct WorkBuddyLoginAssistanceTests {
         for required in [
             "MARKETING_VERSION=\"0.10.1\"",
             "DEFAULT_BUILD=\"202607250005\"",
-            "BUNDLE_ID=\"com.kevinchen.CodexUsageMonitor\"",
+            "BUNDLE_ID=\"com.silkrd.uma\"",
             "/private/tmp/uma-workbuddy-login-final-$short_commit/UMA.app",
             "git -C \"$REPO_ROOT\" archive",
             "UMA-WorkBuddy-Login-Provenance.plist",

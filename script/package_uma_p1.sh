@@ -6,7 +6,7 @@ set -euo pipefail
 
 readonly REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 readonly PRODUCT="CodexUsageMonitor"
-readonly BUNDLE_PREFIX="com.kevinchen.CodexUsageMonitor.uma0.9.p1."
+readonly BUNDLE_PREFIX="com.silkrd.uma.uma0.9.p1."
 
 usage() {
     printf '%s\n' "Usage: $0 (--commit <40-hex-sha> | --provisional-source-archive <tar> --provisional-archive-sha256 <64-hex>) --output <temporary/CodexUsageMonitor.app> --bundle-id <id> --build <number>"

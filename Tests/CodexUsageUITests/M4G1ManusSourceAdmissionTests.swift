@@ -255,7 +255,7 @@ struct M4G1ManusSourceAdmissionTests {
         )
         #expect(
             query[kSecAttrService as String] as? String
-                == "com.kevinchen.CodexUsageMonitor.manus-api-v2"
+                == "com.silkrd.uma.manus-api-v2"
         )
         #expect(query[kSecAttrAccount as String] as? String == "primary")
         #expect(query[kSecUseDataProtectionKeychain as String] as? Bool == true)
@@ -287,7 +287,7 @@ private enum ManusAdmissionHarness {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String:
-                "com.kevinchen.CodexUsageMonitor.manus-api-v2",
+                "com.silkrd.uma.manus-api-v2",
             kSecAttrAccount as String: "primary",
             kSecUseDataProtectionKeychain as String: true,
             kSecAttrAccessible as String:

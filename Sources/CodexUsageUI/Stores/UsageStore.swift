@@ -93,7 +93,7 @@ public final class UsageStore: ObservableObject {
                     store: AgentPreferenceStore(
                         defaults: UserDefaults(
                             suiteName:
-                                "com.kevinchen.UMA.PreviewRenderer.AgentSettings.\(UUID().uuidString)"
+                                "com.silkrd.uma.PreviewRenderer.AgentSettings.\(UUID().uuidString)"
                         )!
                     )
                 )

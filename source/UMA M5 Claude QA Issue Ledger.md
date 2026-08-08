@@ -607,3 +607,13 @@ Sixteen focused tests plus the full package suite pass at 485 tests, up from the
 forty-one Codex and WorkBuddy owned files are byte-identical, the persisted
 payload remains the same six aggregate scalars with no allowlist change, and no
 new persisted file was introduced.
+
+## M5-DIST-G1 identity and signing issue ledger
+
+| ID | Found by | Severity | Evidence / acceptance impact | Repair | Focused retest | Regression retest | Final status |
+|---|---|---:|---|---|---|---|---|
+| M5DIST-001 | Distribution audit | Blocking | The application shipped under an identifier in the upstream author's reverse DNS namespace. A Developer ID signature binds a Team ID to the identifier and the Safari extension identifier derives from it, so distribution was impossible | Migrate every identifier to the Founder's namespace across thirty-six files while leaving retained governance history unchanged | Zero residual occurrences outside `source/`: PASS | Full regression 485/485 | Closed |
+| M5DIST-002 | Distribution audit | Blocking | Packaging signed without the hardened runtime, which notarization requires. A submission would have been rejected even with a valid certificate | Enable the hardened runtime and a secure timestamp whenever a real signing identity is supplied | End-to-end ad-hoc packaging unchanged and still valid on disk: PASS | Full regression | Closed |
+| M5DIST-003 | Credential-handling audit | Gate | Notarization needs an app-specific password, which must never enter the repository, the logs, or an assistant's context | Reference the credential only by keychain profile name, created once by the operator with `notarytool store-credentials` | Naming a profile without a real identity is refused with a specific message: PASS | Not applicable | Closed |
+| M5DIST-004 | Scope audit | Major | The identifier appeared in far more places than first estimated — thirty-six files, not the two originally reported | Enumerate exhaustively before substituting, and separate live gates from inert preview identifiers | Live gates in `AgentUsageRuntime` migrated atomically with the application identifier: PASS | Full regression | Closed; the earlier estimate is corrected in the record |
+| M5DIST-005 | Distribution audit | Gate | The Safari extension carries a temporary-exception file-access entitlement whose acceptance under Developer ID distribution cannot be verified before an actual notarization submission | No speculative change. If Apple rejects it, adjust to the stated reason rather than guessing in advance | Not testable offline | Not applicable | Open; resolves at first notarization submission |

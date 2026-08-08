@@ -18,7 +18,7 @@ struct M4NManusRetirementTests {
             "umaOwnedKeychainCredential",
             "/v2/usage.availableCredits",
             "x-manus-api-key",
-            "com.kevinchen.CodexUsageMonitor.manus-api-v2",
+            "com.silkrd.uma.manus-api-v2",
             "Connect Manus",
             "Save and Verify",
         ]

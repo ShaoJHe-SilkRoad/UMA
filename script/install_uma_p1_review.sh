@@ -41,7 +41,7 @@ cat > "$launcher_contents/Info.plist" <<PLIST
 <plist version="1.0"><dict>
 <key>CFBundleDisplayName</key><string>UMA0.9_Enter</string>
 <key>CFBundleExecutable</key><string>UMA0.9_Enter</string>
-<key>CFBundleIdentifier</key><string>com.kevinchen.CodexUsageMonitor.uma0.9.enter</string>
+<key>CFBundleIdentifier</key><string>com.silkrd.uma.uma0.9.enter</string>
 <key>CFBundleName</key><string>UMA0.9_Enter</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>0.9-p1</string>

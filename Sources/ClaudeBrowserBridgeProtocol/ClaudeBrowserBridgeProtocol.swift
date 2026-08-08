@@ -18,7 +18,7 @@ public enum ClaudeBrowserBridgeContract {
     public static let chromiumExtensionID = "jgoknghcplngcnldmfenkghcbommaalj"
     public static let chromiumExtensionOrigin = "chrome-extension://\(chromiumExtensionID)/"
     public static let chromiumNativeHostName = "com.silkrd.uma.claude_browser"
-    public static let safariApplicationIdentifier = "com.kevinchen.CodexUsageMonitor"
+    public static let safariApplicationIdentifier = "com.silkrd.uma"
     public static let automationMessageKind = "claudeBrowserAutomationEvent"
     public static let automaticRefreshMessageName = "umaClaudeAutomaticRefresh"
     public static let closeOwnedTabMessageName = "umaClaudeCloseOwnedUsageTab"

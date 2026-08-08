@@ -161,7 +161,7 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
     ) -> WorkBuddyAccountWebSessionController {
         let defaults = UserDefaults(
             suiteName:
-                "com.kevinchen.uma.preview.account-web.\(UUID().uuidString)"
+                "com.silkrd.uma.preview.account-web.\(UUID().uuidString)"
         )!
         let controller = WorkBuddyAccountWebSessionController(
             defaults: defaults,
@@ -183,7 +183,7 @@ public final class WorkBuddyAccountWebSessionController: NSObject, ObservableObj
     ) -> WorkBuddyAccountWebSessionController {
         let defaults = UserDefaults(
             suiteName:
-                "com.kevinchen.uma.preview.account-web.failed.\(UUID().uuidString)"
+                "com.silkrd.uma.preview.account-web.failed.\(UUID().uuidString)"
         )!
         let controller = WorkBuddyAccountWebSessionController(defaults: defaults)
         controller.consentGranted = true

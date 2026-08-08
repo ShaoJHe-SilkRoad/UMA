@@ -5,7 +5,7 @@ set -euo pipefail
 readonly REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 readonly PRODUCT="CodexUsageMonitor"
 readonly MARKETING_VERSION="0.10.1"
-readonly BUNDLE_PREFIX="com.kevinchen.CodexUsageMonitor.m2wdbg."
+readonly BUNDLE_PREFIX="com.silkrd.uma.m2wdbg."
 readonly DEFAULT_BUILD="202607240301"
 
 usage() {

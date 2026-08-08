@@ -190,7 +190,7 @@ public struct UsageMonitorRuntime {
         r1AllowedRoot: URL
     ) throws -> UsageMonitorStoreConfiguration {
         if environment.keys.contains("UMA_M2WDBG_R1_MANUAL_STORE") {
-            guard bundleIdentifier == "com.kevinchen.CodexUsageMonitor",
+            guard bundleIdentifier == "com.silkrd.uma",
                   let workBuddyStoreURL = r1ManualStoreURL(
                 bundleIdentifier: bundleIdentifier,
                 environment: environment,
@@ -205,7 +205,7 @@ public struct UsageMonitorRuntime {
         }
 
         guard bundleIdentifier?.hasPrefix(
-            "com.kevinchen.CodexUsageMonitor.m2wdbg."
+            "com.silkrd.uma.m2wdbg."
         ) == true
         else {
             return UsageMonitorStoreConfiguration(
@@ -276,7 +276,7 @@ public struct UsageMonitorRuntime {
         allowedRoot: URL
     ) -> URL? {
         guard bundleIdentifier?.hasPrefix(
-            "com.kevinchen.CodexUsageMonitor.m2wdbg."
+            "com.silkrd.uma.m2wdbg."
         ) == true,
               let rawPath = environment[variable],
               rawPath.hasPrefix("/")
@@ -305,7 +305,7 @@ public struct UsageMonitorRuntime {
         environment: [String: String],
         allowedRoot: URL
     ) -> URL? {
-        guard bundleIdentifier == "com.kevinchen.CodexUsageMonitor",
+        guard bundleIdentifier == "com.silkrd.uma",
               let rawPath = environment["UMA_M2WDBG_R1_MANUAL_STORE"],
               rawPath.hasPrefix("/")
         else {

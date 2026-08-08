@@ -913,3 +913,59 @@ capability and scope contract.
 
 One local commit. No push, PR, merge, tag, release, notarization, deployment, or
 Desktop replacement. The installed Desktop UMA remains protected.
+
+## M5-DIST-G1 identity migration and signing readiness scope lock
+
+Date: 2026-08-08
+
+The Founder enrolled in the Apple Developer Program and granted a narrow
+exemption to change every bundle identifier to their own namespace while
+changing nothing else functional. This section records that migration and the
+signing groundwork that can be completed before a certificate exists.
+
+### Identity migration
+
+The application shipped under `com.kevinchen.CodexUsageMonitor`, inherited from
+the upstream project this repository was forked from. A Developer ID signature
+binds a Team ID to the bundle identifier, and the Safari extension identifier is
+derived from the application's, so an identifier in another developer's reverse
+DNS namespace cannot be distributed.
+
+Every identifier moved to `com.silkrd.uma`, matching the Chromium native host
+name already in use. Thirty-six files changed: eighteen packaging helpers,
+thirteen test files, and five production sources. Governance records under
+`source/` were deliberately left untouched; they are retained history, not
+configuration, and still carry the original identifier.
+
+Two occurrences required judgement rather than substitution. The identifiers in
+`WorkBuddyAccountWebSessionController` name preview-only defaults suites with a
+random suffix and carry no functional weight. The identifiers in
+`AgentUsageRuntime` are live gates on the running bundle identifier and had to
+move atomically with the application's own identifier or debug-store routing
+would have silently stopped matching.
+
+### Signing readiness
+
+Packaging accepts an optional `--signing-identity`, defaulting to ad-hoc so
+every existing invocation behaves exactly as before. A real Developer ID
+identity additionally enables the hardened runtime and a secure timestamp.
+
+The absence of the hardened runtime was a latent blocker: notarization requires
+it, so a submission would have been rejected even with a valid certificate.
+
+An optional `--keychain-profile` submits, waits, staples, and assesses. It is
+refused unless a real signing identity is also supplied. The notarization
+credential is referenced only by profile name and is never read, echoed, or
+stored by the repository.
+
+### Boundary
+
+Codex and WorkBuddy remain excluded from functional change under the standing
+instruction. The identifier substitution inside their files is the exemption the
+Founder granted explicitly and changes no behaviour.
+
+### Delivery
+
+One local commit. No push, PR, merge, tag, release, notarization, deployment, or
+Desktop replacement. Notarization itself remains blocked on Apple Developer
+Program enrolment, which was paid and is in processing.

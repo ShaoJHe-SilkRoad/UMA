@@ -5,7 +5,7 @@
     <key>CFBundleDisplayName</key>
     <string>UMA Browser Companion for Claude</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.kevinchen.CodexUsageMonitor.ClaudeBrowserCompanion</string>
+	<string>com.silkrd.uma.ClaudeBrowserCompanion</string>
 	<key>CFBundleExecutable</key>
 	<string>ClaudeBrowserCompanion</string>
 	<key>CFBundlePackageType</key>

@@ -753,7 +753,7 @@ struct M2WAccountWebSyncTests {
         )
         #expect(script.contains("MARKETING_VERSION=\"0.10.1\""))
         #expect(script.contains("DEFAULT_BUILD=\"202607260001\""))
-        #expect(script.contains("BUNDLE_ID=\"com.kevinchen.CodexUsageMonitor\""))
+        #expect(script.contains("BUNDLE_ID=\"com.silkrd.uma\""))
         #expect(
             script.contains(
                 "/private/tmp/uma-workbuddy-autorefresh-final-$short_commit/UMA.app"

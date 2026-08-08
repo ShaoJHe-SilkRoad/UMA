@@ -18,7 +18,7 @@ struct M2WADBGPackageContractTests {
 
         #expect(script.contains("MARKETING_VERSION=\"0.10.1\""))
         #expect(script.contains("DEFAULT_BUILD=\"202607250002\""))
-        #expect(script.contains("BUNDLE_ID=\"com.kevinchen.CodexUsageMonitor\""))
+        #expect(script.contains("BUNDLE_ID=\"com.silkrd.uma\""))
         #expect(
             script.contains(
                 "/private/tmp/uma-m2wadbg-final-$short_commit/UMA.app"
