@@ -1,206 +1,277 @@
 # UMA M6 Antigravity Local Source Dossier
 
-**Goals:** M6-G1 and M6-SETUP-G1
+**Goals:** M6-G1, M6-SETUP-G1 and M6-G1R
 **Date:** 2026-08-08
-**Baseline commit:** `bd09c15b466e873ece32dc3f52517ae4d3a45f67`
-**Baseline tree:** `200e2d7c9bba917da834cf64c5629611a4edaec9`
-**Historical M6-G1 decision:** `SETUP REQUIRED — OFFICIAL ANTIGRAVITY CLI NOT INSTALLED`
-**Current setup result:** `PASS — OFFICIAL ANTIGRAVITY CLI READY FOR M6-G1R`
+**G1R starting commit:** `6b4a90924705c94db37d4ab6858d56ab084cdbfe`
+**G1R starting tree:** `e7123b7760f1bafeaaaeb6dc487ec53414c5b133`
+**Current decision:** `NO-GO — LIVE ADMISSION EVIDENCE INCOMPLETE`
 
 ## 1. Executive finding
 
-The official Google Antigravity CLI remains a potentially admissible source
-class. M6-G1 correctly found that the standalone CLI was absent, but incorrectly
-reported the Antigravity desktop application itself as absent. A read-only
-addendum confirmed Antigravity Desktop `2.6.0` was already installed and did not
-contain an admitted bundled CLI.
+The official Google Antigravity CLI is installed and the source class remains
+technically promising. One bounded ordinary-network execution returned a
+current structured quota object with explicit remaining semantics, per-bucket
+absolute resets, multiple independent groups, provider-owned authentication,
+and no browser/login action.
 
-No provider source read was attempted. M6-G1 used zero of the three authorized
-quota/Credit reads and created no prompt, task, agent turn, model response,
-conversation, or intentional spend.
+The source is not admitted in M6-G1R. All three authorized executions are
+consumed, but only one retained detailed schema classification. Exact safe
+bucket identity was not retained across two successful samples, and exact live
+`num_turns == 0` was not preserved. The mandatory repeatability, identity, and
+live no-turn gates therefore remain unproven.
 
-M6-SETUP-G1 then installed the official manifest-pinned standalone CLI `1.1.11`,
-proved installed help and structured print support, and used one authorized
-read-only `/usage` execution to establish setup readiness. No raw quota value or
-schema field was retained. The source must now return to M6-G1R; no production
-connector is implemented or authorized.
+Final result:
 
-## 2. Repository and exclusion-zone evidence
+```text
+NO-GO — LIVE ADMISSION EVIDENCE INCOMPLETE
+```
 
-Before executable discovery, the live worktree proved:
+## 2. Repository and exclusion-zone baseline
 
 | Property | Observation |
 |---|---|
 | Workspace | `/Users/juliushe/Developer/UMA-M6-Antigravity` |
 | Branch | `codex/uma-m6-antigravity` |
-| HEAD | `bd09c15b466e873ece32dc3f52517ae4d3a45f67` |
-| Tree | `200e2d7c9bba917da834cf64c5629611a4edaec9` |
-| Worktree | Clean |
-| Index | Empty |
-| M6-B0 commit | Present |
-| M5 frozen/shared runtime | Byte-identical to the M6-B0 parent |
+| Starting HEAD | `6b4a90924705c94db37d4ab6858d56ab084cdbfe` |
+| Starting tree | `e7123b7760f1bafeaaaeb6dc487ec53414c5b133` |
+| Starting worktree | Clean |
+| Starting index | Empty |
+| Accepted setup commit | Present |
+| M5/shared runtime | Unchanged from accepted setup baseline |
 
-No unrelated work required mutation. Product source, `Package.swift`,
-`BrowserExtension`, scripts, existing M5 tests, and existing M5 records stayed
-read-only.
+M6-G1R modifies admission tests and four existing M6 records only. It does not
+modify product source, `Package.swift`, scripts, `BrowserExtension`, M5 records,
+M5 tests, or existing provider mechanisms.
 
-## 3. Corrected current-device executable inventory
-
-Read-only discovery produced this sanitized inventory:
+## 3. Installed executable
 
 | Required fact | Current observation |
 |---|---|
-| Host architecture | arm64 |
-| `agy` on `PATH` | Available after native setup |
-| Documented target `$HOME/.local/bin/agy` | Present |
-| `/Applications/Antigravity.app` | Present; `2.6.0`, `com.google.antigravity`, arm64 |
-| `$HOME/Applications/Antigravity.app` | Absent |
-| Bundled admitted CLI | None |
-| Resolved standalone path | `$HOME/.local/bin/agy` |
-| Symlink chain | None; regular file |
-| Executable type / architecture | Mach-O 64-bit executable, arm64 |
-| Executable owner / mode | Current user, `0755` |
-| Installed version / build | `1.1.11`; no separate build reported |
+| Exact path | `$HOME/.local/bin/agy` |
+| Resolved path | Same; regular file |
+| Symlink chain | None |
+| Version/build | `1.1.11`; no separate build reported |
+| Type / architecture | Mach-O 64-bit executable, arm64 |
+| Executable SHA-256 | `198ff7c3f6d173daa510b0814aa70c6ce14c94035bcd4707a3c0e79fa38a7bc3` |
 | Embedded identifier / Team ID | `cli` / `EQHXZ8M8AV` |
-| Signature / Gatekeeper | Local PASS unavailable; see setup evidence |
-| Quarantine / provenance xattrs | Quarantine absent; provenance present |
-| Installed `--help` | PASS |
+| Quarantine / provenance | Quarantine absent; provenance present |
+| Signature / Gatekeeper | Reliable local PASS unavailable under the previously accepted trust-service limitation |
 
-The installed executable is byte-identical to the verified payload extracted
-from the official manifest-pinned archive. The local macOS trust service cannot
-produce reliable signature assessments, including for Apple system apps; the
-Founder accepted that exact limitation for setup.
+The official installer, manifest version, archive checksum and installed hash
+remain the admitted provenance evidence. M6-G1R neither reinstalls nor updates
+the executable.
 
-## 4. Current official public contract
+## 4. Exact command and execution boundary
 
-Current official Google material was inspected read-only:
-
-- [Antigravity CLI overview](https://antigravity.google/docs/cli/overview)
-- [CLI installation and authentication](https://antigravity.google/docs/cli/install)
-- [Model Quotas `/usage` and `/quota`](https://antigravity.google/docs/cli/commands/usage)
-- [Antigravity changelog](https://antigravity.google/changelog)
-- [Official Antigravity CLI repository](https://github.com/google-antigravity/antigravity-cli)
-- [Official darwin arm64 update manifest](https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/darwin_arm64.json)
-
-The public documentation reported CLI version `1.1.11`, a default macOS target
-of `$HOME/.local/bin/agy`, provider-managed authentication, `/usage` with alias
-`/quota`, and structured `json` / `stream-json` print support for read-only
-commands. The public changelog describes those read-only print commands as
-creating no agent turn, quota spend, or conversation.
-
-These were public source-class facts only during M6-G1. M6-SETUP-G1 later
-downloaded the exact manifest-pinned archive, verified its SHA-512, and proved
-the installed version and capability. They still do not admit a quota schema.
-
-## 5. Command classification
-
-M6-G1 executed no Antigravity command. M6-SETUP-G1 later proved these exact-path
-capability commands:
-
-```text
-$HOME/.local/bin/agy --version
-$HOME/.local/bin/agy --help
-```
-
-Installed help confirms `-p` / `--print`, slash-command expansion, and
-`--output-format` values `text`, `json`, and `stream-json`. The official 1.1.11
-changelog names `/usage` and `/quota`; the setup-readiness argv was:
+Installed help reconfirmed noninteractive print mode, `-p`, JSON and stream-JSON
+formats, and slash-command expansion. The exact source command was:
 
 ```text
 $HOME/.local/bin/agy --output-format json -p /usage
 ```
 
-That form executed exactly once during M6-SETUP-G1 and returned structured JSON.
-Raw output and exact values were discarded. It is setup proof only, not schema
-admission. No `/quota` or `/credits` execution occurred.
+Each execution used:
 
-## 6. Live quota and schema classification
+- exact argv without a shell-constructed provider command;
+- closed stdin;
+- an empty owner-only task directory outside any repository;
+- inherited provider-owned authentication with no injected credential;
+- stdout capped at 64 KiB and stderr capped at 16 KiB;
+- a 15-second timeout;
+- one owned process group with complete teardown.
 
-M6-G1 left every installed/live schema fact unavailable. M6-SETUP-G1 proved
-only that one JSON document can be returned; it retained no schema detail:
+No residual `agy` process or neutral-directory artifact remained.
 
-| Schema fact | Classification |
-|---|---|
-| JSON root/container | Unavailable |
-| Schema/version marker | Unavailable |
-| Quota bucket container | Unavailable |
-| Bucket identifier / safe label | Unavailable |
-| Remaining-versus-used semantics | Unavailable |
-| Reset time / duration form | Unavailable |
-| Disabled / unlimited representation | Unavailable |
-| Observation/currentness marker | Unavailable |
-| Unknown/private-field presence | Unavailable |
-| Repeated-read structural stability | Unavailable |
+## 5. Live execution results
 
-Neither M6-G1 nor M6-SETUP-G1 encodes a production field name, decoder,
-conversion, bucket lineup, or reset representation. M6-G1R must inspect and
-sanitize the live schema under its own bounded authority.
+| Execution | Context | Exit | Structured output |
+|---|---|---:|---|
+| 1 | Network-restricted tool sandbox | 1 | None; zero stdout, bounded generic stderr |
+| 2 | Network-restricted tool sandbox | 1 | None; zero stdout, bounded generic stderr |
+| 3 | Approved ordinary network context | 0 | One JSON object, 1141 stdout bytes, zero stderr bytes |
 
-## 7. Authentication classification
+Executions two and three were deliberate ambiguity-resolution reads, not
+automatic retries. The source-read budget is now `3/3`; `/credits` reads remain
+`0`.
 
-M6-G1 authentication was unobservable because the standalone CLI was absent.
-M6-SETUP-G1's one structured readiness read completed without browser login,
-proving that provider-owned authentication is currently usable by the CLI.
+No raw stderr or JSON was persisted. The first two generic errors were not
+classified as authentication or provider-schema failures. The third result
+proves one ordinary current read but does not prove repeatability.
 
-Official installation material states that a missing provider session may open
-the default browser for provider-controlled sign-in. No browser opened during
-setup. A later routine background source must still fail closed rather than
-unexpectedly launching login.
+## 6. Sanitized structured contract
 
-No credentials, Keychain items, cookies, browser profiles, OAuth/session tokens,
-login URLs, account identity, or private provider state were accessed.
+Top-level type: object. No schema/version marker was observed.
 
-## 8. No-turn, no-task, no-conversation, and no-spend evidence
+```text
+command: object
+  name: string
+  data: object
+    description: string
+    groups: array
+      group: object
+        name: string
+        description: string
+        buckets: array
+          bucket: object
+            id: string
+            name: string
+            remaining_fraction: finite number in 0...1
+            reset_time: ISO-8601 datetime string
+            window: string
+conversation_id: string, observed empty
+duration_seconds: number
+num_turns: number
+response: string
+status: string
+usage: object containing token counters
+```
 
-Official documentation and installed capability now support the intended
-read-only print source class. Full causality and artifact checks remain for
-M6-G1R.
+Two groups with one bucket each were observed. Exact group names, bucket IDs,
+bucket names, window values, quota fractions, reset timestamps, response text,
+and counters were deliberately not retained.
 
-| Claim | M6-G1 evidence |
-|---|---|
-| No provider prompt/task | One read-only slash command; prompt/task count 0 |
-| No agent turn/model response | Official contract plus structured setup result; full runtime proof deferred |
-| No conversation/project artifact | No artifact intentionally created; complete audit deferred to M6-G1R |
-| No quota spend | Intentional spend 0; full causality audit deferred |
-| No credential receipt by UMA | CLI-owned authentication; no credential operation occurred |
+## 7. Quota and remaining semantics
 
-M6-SETUP-G1 does not claim full live admission merely because one structured
-read succeeded. M6-G1R must validate process/artifact behavior, schema meaning,
-privacy reduction, and remaining observational limits.
+The quota container is:
 
-## 9. Credits
+```text
+command.data.groups[].buckets[]
+```
+
+`remaining_fraction` is explicit provider output, not a semantic inference from
+numeric range. The only permitted normalization is:
+
+```text
+remainingPercent = remaining_fraction × 100
+```
+
+Deterministic test rules are:
+
+- accept finite numbers only in `0...1`;
+- preserve exact zero and full boundaries;
+- never clamp;
+- missing or wrong-type remaining is unavailable;
+- multiple groups and buckets remain independent;
+- never sum, split, or infer pools from model names.
+
+The observation was numeric and finite. No used-percentage conversion is needed.
+
+## 8. Reset semantics
+
+Each observed bucket had `reset_time` as an ISO-8601 absolute datetime string.
+No relative reset duration was observed. Reset remains scoped to its own bucket
+and can never migrate across bucket identities. A missing reset is optional;
+malformed present reset data fails the bucket closed.
+
+No disabled or unlimited representation was observed. No freshness/currentness
+field was observed. The source therefore depends on local observation time if
+it is ever admitted.
+
+## 9. Multiple-bucket identity limitation
+
+The JSON exposes group `name`, bucket `id`, bucket `name`, and `window`. Those
+fields appear sufficient to form a bounded composite identity, but their exact
+safe values were not retained and were not compared across two successful
+ordinary reads.
+
+This prevents proof that independent pools can be mapped stably without merging
+or splitting them. It is a mandatory admission failure, not an optional display
+label limitation.
+
+## 10. Authentication classification
+
+Current provider-owned authentication worked for the successful command. No
+browser launched, no login action appeared, and no credential material crossed
+into UMA or DEV.
+
+No password, verification code, Keychain/keyring item, cookie, browser profile,
+OAuth token, refresh token, session, auth database, account identity, or login
+URL was accessed. Authentication was not intentionally invalidated.
+
+A future source would need fixed fail-closed `loginRequired`, `sessionExpired`,
+and `browserLoginSideEffect` classifications. M6-G1R does not implement them.
+
+## 11. No-turn, no-task, no-conversation and no-spend evidence
+
+The official 1.1.11 public contract describes read-only print-mode `/usage` as
+creating no agent turn, quota spend, or conversation. Live evidence agrees in
+all observable ways:
+
+- no prompt or task was supplied;
+- no browser/login action occurred;
+- no workspace/project artifact appeared;
+- no residual provider child remained;
+- the observed `conversation_id` was empty.
+
+However, the sanitized probe retained only a `0...1` range classification for
+`num_turns`, not exact `num_turns == 0`. That mandatory live proof is therefore
+unavailable.
+
+Strongest honest spend conclusion:
+
+```text
+No attributable quota consumption was observed within available evidence,
+consistent with the official read-only command contract.
+```
+
+Mathematical zero-spend cannot be independently measured at the provider's
+display granularity and is not claimed.
+
+## 12. Privacy allowlist
+
+If later readmission is authorized, only these concepts may survive decoding:
+
+- bounded validated group/bucket identity;
+- bounded non-identifying label only when separately proven safe;
+- explicit `remaining_fraction`;
+- per-bucket `reset_time`;
+- bounded validated `window` only when required for pool identity;
+- installed CLI version and local observation time.
+
+Discard before business logic:
+
+- `conversation_id`;
+- `response` and all description/free-text fields;
+- `usage` token counters;
+- `num_turns`, duration and unused status text;
+- account, plan, identity, project, workspace, VCS, task, tool, prompt,
+  response, login, session, credential and token fields;
+- every unknown future field.
+
+Raw stdout, stderr, JSON, live values, timestamps and raw-payload hashes are
+never durable evidence.
+
+## 13. Process and privacy evidence method
+
+The probe observed only its owned child and bounded pipes. External process
+checks used exact process names/PIDs only. No broad argv or environment dump was
+performed. Safari and `agy` counts were zero before and after the successful
+ordinary-network execution.
+
+The previous transient CSRF-argument incident was not repeated. No sensitive
+value entered Git, tests, task files, screenshots, logs or this record.
+
+## 14. Credits
 
 **`CREDITS DEFER`**
 
-No `/credits` read occurred. No Credit field, exact balance, unit semantics,
-schema, or stability was observed. Credits do not block the quota setup
-decision, do not become percentage, and are not combined with model quota.
+No `/credits` command ran. The observed quota container had no admitted Credit
+field. Credits do not influence this quota decision.
 
-## 10. Evidence handling
+## 15. Independent review and decision
 
-All three required examiners reviewed one task-owned sanitized packet. It held
-only discovery states, public-contract classifications, zero-read accounting,
-unavailable live-schema states, the admission decision, and the next-task
-classification. It contained no raw provider payload, stderr, exact quota,
-reset value, identity, credential, browser data, or provider content.
+The source/protocol examiner and privacy examiner independently selected
+`NO-GO` because repeated successful detailed structure, stable bucket identity,
+and exact live no-turn proof are core gates. The QA examiner recommended
+`CONDITIONAL GO`, treating them as later acceptance conditions. Root review
+rejected that relaxation because the governing Goal permits conditional status
+only for optional metadata after primary stability and identity are proven.
 
-The temporary packet was not copied into Git and was deleted after examiner and
-root review. M6-SETUP-G1 retained only sanitized setup facts in
-`source/UMA M6 Antigravity Setup Evidence.md`; raw live JSON and exact quota
-values were never written to task-owned evidence or Git.
-
-## 11. Admission conclusion
-
-The historical M6-G1 decision remains:
+The final M6-G1R decision is therefore:
 
 ```text
-SETUP REQUIRED — OFFICIAL ANTIGRAVITY CLI NOT INSTALLED
+NO-GO — LIVE ADMISSION EVIDENCE INCOMPLETE
 ```
 
-The current setup result is:
-
-```text
-M6-SETUP-G1 PASS — OFFICIAL ANTIGRAVITY CLI READY FOR SOURCE RECHECK
-```
-
-The only next task is **M6-G1R**. M6-G2 remains locked.
+The only next task is **Founder source-direction decision**. M6-G2 remains
+locked.

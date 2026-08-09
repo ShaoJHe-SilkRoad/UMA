@@ -1,13 +1,14 @@
 # UMA M6 Antigravity QA Issue Ledger
 
-**Goals:** M6-G1 and M6-SETUP-G1
+**Goals:** M6-G1, M6-SETUP-G1 and M6-G1R
 **Date:** 2026-08-08
 **Historical M6-G1 decision:** `SETUP REQUIRED — OFFICIAL ANTIGRAVITY CLI NOT INSTALLED`
-**Current setup result:** `PASS — OFFICIAL ANTIGRAVITY CLI READY FOR M6-G1R`
+**Setup result:** `PASS — OFFICIAL ANTIGRAVITY CLI READY FOR M6-G1R`
+**Current decision:** `NO-GO — LIVE ADMISSION EVIDENCE INCOMPLETE`
 
 ## Scope
 
-M6-G1 and M6-SETUP-G1 are admission/setup-only Goals. Their durable scope is:
+The exact M6-G1R repository scope is:
 
 ```text
 Tests/CodexUsageUITests/M6G1AntigravitySourceAdmissionTests.swift
@@ -15,77 +16,88 @@ source/UMA M6 Antigravity Local Source Dossier.md
 source/UMA M6 Antigravity Admission Decision.md
 source/UMA M6 Antigravity Privacy Contract.md
 source/UMA M6 Antigravity QA Issue Ledger.md
-source/UMA M6 Antigravity Setup Evidence.md
 ```
 
-No runtime, manifest, browser-extension, package-script, M5 record, M5 test, or
-existing Scope Lock change belongs to this Goal.
+`source/UMA M6 Antigravity Setup Evidence.md` remains unchanged historical
+setup evidence. No runtime, manifest, browser-extension, package-script, M5
+record, M5 test, or existing Scope Lock change belongs to M6-G1R.
 
 ## Issue ledger
 
 | ID | First evidence | Classification | Root cause | Resolution | Retest | Final status |
 |---|---|---|---|---|---|---|
-| M6G1-001 | PATH, documented path, application, receipt, Spotlight, and LaunchServices discovery found no CLI | Setup gate | Official Antigravity CLI is not installed on this Mac | Return `SETUP REQUIRED`; do not install/update/login in G1 | Deterministic absence/decision tests | Closed as setup condition |
-| M6G1-002 | No executable or installed help exists | Capability gate | Exact installed argv and structured print capability cannot be proven | Preserve documented syntax as an untested candidate only | Capability-unavailable test | Deferred to M6-SETUP-G1 |
-| M6G1-003 | No provider executable exists | Schema gate | Root, bucket, semantic, reset, and private-field shapes are unavailable | Do not invent decoder fields from planning material | Live-schema-unavailable test | Deferred to renewed admission |
-| M6G1-004 | CLI absence prevents provider-state observation | Authentication gate | Authentication cannot be distinguished from missing installation | Record `unobservable`, not logged-out/expired/enterprise | Authentication-classification test | Closed honestly for G1 |
-| M6G1-005 | No live read occurred | Proof limitation | Installed no-turn/no-spend behavior cannot be observed | Separate public-contract support from unavailable live causality | Zero-read/no-claim test | Deferred to renewed admission |
-| M6G1-006 | Optional `/credits` evidence unavailable | Optional source | No Credit schema or balance was read | Record `CREDITS DEFER`; do not block quota setup decision | Credits-independence test | Closed as deferred optional source |
-| M6G1-007 | Initial focused test found that the Privacy Contract omitted the only permitted next task | Record consistency | The privacy boundary documented the setup decision but not its explicit successor lock | Add `M6-SETUP-G1` as the only next task and keep M6-G2 locked | Focused suite rerun: 8/8 PASS | Closed |
-| M6G1-008 | Initial cached-diff check found two-space line endings in new records | Staged-diff hygiene | Markdown formatting introduced unintended trailing spaces | Remove the trailing spaces without changing the admission decision | Cached whitespace check and independent staged-index rerun: PASS | Closed |
-| M6SETUP-001 | Founder evidence and bundle inspection proved `/Applications/Antigravity.app` was installed | Record correctness | Initial discovery incorrectly treated the desktop application as absent while correctly finding no standalone CLI | Correct desktop presence separately from historical standalone-CLI absence | Durable-record consistency test | Closed |
-| M6SETUP-002 | Installed desktop bundle contained no `agy` or admitted CLI launcher | Source boundary | Electron helpers, language server, updater, encoder, and MCP scripts are not the official read-only CLI source | Reject bundled private/internal components; retain standalone official CLI class | Exact bundle inventory and filename audit | Closed |
-| M6SETUP-003 | Official manifest-exact CLI could not receive a reliable local code-sign/Gatekeeper PASS | Accepted trust risk | macOS trust service also failed control checks against Apple system apps | Founder explicitly accepted the disclosed installer-scoped risk; retain manifest and checksum provenance | Installer/archive identity and post-install payload comparison | Closed with disclosed risk |
-| M6SETUP-004 | Official installer added PATH entries to both zsh profiles | Setup behavior | Provider native setup configures `$HOME/.local/bin` | Verify only the exact documented PATH line and no global security change | Exact-line profile check | Closed |
-| M6SETUP-005 | Installed help did not enumerate individual read-only slash commands | Capability gap | Help documents print, JSON, and slash expansion but not `/usage` by name | Use the official 1.1.11 changelog plus one authorized structured `/usage` setup check | One structured success; zero retries | Closed for setup, schema deferred |
-| M6SETUP-006 | One process inventory command unexpectedly returned a process-local CSRF argument in transient tool output | Privacy incident | A path-filtered process listing included full argv instead of executable path only | Do not reproduce or retain the value; use PID/comm-only process checks thereafter | Git/temp/log review found no retained value | Closed with disclosure |
+| M6G1-001 | Initial G1 found no standalone CLI | Historical setup gate | Official CLI was not yet installed | Return `SETUP REQUIRED` without live read | Historical deterministic tests | Closed by M6-SETUP-G1 |
+| M6SETUP-001 | Official installer produced manifest-exact CLI `1.1.11` | Historical setup result | Separate setup was required | Install, verify help, retain sanitized evidence | Setup tests 10/10 PASS | Closed |
+| M6SETUP-002 | Reliable local code-sign/Gatekeeper PASS unavailable | Accepted trust risk | Local trust service also failed Apple control apps | Founder accepted exact installer/manifest/checksum provenance | Post-install identity checks | Closed with disclosed risk |
+| M6SETUP-003 | Process inventory exposed one process-local CSRF argument in transient output | Historical privacy incident | Full argv was collected instead of PID/executable identity only | Do not retain/reproduce; prohibit broad argv evidence | Git/temp/log review | Closed with disclosure |
+| M6G1R-001 | First two exact `/usage` executions returned exit 1, zero stdout and bounded generic stderr | Execution environment | Both ran inside the tool's network-restricted sandbox | Use the final authorized ambiguity-resolution read in ordinary network context; retain no raw stderr | Third execution returned structured JSON | Closed as environmental limitation |
+| M6G1R-002 | One ordinary-network read returned `command.data.groups[].buckets[]` | Schema evidence | Setup retained JSON success only, not field structure | Record field/type/range classifications without live values | Deterministic observed-shape tests | Closed for one observation |
+| M6G1R-003 | Bucket contained explicit `remaining_fraction` | Semantic evidence | Remaining semantics were previously unadmitted | Admit only `remainingPercent = remaining_fraction × 100`; finite `0...1`; no clamp | Boundary, invalid, missing and wrong-type tests | Closed |
+| M6G1R-004 | Bucket contained ISO-8601 `reset_time`; no duration | Reset evidence | Reset representation was previously unknown | Keep reset bucket-scoped; accept absence; reject malformed present value | Present/absent/malformed reset tests | Closed |
+| M6G1R-005 | Envelope contained response, conversation, turn/duration and token-counter fields | Privacy boundary | Structured command output includes fields not needed by quota UI | Discard before projection; allowlist only bounded quota identity/value/reset/version/time | Private/unknown-field projection tests and examiner review | Closed |
+| M6G1R-006 | Exact safe bucket identity was not retained across two successful reads | Mandatory admission gap | Only one detailed successful sample remained within the read budget | Do not infer or hard-code identity; return `NO-GO` | Source/protocol and privacy examiner review | Open for future Founder-authorized direction |
+| M6G1R-007 | Detailed schema stability was not repeated | Mandatory admission gap | Two sandbox executions produced no JSON; setup retained only JSON-success classification | Do not treat environmental failures as provider instability or as repeatability proof | Independent decision review | Open for future Founder-authorized direction |
+| M6G1R-008 | Sanitizer retained only `num_turns` range `0...1` | Mandatory no-turn gap | Exact operational counter was over-sanitized | Preserve official no-turn contract and empty conversation evidence, but do not overclaim live zero-turn proof | Independent decision review | Open for future Founder-authorized direction |
+| M6G1R-009 | QA examiner recommended `CONDITIONAL GO`; two examiners recommended `NO-GO` | Decision disagreement | QA treated repeatability/identity/no-turn as later acceptance conditions | Apply governing criteria: those are core GO gates, not optional conditional metadata | Root requirement-by-requirement audit | Closed as `NO-GO` |
+| M6G1R-010 | Shared packet initially had mode `0644` inside owner-only directory | Temporary evidence permission | Patch creation used default file mode | Change exact packet to `0600`; preserve directory `0700` | Privacy examiner recheck: PASS | Closed |
+| M6G1R-011 | A bare sandboxed `swift build -c debug` could not write the user module cache, then selected an SDK whose SwiftUI macro plugin was unavailable | Verification environment | The repository requires its pinned SDK and isolated module-cache flags | Re-run Debug and Release with the repository's established MacOSX26.5 SDK, isolated task-owned caches and explicit macro compatibility flag | Both product builds completed | Closed |
+| M6G1R-012 | Independent cached review found the test harness did not model identity stability separately, retained a positive user-expanded executable path, and did not validate `command.name` | Test-contract and privacy hardening | Structural and identity stability were initially conflated; the exact argv fixture used an expanded path; shape alone accepted another command envelope | Add a mandatory independent identity gate and test, normalize the fixture to `$HOME`, and require `command.name == usage` | Focused 21/21; full 506/506 | Closed |
 
-No issue was converted into a connector workaround. No UMA runtime repair was
-required or authorized.
+No issue was converted into a production connector workaround. No UMA runtime
+repair was implemented.
 
 ## Shared sanitized evidence
 
-The source/protocol examiner, privacy examiner, and QA runner reviewed one
-owner-only sanitized packet. It contained only:
+The source/protocol examiner, privacy examiner and QA runner reviewed the same
+owner-only packet. It contained:
 
-- current-device absence classifications;
-- unavailable installed-artifact/schema classifications;
-- official public source-contract classifications;
-- zero-read/prompt/task/spend accounting;
-- `SETUP REQUIRED`, `CREDITS DEFER`, and `M6-SETUP-G1`.
+- installed source and exact command classifications;
+- three-read accounting and sanitized execution outcomes;
+- field names, types, range classes and byte counts;
+- schema, semantic, reset, privacy and authentication classifications;
+- explicit evidence gaps and `CREDITS DEFER`.
 
-It contained no raw stdout/stderr/JSON, exact quota or reset value, identity,
-credential, browser data, conversation, task content, or provider content. The
-packet was deleted after all reviews and was not copied into Git.
+It contained no raw stdout/stderr/JSON, exact quota/reset value, exact group or
+bucket identity, response text, account identity, credential, browser data,
+conversation content, task content, provider content, screenshot or raw-payload
+hash.
+
+Examiner results:
+
+- source/protocol: `NO-GO`;
+- privacy: PASS privacy boundary and `NO-GO` admission recommendation;
+- QA: `CONDITIONAL GO` recommendation with later identity/stability/no-turn gates;
+- root: `NO-GO`, because those three gates are mandatory under M6-G1R.
 
 ## Probe accounting
 
 | Operation | Authorized | Consumed |
 |---|---:|---:|
-| M6-G1 `/usage`, `/quota`, `/credits`, or equivalent reads | 3 | 0 |
-| M6-SETUP-G1 `/usage` readiness reads | 1 | 1 |
-| M6-SETUP-G1 retries | 0 | 0 |
-| M6-SETUP-G1 `/quota` or `/credits` reads | 0 | 0 |
+| M6-G1 source reads | 3 | 0 |
+| M6-SETUP-G1 readiness reads | 1 | 1 |
+| M6-G1R `/usage` or `/quota` executions | 3 | 3 |
+| M6-G1R automatic retries | 0 | 0 |
+| M6-G1R `/credits` executions | 0 | 0 |
 | Provider prompts/tasks | 0 | 0 |
-| Intentional quota/USD spend | 0 | 0 |
+| Intentional provider work/spend | 0 | 0 |
 
-The setup read returned structured JSON without browser login. Raw output and
-exact quota values were discarded in process memory and never entered durable
-evidence.
+The first two G1R executions produced no JSON inside the network-restricted tool
+sandbox. The third produced one current structured JSON object in the approved
+ordinary network context. No further live read is authorized.
 
 ## Required verification
 
 | Check | Result |
 |---|---|
-| Focused M6-G1 tests | 8/8 PASS |
-| Full `script/test.sh` suite | 493/493 PASS: 475 CodexUsageUITests + 18 ClaudeBrowserBridgeCoreTests |
-| Focused M6 setup tests | 10/10 PASS |
-| Affected/full regression after setup-record repair | 495/495 PASS: 477 CodexUsageUITests + 18 ClaudeBrowserBridgeCoreTests |
+| Focused M6-G1R tests | PASS — 21/21 |
+| Full `script/test.sh` suite | PASS — 506/506 (488 main + 18 bridge) |
+| Debug build | PASS — pinned SDK, isolated task-owned cache |
+| Release build | PASS — pinned SDK, isolated task-owned cache |
 | `git diff --check` | PASS |
-| Privacy/identity/secret scan | PASS; synthetic `.invalid` fixture only |
-| M5/Codex/Claude/WorkBuddy protected diff audit | PASS; byte-identical to M6-B0 |
-| Exact staged-index review | PASS after whitespace repair and independent rerun |
-| Product Debug/Release builds | Not required: documentation plus isolated test-only harness |
+| Privacy/identity/secret scan | PASS — only reserved `.invalid` synthetic test data and an explicit path-rejection sentinel were present; no live identity or secret material |
+| M5/Codex/Claude/WorkBuddy protected diff audit | PASS — no protected runtime or record changed |
+| Exact staged-index review | PASS — independent cached review after repair |
+| Task-owned temporary evidence/build cleanup | PASS — five exact M6-G1R paths removed after examiner and build completion |
 
 ## Mechanism audit
 
@@ -98,14 +110,15 @@ Antigravity production runtime implemented: NO
 
 ## Completion rule
 
-All current M6 records must agree on:
+All four current records must agree on:
 
 ```text
-Historical admission: SETUP REQUIRED
-Current setup: PASS, official CLI 1.1.11 installed
+Admission: NO-GO — LIVE ADMISSION EVIDENCE INCOMPLETE
+Proven: one current structured quota object with explicit remaining and reset
+Unproven: repeated detailed structure, stable pool identity, exact live no-turn
 Credits: CREDITS DEFER
-M6-SETUP live reads: 1/1, retries 0
-Only next task: M6-G1R
+M6-G1R reads: 3/3, automatic retries 0
+Only next task: Founder source-direction decision
 ```
 
 M6-G2 remains locked.

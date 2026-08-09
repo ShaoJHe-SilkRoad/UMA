@@ -1,69 +1,84 @@
 # UMA M6 Antigravity Admission Decision
 
-**Goal:** M6-G1
+**Goal:** M6-G1R
 **Date:** 2026-08-08
-**Decision:** `SETUP REQUIRED — OFFICIAL ANTIGRAVITY CLI NOT INSTALLED`
+**Decision:** `NO-GO — LIVE ADMISSION EVIDENCE INCOMPLETE`
 
 ## Decision
 
-At the time of M6-G1, the current device had no installed standalone `agy`
-executable. A later read-only correction confirmed that Antigravity Desktop was
-already installed at `/Applications/Antigravity.app`; the desktop bundle did
-not contain an admitted CLI source. M6-G1 could not admit or reject the live
-quota schema because no standalone source was then available to probe.
+The installed official Antigravity CLI `1.1.11` produced one current structured
+quota document through the exact read-only `/usage` print command. The observed
+contract contains explicit `remaining_fraction` values and per-bucket ISO-8601
+`reset_time` values under `command.data.groups[].buckets[]`. Provider-owned
+authentication succeeded without browser login or credential access, and the
+payload can be reduced through a narrow privacy allowlist.
 
-The official CLI source class remains viable: current Google documentation
-describes a provider-owned CLI, provider-managed authentication, a `/usage`
-command with `/quota` alias, and structured read-only print output. Installation
-and authentication therefore required a separate Human-authorized setup Goal.
+M6-G1R nevertheless returns **`NO-GO`**. The live-read budget ended without the
+mandatory proof of repeated detailed structural stability, deterministic
+bucket identity stability across the multiple independent quota groups, or an
+exact live zero-turn counter. These are core admission gates, not optional
+metadata eligible for `CONDITIONAL GO`.
 
-This outcome is `SETUP REQUIRED`, not `GO`, `CONDITIONAL GO`, or `NO-GO`.
+This result does not prove that the official source is unsafe or unusable. It
+means the evidence authorized for this Goal is insufficient to admit the source
+into production honestly.
 
-## Post-decision setup status
+## Historical decisions
 
-M6-SETUP-G1 subsequently installed the official manifest-pinned CLI `1.1.11`
-at `$HOME/.local/bin/agy`. Exact-path `--version` and `--help` passed, and one
-authorized `/usage` setup-readiness execution returned structured JSON without
-login, prompt, task, retry, or retained quota values.
+- M6-G1: `SETUP REQUIRED — OFFICIAL ANTIGRAVITY CLI NOT INSTALLED`
+- M6-SETUP-G1: `PASS — OFFICIAL ANTIGRAVITY CLI READY FOR SOURCE RECHECK`
+- M6-G1R: `NO-GO — LIVE ADMISSION EVIDENCE INCOMPLETE`
 
-This setup result does not retroactively convert M6-G1 to `GO`. Schema,
-semantics, stability, privacy projection, and no-spend admission remain for
-M6-G1R. See `source/UMA M6 Antigravity Setup Evidence.md`.
+## Current gate matrix
 
-## Gate matrix
-
-| Admission gate | Evidence | Result |
+| Admission gate | Current evidence | Result |
 |---|---|---|
-| Official source class | Current official Google documentation/repository | Viable |
-| Trusted installed CLI | PATH, documented path, receipt, Spotlight, and LaunchServices checks found no standalone CLI; desktop presence was corrected later | Missing |
-| Installed help / exact argv | No executable | Unavailable |
-| Installed version / provenance | No executable | Unavailable |
-| Current structured quota read | Not attempted; CLI absent | Unavailable |
-| Valid quota bucket | Not observed | Unavailable |
-| Explicit remaining semantics | Not observed | Unavailable |
-| Reset semantics | Not observed | Optional and unavailable |
-| Privacy projection | Contracted and deterministic; no live payload existed | Ready for later proof |
-| Provider-managed authentication | Public contract only; current device unobservable | Setup required |
-| No turn/task/conversation/spend | Public contract supports source class; live causality untested | Deferred |
-| Credits | No read or schema | `CREDITS DEFER` |
+| Official installed source | Manifest-pinned `$HOME/.local/bin/agy` `1.1.11`, exact executable hash unchanged | PASS with previously accepted local trust-service limitation |
+| Installed help / exact argv | Print mode, JSON output and slash expansion confirmed | PASS |
+| Current structured quota | One successful ordinary-network JSON object | PASS |
+| Quota container | `command.data.groups[].buckets[]` | PASS |
+| Valid quota bucket | Two groups observed, one valid bucket in each | PASS for one observation |
+| Remaining semantics | Explicit `remaining_fraction`, finite and in `0...1` | PASS |
+| Normalization | `remainingPercent = remaining_fraction × 100` exactly once | PASS |
+| Reset semantics | Per-bucket ISO-8601 `reset_time`; no relative duration observed | PASS |
+| Privacy projection | Narrow allowlist feasible; private/unused envelope fields rejectable | PASS |
+| Provider-managed authentication | Current read succeeded without browser/login or credential access | PASS |
+| Bounded lifecycle | Closed stdin, empty owner-only cwd, byte caps, timeout, owned child teardown | PASS |
+| Repeated detailed structure | Only one detailed successful ordinary-network sample | **FAIL / unproven** |
+| Stable bucket identity | ID/name/window fields exist, but exact safe identities were not retained across reads | **FAIL / unproven** |
+| Exact live no-turn evidence | Empty `conversation_id`; exact `num_turns == 0` was not retained | **FAIL / unproven** |
+| No attributable spend | Official read-only contract plus no observable provider work; exact zero is not measurable | Supported with measurement limitation |
+| Credits | No read and no admitted schema | `CREDITS DEFER` |
 
-## Why this is not NO-GO
+## Live-read accounting
 
-The missing component is an official installation/setup condition. Current
-public material describes the underlying structured, read-only source class;
-M6-G1 found no requirement for an API key, copied token, Keychain read, browser
-profile import, manual quota, private endpoint, or provider task.
+| Operation | Authorized | Consumed |
+|---|---:|---:|
+| M6-G1R `/usage` or `/quota` executions | 3 | 3 |
+| Automatic retries | 0 | 0 |
+| `/credits` executions | 0 | 0 |
+| Provider prompts/tasks | 0 | 0 |
+| Intentional provider work/spend | 0 | 0 |
 
-The source becomes `NO-GO` later if installed behavior requires a prohibited
-route, forces interactive login during routine reads, creates provider work or
-spend, exposes ambiguous quota semantics, or cannot be safely reduced.
+The first two executions occurred in a network-restricted tool sandbox and
+returned no JSON. Their generic stderr was not retained. The third execution
+used the approved ordinary network context and returned one structured JSON
+object. The environmental distinction explains why the first two failures are
+not treated as provider schema instability, but they cannot substitute for a
+second successful detailed sample.
 
-## Why this is not GO or CONDITIONAL GO
+## Why this is not CONDITIONAL GO
 
-Neither decision is permitted without a current successful structured read and
-at least one valid quota bucket with explicit semantics. M6-G1 observed none.
-Optional-metadata tolerance cannot compensate for a missing executable and
-missing primary quota observation.
+`CONDITIONAL GO` is reserved for optional missing detail after primary quota,
+identity, lifecycle, and ordinary-read stability are proven. Missing reset,
+safe display labels, or Credits could be conditional risks. In contrast:
+
+- stable identity is required to keep multiple quota pools independent;
+- repeated detailed structure is required to bind an unversioned schema;
+- live no-turn evidence is a mandatory source-safety gate.
+
+Deferring those gates to production would redefine the Goal rather than satisfy
+it.
 
 ## Locked consequences
 
@@ -71,23 +86,17 @@ missing primary quota observation.
 - No production connector, scheduler, Settings entry, main-panel card, or
   Desktop Assistant presentation is authorized.
 - No status line, API-key route, token route, Keychain route, browser source,
-  manual quota, or inferred balance is admitted.
+  manual quota, Credits implementation, or inferred balance is admitted.
 - Codex, Claude Code, and WorkBuddy mechanisms remain unchanged.
-- M5 frozen and shared runtime paths remain read-only.
+- M5 frozen and shared runtime paths remain unchanged.
+- M6-G2 remains locked.
 
-## Historical and current next task
+## Next task
 
-M6-G1 originally permitted exactly one next task, which is now complete:
-
-```text
-M6-SETUP-G1 — official Antigravity CLI setup and provider-controlled login
-```
-
-The current and only permitted next task is:
+The only next task is:
 
 ```text
-M6-G1R — repeat live Antigravity source admission against the installed CLI
+Founder source-direction decision
 ```
 
-Do not begin M6-G2 until that installed-source admission returns `GO` or
-`CONDITIONAL GO`.
+No further live read or alternate source class is implied by this record.

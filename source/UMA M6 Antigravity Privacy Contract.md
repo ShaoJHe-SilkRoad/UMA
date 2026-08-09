@@ -1,109 +1,138 @@
 # UMA M6 Antigravity Privacy Contract
 
-**Goals:** M6-G1 and M6-SETUP-G1
+**Goals:** M6-G1, M6-SETUP-G1 and M6-G1R
 **Date:** 2026-08-08
-**Current state:** `SETUP COMPLETE — M6-G1R REQUIRED`
+**Current state:** `NO-GO — LIVE ADMISSION EVIDENCE INCOMPLETE`
 
 ## 1. Boundary
 
-UMA may eventually consume only normalized current quota facts from one exact,
-trusted, official Antigravity CLI executable. The CLI owns authentication. UMA
-must never receive or inspect provider authentication material.
+UMA may consume only normalized current quota facts from one exact trusted
+official Antigravity CLI executable after admission. The CLI owns
+authentication. UMA must never receive or inspect provider authentication
+material.
 
-M6-G1 performed discovery only. M6-SETUP-G1 installed the official
-manifest-pinned CLI and executed one authorized read-only `/usage` setup check.
-Raw output existed only transiently in process memory, was reduced to a
-structured-success classification, and was discarded without field inspection.
+M6-G1R performed three bounded `/usage` executions. Two network-restricted
+tool-sandbox executions returned no JSON. One approved ordinary-network
+execution returned a JSON object and was reduced entirely in memory to field,
+type, range and privacy classifications. No raw output or exact Founder value
+was retained.
 
-## 2. Future process boundary
+## 2. Process boundary
 
-During renewed admission, a source probe must:
+Every admission probe used:
 
-- resolve one exact trusted executable outside the repository;
-- reject working-directory shadows, unresolved chains, and symlink escapes;
-- invoke a fixed argv array without a shell or string interpolation;
-- close stdin and inject no credential environment value;
-- use an empty owner-only task directory outside user repositories;
-- own one child process and allow one read in flight;
-- bound stdout to 64 KiB and stderr to 16 KiB;
-- use a 15-second normal timeout and 20-second hard timeout;
-- terminate and reap only its owned child;
-- persist no raw stdout, stderr, or provider payload.
+- exact resolved `$HOME/.local/bin/agy` and a fixed argv array;
+- no provider-command shell interpolation;
+- closed stdin and no injected credential environment value;
+- an empty owner-only task directory outside repositories;
+- one owned child process group and one read in flight;
+- stdout capped at 64 KiB and stderr capped at 16 KiB;
+- a 15-second timeout with owned-child termination and reap;
+- no raw stdout, stderr or provider payload persistence.
 
-These are admission constraints, not an M6-SETUP-G1 runtime implementation.
+External process evidence used exact process identity/PID only. Broad argv,
+environment, authentication, browser and process dumps are prohibited.
 
-## 3. Strict quota allowlist
+## 3. Observed quota ingress
 
-A later decoder may publish only fields proven by installed structured output:
+The observed exact container is:
 
-- required bounded provider bucket identifier;
-- optional bounded non-identifying display label;
-- exactly one explicitly documented remaining or used semantic;
-- optional documented reset time or reset duration;
-- explicit disabled/unlimited state only when documented and observed;
-- safe bounded CLI version/capability classification;
-- observation and freshness classification.
+```text
+command.data.groups[].buckets[]
+```
 
-Numeric rules:
+An observed bucket contained:
 
-- `remaining_fraction` is finite and within `0...1`, then converts once through
-  `remainingPercent = remaining_fraction × 100`;
-- an explicitly documented `used_percentage` is finite and within `0...100`,
-  then converts once through `remainingPercent = 100 - usedPercentage`;
-- used versus remaining is never inferred from range;
-- malformed values are never clamped;
-- missing is unavailable, not zero;
-- independent buckets are never summed, split, or deduplicated by label.
+```text
+id: string
+name: string
+remaining_fraction: finite number in 0...1
+reset_time: ISO-8601 datetime string
+window: string
+```
 
-No installed field name, container path, schema marker, reset type, or unlimited
-representation is admitted by M6-G1 or M6-SETUP-G1. Those facts remain
-unavailable until M6-G1R.
+There was no explicit schema/version marker, relative reset duration,
+disabled/unlimited state or freshness field.
 
-## 4. Rejected data
-
-Discard before any shared model, cache, diagnostic, or durable record:
-
-- email or account/organization identity;
-- plan, billing, purchase, or payment data;
-- login URL or browser state;
-- cookie, token, Keychain, keyring, credential, or session material;
-- conversation, message, prompt, response, task, tool, or project content;
-- cwd, workspace, source-code, repository, branch, or VCS data;
-- raw provider stdout/stderr or complete JSON;
-- unknown free text and future unadmitted fields.
-
-Unsafe labels are omitted rather than retained. If required quota meaning cannot
-be separated from identity or private content, the source is `NO-GO`.
-
-## 5. Schema and diagnostics
-
-Ingress order for a later probe:
+Ingress order for any renewed admission remains:
 
 ```text
 byte caps
 → UTF-8
 → one JSON object
-→ verified container
-→ exact-key/type validation
-→ semantic validation
-→ sanitized projection
+→ exact CLI-version and container check
+→ strict key/type/range validation
+→ private-field discard
+→ sanitized quota projection
 ```
 
-Unknown provider-envelope fields may be noticed only as bounded category
-presence and are discarded in memory. A sanitized evidence packet accepts no
-unknown keys. If no schema marker exists, the admitted contract binds to the
-verified CLI version and observed structure; incompatible changes fail closed.
+## 4. Smallest candidate allowlist
 
-Diagnostics are fixed categories and counters only:
+Only these concepts may survive decoding:
+
+- bounded validated group/bucket identity;
+- bounded non-identifying label only after separate safety proof;
+- `remaining_fraction`;
+- per-bucket `reset_time`;
+- bounded validated `window` only when required for independent pool identity;
+- safe CLI version and local observation time.
+
+`window`, group identity and bucket identity must use a bounded validated
+grammar. Arbitrary provider text is never accepted merely because it occupies
+an identity or label field.
+
+Numeric rules:
+
+- finite `remaining_fraction` must be within `0...1`;
+- normalize exactly once with `remainingPercent = remaining_fraction × 100`;
+- never infer used-versus-remaining from numeric range;
+- never clamp;
+- missing or wrong type is unavailable, not zero;
+- independent buckets are never summed, split or deduplicated by display label.
+
+Reset rules:
+
+- parse a present `reset_time` only as ISO-8601;
+- scope it to its own stable bucket identity;
+- missing reset remains optional and unavailable;
+- malformed present reset fails the affected bucket closed.
+
+## 5. Rejected observed envelope fields
+
+The successful JSON envelope also exposed fields that are unnecessary for quota
+presentation. Discard before any UMA business logic:
+
+- `conversation_id`, even when empty;
+- `response` and every description/free-text field;
+- `usage` token counters;
+- `num_turns` and duration fields;
+- status or command text not needed for strict quota decoding;
+- all unknown future fields.
+
+Always reject:
+
+- email, account, organization, plan, billing, purchase and payment identity;
+- login URL, browser state, cookies, tokens, credentials, Keychain/keyring and
+  session material;
+- conversation, message, prompt, response, task, tool and project content;
+- cwd, workspace, source code, repository, branch and VCS state;
+- raw stdout/stderr, complete JSON and raw-payload hashes.
+
+If quota meaning cannot be separated from those classes, the source remains
+`NO-GO`.
+
+## 6. Authentication lifecycle
+
+The successful read proved current provider-owned authentication without a
+browser/login action. UMA and DEV accessed no authentication material.
+
+No logout or expiry was induced. A future runtime must classify bounded
+noninteractive outcomes such as:
 
 ```text
-notInstalled
-unsupportedVersion
 loginRequired
 sessionExpired
 browserLoginSideEffect
-unsupportedAccountMode
-enterpriseAmbiguous
 providerUnavailable
 timeout
 malformedOutput
@@ -111,52 +140,37 @@ unsupportedSchema
 noValidQuota
 ```
 
-Raw provider messages never enter logs, crash diagnostics, packages, or Git.
+A routine command that opens login fails closed. API keys, copied tokens, UMA
+OAuth, Keychain/keyring reads, browser-cookie imports, private endpoints and
+identity-dependent interpretation remain prohibited.
 
-## 6. Authentication
+## 7. Evidence retention
 
-M6-G1 authentication was unobservable because the standalone CLI was absent.
-M6-SETUP-G1's single structured readiness read completed without browser login,
-so provider-owned authentication is currently usable. UMA and DEV still have no
-access to the authentication material.
+Durable evidence may retain only:
 
-During admission and later runtime:
+- executable/provenance and safe version facts;
+- exact safe command form and lifecycle bounds;
+- JSON field names, types and range classifications;
+- container, semantic and reset classifications;
+- byte counts, execution counts and fixed outcomes;
+- privacy-field categories and the final decision.
 
-- a bounded noninteractive provider `loginRequired` state may return
-  `SETUP REQUIRED` and suspend reads;
-- a routine quota command that opens or attempts browser login is
-  `browserLoginSideEffect` and fails the automation source closed;
-- API key, copied token, UMA OAuth, Keychain/keyring read, browser-cookie import,
-  private endpoint, or identity-dependent interpretation is `NO-GO`.
+Never retain exact live quota values, reset timestamps, group names, bucket IDs,
+bucket labels, window values, Credit balances, response text, counters, account
+identity, authentication state material, screenshots or raw provider output.
 
-UMA disconnect must eventually clear only UMA-owned normalized state and must
-not sign the Human out or alter provider authentication.
+The shared G1R packet was owner-only (`0700` directory, `0600` regular files),
+contained sanitized classifications only, and was shared with the three named
+examiners. It must be deleted after durable-record extraction and verification.
 
-## 7. Credits separation
+## 8. Admission limitation
 
-M6-G1 classifies Credits as **`CREDITS DEFER`**. A later Credit channel requires
-an exact structured current spendable balance and explicit native-unit
-semantics. Credits never become percentage, never combine with model quota, and
-never exceed the provider-wide two-channel limit.
+Privacy reduction itself passed independent review. The final source decision
+is still `NO-GO` because privacy safety cannot replace the mandatory proof of:
 
-## 8. Evidence retention
+- detailed structural stability across successful ordinary reads;
+- deterministic identity stability for multiple independent quota pools;
+- exact live no-turn behavior.
 
-Durable records may retain only executable/provenance states, safe command
-forms, public documentation links, field-name classifications, byte counts,
-bounded bucket identifiers, semantic classifications, safe versions, reset
-types, read accounting, and fixed outcomes.
-
-Never retain exact live quota values, reset timestamps, Credit balances, raw
-payload hashes, account identity, credentials, browser data, or screenshots.
-Tests use visibly synthetic values only.
-
-The single M6-G1 packet was owner-only (`0700` directory, `0600` regular file),
-contained sanitized discovery classifications only, passed source/privacy/QA
-review, was never copied into Git, and was deleted after review.
-
-The M6-SETUP-G1 read retained only a success/JSON classification; no raw output,
-exact quota value, schema field, identity, credential, or browser data was
-written to disk or durable evidence.
-
-The only next task is **M6-G1R**. M6-G2 and all production runtime work remain
-locked.
+Credits remain **`CREDITS DEFER`**. The only next task is **Founder source-direction decision**.
+M6-G2 and production runtime work remain locked.
