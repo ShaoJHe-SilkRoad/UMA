@@ -1,12 +1,12 @@
 # UMA M6 Antigravity QA Issue Ledger
 
-**Goals:** M6-G1, M6-SETUP-G1, M6-G1R, M6-G1R2 and M6-G2
+**Goals:** M6-G1, M6-SETUP-G1, M6-G1R, M6-G1R2, M6-G2 and M6-G3
 **Date:** 2026-08-08
 **Historical M6-G1 decision:** `SETUP REQUIRED — OFFICIAL ANTIGRAVITY CLI NOT INSTALLED`
 **Historical M6-G1R decision:** `NO-GO — LIVE ADMISSION EVIDENCE INCOMPLETE`
 **Current decision:** `GO — OFFICIAL ANTIGRAVITY CLI QUOTA SOURCE ADMITTED`
 **Credits:** `CREDITS DEFER`
-**Only next task:** M6-G3
+**Only next task after G3 PASS:** M6DBG-G1
 
 ## Scope
 
@@ -145,6 +145,57 @@ screenshot or workspace data. All G2 provider inputs were deterministic fixtures
 | M6G2-012 | Independent staged review | Blocking | The first decoder accepted future/private container fields and recursively traversed rejected response content | Enforce exact root/command/data/group/bucket field allowlists, validate admitted descriptions only as discarded schema types, reject future fields without descending into their values and never access the response value | Decoder and CLI suites PASS; 42/42 focused | Full suite 552/552 PASS | Closed |
 | M6G2-013 | Independent staged review | Major | Auto Refresh could stop at a disabled due cycle without a path to reschedule, and Disable could diverge from the persisted preference | Add an explicit connector refresh-control operation; persist and cancel on Disable; reschedule on re-enable | Off→due→on and disable persistence tests PASS | Full suite 552/552; Release/strict Release PASS | Closed |
 | M6G2-014 | Independent staged review | Major | Missing CLI capability was collapsed into generic failure, making the required Install/Open Settings state unreachable | Carry a bounded unsupported/unavailable capability classification and map it to `notInstalled` plus `executableMissing` in production Settings | Connector and production-wiring tests PASS | Full suite 552/552 PASS | Closed |
+
+## M6-G3 live acceptance issue ledger
+
+This section retains no exact quota, bucket identifier, label, reset timestamp,
+raw provider output, identity, credential, conversation, prompt or task data.
+
+| ID | First evidence | Classification | Root cause | Repair | Focused retest | Live/regression retest | Final status |
+|---|---|---:|---|---|---|---|---|
+| M6G3-001 | The first bounded production reads exited normally but were rejected before normalization; the narrowed safe class was `invalidBucket` | Blocking live-admission defect | The G2 decoder applied a machine-identifier alphabet to schema-only human-readable group/window text and treated a provider null reset as malformed rather than unavailable | Keep `bucket.id` strict; validate group/window text as bounded non-control schema strings; map null reset to unavailable; preserve exact key/type gates; retain content-free decoder failure classes | Strict decoder and bounded client suites PASS | Final two-read production connector/scheduler gate PASS | Closed |
+| M6G3-002 | A direct source assertion matched its own forbidden-literal assertion | Test defect | The self-audit embedded the complete forbidden token | Construct the forbidden token from fragments so only an actual route/payload identifier trips the audit | G3 deterministic contract test PASS | Final full suite 555/555 PASS | Closed |
+
+## M6-G3 live accounting
+
+| Operation class | Authorized | Consumed |
+|---|---:|---:|
+| Read-only `/usage` operations | 6 | 6 |
+| Successful final production observations | 2 | 2 |
+| Diagnostic fail-closed observations | 4 | 4 |
+| `/credits` operations | 0 | 0 |
+| Provider prompts/tasks/conversations | 0 | 0 |
+| Intentional provider work/spend | 0 | 0 |
+
+The final acceptance sequence used the production client, strict decoder,
+connector, registry, UsageStore and shared main-panel presentation. One current
+read armed the normal completion-relative five-minute scheduler; its scheduled
+read completed; a simultaneous manual request coalesced into that single
+in-flight operation. Maximum concurrent provider process count was one.
+
+Sanitized final evidence passed: multiple independent buckets, stable
+`bucket.id`, remaining normalization parity, bucket-scoped reset validation,
+main-panel admission, exact four-provider order, Desktop Assistant exclusion,
+scheduled refresh, manual/scheduled coalescing, no duplicate process, no
+attributable decrement within provider granularity and complete teardown.
+
+Credits remain `CREDITS DEFER`.
+
+## M6-G3 final verification summary
+
+| Check | Result |
+|---|---|
+| Focused decoder, client, connector and G3 acceptance tests | PASS — 32/32 on the repaired final edit set |
+| Complete fresh suite | PASS — 537 UI tests plus 18 bridge tests, 555/555 total, using isolated task-owned caches and deterministic serial execution |
+| Debug / Release / strict-concurrency Release | PASS — Apple Command Line Tools 27.0, Swift 6.4, macOS 26.5 SDK, task-owned caches |
+| Rebuilt G3 preflight package | PASS — build `202608090102`, working-tree preflight, strict deep ad-hoc signature, arm64, system dependencies only, exact package-content allowlist and no bundled `agy` |
+| Privacy, identity and secret audit | PASS — no retained provider payload, identity, credential or exact quota value; the sole production keyword hit is the explicit environment denylist entry `cookies` |
+| Protected M5 files | PASS — accepted 52-file Git-blob manifest unchanged |
+| Protected Desktop application | PASS — executable checksum unchanged; no replacement or launch used as G3 evidence |
+| Provider processes | PASS — no residual `agy` or task-owned candidate process |
+| `git diff --check` | PASS |
+| Independent staged-index review | PASS — exact nine-file cached scope; no blocking or actionable issue |
+| Credits | `CREDITS DEFER` |
 
 ## M6-G2 final verification summary
 

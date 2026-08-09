@@ -313,6 +313,8 @@ actor GoogleAntigravityUsageConnector: AgentUsageConnector {
             replace(next)
         case let .failure(error):
             if [.loginRequired, .unsupportedVersion, .unsupportedSchema,
+                .invalidOperationalEnvelope, .invalidBucket,
+                .duplicateBucketIdentity,
                 .notInstalled, .untrustedExecutable].contains(error) {
                 automaticRefreshSuspended = true
                 lastGood = nil
@@ -320,6 +322,8 @@ actor GoogleAntigravityUsageConnector: AgentUsageConnector {
                 case .loginRequired:
                     .authenticationRequired
                 case .unsupportedVersion, .unsupportedSchema,
+                     .invalidOperationalEnvelope, .invalidBucket,
+                     .duplicateBucketIdentity,
                      .notInstalled, .untrustedExecutable:
                     .unsupported
                 default:
@@ -348,8 +352,9 @@ actor GoogleAntigravityUsageConnector: AgentUsageConnector {
 
     private func applyCapabilityFailure(_ error: AntigravityCLIClientError) {
         let state: AgentConnectorState = switch error {
-        case .unsupportedVersion, .unsupportedSchema, .notInstalled,
-             .untrustedExecutable:
+        case .unsupportedVersion, .unsupportedSchema,
+             .invalidOperationalEnvelope, .invalidBucket,
+             .duplicateBucketIdentity, .notInstalled, .untrustedExecutable:
             .unsupported
         case .loginRequired:
             .authenticationRequired
@@ -553,7 +558,9 @@ actor GoogleAntigravityUsageConnector: AgentUsageConnector {
             .authorizationRequired
         case .timedOut:
             .timedOut
-        case .unsupportedVersion, .unsupportedSchema, .untrustedExecutable:
+        case .unsupportedVersion, .unsupportedSchema,
+             .invalidOperationalEnvelope, .invalidBucket,
+             .duplicateBucketIdentity, .untrustedExecutable:
             .unsupported
         case .malformedOutput, .noValidQuota:
             .malformedResponse

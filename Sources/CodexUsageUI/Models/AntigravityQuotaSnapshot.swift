@@ -93,8 +93,11 @@ enum AntigravityQuotaDecoder {
 
         for group in groups {
             guard Set(group.keys) == admittedGroupKeys,
-                  safeIdentifier(group["name"]) != nil,
-                  group["description"] is String,
+                  safeSchemaString(group["name"], maximumBytes: 128) != nil,
+                  safeSchemaString(
+                      group["description"],
+                      maximumBytes: 512
+                  ) != nil,
                   let rawBuckets = group["buckets"] as? [[String: Any]],
                   buckets.count + rawBuckets.count <= maximumBuckets
             else {
@@ -106,8 +109,11 @@ enum AntigravityQuotaDecoder {
                       admittedBucketKeys.subtracting(["reset_time"])
                         .isSubset(of: Set(rawBucket.keys)),
                       let bucketID = safeIdentifier(rawBucket["id"]),
-                      safeIdentifier(rawBucket["window"]) != nil,
-                      let displayLabel = safeDisplayLabel(rawBucket["name"]),
+                      safeSchemaString(
+                          rawBucket["window"],
+                          maximumBytes: 128
+                      ) != nil,
+                      rawBucket["name"] is String,
                       let number = rawBucket["remaining_fraction"] as? NSNumber,
                       !isBoolean(number)
                 else {
@@ -121,8 +127,9 @@ enum AntigravityQuotaDecoder {
                     throw AntigravityQuotaDecodingError.invalidBucket
                 }
 
+                let displayLabel = safeDisplayLabel(rawBucket["name"])
                 let resetsAt: Date?
-                if let rawReset = rawBucket["reset_time"] {
+                if let rawReset = rawBucket["reset_time"], !(rawReset is NSNull) {
                     guard let resetString = rawReset as? String,
                           let reset = iso8601Date(resetString)
                     else {
@@ -214,6 +221,26 @@ enum AntigravityQuotaDecoder {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
               trimmed.utf8.count <= 48,
+              !trimmed.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              })
+        else {
+            return nil
+        }
+        return trimmed
+    }
+
+    /// Group and window text is schema-only provider metadata, not identity.
+    /// It may be human-readable and localized, so validate bounded text rather
+    /// than imposing the machine-identifier alphabet reserved for bucket.id.
+    private static func safeSchemaString(
+        _ value: Any?,
+        maximumBytes: Int
+    ) -> String? {
+        guard let value = value as? String else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              trimmed.utf8.count <= maximumBytes,
               !trimmed.unicodeScalars.contains(where: {
                   CharacterSet.controlCharacters.contains($0)
               })

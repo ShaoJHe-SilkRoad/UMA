@@ -129,10 +129,37 @@ struct M6G2AntigravityQuotaDecoderTests {
             bucket("p", window: "w", remaining: 0.5),
         ])])
         #expect(withoutReset.buckets[0].resetsAt == nil)
+        var nullReset = bucket("null-reset", window: "w", remaining: 0.5)
+        nullReset["reset_time"] = NSNull()
+        let unavailableReset = try decode(groups: [group("g", buckets: [
+            nullReset,
+        ])])
+        #expect(unavailableReset.buckets[0].resetsAt == nil)
         #expect(throws: AntigravityQuotaDecodingError.invalidBucket) {
             try decode(groups: [group("g", buckets: [
                 bucket("p", window: "w", remaining: 0.5, reset: "tomorrow"),
             ])])
+        }
+    }
+
+    @Test
+    func schemaOnlyTextAllowsBoundedHumanLabelsWithoutWeakeningIdentity() throws {
+        var humanReadableGroup = group("Gemini model group", buckets: [
+            bucket(
+                "stable-pool-id",
+                window: "Five hour rolling window",
+                remaining: 0.5,
+                name: "Gemini 3.5 Pro"
+            ),
+        ])
+        humanReadableGroup["description"] = "Current provider quota group"
+        let decoded = try decode(groups: [humanReadableGroup])
+        #expect(decoded.buckets[0].id == "stable-pool-id")
+        #expect(decoded.buckets[0].displayLabel == "Gemini 3.5 Pro")
+
+        humanReadableGroup["name"] = String(repeating: "x", count: 129)
+        #expect(throws: AntigravityQuotaDecodingError.invalidBucket) {
+            try decode(groups: [humanReadableGroup])
         }
     }
 

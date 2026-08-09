@@ -38,6 +38,9 @@ enum AntigravityCLIClientError: Error, Equatable, Sendable {
     case processExited
     case malformedOutput
     case unsupportedSchema
+    case invalidOperationalEnvelope
+    case invalidBucket
+    case duplicateBucketIdentity
     case noValidQuota
     case providerUnavailable
 }
@@ -173,9 +176,14 @@ struct AntigravityReadOnlyCLIClient: Sendable {
             .malformedOutput
         case .unsupportedVersion:
             .unsupportedVersion
-        case .unsupportedSchema, .invalidOperationalEnvelope, .invalidBucket,
-             .duplicateBucketIdentity:
+        case .unsupportedSchema:
             .unsupportedSchema
+        case .invalidOperationalEnvelope:
+            .invalidOperationalEnvelope
+        case .invalidBucket:
+            .invalidBucket
+        case .duplicateBucketIdentity:
+            .duplicateBucketIdentity
         case .noValidQuota:
             .noValidQuota
         }

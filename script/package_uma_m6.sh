@@ -16,8 +16,8 @@ readonly DEFAULT_CLT_SDK="$DEFAULT_DEVELOPER_DIR/SDKs/MacOSX26.5.sdk"
 
 usage() {
     printf '%s\n' \
-        "Usage: $0 --commit <40-hex-sha> --phase <preflight|final> --output <exact-path> [--build <12-digit-number>]" \
-        "Expected output: $DELIVERY_ROOT/uma-m6-<phase>-<commit>/UMA.app"
+        "Usage: $0 --commit <40-hex-sha> --phase <preflight|final|g3-preflight|g3-final> --output <exact-path> [--build <12-digit-number>]" \
+        "Expected output: $DELIVERY_ROOT/uma-m6[-g3]-<phase>-<commit>/UMA.app"
 }
 
 commit=""
@@ -35,9 +35,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { usage >&2; exit 2; }
-[[ "$phase" == "preflight" || "$phase" == "final" ]] || { usage >&2; exit 2; }
+[[ "$phase" == "preflight" || "$phase" == "final" \
+    || "$phase" == "g3-preflight" || "$phase" == "g3-final" ]] \
+    || { usage >&2; exit 2; }
 [[ "$build_number" =~ ^[0-9]{12}$ ]] || { usage >&2; exit 2; }
-readonly expected_output="$DELIVERY_ROOT/uma-m6-$phase-$commit/UMA.app"
+if [[ "$phase" == g3-* ]]; then
+    readonly expected_output="$DELIVERY_ROOT/uma-m6-g3-${phase#g3-}-$commit/UMA.app"
+else
+    readonly expected_output="$DELIVERY_ROOT/uma-m6-$phase-$commit/UMA.app"
+fi
 [[ "$output" == "$expected_output" ]] || {
     printf 'Refusing output outside %s\n' "$expected_output" >&2
     exit 2
@@ -112,7 +118,7 @@ trap 'exit 130' HUP INT TERM
 mkdir -p "$package_root/home" "$package_root/tmp" \
     "$package_root/cache/clang" "$package_root/cache/swiftpm" \
     "$package_root/config" "$package_root/security"
-if [[ "$phase" == "final" ]]; then
+if [[ "$phase" == "final" || "$phase" == "g3-final" ]]; then
     source_root="$package_root/source"
     mkdir "$source_root"
     git -C "$REPO_ROOT" archive --format=tar --output="$package_root/source.tar" "$commit"

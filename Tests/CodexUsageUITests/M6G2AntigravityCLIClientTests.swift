@@ -136,6 +136,30 @@ struct M6G2AntigravityCLIClientTests {
         await #expect(throws: AntigravityCLIClientError.unsupportedSchema) {
             try await unsupported.readCurrentQuota()
         }
+
+        let invalidBucket = makeClient(run: { _ in
+            var object = try #require(
+                JSONSerialization.jsonObject(with: validFixture())
+                    as? [String: Any]
+            )
+            var command = try #require(object["command"] as? [String: Any])
+            var data = try #require(command["data"] as? [String: Any])
+            var groups = try #require(data["groups"] as? [[String: Any]])
+            var buckets = try #require(groups[0]["buckets"] as? [[String: Any]])
+            buckets[0]["id"] = "unsafe identity"
+            groups[0]["buckets"] = buckets
+            data["groups"] = groups
+            command["data"] = data
+            object["command"] = command
+            return .init(
+                stdout: try JSONSerialization.data(withJSONObject: object),
+                stderr: Data(),
+                terminationStatus: 0
+            )
+        })
+        await #expect(throws: AntigravityCLIClientError.invalidBucket) {
+            try await invalidBucket.readCurrentQuota()
+        }
     }
 
     @Test
