@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 enum UsageMonitorRuntimeError: Error, Equatable {
@@ -33,6 +34,7 @@ enum AgentUsageRuntime {
 public struct UsageMonitorRuntime {
     public let store: UsageStore
     public let claudeSettings: ClaudeBrowserSettingsModel
+    public let antigravitySettings: AntigravitySettingsModel
     public let workBuddySettings: WorkBuddySettingsModel
     public let workBuddyLogin: WorkBuddyLoginCoordinator
     public let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController
@@ -84,12 +86,21 @@ public struct UsageMonitorRuntime {
             }
         )
         let agentSettings = AgentSettingsCoordinator()
+        let antigravityRefresh = AntigravityAutoRefreshPreference()
+        let antigravityClient = AntigravityReadOnlyCLIClient()
+        let antigravityConnector = GoogleAntigravityUsageConnector(
+            client: antigravityClient,
+            autoRefreshEnabled: { @MainActor in
+                antigravityRefresh.isEnabled
+            }
+        )
         let registry = AgentUsageRuntime.makeCodexRegistry(
             snapshotStore: snapshotStore,
             additionalConnectors: [
                 claudeConnector,
                 workBuddyConnector,
                 accountWebConnector,
+                antigravityConnector,
             ]
         )
         let claudeSettings = ClaudeBrowserSettingsModel(
@@ -125,6 +136,72 @@ public struct UsageMonitorRuntime {
             consentDefaults: .standard,
             agentSettings: agentSettings
         )
+        let refreshAntigravityAdmissions:
+            @MainActor @Sendable (ProviderEligibilityScanTrigger) async -> AntigravitySettingsObservation = {
+                trigger in
+                let descriptors = await registry.orderedDescriptors()
+                let excluded = agentSettings.disabledConnectorIDs(
+                    from: descriptors.map(\.id)
+                )
+                _ = await registry.scanSurfaceAdmissions(
+                    trigger: trigger,
+                    excludedProviderIDs: excluded
+                )
+                return Self.antigravityObservation(
+                    await antigravityConnector.currentSnapshot()
+                )
+            }
+        let antigravitySettings = AntigravitySettingsModel(
+            initialState: .checking,
+            autoRefreshEnabled: antigravityRefresh.isEnabled,
+            checkAgain: {
+                await refreshAntigravityAdmissions(.checkAgain)
+            },
+            syncNow: {
+                await refreshAntigravityAdmissions(.syncNow)
+            },
+            disable: {
+                antigravityRefresh.isEnabled = false
+                await antigravityConnector.setAutomaticRefreshEnabled(false)
+                try? await registry.perform(
+                    .disconnect,
+                    for: GoogleAntigravityUsageConnector.connectorID
+                )
+                agentSettings.setMonitoringEnabled(
+                    false,
+                    for: GoogleAntigravityUsageConnector.connectorID
+                )
+            },
+            setAutoRefresh: { enabled in
+                antigravityRefresh.isEnabled = enabled
+                await antigravityConnector.setAutomaticRefreshEnabled(enabled)
+            },
+            openOfficialSetup: {
+                if let url = URL(
+                    string: "https://antigravity.google/docs/cli/install"
+                ) {
+                    NSWorkspace.shared.open(url)
+                }
+                return await refreshAntigravityAdmissions(.checkAgain)
+            },
+            openProvider: {
+                if let url = URL(
+                    string: "https://antigravity.google/docs/cli/install"
+                ) {
+                    NSWorkspace.shared.open(url)
+                }
+                return AntigravitySettingsObservation(state: .loginRequired)
+            }
+        )
+        Task { @MainActor [weak antigravitySettings] in
+            let stream = await antigravityConnector.snapshots()
+            for await snapshot in stream {
+                guard !Task.isCancelled else { return }
+                antigravitySettings?.receive(
+                    Self.antigravityObservation(snapshot)
+                )
+            }
+        }
         Task {
             let shouldStartClaude = claudeConsent.consentGranted
             // Browser Sync is not a passive local-availability source, but a
@@ -150,9 +227,47 @@ public struct UsageMonitorRuntime {
         return UsageMonitorRuntime(
             store: usageStore,
             claudeSettings: claudeSettings,
+            antigravitySettings: antigravitySettings,
             workBuddySettings: settings,
             workBuddyLogin: login,
             workBuddyAccountWebSync: accountWebSync
+        )
+    }
+
+    static func antigravityObservation(
+        _ snapshot: AgentUsageSnapshot
+    ) -> AntigravitySettingsObservation {
+        let observedAt = snapshot.lastSuccessfulAt ?? snapshot.capturedAt
+        let state: AntigravitySettingsPresentationState = switch (
+            snapshot.state,
+            snapshot.freshness,
+            snapshot.safeFailure
+        ) {
+        case (.inactive, _, _): .disabled
+        case (.authenticationRequired, _, _): .loginRequired
+        case (.waitingForFirstResponse, _, _): .refreshing(nil)
+        case (.ready, .fresh, _): .fresh(observedAt)
+        case (.ready, .cached, _): .cached(observedAt)
+        case (.stale, _, _), (.ready, .stale, _): .stale(observedAt)
+        case (.unsupported, _, .unavailable): .notInstalled
+        case (.unsupported, _, _), (.failed, _, _): .failed
+        default: .failed
+        }
+        let safeError: AntigravitySettingsSafeError? = switch (
+            snapshot.state,
+            snapshot.safeFailure
+        ) {
+        case (.unsupported, .unavailable): .executableMissing
+        case (_, .authorizationRequired): .authenticationRequired
+        case (_, .timedOut): .timedOut
+        case (_, .unsupported): .unsupportedVersion
+        case (_, .malformedResponse): .unsupportedSchema
+        case (_, .unavailable), (_, .processExited), (_, .unknown): .unavailable
+        case (_, nil): nil
+        }
+        return AntigravitySettingsObservation(
+            state: state,
+            safeError: safeError
         )
     }
 
@@ -350,5 +465,23 @@ public struct UsageMonitorRuntime {
             return nil
         }
         return url
+    }
+}
+
+@MainActor
+private final class AntigravityAutoRefreshPreference {
+    private static let key = "antigravity.autoRefreshEnabled"
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        if defaults.object(forKey: Self.key) == nil {
+            defaults.set(true, forKey: Self.key)
+        }
+    }
+
+    var isEnabled: Bool {
+        get { defaults.bool(forKey: Self.key) }
+        set { defaults.set(newValue, forKey: Self.key) }
     }
 }

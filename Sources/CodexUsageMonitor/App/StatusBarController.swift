@@ -16,6 +16,7 @@ final class StatusBarController: NSObject {
     init(
         store: UsageStore,
         claudeSettings: ClaudeBrowserSettingsModel,
+        antigravitySettings: AntigravitySettingsModel,
         workBuddySettings: WorkBuddySettingsModel,
         workBuddyLogin: WorkBuddyLoginCoordinator,
         workBuddyAccountWebSync: WorkBuddyAccountWebSessionController
@@ -30,6 +31,7 @@ final class StatusBarController: NSObject {
             store: store,
             statusItem: statusItem,
             claudeSettings: claudeSettings,
+            antigravitySettings: antigravitySettings,
             workBuddySettings: workBuddySettings,
             workBuddyLogin: workBuddyLogin,
             workBuddyAccountWebSync: workBuddyAccountWebSync,

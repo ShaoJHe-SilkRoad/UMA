@@ -689,7 +689,17 @@ public enum SharedUsagePresentationPolicy {
         case .sevenDay:
             labels = (.sevenDay, "7D", language == .english ? "seven-day window" : "七天额度窗口")
         case .other:
-            labels = (.other, "—", language == .english ? "usage window" : "额度窗口")
+            if let displayLabel = window.displayLabel {
+                labels = (
+                    .other,
+                    displayLabel,
+                    language == .english
+                        ? "\(displayLabel) usage window"
+                        : "\(displayLabel) 额度窗口"
+                )
+            } else {
+                labels = (.other, "—", language == .english ? "usage window" : "额度窗口")
+            }
         }
 
         let remaining: SharedRemainingValue

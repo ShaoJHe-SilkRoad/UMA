@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusBarController = StatusBarController(
             store: store,
             claudeSettings: runtime.claudeSettings,
+            antigravitySettings: runtime.antigravitySettings,
             workBuddySettings: runtime.workBuddySettings,
             workBuddyLogin: runtime.workBuddyLogin,
             workBuddyAccountWebSync: runtime.workBuddyAccountWebSync

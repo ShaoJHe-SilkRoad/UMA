@@ -42,6 +42,7 @@ struct AgentPreferenceRecord: Codable, Equatable, Identifiable, Sendable {
     static let codexProviderID = AgentConnectorID(rawValue: "codex")!
     static let claudeProviderID = AgentConnectorID(rawValue: "claude")!
     static let workBuddyProviderID = AgentConnectorID(rawValue: "workbuddy")!
+    static let antigravityProviderID = AgentConnectorID(rawValue: "antigravity")!
 
     let providerID: AgentConnectorID
     var hasBeenDetected: Bool

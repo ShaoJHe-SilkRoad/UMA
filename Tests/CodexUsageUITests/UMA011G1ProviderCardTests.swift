@@ -63,13 +63,14 @@ struct UMA011G1ProviderCardTests {
     }
 
     @Test
-    func roadmapOrderScalesDeterministicallyFromThreeToEightProviders() throws {
+    func roadmapOrderScalesDeterministicallyFromFourToNineProviders() throws {
         let rawIDs = [
             "emerging.local",
             "doubao.local",
             "kimi.local",
             "cursor.local",
             "manus.local",
+            "antigravity.cli",
             "workbuddy.accountWeb",
             "claude.local",
             "codex.local",
@@ -82,13 +83,14 @@ struct UMA011G1ProviderCardTests {
             "codex.local",
             "claude.local",
             "workbuddy.accountWeb",
+            "antigravity.cli",
             "manus.local",
             "cursor.local",
             "kimi.local",
             "doubao.local",
             "emerging.local",
         ])
-        for count in 3...8 {
+        for count in 4...9 {
             let subset = Array(ids.suffix(count))
             let first = subset.sorted(by: AgentProviderOrder.precedes)
             let second = subset.reversed().sorted(by: AgentProviderOrder.precedes)

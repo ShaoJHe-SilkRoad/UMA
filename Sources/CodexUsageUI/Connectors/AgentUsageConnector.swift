@@ -34,6 +34,7 @@ enum AgentProviderOrder {
         case "codex": 0
         case "claude": 100
         case "workbuddy": 200
+        case "antigravity": 250
         case "manus": 300
         case "cursor": 400
         case "kimi": 500
@@ -299,6 +300,10 @@ struct AgentRateLimitWindow: Codable, Sendable, Equatable, Identifiable {
 
     let id: String
     let kind: Kind
+    /// Optional validated provider display label. Stable identity remains
+    /// `id`; this value is presentation-only and never participates in
+    /// selection or persistence keys.
+    let displayLabel: String?
     let usedPercent: Double?
     /// A normalized provider value restored from UMA's sanitized last-valid
     /// cache. Live providers continue to publish `usedPercent`; exactly one of
@@ -310,6 +315,7 @@ struct AgentRateLimitWindow: Codable, Sendable, Equatable, Identifiable {
     init(
         id: String,
         kind: Kind,
+        displayLabel: String? = nil,
         usedPercent: Double?,
         remainingPercent: Double? = nil,
         isUnlimited: Bool,
@@ -317,6 +323,7 @@ struct AgentRateLimitWindow: Codable, Sendable, Equatable, Identifiable {
     ) {
         self.id = id
         self.kind = kind
+        self.displayLabel = displayLabel
         self.usedPercent = usedPercent
         self.remainingPercent = remainingPercent
         self.isUnlimited = isUnlimited

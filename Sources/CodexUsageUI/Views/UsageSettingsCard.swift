@@ -11,6 +11,7 @@ struct UsageSettingsCard: View {
     @Binding var showAPICost: Bool
     @Binding var language: AppLanguage
     let claudeSettings: ClaudeBrowserSettingsModel?
+    var antigravitySettings: AntigravitySettingsModel? = nil
     let workBuddySettings: WorkBuddySettingsModel?
     let workBuddyLogin: WorkBuddyLoginCoordinator?
     let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
@@ -101,6 +102,7 @@ struct UsageSettingsCard: View {
                     showRecentTasks: $showRecentTasks,
                     showAPICost: $showAPICost,
                     claudeSettings: claudeSettings,
+                    antigravitySettings: antigravitySettings,
                     workBuddySettings: workBuddySettings,
                     workBuddyLogin: workBuddyLogin,
                     workBuddyAccountWebSync: workBuddyAccountWebSync,
@@ -378,6 +380,7 @@ private struct AgentSpecificSettingsContent: View {
     @Binding var showRecentTasks: Bool
     @Binding var showAPICost: Bool
     let claudeSettings: ClaudeBrowserSettingsModel?
+    let antigravitySettings: AntigravitySettingsModel?
     let workBuddySettings: WorkBuddySettingsModel?
     let workBuddyLogin: WorkBuddyLoginCoordinator?
     let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
@@ -440,10 +443,18 @@ private struct AgentSpecificSettingsContent: View {
                         coordinator.isMonitoringEnabled(for: providerID)
                     },
                     set: {
-                        coordinator.setMonitoringEnabled(
-                            $0,
-                            for: providerID
-                        )
+                        if providerID
+                            == AgentPreferenceRecord.antigravityProviderID,
+                           let antigravitySettings {
+                            if $0 {
+                                coordinator.setMonitoringEnabled(true, for: providerID)
+                                antigravitySettings.checkAntigravity()
+                            } else {
+                                antigravitySettings.disable()
+                            }
+                        } else {
+                            coordinator.setMonitoringEnabled($0, for: providerID)
+                        }
                     }
                 )
             )
@@ -488,6 +499,15 @@ private struct AgentSpecificSettingsContent: View {
                 )
             }
 
+            if providerID == AgentPreferenceRecord.antigravityProviderID,
+               let antigravitySettings {
+                Divider().opacity(0.35)
+                AntigravitySettingsSection(
+                    model: antigravitySettings,
+                    language: language
+                )
+            }
+
             if providerID == AgentPreferenceRecord.workBuddyProviderID,
                let workBuddySettings {
                 Divider().opacity(0.35)
@@ -523,6 +543,133 @@ private struct AgentSpecificSettingsContent: View {
                 coordinator.setCodexDetails(details, for: providerID)
             }
         )
+    }
+}
+
+private struct AntigravitySettingsSection: View {
+    @ObservedObject var model: AntigravitySettingsModel
+    let language: AppLanguage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(language.antigravitySourceLabel)
+                .font(
+                    AppTypography.font(
+                        10.5,
+                        weight: .semibold,
+                        language: language
+                    )
+                )
+            Text(language.antigravityState(model.state))
+                .font(AppTypography.font(9.5, language: language))
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("antigravity.settings.state")
+
+            if showsAutoRefresh {
+                SettingsToggleRow(
+                    title: language.antigravityAutoRefresh,
+                    systemImage: "arrow.clockwise",
+                    language: language,
+                    isOn: Binding(
+                        get: { model.autoRefreshEnabled },
+                        set: { model.setAutoRefreshEnabled($0) }
+                    )
+                )
+            }
+
+            HStack(spacing: 8) {
+                primaryAction
+                if showsCheckAgain {
+                    Button(language.antigravityCheck) {
+                        model.checkAntigravity()
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("antigravity.settings.check")
+                }
+                if showsDisable {
+                    Button(language.antigravityDisable) {
+                        model.disable()
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("antigravity.settings.disable")
+                }
+            }
+            .disabled(model.actionInProgress)
+
+            if let action = model.activeAction {
+                Text(language.antigravityAction(action))
+                    .font(AppTypography.font(9, language: language))
+                    .foregroundStyle(.secondary)
+            }
+            if let error = model.safeError {
+                Text(language.antigravityError(error))
+                    .font(AppTypography.font(9, language: language))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            DisclosureGroup(language.antigravitySourceTransparency) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(model.sourceTransparency.source)
+                    Text(model.sourceTransparency.authentication)
+                    Text(language.antigravityPrivacySummary)
+                }
+                .font(AppTypography.font(8.5, language: language))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var primaryAction: some View {
+        switch model.state {
+        case .notInstalled:
+            Button(language.antigravityInstallOrOpen) {
+                model.openOfficialSetup()
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("antigravity.settings.setup")
+        case .loginRequired:
+            Button(language.antigravityInstallOrOpen) {
+                model.openProvider()
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("antigravity.settings.open-provider")
+        default:
+            Button(language.antigravitySyncNow) {
+                model.syncNow()
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("antigravity.settings.sync")
+        }
+    }
+
+    private var showsAutoRefresh: Bool {
+        switch model.state {
+        case .connected, .fresh, .cached, .stale, .refreshing:
+            true
+        default:
+            false
+        }
+    }
+
+    private var showsCheckAgain: Bool {
+        switch model.state {
+        case .notInstalled, .loginRequired, .failed:
+            true
+        default:
+            false
+        }
+    }
+
+    private var showsDisable: Bool {
+        switch model.state {
+        case .disabled, .notInstalled:
+            false
+        default:
+            true
+        }
     }
 }
 

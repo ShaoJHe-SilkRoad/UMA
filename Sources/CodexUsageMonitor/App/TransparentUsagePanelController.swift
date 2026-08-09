@@ -35,6 +35,7 @@ final class TransparentUsagePanelController {
     private let tuning: GlassTuning
     private let store: UsageStore
     private let claudeSettings: ClaudeBrowserSettingsModel
+    private let antigravitySettings: AntigravitySettingsModel
     private let workBuddySettings: WorkBuddySettingsModel
     private let workBuddyLogin: WorkBuddyLoginCoordinator
     private let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController
@@ -48,6 +49,7 @@ final class TransparentUsagePanelController {
         store: UsageStore,
         statusItem: NSStatusItem,
         claudeSettings: ClaudeBrowserSettingsModel,
+        antigravitySettings: AntigravitySettingsModel,
         workBuddySettings: WorkBuddySettingsModel,
         workBuddyLogin: WorkBuddyLoginCoordinator,
         workBuddyAccountWebSync: WorkBuddyAccountWebSessionController,
@@ -55,6 +57,7 @@ final class TransparentUsagePanelController {
     ) {
         self.store = store
         self.claudeSettings = claudeSettings
+        self.antigravitySettings = antigravitySettings
         self.workBuddySettings = workBuddySettings
         self.workBuddyLogin = workBuddyLogin
         self.workBuddyAccountWebSync = workBuddyAccountWebSync
@@ -76,6 +79,7 @@ final class TransparentUsagePanelController {
         configurePanel(
             store: store,
             claudeSettings: claudeSettings,
+            antigravitySettings: antigravitySettings,
             workBuddySettings: workBuddySettings,
             workBuddyLogin: workBuddyLogin,
             workBuddyAccountWebSync: workBuddyAccountWebSync,
@@ -116,6 +120,7 @@ final class TransparentUsagePanelController {
     private func configurePanel(
         store: UsageStore,
         claudeSettings: ClaudeBrowserSettingsModel,
+        antigravitySettings: AntigravitySettingsModel,
         workBuddySettings: WorkBuddySettingsModel,
         workBuddyLogin: WorkBuddyLoginCoordinator,
         workBuddyAccountWebSync: WorkBuddyAccountWebSessionController,
@@ -158,6 +163,7 @@ final class TransparentUsagePanelController {
                 },
                 localAccessConfirmationAction: NativeLocalCodexAccessConfirmation.action(for: store),
                 claudeSettings: claudeSettings,
+                antigravitySettings: antigravitySettings,
                 workBuddySettings: workBuddySettings,
                 workBuddyLogin: workBuddyLogin,
                 workBuddyAccountWebSync: workBuddyAccountWebSync

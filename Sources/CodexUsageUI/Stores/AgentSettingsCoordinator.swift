@@ -28,6 +28,7 @@ final class AgentSettingsCoordinator: ObservableObject {
             (AgentPreferenceRecord.codexProviderID, "Codex"),
             (AgentPreferenceRecord.claudeProviderID, "Claude Code"),
             (AgentPreferenceRecord.workBuddyProviderID, "WorkBuddy"),
+            (AgentPreferenceRecord.antigravityProviderID, "Google Antigravity"),
         ]
     ) {
         self.store = store

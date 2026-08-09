@@ -1,12 +1,12 @@
 # UMA M6 Antigravity QA Issue Ledger
 
-**Goals:** M6-G1, M6-SETUP-G1, M6-G1R and M6-G1R2
+**Goals:** M6-G1, M6-SETUP-G1, M6-G1R, M6-G1R2 and M6-G2
 **Date:** 2026-08-08
 **Historical M6-G1 decision:** `SETUP REQUIRED — OFFICIAL ANTIGRAVITY CLI NOT INSTALLED`
 **Historical M6-G1R decision:** `NO-GO — LIVE ADMISSION EVIDENCE INCOMPLETE`
 **Current decision:** `GO — OFFICIAL ANTIGRAVITY CLI QUOTA SOURCE ADMITTED`
 **Credits:** `CREDITS DEFER`
-**Only next task:** M6-G2
+**Only next task:** M6-G3
 
 ## Scope
 
@@ -120,4 +120,43 @@ M6-G1R2 reads: 3/3; successful detailed observations: 2; retries: 0
 Only next task: M6-G2
 ```
 
-M6-G2 was not started.
+This historical M6-G1R2 section ended before M6-G2 began. The completed M6-G2
+closure evidence is recorded below.
+
+## M6-G2 connector, scheduler and Settings issue ledger
+
+This section contains no live quota, reset timestamp, pool identity, account
+identity, credential, provider response, raw output, conversation, task, prompt,
+screenshot or workspace data. All G2 provider inputs were deterministic fixtures.
+
+| ID | Found by | Severity | Evidence / acceptance impact | Repair | Focused retest | Regression retest | Final status |
+|---|---|---:|---|---|---|---|---|
+| M6G2-001 | Source-boundary review | Blocking | A generic subprocess path could widen the admitted source beyond the exact official executable and `/usage` command | Bind the client to the current-user `$HOME/.local/bin/agy`, admitted SHA/version/arm64 identity and exact argv; no shell, provider input, credential environment or user workspace | CLI client 8/8 PASS | Full suite 552/552 PASS | Closed |
+| M6G2-002 | Decoder review | Blocking | Permissive decoding could admit private fields, ambiguous percentage semantics or unstable pool identities | Strict allowlist; explicit remaining conversion once; independent stable buckets; fail closed on ambiguity, invalid range, future schema or duplicate identity | M6-G2 focused matrix PASS | Full suite 552/552 PASS | Closed |
+| M6G2-003 | Lifecycle review | Major | Independent triggers could multiply processes, overlap reads or create retry bursts | One source-owned completion-relative five-minute scheduler, one in-flight process, three-minute minimum, coalescing and complete child teardown | Scheduler suite PASS | Full suite 552/552 PASS | Closed |
+| M6G2-004 | Authentication/privacy review | Blocking | Routine refresh could trigger/adopt login state, expose provider data or persist raw output | Provider-owned authentication only; suspend on login-required classification; publish normalized quota fields and bounded safe classifications | Privacy and CLI suites PASS | Source/package scans PASS | Closed |
+| M6G2-005 | Settings/localization review | Major | Setup and freshness could be unclear or require credential-shaped UI | Injected-operation Settings with Check, official Install/Open, Login Required, Connected/Refreshing/Fresh/Cached/Stale, Auto Refresh, Sync Now, Disable and source/privacy text in EN/zh-CN | Settings suite PASS | Full suite 552/552 PASS | Closed |
+| M6G2-006 | Shared-surface review | Blocking | A fourth provider could change existing provider behavior or density | Add Antigravity-only shared branches, preserve order and Maximum Decrement, keep four-provider Regular behavior and exclude provider four from Desktop Assistant | Presentation/package suite PASS | Codex/Claude/WorkBuddy full regressions PASS | Closed |
+| M6G2-007 | Toolchain review | Gate | User-level SwiftPM/Clang caches were unavailable and a bare invocation produced misleading SDK drift diagnostics | Keep frozen `script/test.sh`; use current Apple CLT 27.0, its pinned macOS 26.5 SDK and task-owned writable module caches | Complete script entry point PASS | Debug/Release/strict Release PASS | Closed |
+| M6G2-008 | Package/privacy review | Gate | Initial helper used an incorrect developer-root ascent and a nonexistent `/usr/bin/chmod`; an earlier preflight also selected an unnecessary beta Xcode path | Correct path/tool usage, then select verified Apple Command Line Tools and pinned SDK by default; preserve M5 companions and enforce provenance/signature/dependency/file/privacy allowlists | Package contract 5/5 PASS | Final-code preflight PASS | Closed |
+| M6G2-009 | Process cancellation retest | Blocking | Cancellation could arrive before `Process.run()`, leaving the owned child to run until normal exit; only the 15-second soft timeout existed | Reject pre-launch cancellation, terminate immediately after a launch race, add a separate 20-second force-kill ceiling, and always reap | Cancellation 0.002 s; CLI suite 8/8 PASS | Full suite 552/552 PASS | Closed |
+| M6G2-010 | Fixture review | Minor | JSONSerialization cannot encode infinite floating-point test arguments | Test out-of-range finite values through JSONSerialization and feed NaN/Infinity spellings as malformed raw JSON | Decoder suite PASS | Full suite 552/552 PASS | Closed |
+| M6G2-011 | Final lifecycle review | Major | A single connector stream continuation let the Settings observer replace the registry observer, while omitting the Settings observer left scheduled Fresh/Cached/Stale state frozen | Support independently owned bounded stream continuations and bind the idle Settings model to the same normalized connector snapshots; also enforce owner and execute-mode checks at the public capability gate | Focused observer and trust tests PASS | Final full suite 552/552 PASS; Release/strict Release PASS | Closed |
+| M6G2-012 | Independent staged review | Blocking | The first decoder accepted future/private container fields and recursively traversed rejected response content | Enforce exact root/command/data/group/bucket field allowlists, validate admitted descriptions only as discarded schema types, reject future fields without descending into their values and never access the response value | Decoder and CLI suites PASS; 42/42 focused | Full suite 552/552 PASS | Closed |
+| M6G2-013 | Independent staged review | Major | Auto Refresh could stop at a disabled due cycle without a path to reschedule, and Disable could diverge from the persisted preference | Add an explicit connector refresh-control operation; persist and cancel on Disable; reschedule on re-enable | Off→due→on and disable persistence tests PASS | Full suite 552/552; Release/strict Release PASS | Closed |
+| M6G2-014 | Independent staged review | Major | Missing CLI capability was collapsed into generic failure, making the required Install/Open Settings state unreachable | Carry a bounded unsupported/unavailable capability classification and map it to `notInstalled` plus `executableMissing` in production Settings | Connector and production-wiring tests PASS | Full suite 552/552 PASS | Closed |
+
+## M6-G2 final verification summary
+
+| Check | Result |
+|---|---|
+| Focused M6-G2 tests | PASS — 42/42 on the repaired final edit set |
+| Complete `script/test.sh` | PASS — 534 UI tests plus 18 bridge tests, 552/552 total, using the supported deterministic `--no-parallel` SwiftPM execution mode |
+| Debug / Release / strict-concurrency Release | PASS — Apple Command Line Tools 27.0, Swift 6.4, macOS 26.5 SDK, task-owned caches |
+| Preflight package | PASS — working-tree preflight, strict deep ad-hoc signature, arm64, system dependencies only, exact file allowlist, no bundled `agy` |
+| `git diff --check` | PASS |
+| Independent staged-index review | PASS — repaired 25-file cached scope; no blocking or actionable issue |
+| Provider reads and prompts | 0 / 0 |
+| Credits | `CREDITS DEFER` |
+| Protected M5 files | PASS — 52-file frozen set unchanged from the accepted manifest |
+| Existing mechanisms | Codex NO; Claude NO; WorkBuddy NO |
