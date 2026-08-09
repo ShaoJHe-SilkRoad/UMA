@@ -96,7 +96,7 @@ struct M6G1AntigravitySourceAdmissionTests {
             #expect(record.contains("CREDITS DEFER"))
             #expect(record.contains("M6-G1R"))
             #expect(!record.contains("synthetic-private@example.invalid"))
-            #expect(!record.contains("/Users/juliushe/.local/bin/agy"))
+            #expect(!record.contains("/Users/"))
         }
 
         let admission = records[1]
@@ -169,6 +169,23 @@ struct M6G1AntigravitySourceAdmissionTests {
     }
 
     @Test
+    func g1R2AdmitsAfterAllThreeEvidenceGapsAreClosed() {
+        let evidence = AntigravityAdmissionEvidence.m6G1R2Observation
+
+        #expect(evidence.structuralStability == .present)
+        #expect(evidence.identityStability == .present)
+        #expect(evidence.noProviderWork == .present)
+        #expect(evidence.quotaReads == 3)
+        #expect(evidence.creditReads == 0)
+        #expect(evidence.providerPrompts == 0)
+        #expect(evidence.providerTasks == 0)
+        #expect(evidence.intentionalSpend == 0)
+        #expect(AntigravityAdmissionHarness.decide(evidence) == .go)
+        #expect(AntigravityAdmissionHarness.nextTask(for: evidence) == "M6-G2")
+        #expect(AntigravityAdmissionHarness.decide(.m6G1RObservation) == .noGo)
+    }
+
+    @Test
     func stableIdentityIsAnIndependentMandatoryAdmissionGate() {
         var evidence = AntigravityAdmissionEvidence.m6G1RObservation
         evidence.structuralStability = .present
@@ -187,8 +204,13 @@ struct M6G1AntigravitySourceAdmissionTests {
         )
 
         #expect(projection.buckets == [
-            .init(stableID: "group-a|bucket-a|five-hour", remainingPercent: 42.5, hasReset: true),
+            .init(
+                stableID: "bucket-a",
+                remainingPercent: 42.5,
+                resetTime: ISO8601DateFormatter().date(from: "2026-08-09T12:00:00Z")
+            ),
         ])
+        #expect(projection.operationalEvidence == .confirmedNoProviderWork)
     }
 
     @Test
@@ -201,11 +223,50 @@ struct M6G1AntigravitySourceAdmissionTests {
         )
 
         #expect(projection.buckets.map(\.stableID) == [
-            "group-a|bucket-a|five-hour",
-            "group-b|bucket-b|five-hour",
+            "bucket-a",
+            "bucket-b",
         ])
         #expect(projection.buckets.map(\.remainingPercent) == [0, 100])
-        #expect(projection.buckets.allSatisfy { !$0.hasReset })
+        #expect(projection.buckets.allSatisfy { $0.resetTime == nil })
+    }
+
+    @Test
+    func repeatedStructuredReadsKeepSchemaAndProviderOwnedIdentityStable() throws {
+        let first = try AntigravityQuotaFixtureDecoder.decode(
+            fixture(groups: [
+                group("group-a", buckets: [bucket("bucket-a", remaining: 0.75, reset: "2026-08-09T12:00:00Z")]),
+                group("group-b", buckets: [bucket("bucket-b", remaining: 0.50, reset: "2026-08-10T12:00:00Z")]),
+            ])
+        )
+        let second = try AntigravityQuotaFixtureDecoder.decode(
+            fixture(groups: [
+                group("group-a", buckets: [bucket("bucket-a", remaining: 0.74, reset: "2026-08-09T12:05:00Z")]),
+                group("group-b", buckets: [bucket("bucket-b", remaining: 0.50, reset: "2026-08-10T12:05:00Z")]),
+            ])
+        )
+
+        #expect(first.buckets.map(\.stableID) == second.buckets.map(\.stableID))
+        #expect(first.buckets.map(\.remainingPercent) != second.buckets.map(\.remainingPercent))
+        #expect(first.buckets.map(\.resetTime) != second.buckets.map(\.resetTime))
+        #expect(first.operationalEvidence == second.operationalEvidence)
+    }
+
+    @Test
+    func providerOwnedIdentityIsIndependentOfGroupAndArrayOrder() throws {
+        let first = try AntigravityQuotaFixtureDecoder.decode(
+            fixture(groups: [
+                group("group-a", buckets: [bucket("bucket-a", remaining: 0.5, reset: nil)]),
+                group("group-b", buckets: [bucket("bucket-b", remaining: 0.5, reset: nil)]),
+            ])
+        )
+        let reordered = try AntigravityQuotaFixtureDecoder.decode(
+            fixture(groups: [
+                group("group-b", buckets: [bucket("bucket-b", remaining: 0.4, reset: nil)]),
+                group("group-a", buckets: [bucket("bucket-a", remaining: 0.4, reset: nil)]),
+            ])
+        )
+
+        #expect(first.buckets.map(\.stableID).sorted() == reordered.buckets.map(\.stableID).sorted())
     }
 
     @Test(arguments: [-0.01, 1.01])
@@ -263,7 +324,7 @@ struct M6G1AntigravitySourceAdmissionTests {
             fixture(groups: [group("group-a", buckets: [bucket("bucket-a", remaining: 0.5, reset: nil)])])
         )
         #expect(withoutReset.buckets == [
-            .init(stableID: "group-a|bucket-a|five-hour", remainingPercent: 50, hasReset: false),
+            .init(stableID: "bucket-a", remainingPercent: 50, resetTime: nil),
         ])
 
         #expect(throws: AntigravityQuotaFixtureError.invalidBucket) {
@@ -285,10 +346,8 @@ struct M6G1AntigravitySourceAdmissionTests {
                 "future_private": "synthetic-secret",
             ]])],
             envelopeExtras: [
-                "conversation_id": "synthetic-conversation",
-                "response": "synthetic-response",
                 "account_id": "synthetic-account",
-                "usage": ["total_tokens": 999],
+                "future_private": "synthetic-secret-envelope",
             ]
         )
 
@@ -300,7 +359,35 @@ struct M6G1AntigravitySourceAdmissionTests {
         #expect(!reflection.contains("synthetic-conversation"))
         #expect(!reflection.contains("synthetic-response"))
         #expect(!reflection.contains("synthetic-account"))
-        #expect(!reflection.contains("999"))
+    }
+
+    @Test
+    func zeroTurnEvidenceIsReducedToSanitizedBooleans() throws {
+        let projection = try AntigravityQuotaFixtureDecoder.decode(
+            fixture(groups: [group("group-a", buckets: [bucket("bucket-a", remaining: 0.5, reset: nil)])])
+        )
+
+        #expect(projection.operationalEvidence.zeroTurnConfirmed)
+        #expect(!projection.operationalEvidence.conversationCreated)
+        #expect(!projection.operationalEvidence.taskIdentifierPresent)
+        #expect(projection.operationalEvidence.tokenCountersAllZero)
+        #expect(!projection.operationalEvidence.modelResponseGenerated)
+    }
+
+    @Test
+    func nonzeroTurnConversationTokenOrTaskEvidenceFailsClosed() {
+        let baseGroups = [group("group-a", buckets: [bucket("bucket-a", remaining: 0.5, reset: nil)])]
+
+        for extras: [String: Any] in [
+            ["num_turns": 1],
+            ["conversation_id": "synthetic-conversation"],
+            ["usage": ["synthetic_counter": 1]],
+            ["task_id": "synthetic-task"],
+        ] {
+            #expect(throws: AntigravityQuotaFixtureError.invalidOperationalEvidence) {
+                try AntigravityQuotaFixtureDecoder.decode(fixture(groups: baseGroups, envelopeExtras: extras))
+            }
+        }
     }
 
     @Test
@@ -312,10 +399,10 @@ struct M6G1AntigravitySourceAdmissionTests {
         }
         #expect(throws: AntigravityQuotaFixtureError.duplicateBucketIdentity) {
             try AntigravityQuotaFixtureDecoder.decode(
-                fixture(groups: [group("group-a", buckets: [
-                    bucket("bucket-a", remaining: 0.5, reset: nil),
-                    bucket("bucket-a", remaining: 0.4, reset: nil),
-                ])])
+                fixture(groups: [
+                    group("group-a", buckets: [bucket("bucket-a", remaining: 0.5, reset: nil)]),
+                    group("group-b", buckets: [bucket("bucket-a", remaining: 0.4, reset: nil)]),
+                ])
             )
         }
         #expect(throws: AntigravityQuotaFixtureError.unsupportedVersion) {
@@ -333,18 +420,20 @@ struct M6G1AntigravitySourceAdmissionTests {
         }
         #expect(AntigravityAdmissionEvidence.m6G1RObservation.credits == .defer)
         #expect(AntigravityAdmissionEvidence.m6G1RObservation.creditReads == 0)
+        #expect(AntigravityAdmissionEvidence.m6G1R2Observation.credits == .defer)
+        #expect(AntigravityAdmissionEvidence.m6G1R2Observation.creditReads == 0)
     }
 
     @Test
-    func currentRecordsAgreeOnNoGoAndFounderReview() throws {
+    func currentRecordsAgreeOnGoAndM6G2() throws {
         let records = try currentDecisionRecords()
 
         for record in records {
-            #expect(record.contains("NO-GO"))
+            #expect(record.contains("GO — OFFICIAL ANTIGRAVITY CLI QUOTA SOURCE ADMITTED"))
             #expect(record.contains("CREDITS DEFER"))
-            #expect(record.contains("Founder source-direction decision"))
+            #expect(record.contains("M6-G2"))
             #expect(!record.contains("synthetic-private@example.invalid"))
-            #expect(!record.contains("/Users/juliushe/.local/bin/agy"))
+            #expect(!record.contains("/Users/"))
         }
     }
 
@@ -371,7 +460,18 @@ struct M6G1AntigravitySourceAdmissionTests {
         groups: [[String: Any]],
         envelopeExtras: [String: Any] = [:]
     ) throws -> Data {
-        var envelope = envelopeExtras
+        var envelope: [String: Any] = [
+            "conversation_id": "",
+            "duration_seconds": 0,
+            "num_turns": 0,
+            "response": "Synthetic ignored response",
+            "status": "success",
+            "usage": [
+                "synthetic_input_tokens": 0,
+                "synthetic_output_tokens": 0,
+            ],
+        ]
+        envelope.merge(envelopeExtras) { _, replacement in replacement }
         envelope["command"] = [
             "name": "usage",
             "data": [
@@ -556,6 +656,44 @@ private struct AntigravityAdmissionEvidence: Equatable {
         creditPercentage: nil,
         productionConnectorImplemented: false
     )
+
+    static let m6G1R2Observation = AntigravityAdmissionEvidence(
+        pathLookup: .present,
+        documentedPath: .present,
+        application: .present,
+        installedVersion: .present,
+        installedHelp: .present,
+        signature: .unavailable,
+        gatekeeper: .unavailable,
+        liveSchema: .present,
+        remainingSemantics: .present,
+        resetSemantics: .present,
+        structuralStability: .present,
+        identityStability: .present,
+        privacyProjection: .present,
+        boundedLifecycle: .present,
+        noProviderWork: .present,
+        currentDeviceBrowserBehavior: .present,
+        sourceClass: .officialCLI,
+        publicStructuredPrintContract: true,
+        authentication: .authenticated,
+        credits: .defer,
+        quotaReads: 3,
+        creditReads: 0,
+        providerPrompts: 0,
+        providerTasks: 0,
+        intentionalSpend: 0,
+        testedQuotaArgumentVector: [
+            "$HOME/.local/bin/agy",
+            "--output-format",
+            "json",
+            "-p",
+            "/usage",
+        ],
+        creditValue: nil,
+        creditPercentage: nil,
+        productionConnectorImplemented: false
+    )
 }
 
 private struct AntigravitySanitizedProjection: Equatable {
@@ -615,18 +753,36 @@ private enum AntigravityAdmissionHarness {
 
 private struct AntigravityQuotaProjection: Equatable {
     var buckets: [AntigravityQuotaBucketProjection]
+    var operationalEvidence: AntigravityOperationalProjection
 }
 
 private struct AntigravityQuotaBucketProjection: Equatable {
     var stableID: String
     var remainingPercent: Double
-    var hasReset: Bool
+    var resetTime: Date?
+}
+
+private struct AntigravityOperationalProjection: Equatable {
+    var zeroTurnConfirmed: Bool
+    var conversationCreated: Bool
+    var taskIdentifierPresent: Bool
+    var tokenCountersAllZero: Bool
+    var modelResponseGenerated: Bool
+
+    static let confirmedNoProviderWork = AntigravityOperationalProjection(
+        zeroTurnConfirmed: true,
+        conversationCreated: false,
+        taskIdentifierPresent: false,
+        tokenCountersAllZero: true,
+        modelResponseGenerated: false
+    )
 }
 
 private enum AntigravityQuotaFixtureError: Error, Equatable {
     case malformedJSON
     case unsupportedVersion
     case missingQuotaContainer
+    case invalidOperationalEvidence
     case invalidBucket
     case duplicateBucketIdentity
     case noValidQuota
@@ -657,6 +813,28 @@ private enum AntigravityQuotaFixtureDecoder {
             throw AntigravityQuotaFixtureError.missingQuotaContainer
         }
 
+
+        guard let numTurns = object["num_turns"] as? NSNumber,
+              CFGetTypeID(numTurns) != CFBooleanGetTypeID(),
+              numTurns.intValue == 0,
+              numTurns.doubleValue == 0,
+              let conversationID = object["conversation_id"] as? String,
+              conversationID.isEmpty,
+              let usage = object["usage"] as? [String: Any],
+              !usage.isEmpty,
+              usage.values.allSatisfy({ value in
+                  guard let number = value as? NSNumber,
+                        CFGetTypeID(number) != CFBooleanGetTypeID()
+                  else {
+                      return false
+                  }
+                  return number.doubleValue == 0
+              }),
+              !containsTaskIdentifier(in: object)
+        else {
+            throw AntigravityQuotaFixtureError.invalidOperationalEvidence
+        }
+
         var identities = Set<String>()
         var buckets: [AntigravityQuotaBucketProjection] = []
 
@@ -683,19 +861,21 @@ private enum AntigravityQuotaFixtureDecoder {
                     throw AntigravityQuotaFixtureError.invalidBucket
                 }
 
-                let hasReset: Bool
+                let resetTime: Date?
                 if let reset = rawBucket["reset_time"] {
                     guard let resetString = reset as? String,
-                          iso8601Date(resetString) != nil
+                          let parsedReset = iso8601Date(resetString)
                     else {
                         throw AntigravityQuotaFixtureError.invalidBucket
                     }
-                    hasReset = true
+                    resetTime = parsedReset
                 } else {
-                    hasReset = false
+                    resetTime = nil
                 }
 
-                let stableID = "\(groupName)|\(bucketID)|\(window)"
+                _ = groupName
+                _ = window
+                let stableID = bucketID
                 guard identities.insert(stableID).inserted else {
                     throw AntigravityQuotaFixtureError.duplicateBucketIdentity
                 }
@@ -704,7 +884,7 @@ private enum AntigravityQuotaFixtureDecoder {
                     .init(
                         stableID: stableID,
                         remainingPercent: remainingFraction * 100,
-                        hasReset: hasReset
+                        resetTime: resetTime
                     )
                 )
             }
@@ -713,7 +893,27 @@ private enum AntigravityQuotaFixtureDecoder {
         guard !buckets.isEmpty else {
             throw AntigravityQuotaFixtureError.noValidQuota
         }
-        return AntigravityQuotaProjection(buckets: buckets)
+        return AntigravityQuotaProjection(
+            buckets: buckets,
+            operationalEvidence: .confirmedNoProviderWork
+        )
+    }
+
+    private static func containsTaskIdentifier(in value: Any) -> Bool {
+        if let object = value as? [String: Any] {
+            for (key, nestedValue) in object {
+                let normalized = key.lowercased().replacingOccurrences(of: "-", with: "_")
+                if ["task", "tasks", "task_id", "taskid", "tool_call", "tool_calls"].contains(normalized) {
+                    return true
+                }
+                if containsTaskIdentifier(in: nestedValue) {
+                    return true
+                }
+            }
+        } else if let array = value as? [Any] {
+            return array.contains(where: containsTaskIdentifier)
+        }
+        return false
     }
 
     private static func safeIdentifier(_ value: Any?) -> String? {

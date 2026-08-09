@@ -1,277 +1,191 @@
 # UMA M6 Antigravity Local Source Dossier
 
-**Goals:** M6-G1, M6-SETUP-G1 and M6-G1R
+**Goals:** M6-G1, M6-SETUP-G1, M6-G1R and M6-G1R2
 **Date:** 2026-08-08
-**G1R starting commit:** `6b4a90924705c94db37d4ab6858d56ab084cdbfe`
-**G1R starting tree:** `e7123b7760f1bafeaaaeb6dc487ec53414c5b133`
-**Current decision:** `NO-GO — LIVE ADMISSION EVIDENCE INCOMPLETE`
+**Current decision:** `GO — OFFICIAL ANTIGRAVITY CLI QUOTA SOURCE ADMITTED`
+**Credits:** `CREDITS DEFER`
+**Only next task:** M6-G2
 
-## 1. Executive finding
+## 1. Accepted lineage and unchanged baseline
 
-The official Google Antigravity CLI is installed and the source class remains
-technically promising. One bounded ordinary-network execution returned a
-current structured quota object with explicit remaining semantics, per-bucket
-absolute resets, multiple independent groups, provider-owned authentication,
-and no browser/login action.
+M6-G1 established the official CLI source class and returned `SETUP REQUIRED`.
+M6-SETUP-G1 installed and verified the official manifest-pinned CLI. M6-G1R
+proved one current structured quota response but correctly returned
+`NO-GO — LIVE ADMISSION EVIDENCE INCOMPLETE`: repeated structure, stable quota
+identity and exact no-turn evidence were still missing.
 
-The source is not admitted in M6-G1R. All three authorized executions are
-consumed, but only one retained detailed schema classification. Exact safe
-bucket identity was not retained across two successful samples, and exact live
-`num_turns == 0` was not preserved. The mandatory repeatability, identity, and
-live no-turn gates therefore remain unproven.
-
-Final result:
+M6-G1R2 began from:
 
 ```text
-NO-GO — LIVE ADMISSION EVIDENCE INCOMPLETE
+branch: codex/uma-m6-antigravity
+HEAD: d128018bf27896d34e8bea0c158a2b4a6f77e925
+tree: 9b03062e1d8bed3f3b1c89f5c1f404bdfe231eee
+worktree/index: clean/empty
 ```
 
-## 2. Repository and exclusion-zone baseline
+The installed candidate remained the regular, non-symlink arm64 executable at
+`$HOME/.local/bin/agy`, version `1.1.11`, SHA-256
+`198ff7c3f6d173daa510b0814aa70c6ce14c94035bcd4707a3c0e79fa38a7bc3`.
+Accepted setup trust limitations remain unchanged. M5 frozen records and the
+Codex, Claude and WorkBuddy mechanisms were unchanged.
 
-| Property | Observation |
-|---|---|
-| Workspace | `/Users/juliushe/Developer/UMA-M6-Antigravity` |
-| Branch | `codex/uma-m6-antigravity` |
-| Starting HEAD | `6b4a90924705c94db37d4ab6858d56ab084cdbfe` |
-| Starting tree | `e7123b7760f1bafeaaaeb6dc487ec53414c5b133` |
-| Starting worktree | Clean |
-| Starting index | Empty |
-| Accepted setup commit | Present |
-| M5/shared runtime | Unchanged from accepted setup baseline |
+## 2. Exact read boundary
 
-M6-G1R modifies admission tests and four existing M6 records only. It does not
-modify product source, `Package.swift`, scripts, `BrowserExtension`, M5 records,
-M5 tests, or existing provider mechanisms.
-
-## 3. Installed executable
-
-| Required fact | Current observation |
-|---|---|
-| Exact path | `$HOME/.local/bin/agy` |
-| Resolved path | Same; regular file |
-| Symlink chain | None |
-| Version/build | `1.1.11`; no separate build reported |
-| Type / architecture | Mach-O 64-bit executable, arm64 |
-| Executable SHA-256 | `198ff7c3f6d173daa510b0814aa70c6ce14c94035bcd4707a3c0e79fa38a7bc3` |
-| Embedded identifier / Team ID | `cli` / `EQHXZ8M8AV` |
-| Quarantine / provenance | Quarantine absent; provenance present |
-| Signature / Gatekeeper | Reliable local PASS unavailable under the previously accepted trust-service limitation |
-
-The official installer, manifest version, archive checksum and installed hash
-remain the admitted provenance evidence. M6-G1R neither reinstalls nor updates
-the executable.
-
-## 4. Exact command and execution boundary
-
-Installed help reconfirmed noninteractive print mode, `-p`, JSON and stream-JSON
-formats, and slash-command expansion. The exact source command was:
+Every M6-G1R2 provider invocation used the already proven argument vector:
 
 ```text
 $HOME/.local/bin/agy --output-format json -p /usage
 ```
 
-Each execution used:
+Execution used the ordinary local class that had previously produced structured
+output, an empty owner-only task directory, closed stdin, no shell, no injected
+credentials, a 64 KiB stdout cap, a 16 KiB stderr cap, a 15-second timeout, one
+owned child and complete reap. Raw stdout, stderr and provider JSON existed only
+in memory long enough to produce the allowlisted classifications below.
 
-- exact argv without a shell-constructed provider command;
-- closed stdin;
-- an empty owner-only task directory outside any repository;
-- inherited provider-owned authentication with no injected credential;
-- stdout capped at 64 KiB and stderr capped at 16 KiB;
-- a 15-second timeout;
-- one owned process group with complete teardown.
+## 3. M6-G1R2 read accounting
 
-No residual `agy` process or neutral-directory artifact remained.
+| Execution | Outcome | Durable classification |
+|---|---|---|
+| 1 | Provider process completed; the local evidence harness then hit a process-group permission error during teardown | Conservatively counted as an unclassified live execution; no raw output or exact value persisted |
+| 2 | Exit 0; one JSON object; 1,141 stdout bytes; empty stderr | Successful ordinary structured read |
+| 3 | Exit 0; one JSON object; 1,141 stdout bytes; empty stderr | Successful ordinary structured read |
 
-## 5. Live execution results
+Total M6-G1R2 `/usage` executions were **3/3**. Automatic retries were **0**.
+`/credits` reads, provider prompts, provider tasks and intentional provider work
+were all **0**.
 
-| Execution | Context | Exit | Structured output |
-|---|---|---:|---|
-| 1 | Network-restricted tool sandbox | 1 | None; zero stdout, bounded generic stderr |
-| 2 | Network-restricted tool sandbox | 1 | None; zero stdout, bounded generic stderr |
-| 3 | Approved ordinary network context | 0 | One JSON object, 1141 stdout bytes, zero stderr bytes |
+The first execution exposed a local evidence-harness teardown defect, not a
+provider failure. The harness was repaired to reap the completed child first and
+to use bounded direct-child termination only when process-group signaling is
+unavailable. The two remaining authorized reads were deliberate required
+observations, not retries.
 
-Executions two and three were deliberate ambiguity-resolution reads, not
-automatic retries. The source-read budget is now `3/3`; `/credits` reads remain
-`0`.
+## 4. Repeated structured-output stability
 
-No raw stderr or JSON was persisted. The first two generic errors were not
-classified as authentication or provider-schema failures. The third result
-proves one ordinary current read but does not prove repeatability.
-
-## 6. Sanitized structured contract
-
-Top-level type: object. No schema/version marker was observed.
+Both successful ordinary reads had the same required schema:
 
 ```text
+root: object
 command: object
-  name: string
-  data: object
-    description: string
-    groups: array
-      group: object
-        name: string
-        description: string
-        buckets: array
-          bucket: object
-            id: string
-            name: string
-            remaining_fraction: finite number in 0...1
-            reset_time: ISO-8601 datetime string
-            window: string
-conversation_id: string, observed empty
-duration_seconds: number
-num_turns: number
-response: string
-status: string
-usage: object containing token counters
+command.name: string equal to usage
+command.data: object
+command.data.groups: array
+groups[]: { name: string, description: string, buckets: array }
+buckets[]: {
+  id: string,
+  name: string,
+  remaining_fraction: number,
+  reset_time: string,
+  window: string
+}
 ```
 
-Two groups with one bucket each were observed. Exact group names, bucket IDs,
-bucket names, window values, quota fractions, reset timestamps, response text,
-and counters were deliberately not retained.
+Both observations exposed two groups with one bucket each. Field names, field
+types, group count, bucket counts, remaining semantics, reset semantics and
+private-envelope field classes were structurally reproducible. No schema/version
+marker or freshness field was observed; the decoder boundary is therefore pinned
+to CLI `1.1.11` plus the exact command/container/type contract and must fail
+closed on mismatch.
 
-## 7. Quota and remaining semantics
+## 5. Provider-owned bucket identity
 
-The quota container is:
+The smallest stable provider-owned quota-pool identity is `bucket.id`.
+
+- Every publishable pool had a nonempty bounded provider bucket identifier.
+- `POOL_A_IDENTITY_STABLE: YES`.
+- `POOL_B_IDENTITY_STABLE: YES`.
+- Matching was independent of group/array position.
+- No remaining value, reset time, display label, model assumption or local
+  sequence number participated in identity.
+- One reset observation changed while both bucket identities remained stable,
+  demonstrating that reset/value fields are not identity inputs.
+- Duplicate bucket identifiers across the complete response must fail closed;
+  they must never be merged or disambiguated locally.
+
+Exact live bucket identifiers, labels, window values, balances and reset times
+were discarded and are not recorded here.
+
+## 6. Quota semantics
+
+`remaining_fraction` is an explicit provider remaining fraction. Admission is:
 
 ```text
-command.data.groups[].buckets[]
+finite number in 0...1
+→ remainingPercent = remaining_fraction × 100 exactly once
 ```
 
-`remaining_fraction` is explicit provider output, not a semantic inference from
-numeric range. The only permitted normalization is:
+There is no clamp, used/remaining inference, unavailable-to-zero conversion or
+cross-pool aggregation. `reset_time` is an optional bucket-scoped absolute
+ISO-8601 time. A malformed present reset fails that bucket closed; absence remains
+unavailable. Each independent bucket remains independent.
+
+## 7. Zero-turn and no-provider-work proof
+
+Each successful result was reduced to these booleans before durable retention:
 
 ```text
-remainingPercent = remaining_fraction × 100
+ZERO_TURN_CONFIRMED: YES
+CONVERSATION_CREATED: NO
+TASK_IDENTIFIER_PRESENT: NO
+PROVIDER_TOKEN_COUNTERS_ALL_ZERO: YES
+MODEL_RESPONSE_GENERATED: NO
 ```
 
-Deterministic test rules are:
+The zero-turn classification came from `num_turns == 0`; conversation creation
+from an empty/absent normalized conversation identifier; task creation from the
+absence of task/tool identifiers; and token activity from all provider token
+counters being zero. Response content was never retained or interpreted.
 
-- accept finite numbers only in `0...1`;
-- preserve exact zero and full boundaries;
-- never clamp;
-- missing or wrong-type remaining is unavailable;
-- multiple groups and buckets remain independent;
-- never sum, split, or infer pools from model names.
+No attributable quota decrement was observed across the successful reads. The
+admitted conclusion is deliberately bounded:
 
-The observation was numeric and finite. No used-percentage conversion is needed.
+> No attributable quota consumption observed within provider granularity,
+> consistent with the official read-only command contract.
 
-## 8. Reset semantics
+This does not claim mathematical zero spend beyond provider granularity.
 
-Each observed bucket had `reset_time` as an ISO-8601 absolute datetime string.
-No relative reset duration was observed. Reset remains scoped to its own bucket
-and can never migrate across bucket identities. A missing reset is optional;
-malformed present reset data fails the bucket closed.
+## 8. Authentication, browser and lifecycle
 
-No disabled or unlimited representation was observed. No freshness/currentness
-field was observed. The source therefore depends on local observation time if
-it is ever admitted.
+Provider-owned authentication was already active. The read succeeded without
+DEV accessing credentials, Keychain/keyring data, tokens, cookies, sessions,
+browser profiles or account identity. Safari process count was one before and
+after the successful-read sequence; no login/browser side effect was observed.
 
-## 9. Multiple-bucket identity limitation
+The exact owned CLI child count was one per read. No `agy` child remained after
+completion. The neutral cwd stayed empty. Two task-owned provider temporary
+regular files were removed by exact path without inspecting contents; the
+provider temporary directory was empty after teardown. No unrelated process argv
+or environment was enumerated.
 
-The JSON exposes group `name`, bucket `id`, bucket `name`, and `window`. Those
-fields appear sufficient to form a bounded composite identity, but their exact
-safe values were not retained and were not compared across two successful
-ordinary reads.
+## 9. Privacy projection
 
-This prevents proof that independent pools can be mapped stably without merging
-or splitting them. It is a mandatory admission failure, not an optional display
-label limitation.
+Only these concepts may cross a future decoder boundary:
 
-## 10. Authentication classification
+- validated provider `bucket.id`;
+- finite `remaining_fraction`, normalized once;
+- optional bucket-scoped `reset_time`;
+- a separately validated safe display label if later required;
+- CLI version and local observation time;
+- normalized zero-turn/no-provider-work booleans.
 
-Current provider-owned authentication worked for the successful command. No
-browser launched, no login action appeared, and no credential material crossed
-into UMA or DEV.
+Conversation/response text, descriptions, token-counter values, duration,
+status, raw JSON, account identity, credentials, workspace data and all unknown
+fields are discarded. No exact live balance, reset or identity value was made
+durable.
 
-No password, verification code, Keychain/keyring item, cookie, browser profile,
-OAuth token, refresh token, session, auth database, account identity, or login
-URL was accessed. Authentication was not intentionally invalidated.
+## 10. Decision
 
-A future source would need fixed fail-closed `loginRequired`, `sessionExpired`,
-and `browserLoginSideEffect` classifications. M6-G1R does not implement them.
+M6-G1R2 closes all three mandatory M6-G1R gaps:
 
-## 11. No-turn, no-task, no-conversation and no-spend evidence
+1. repeated ordinary structured-output stability — PASS;
+2. deterministic provider-owned pool identity — PASS;
+3. durable sanitized zero-turn/no-provider-work evidence — PASS.
 
-The official 1.1.11 public contract describes read-only print-mode `/usage` as
-creating no agent turn, quota spend, or conversation. Live evidence agrees in
-all observable ways:
+The official Antigravity CLI quota source is admitted:
 
-- no prompt or task was supplied;
-- no browser/login action occurred;
-- no workspace/project artifact appeared;
-- no residual provider child remained;
-- the observed `conversation_id` was empty.
+`GO — OFFICIAL ANTIGRAVITY CLI QUOTA SOURCE ADMITTED`
 
-However, the sanitized probe retained only a `0...1` range classification for
-`num_turns`, not exact `num_turns == 0`. That mandatory live proof is therefore
-unavailable.
-
-Strongest honest spend conclusion:
-
-```text
-No attributable quota consumption was observed within available evidence,
-consistent with the official read-only command contract.
-```
-
-Mathematical zero-spend cannot be independently measured at the provider's
-display granularity and is not claimed.
-
-## 12. Privacy allowlist
-
-If later readmission is authorized, only these concepts may survive decoding:
-
-- bounded validated group/bucket identity;
-- bounded non-identifying label only when separately proven safe;
-- explicit `remaining_fraction`;
-- per-bucket `reset_time`;
-- bounded validated `window` only when required for pool identity;
-- installed CLI version and local observation time.
-
-Discard before business logic:
-
-- `conversation_id`;
-- `response` and all description/free-text fields;
-- `usage` token counters;
-- `num_turns`, duration and unused status text;
-- account, plan, identity, project, workspace, VCS, task, tool, prompt,
-  response, login, session, credential and token fields;
-- every unknown future field.
-
-Raw stdout, stderr, JSON, live values, timestamps and raw-payload hashes are
-never durable evidence.
-
-## 13. Process and privacy evidence method
-
-The probe observed only its owned child and bounded pipes. External process
-checks used exact process names/PIDs only. No broad argv or environment dump was
-performed. Safari and `agy` counts were zero before and after the successful
-ordinary-network execution.
-
-The previous transient CSRF-argument incident was not repeated. No sensitive
-value entered Git, tests, task files, screenshots, logs or this record.
-
-## 14. Credits
-
-**`CREDITS DEFER`**
-
-No `/credits` command ran. The observed quota container had no admitted Credit
-field. Credits do not influence this quota decision.
-
-## 15. Independent review and decision
-
-The source/protocol examiner and privacy examiner independently selected
-`NO-GO` because repeated successful detailed structure, stable bucket identity,
-and exact live no-turn proof are core gates. The QA examiner recommended
-`CONDITIONAL GO`, treating them as later acceptance conditions. Root review
-rejected that relaxation because the governing Goal permits conditional status
-only for optional metadata after primary stability and identity are proven.
-
-The final M6-G1R decision is therefore:
-
-```text
-NO-GO — LIVE ADMISSION EVIDENCE INCOMPLETE
-```
-
-The only next task is **Founder source-direction decision**. M6-G2 remains
-locked.
+Credits remain **`CREDITS DEFER`**. No Credits source was inspected. No
+production connector, scheduler, UI, package or installed application was
+changed. **M6-G2 is the only next task and was not begun.**
