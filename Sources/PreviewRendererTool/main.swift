@@ -133,6 +133,12 @@ struct PreviewRendererTool {
                     language: language
                 )
                 : nil
+            let antigravityCard = arguments.contains("--antigravity")
+                ? makeAntigravityCard(
+                    arguments: arguments,
+                    language: language
+                )
+                : nil
             let previewScenario = arguments.contains("--workbuddy-only")
                 ? CodexPreviewScenario.permission
                 : try codexPreviewScenario(arguments)
@@ -147,6 +153,7 @@ struct PreviewRendererTool {
             let extraCards = (codexCard.map { [$0] } ?? [])
                 + (claudeCard.map { [$0] } ?? [])
                 + (workBuddyCard.map { [$0] } ?? [])
+                + (antigravityCard.map { [$0] } ?? [])
                 + makeSyntheticCards(
                     count: syntheticProviderCount(arguments),
                     language: language
@@ -172,6 +179,8 @@ struct PreviewRendererTool {
                         ? "workbuddy.accountWebCredits"
                         : "workbuddy.manualAvailability"
                 ]
+            } else if arguments.contains("--antigravity-expanded") {
+                expandedProviderIDs = ["antigravity.cli"]
             } else {
                 expandedProviderIDs = []
             }
@@ -219,6 +228,28 @@ struct PreviewRendererTool {
             let workBuddySettings = workBuddyLogin != nil || accountWebSync != nil
                 ? WorkBuddySettingsModel.preview()
                 : nil
+            let antigravitySettings = arguments.contains("--antigravity")
+                ? AntigravitySettingsModel(
+                    initialState: .fresh(
+                        Date(timeIntervalSince1970: 1_800_000_000)
+                    ),
+                    checkAgain: {
+                        AntigravitySettingsObservation(
+                            state: .fresh(
+                                Date(timeIntervalSince1970: 1_800_000_000)
+                            )
+                        )
+                    },
+                    syncNow: {
+                        AntigravitySettingsObservation(
+                            state: .fresh(
+                                Date(timeIntervalSince1970: 1_800_000_000)
+                            )
+                        )
+                    },
+                    disable: {}
+                )
+                : nil
             let panelHeight = measuredPanelHeight(
                 store: store,
                 tuning: tuning,
@@ -226,6 +257,7 @@ struct PreviewRendererTool {
                 settingsDestinationProviderID:
                     settingsDestinationProviderID,
                 expandedProviderIDs: expandedProviderIDs,
+                antigravitySettings: antigravitySettings,
                 workBuddySettings: workBuddySettings,
                 workBuddyLogin: workBuddyLogin,
                 workBuddyAccountWebSync: accountWebSync,
@@ -250,6 +282,7 @@ struct PreviewRendererTool {
                         guard interactive else { return }
                         interactiveHeightUpdate?(height)
                     },
+                    antigravitySettings: antigravitySettings,
                     workBuddySettings: workBuddySettings,
                     workBuddyLogin: workBuddyLogin,
                     workBuddyAccountWebSync: accountWebSync,
@@ -520,6 +553,7 @@ struct PreviewRendererTool {
         showsSettings: Bool,
         settingsDestinationProviderID: String?,
         expandedProviderIDs: Set<String>,
+        antigravitySettings: AntigravitySettingsModel?,
         workBuddySettings: WorkBuddySettingsModel?,
         workBuddyLogin: WorkBuddyLoginCoordinator?,
         workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?,
@@ -536,6 +570,7 @@ struct PreviewRendererTool {
                 settingsDestinationProviderID: settingsDestinationProviderID,
                 expandedProviderIDs: expandedProviderIDs,
                 onHeightChange: { measurement.height = $0 },
+                antigravitySettings: antigravitySettings,
                 workBuddySettings: workBuddySettings,
                 workBuddyLogin: workBuddyLogin,
                 workBuddyAccountWebSync: workBuddyAccountWebSync,
@@ -565,6 +600,66 @@ struct PreviewRendererTool {
         }
         window.orderOut(nil)
         return UsagePanelMetrics.resolvedContentHeight(measurement.height)
+    }
+
+    private static func makeAntigravityCard(
+        arguments: [String],
+        language: AppLanguage
+    ) -> SharedUsageCardPresentation {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let isFailed = arguments.contains("--antigravity-failed")
+        let isCached = arguments.contains("--antigravity-cached")
+        let isStale = arguments.contains("--antigravity-stale") || isFailed
+        let primary = SharedUsageWindowPresentation(
+            id: "antigravity-primary",
+            kind: .other,
+            compactLabel: language == .english ? "Primary" : "主要额度",
+            accessibilityLabel: language == .english
+                ? "Primary usage window"
+                : "主要额度窗口",
+            remaining: .finite(58),
+            resetsAt: now.addingTimeInterval(7_200),
+            resetText: language == .english
+                ? "Resets in 2 hr"
+                : "2 小时后重置"
+        )
+        let secondary = SharedUsageWindowPresentation(
+            id: "antigravity-secondary",
+            kind: .other,
+            compactLabel: language == .english ? "Secondary" : "次要额度",
+            accessibilityLabel: language == .english
+                ? "Secondary usage window"
+                : "次要额度窗口",
+            remaining: .finite(76),
+            resetsAt: arguments.contains("--antigravity-missing-reset")
+                ? nil
+                : now.addingTimeInterval(86_400),
+            resetText: arguments.contains("--antigravity-missing-reset")
+                ? (language == .english ? "Reset unavailable" : "重置时间不可用")
+                : (language == .english ? "Resets in 1 day" : "1 天后重置")
+        )
+        return SharedUsageCardPresentation(
+            id: "antigravity.cli",
+            providerName: "Google Antigravity",
+            connectionStatus: isFailed
+                ? .failed
+                : (isStale ? .stale : .connected),
+            freshness: isCached ? .cached : (isStale ? .stale : .fresh),
+            windows: [primary, secondary],
+            selectedWindowID: primary.id,
+            remaining: primary.remaining,
+            sourceDescription: language == .english
+                ? "Official Antigravity CLI · read-only /usage"
+                : "Antigravity 官方 CLI · 只读 /usage",
+            isVisibleInDesktopAssistant: false,
+            severity: isCached || isStale
+                ? .neutral
+                : SharedUsagePresentationPolicy.severity(
+                    for: primary.remaining
+                ),
+            isRetainingLastValidValue: isCached || isStale,
+            capturedAt: now
+        )
     }
 
     private static func makeWorkBuddyCard(

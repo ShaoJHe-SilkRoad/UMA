@@ -193,15 +193,10 @@ public struct UsageMonitorRuntime {
                 return AntigravitySettingsObservation(state: .loginRequired)
             }
         )
-        Task { @MainActor [weak antigravitySettings] in
-            let stream = await antigravityConnector.snapshots()
-            for await snapshot in stream {
-                guard !Task.isCancelled else { return }
-                antigravitySettings?.receive(
-                    Self.antigravityObservation(snapshot)
-                )
-            }
-        }
+        antigravitySettings.observe(
+            from: antigravityConnector,
+            map: Self.antigravityObservation
+        )
         Task {
             let shouldStartClaude = claudeConsent.consentGranted
             // Browser Sync is not a passive local-availability source, but a
@@ -234,7 +229,7 @@ public struct UsageMonitorRuntime {
         )
     }
 
-    static func antigravityObservation(
+    nonisolated static func antigravityObservation(
         _ snapshot: AgentUsageSnapshot
     ) -> AntigravitySettingsObservation {
         let observedAt = snapshot.lastSuccessfulAt ?? snapshot.capturedAt

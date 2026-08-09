@@ -22,6 +22,22 @@ struct M6G2AntigravityConnectorSchedulerTests {
     }
 
     @Test
+    func completedLaunchReadDoesNotSwallowFirstLaterManualRefresh() async {
+        let reader = CountingQuotaReader()
+        let connector = makeConnector(reader: { try await reader.read() })
+
+        await connector.start()
+        await waitUntil {
+            (await connector.diagnostics()).completedReadCount == 1
+        }
+        await connector.refresh(trigger: .manual)
+
+        #expect(await reader.count == 2)
+        #expect((await connector.diagnostics()).completedReadCount == 2)
+        await connector.stop()
+    }
+
+    @Test
     func concurrentManualRefreshesShareOneInFlightRead() async {
         let reader = BlockingQuotaReader()
         let connector = makeConnector(reader: { try await reader.read() })
@@ -188,6 +204,52 @@ struct M6G2AntigravityConnectorSchedulerTests {
     }
 
     @Test
+    func immediateRefreshThenDisconnectCannotOrphanLaunchReadOrRepublish() async {
+        let barrier = InitialReadBarrier()
+        let reader = CountingQuotaReader()
+        let connector = makeConnector(
+            reader: { try await reader.read() },
+            initialReadBarrier: { await barrier.wait() }
+        )
+
+        await connector.start()
+        let refresh = Task { await connector.refresh() }
+        await Task.yield()
+        await connector.perform(.disconnect)
+        await barrier.release()
+        await refresh.value
+
+        let snapshot = await connector.currentSnapshot()
+        let diagnostics = await connector.diagnostics()
+        #expect(await reader.count == 0)
+        #expect(snapshot.state == .inactive)
+        #expect(snapshot.channels.isEmpty)
+        #expect(!diagnostics.processReadInFlight)
+        #expect(!diagnostics.schedulerActive)
+    }
+
+    @Test
+    func wakeDuringActiveReadDoesNotDuplicateAndKeepsOneScheduler() async {
+        let reader = BlockingQuotaReader()
+        let connector = makeConnector(reader: { try await reader.read() })
+
+        await connector.start()
+        await waitUntil { await reader.count == 1 }
+        let wake = Task { await connector.refresh(trigger: .wake) }
+        await wake.value
+        #expect(await reader.count == 1)
+        #expect(await reader.maximumConcurrent == 1)
+
+        await reader.release()
+        await waitUntil {
+            (await connector.diagnostics()).completedReadCount == 1
+        }
+        let diagnostics = await connector.diagnostics()
+        #expect(diagnostics.schedulerActive)
+        await connector.stop()
+    }
+
+    @Test
     func descriptorIsProviderFourReadOnlyAndAssistantHidden() {
         let connector = makeConnector(reader: { quota() })
         let descriptor = connector.descriptor
@@ -218,11 +280,40 @@ struct M6G2AntigravityConnectorSchedulerTests {
         await connector.stop()
     }
 
+    @Test @MainActor
+    func settingsObserverTerminatesWithOwningModel() async {
+        let connector = makeConnector(reader: { quota() })
+        var model: AntigravitySettingsModel? = AntigravitySettingsModel(
+            checkAgain: { AntigravitySettingsObservation(state: .checking) },
+            syncNow: { AntigravitySettingsObservation(state: .checking) },
+            disable: {}
+        )
+        weak var weakModel = model
+        model?.observe(
+            from: connector,
+            map: UsageMonitorRuntime.antigravityObservation
+        )
+        await waitUntil {
+            (await connector.diagnostics()).snapshotObserverCount == 1
+        }
+
+        model = nil
+        await waitUntil {
+            (await connector.diagnostics()).snapshotObserverCount == 0
+        }
+
+        #expect(weakModel == nil)
+        #expect((await connector.diagnostics()).snapshotObserverCount == 0)
+        await connector.stop()
+    }
+
     private func makeConnector(
         reader: @escaping GoogleAntigravityUsageConnector.QuotaReader,
         verifier: @escaping GoogleAntigravityUsageConnector.CapabilityVerifier = {},
         autoRefreshEnabled:
             @escaping GoogleAntigravityUsageConnector.PreferenceReader = { true },
+        initialReadBarrier:
+            @escaping GoogleAntigravityUsageConnector.InitialReadBarrier = {},
         now: @escaping GoogleAntigravityUsageConnector.Now = Date.init,
         sleeper: @escaping GoogleAntigravityUsageConnector.Sleeper = { _ in
             throw CancellationError()
@@ -233,6 +324,7 @@ struct M6G2AntigravityConnectorSchedulerTests {
             readQuota: reader,
             verifyCapability: verifier,
             autoRefreshEnabled: autoRefreshEnabled,
+            initialReadBarrier: initialReadBarrier,
             now: now,
             sleep: sleeper,
             refreshInterval: interval
@@ -256,6 +348,22 @@ struct M6G2AntigravityConnectorSchedulerTests {
             return snapshot
         }
         return nil
+    }
+}
+
+private actor InitialReadBarrier {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var released = false
+
+    func wait() async {
+        guard !released else { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func release() {
+        released = true
+        continuation?.resume()
+        continuation = nil
     }
 }
 

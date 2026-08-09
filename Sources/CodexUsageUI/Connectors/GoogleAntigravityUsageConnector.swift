@@ -7,6 +7,7 @@ struct GoogleAntigravityConnectorDiagnostics: Equatable, Sendable {
     let processReadInFlight: Bool
     let schedulerActive: Bool
     let automaticRefreshSuspended: Bool
+    let snapshotObserverCount: Int
 }
 
 actor GoogleAntigravityUsageConnector: AgentUsageConnector {
@@ -14,6 +15,7 @@ actor GoogleAntigravityUsageConnector: AgentUsageConnector {
         @Sendable () async throws -> AntigravityQuotaSnapshot
     typealias CapabilityVerifier = @Sendable () throws -> Void
     typealias PreferenceReader = @Sendable () async -> Bool
+    typealias InitialReadBarrier = @Sendable () async -> Void
     typealias Now = @Sendable () -> Date
     typealias Sleeper = @Sendable (TimeInterval) async throws -> Void
 
@@ -89,6 +91,7 @@ actor GoogleAntigravityUsageConnector: AgentUsageConnector {
     private let readQuota: QuotaReader
     private let verifyCapability: CapabilityVerifier
     private let autoRefreshEnabled: PreferenceReader
+    private let initialReadBarrier: InitialReadBarrier
     private let now: Now
     private let sleep: Sleeper
     private let refreshInterval: TimeInterval
@@ -101,6 +104,7 @@ actor GoogleAntigravityUsageConnector: AgentUsageConnector {
     private var started = false
     private var activeRead: ActiveRead?
     private var initialReadTask: Task<Void, Never>?
+    private var initialReadGeneration: UInt64 = 0
     private var schedulerTask: Task<Void, Never>?
     private var schedulerGeneration: UInt64 = 0
     private var readGeneration: UInt64 = 0
@@ -113,6 +117,7 @@ actor GoogleAntigravityUsageConnector: AgentUsageConnector {
         readQuota: @escaping QuotaReader,
         verifyCapability: @escaping CapabilityVerifier,
         autoRefreshEnabled: @escaping PreferenceReader = { true },
+        initialReadBarrier: @escaping InitialReadBarrier = {},
         now: @escaping Now = Date.init,
         sleep: @escaping Sleeper = { interval in
             try await Task.sleep(for: .seconds(interval))
@@ -122,6 +127,7 @@ actor GoogleAntigravityUsageConnector: AgentUsageConnector {
         self.readQuota = readQuota
         self.verifyCapability = verifyCapability
         self.autoRefreshEnabled = autoRefreshEnabled
+        self.initialReadBarrier = initialReadBarrier
         self.now = now
         self.sleep = sleep
         self.refreshInterval = max(refreshInterval, Self.minimumRefreshInterval)
@@ -178,9 +184,11 @@ actor GoogleAntigravityUsageConnector: AgentUsageConnector {
                 capturedAt: now()
             ))
         }
+        initialReadGeneration &+= 1
+        let generation = initialReadGeneration
         let task = Task<Void, Never> { [weak self] in
             guard let self else { return }
-            await self.requestRead(reschedule: true)
+            await self.performInitialRead(generation: generation)
         }
         initialReadTask = task
     }
@@ -244,7 +252,8 @@ actor GoogleAntigravityUsageConnector: AgentUsageConnector {
             scheduledCycleCount: scheduledCycleCount,
             processReadInFlight: activeRead != nil,
             schedulerActive: schedulerTask != nil,
-            automaticRefreshSuspended: automaticRefreshSuspended
+            automaticRefreshSuspended: automaticRefreshSuspended,
+            snapshotObserverCount: continuations.count
         )
     }
 
@@ -257,12 +266,32 @@ actor GoogleAntigravityUsageConnector: AgentUsageConnector {
     }
 
     private func consumeInitialReadOrRefresh() async {
-        if let initialReadTask {
-            self.initialReadTask = nil
-            await initialReadTask.value
-            return
+        if let launchTask = initialReadTask {
+            let generation = initialReadGeneration
+            let completedBeforeAwait = completedReadCount
+            await launchTask.value
+            guard started, initialReadGeneration == generation else { return }
+            // Coalesce only when the launch read was still active when this
+            // request arrived. A completed-but-not-yet-cleared launch task
+            // must not swallow the first later manual refresh.
+            if completedReadCount > completedBeforeAwait {
+                return
+            }
         }
+        guard started else { return }
         await requestRead(reschedule: true)
+    }
+
+    private func performInitialRead(generation: UInt64) async {
+        await initialReadBarrier()
+        guard started,
+              initialReadGeneration == generation,
+              !Task.isCancelled else { return }
+        await requestRead(reschedule: true)
+        guard started,
+              initialReadGeneration == generation,
+              !Task.isCancelled else { return }
+        initialReadTask = nil
     }
 
     private func requestRead(reschedule: Bool) async {
@@ -415,6 +444,7 @@ actor GoogleAntigravityUsageConnector: AgentUsageConnector {
         started = false
         automaticRefreshSuspended = false
         cancelScheduler()
+        initialReadGeneration &+= 1
         initialReadTask?.cancel()
         initialReadTask = nil
         activeRead?.task.cancel()
@@ -492,7 +522,12 @@ actor GoogleAntigravityUsageConnector: AgentUsageConnector {
         let age = now.timeIntervalSince(lastGood.lastSuccessfulAt ?? .distantPast)
         let freshness: AgentConnectorFreshness
         let state: AgentConnectorState
-        if age <= freshnessInterval {
+        if failure != nil, age <= staleInterval {
+            // A failed current read can retain the last valid value, but it
+            // must never continue to present that value as current/Fresh.
+            freshness = .cached
+            state = .ready
+        } else if age <= freshnessInterval {
             freshness = .fresh
             state = .ready
         } else if age <= staleInterval {

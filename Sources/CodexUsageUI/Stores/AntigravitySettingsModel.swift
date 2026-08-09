@@ -109,6 +109,7 @@ public final class AntigravitySettingsModel: ObservableObject {
 
     public let sourceTransparency = AntigravitySourceTransparency()
     private let operations: AntigravitySettingsOperations
+    private var observationTask: Task<Void, Never>?
 
     init(
         operations: AntigravitySettingsOperations = .unavailable,
@@ -119,6 +120,10 @@ public final class AntigravitySettingsModel: ObservableObject {
         state = initialState
         safeError = nil
         self.autoRefreshEnabled = autoRefreshEnabled
+    }
+
+    deinit {
+        observationTask?.cancel()
     }
 
     public convenience init(
@@ -213,6 +218,20 @@ public final class AntigravitySettingsModel: ObservableObject {
         guard !actionInProgress else { return }
         state = observation.state
         safeError = observation.safeError
+    }
+
+    func observe(
+        from connector: GoogleAntigravityUsageConnector,
+        map: @escaping @Sendable (AgentUsageSnapshot) -> AntigravitySettingsObservation
+    ) {
+        observationTask?.cancel()
+        observationTask = Task { @MainActor [weak self] in
+            let stream = await connector.snapshots()
+            for await snapshot in stream {
+                guard !Task.isCancelled, self != nil else { return }
+                self?.receive(map(snapshot))
+            }
+        }
     }
 
     private func run(

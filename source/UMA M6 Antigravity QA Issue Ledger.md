@@ -1,12 +1,12 @@
 # UMA M6 Antigravity QA Issue Ledger
 
-**Goals:** M6-G1, M6-SETUP-G1, M6-G1R, M6-G1R2, M6-G2 and M6-G3
+**Goals:** M6-G1, M6-SETUP-G1, M6-G1R, M6-G1R2, M6-G2, M6-G3 and M6DBG-G1
 **Date:** 2026-08-08
 **Historical M6-G1 decision:** `SETUP REQUIRED — OFFICIAL ANTIGRAVITY CLI NOT INSTALLED`
 **Historical M6-G1R decision:** `NO-GO — LIVE ADMISSION EVIDENCE INCOMPLETE`
 **Current decision:** `GO — OFFICIAL ANTIGRAVITY CLI QUOTA SOURCE ADMITTED`
 **Credits:** `CREDITS DEFER`
-**Only next task after G3 PASS:** M6DBG-G1
+**Only next task after M6DBG PASS:** M6A-G1
 
 ## Scope
 
@@ -211,3 +211,47 @@ Credits remain `CREDITS DEFER`.
 | Credits | `CREDITS DEFER` |
 | Protected M5 files | PASS — 52-file frozen set unchanged from the accepted manifest |
 | Existing mechanisms | Codex NO; Claude NO; WorkBuddy NO |
+
+## M6DBG-G1 four-provider defect closure
+
+This section retains no exact quota, bucket identifier, label, reset timestamp,
+raw provider output, identity, credential, conversation, prompt or task data.
+
+| ID | Finder | Severity | Evidence / acceptance impact | Repair | Focused retest | Regression retest | Final status |
+|---|---|---:|---|---|---|---|---|
+| M6DBG-001 | Lifecycle review | Major | The completed launch-read task could remain stored briefly and consume the first later manual refresh without starting a new provider read | Distinguish an active launch read from a completed launch task; coalesce only the active operation and execute the later refresh | Launch/manual handoff and collision tests PASS | M6 85/85; full 570/570 | Closed |
+| M6DBG-002 | Lifecycle review | Major | The production Settings observer task was unowned, so model/runtime teardown could leave a connector stream continuation alive | Give `AntigravitySettingsModel` sole task ownership; cancel at deinit; verify stream continuation removal | 30 Settings cycles and observer teardown PASS | M6 85/85; full 570/570 | Closed |
+| M6DBG-003 | Failure-matrix test | Major | A timeout could retain last-valid quota while continuing to label it Fresh | Mark retained last-valid data Cached immediately on a failed current read; preserve the existing Stale age boundary and recovery to Fresh | Transient failure/recovery test PASS | M6 85/85; full 570/570 | Closed |
+| M6DBG-004 | Focused test run | Minor, acceptance-required | A constant-zero deterministic random generator could stall bounded standard-library shuffle selection | Replace it with a seeded deterministic generator | All 24 completion-order permutations PASS | M6DBG 11/11 PASS | Closed |
+| M6DBG-005 | Privacy-test review | Minor, acceptance-required | The first self-audit treated required no-work validation and explicit unsupported-field names as active privacy paths | Reject active Credits/credential/browser mechanisms while affirmatively checking safe no-work validation and unsupported-field classification | Privacy contract test PASS | M6DBG 11/11 PASS | Closed |
+| M6DBG-006 | Independent staged-index review | Blocking | An immediate refresh cleared cancellation ownership before awaiting a launch task; Disconnect could then miss a delayed task and allow it to read or republish after teardown | Retain launch-task ownership, validate started/generation/cancellation before and after the read, and return fail-closed after lifecycle invalidation | Deterministic barrier race proves zero reads and inactive state after immediate refresh/Disconnect | Scheduler 15/15; M6 85/85; full 570/570 | Closed |
+| M6DBG-007 | Independent staged-index review | Blocking | Connector cycles did not prove full application relaunch, and sleep/wake had no explicit M6DBG acceptance evidence | Run the rebuilt exact preflight through 20 isolated full-app launch/termination cycles and add deterministic wake-during-read coverage | 20/20 exact-path app cycles, zero residual process; wake produces no duplicate read and keeps one scheduler | M6 85/85; full 570/570 | Closed |
+
+## M6DBG live accounting
+
+| Operation class | Authorized | Consumed |
+|---|---:|---:|
+| Read-only `/usage` operations | 6 | 4 |
+| Successful structured operations | n/a | 4 |
+| Final-code accepted operations | n/a | 2 |
+| `/credits` operations | 0 | 0 |
+| Provider prompts/tasks/conversations | 0 | 0 |
+| Intentional provider work/spend | 0 | 0 |
+
+## M6DBG final verification summary
+
+| Check | Result |
+|---|---|
+| Four-provider subset/order/failure matrix | PASS — deterministic fixture coverage complete |
+| Refresh collision matrix | PASS — 60 colliding requests, one in-flight Antigravity read |
+| Lifecycle matrix | PASS — 20 connector runtime, 20 exact-path full-app relaunch, 50 panel, 30 Settings, wake and refresh/Disconnect-race cycles |
+| Physical main-panel renderer matrix | PASS — 0–4 providers, collapsed/expanded, failure mix, Light/Dark and Settings |
+| Resource trend | PASS — CPU idle; RSS decreased; threads decreased; descriptors stable; child count zero |
+| Live final-code production connector | PASS — 2 final-code reads; scheduler/manual coalescing; one process; teardown |
+| Focused / affected / complete fresh suite | PASS — 11/11; 85/85; 570/570 |
+| Debug / Release / strict Release | PASS / PASS / PASS with Swift warnings as errors |
+| Working-tree M6DBG preflight package | PASS — build 202608090002, arm64, strict deep signature, system dependencies, no bundled `agy` |
+| Privacy, frozen M5 and protected provider audits | PASS — no secret/account identity/private provider data; accepted M5 52-file manifest and Desktop executable unchanged; direct Codex/Claude/WorkBuddy paths untouched |
+| Independent staged-index review | PASS — exact ten-file cached scope; no blocker or actionable issue |
+| Commit-exact package | Pending |
+| Credits | `CREDITS DEFER` |
