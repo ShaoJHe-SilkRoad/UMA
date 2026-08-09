@@ -176,7 +176,7 @@ struct M6G3AntigravityLiveAcceptanceTests {
             "workbuddy.accountWeb",
             GoogleAntigravityUsageConnector.connectorID.rawValue,
         ]
-        let assistantExcluded = !store.assistantPresentationCards.contains {
+        let assistantIncluded = store.assistantPresentationCards.contains {
             $0.id == GoogleAntigravityUsageConnector.connectorID.rawValue
         }
         let evidence = M6G3SanitizedLiveEvidence(
@@ -190,7 +190,7 @@ struct M6G3AntigravityLiveAcceptanceTests {
             bucketScopedResetValid: allResetsScoped,
             mainPanelAdmission: initialCard != nil && finalCardReady,
             providerOrderValid: providerOrder,
-            desktopAssistantExcluded: assistantExcluded,
+            desktopAssistantIncluded: assistantIncluded,
             scheduledRefreshCompleted: diagnostics.scheduledCycleCount == 1
                 && diagnostics.completedReadCount == 2,
             manualScheduledCoalescing: diagnostics.coalescedReadCount >= 1,
@@ -215,7 +215,7 @@ struct M6G3AntigravityLiveAcceptanceTests {
         #expect(stoppedEvidence.bucketScopedResetValid)
         #expect(stoppedEvidence.mainPanelAdmission)
         #expect(stoppedEvidence.providerOrderValid)
-        #expect(stoppedEvidence.desktopAssistantExcluded)
+        #expect(stoppedEvidence.desktopAssistantIncluded)
         #expect(stoppedEvidence.scheduledRefreshCompleted)
         #expect(stoppedEvidence.manualScheduledCoalescing)
         #expect(stoppedEvidence.noDuplicateProcess)
@@ -318,7 +318,7 @@ private enum M6G3SanitizedComparison {
         guard card.providerName == "Google Antigravity",
               card.freshness == .fresh,
               card.connectionStatus == .connected,
-              !card.isVisibleInDesktopAssistant,
+              card.isVisibleInDesktopAssistant,
               card.windows.count == quota.buckets.count
         else { return false }
         let quotaByID = Dictionary(
@@ -361,7 +361,7 @@ private struct M6G3SanitizedLiveEvidence: Codable {
     let bucketScopedResetValid: Bool
     let mainPanelAdmission: Bool
     let providerOrderValid: Bool
-    let desktopAssistantExcluded: Bool
+    let desktopAssistantIncluded: Bool
     let scheduledRefreshCompleted: Bool
     let manualScheduledCoalescing: Bool
     let noDuplicateProcess: Bool
@@ -379,7 +379,7 @@ private struct M6G3SanitizedLiveEvidence: Codable {
             bucketScopedResetValid: bucketScopedResetValid,
             mainPanelAdmission: mainPanelAdmission,
             providerOrderValid: providerOrderValid,
-            desktopAssistantExcluded: desktopAssistantExcluded,
+            desktopAssistantIncluded: desktopAssistantIncluded,
             scheduledRefreshCompleted: scheduledRefreshCompleted,
             manualScheduledCoalescing: manualScheduledCoalescing,
             noDuplicateProcess: noDuplicateProcess,

@@ -33,7 +33,6 @@ actor GoogleAntigravityUsageConnector: AgentUsageConnector {
         .rateLimits,
         .sanitizedLastValidRestore,
         .automaticRefresh,
-        .hiddenFromDesktopAssistant,
     ]
 
     nonisolated let id = connectorID

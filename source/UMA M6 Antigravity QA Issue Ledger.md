@@ -1,12 +1,12 @@
 # UMA M6 Antigravity QA Issue Ledger
 
-**Goals:** M6-G1, M6-SETUP-G1, M6-G1R, M6-G1R2, M6-G2, M6-G3 and M6DBG-G1
+**Goals:** M6-G1, M6-SETUP-G1, M6-G1R, M6-G1R2, M6-G2, M6-G3, M6DBG-G1 and M6A-G1
 **Date:** 2026-08-08
 **Historical M6-G1 decision:** `SETUP REQUIRED — OFFICIAL ANTIGRAVITY CLI NOT INSTALLED`
 **Historical M6-G1R decision:** `NO-GO — LIVE ADMISSION EVIDENCE INCOMPLETE`
 **Current decision:** `GO — OFFICIAL ANTIGRAVITY CLI QUOTA SOURCE ADMITTED`
 **Credits:** `CREDITS DEFER`
-**Only next task after M6DBG PASS:** M6A-G1
+**Only next task after M6A PASS:** M6ADBG-G1
 
 ## Scope
 
@@ -255,3 +255,41 @@ raw provider output, identity, credential, conversation, prompt or task data.
 | Independent staged-index review | PASS — exact ten-file cached scope; no blocker or actionable issue |
 | Commit-exact package | Pending |
 | Credits | `CREDITS DEFER` |
+
+## M6A-G1 Desktop Assistant issue ledger
+
+This section is deterministic and fixture-only. It retains no live quota,
+bucket identifier, label, reset timestamp, raw provider output, identity,
+credential, conversation, prompt or task data. M6A performs no provider read.
+
+| ID | Finder | Severity | Evidence / acceptance impact | Repair | Focused retest | Regression retest | Final status |
+|---|---|---:|---|---|---|---|---|
+| M6A-001 | Shared-surface admission review | Blocking | The accepted Antigravity shared card was explicitly excluded from Desktop Assistant | Remove only `.hiddenFromDesktopAssistant`; preserve the existing connector, process, decoder, scheduler, cache, registry and UsageStore ownership | M6A focused 11/11 PASS | Affected 78/78 and full 581/581 PASS | Closed — PASS |
+| M6A-002 | Regular-mode presentation review | Major | Antigravity had no localized shared source description, so Regular, Tooltip and accessibility output could omit Fresh/Cached/Stale context | Add the existing localized Antigravity source label at the shared presentation boundary without changing source data or selection | M6A focused 11/11 PASS | Light/Dark and EN/zh-CN deterministic renderer matrix PASS | Closed — PASS |
+| M6A-003 | Renderer review | Major | Assistant fixtures could not include Antigravity, and the missing-reset flag altered an unselected bucket | Add an Assistant Antigravity fixture, make the selected bucket own missing-reset evidence and permit deterministic secondary-bucket selection | M6A focused 11/11 PASS | Twelve-image Regular/Minimalist and state renderer matrix PASS | Closed — PASS |
+| M6A-004 | Predecessor contract review | Acceptance-required | Always-run G2/G3 tests still encoded the superseded Assistant exclusion contract | Update only the current product-contract assertions; preserve historical G3/M6DBG records and live accounting unchanged | Affected 78/78 PASS | Full 581/581 PASS | Closed — PASS |
+| M6A-005 | Delivery review | Gate | The M6 package helper had no persistent-root M6A preflight/final phases | Add exact no-overwrite `m6a-preflight` and commit-exact `m6a-final` phases while preserving the package allowlist and M5 companions | Package-contract suite PASS | Working-tree preflight package and package audit PASS | Closed — PASS |
+| M6A-006 | Process-isolation audit | Privacy | A broad read-only process inspection unexpectedly exposed opaque provider-owned argument metadata in transient tool output | Do not retain, reproduce, hash or use the metadata; replace all remaining process checks with exact executable-name/count checks only | Repository, evidence and package scans found no retained metadata | Independent privacy review PASS WITH DISCLOSED CONTAINED INCIDENT | Closed — contained, nonblocking disclosure required |
+| M6A-007 | Independent staged-index review | Major | The G3 sanitized live harness required Assistant visibility in its parity check but still named, stored and asserted the superseded Assistant-exclusion evidence flag | Rename and invert the complete sanitized evidence path to Assistant inclusion without changing provider reads or historical accounting | M6A 11/11 plus G3 2/2 focused reproduction PASS | Complete fresh 581/581 suite and independent staged re-review PASS | Closed — PASS |
+| M6A-008 | Independent staged-index review | Acceptance-required | The first focused suite did not explicitly prove non-key/non-main/nonactivating panel behavior or singular host observer installation with symmetric teardown | Add bounded runtime key/main preservation plus source-contract counts for the three host observers and their matching removal paths | M6A focused 11/11 PASS | Complete fresh 581/581 suite PASS | Closed — PASS |
+
+## M6A-G1 verification summary
+
+| Check | Result |
+|---|---|
+| Focused M6A tests | PASS — 11/11 |
+| Affected Assistant/M6 regressions | PASS — 78/78 across eight suites |
+| Complete fresh suite | PASS — 563 UI plus 18 bridge tests; 581/581 total |
+| Debug / Release / strict-concurrency Release | PASS / PASS / PASS with warnings as errors |
+| Light/Dark, EN/zh-CN, Regular/Minimalist renderer matrix | PASS — twelve deterministic captures; four-provider Regular and five-provider fixture Minimalist geometry verified; no clipping, overlap or extra nesting |
+| Main/Assistant parity and source ownership | PASS — one immutable shared presentation; stable selected bucket/value/reset/freshness and no Assistant source owner |
+| Working-tree M6A preflight package | PASS — build 202608090105, arm64, strict deep signature, system dependencies, no bundled `agy` |
+| Privacy, identity, secret and protected M5/provider audits | PASS WITH DISCLOSED CONTAINED INCIDENT — no metadata retained in repository, package, evidence or screenshots; M5 and protected provider mechanisms unchanged |
+| Independent staged-index review | PASS — exact nine-file cached scope; source/protocol, QA and privacy examiners found no blocking or actionable issue |
+| Commit-exact package | Pending |
+| Provider reads / prompts / intentional spend | `0 / 0 / 0` |
+| Credits | `CREDITS DEFER` |
+
+After M6A PASS, exactly one next task is permitted:
+
+`M6ADBG-G1 — Four-provider combined closeout`

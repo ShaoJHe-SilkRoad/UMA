@@ -5,7 +5,7 @@ import Testing
 @Suite("M6-G2 package and shared presentation contract")
 struct M6G2AntigravityPackageContractTests {
     @Test
-    func dynamicBucketLabelAndProviderOrderReachMainPanelOnly() throws {
+    func dynamicBucketLabelAndProviderOrderReachSharedSurfaces() throws {
         let antigravity = snapshot(
             id: GoogleAntigravityUsageConnector.connectorID,
             name: "Google Antigravity",
@@ -31,8 +31,8 @@ struct M6G2AntigravityPackageContractTests {
         #expect(card.windows.first?.compactLabel == "Primary pool")
         #expect(card.windows.first?.accessibilityLabel == "Primary pool usage window")
         #expect(card.remaining == .finite(50))
-        #expect(!card.isVisibleInDesktopAssistant)
-        #expect(!SharedUsagePresentationPolicy.assistantCards(from: cards)
+        #expect(card.isVisibleInDesktopAssistant)
+        #expect(SharedUsagePresentationPolicy.assistantCards(from: cards)
             .contains(where: { $0.id == "antigravity.cli" }))
     }
 
@@ -96,6 +96,9 @@ struct M6G2AntigravityPackageContractTests {
         #expect(helper.contains("m6dbg-preflight"))
         #expect(helper.contains("m6dbg-final"))
         #expect(helper.contains("uma-m6dbg-${phase#m6dbg-}-$commit/UMA.app"))
+        #expect(helper.contains("m6a-preflight"))
+        #expect(helper.contains("m6a-final"))
+        #expect(helper.contains("uma-m6a-${phase#m6a-}-$commit/UMA.app"))
         #expect(helper.contains("/Library/Developer/CommandLineTools"))
         #expect(helper.contains("MacOSX26.5.sdk"))
         #expect(!helper.contains("/usr/bin/chmod"))

@@ -250,7 +250,7 @@ struct M6G2AntigravityConnectorSchedulerTests {
     }
 
     @Test
-    func descriptorIsProviderFourReadOnlyAndAssistantHidden() {
+    func descriptorIsProviderFourReadOnlyAndAssistantVisible() {
         let connector = makeConnector(reader: { quota() })
         let descriptor = connector.descriptor
         #expect(descriptor.id.rawValue == "antigravity.cli")
@@ -259,7 +259,7 @@ struct M6G2AntigravityConnectorSchedulerTests {
         #expect(descriptor.usageReadContract == .currentStructuredLocalRead)
         #expect(descriptor.authenticationMethod == .officialApplicationOwnedSession)
         #expect(!descriptor.supportsRestore)
-        #expect(descriptor.capabilities.contains(.hiddenFromDesktopAssistant))
+        #expect(!descriptor.capabilities.contains(.hiddenFromDesktopAssistant))
         #expect(descriptor.unsupportedFields.contains("credits"))
         #expect(AgentProviderOrder.priority(for: descriptor.id) == 250)
     }

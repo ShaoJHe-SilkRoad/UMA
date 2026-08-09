@@ -83,6 +83,14 @@ struct PreviewRendererTool {
                     )
                 )
             }
+            if arguments.contains("--assistant-antigravity") {
+                sharedAssistantCards.append(
+                    makeAntigravityCard(
+                        arguments: arguments,
+                        language: language
+                    )
+                )
+            }
             if let workBuddyCard {
                 sharedAssistantCards.append(workBuddyCard)
             }
@@ -618,10 +626,12 @@ struct PreviewRendererTool {
                 ? "Primary usage window"
                 : "主要额度窗口",
             remaining: .finite(58),
-            resetsAt: now.addingTimeInterval(7_200),
-            resetText: language == .english
-                ? "Resets in 2 hr"
-                : "2 小时后重置"
+            resetsAt: arguments.contains("--antigravity-missing-reset")
+                ? nil
+                : now.addingTimeInterval(7_200),
+            resetText: arguments.contains("--antigravity-missing-reset")
+                ? (language == .english ? "Reset unavailable" : "重置时间不可用")
+                : (language == .english ? "Resets in 2 hr" : "2 小时后重置")
         )
         let secondary = SharedUsageWindowPresentation(
             id: "antigravity-secondary",
@@ -631,13 +641,12 @@ struct PreviewRendererTool {
                 ? "Secondary usage window"
                 : "次要额度窗口",
             remaining: .finite(76),
-            resetsAt: arguments.contains("--antigravity-missing-reset")
-                ? nil
-                : now.addingTimeInterval(86_400),
-            resetText: arguments.contains("--antigravity-missing-reset")
-                ? (language == .english ? "Reset unavailable" : "重置时间不可用")
-                : (language == .english ? "Resets in 1 day" : "1 天后重置")
+            resetsAt: now.addingTimeInterval(86_400),
+            resetText: language == .english ? "Resets in 1 day" : "1 天后重置"
         )
+        let selected = arguments.contains("--antigravity-select-secondary")
+            ? secondary
+            : primary
         return SharedUsageCardPresentation(
             id: "antigravity.cli",
             providerName: "Google Antigravity",
@@ -646,16 +655,16 @@ struct PreviewRendererTool {
                 : (isStale ? .stale : .connected),
             freshness: isCached ? .cached : (isStale ? .stale : .fresh),
             windows: [primary, secondary],
-            selectedWindowID: primary.id,
-            remaining: primary.remaining,
+            selectedWindowID: selected.id,
+            remaining: selected.remaining,
             sourceDescription: language == .english
                 ? "Official Antigravity CLI · read-only /usage"
                 : "Antigravity 官方 CLI · 只读 /usage",
-            isVisibleInDesktopAssistant: false,
+            isVisibleInDesktopAssistant: true,
             severity: isCached || isStale
                 ? .neutral
                 : SharedUsagePresentationPolicy.severity(
-                    for: primary.remaining
+                    for: selected.remaining
                 ),
             isRetainingLastValidValue: isCached || isStale,
             capturedAt: now

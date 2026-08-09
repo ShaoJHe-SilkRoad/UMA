@@ -665,9 +665,11 @@ public enum SharedUsagePresentationPolicy {
             availabilityLifecycle: availabilityLifecycle,
             sourceDescription: availability?.sourceState == .authenticatedAccountWeb
                 ? language.workBuddyAccountWebSource
-                : snapshot.capabilities.contains(.sanitizedLastValidRestore)
-                    ? accountChannel?.coverageNote
-                    : nil,
+                : snapshot.id == GoogleAntigravityUsageConnector.connectorID
+                    ? language.antigravitySourceLabel
+                    : snapshot.capabilities.contains(.sanitizedLastValidRestore)
+                        ? accountChannel?.coverageNote
+                        : nil,
             isVisibleInDesktopAssistant: !snapshot.capabilities.contains(
                 .hiddenFromDesktopAssistant
             ),
