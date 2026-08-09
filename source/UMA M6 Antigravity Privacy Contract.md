@@ -1,8 +1,8 @@
 # UMA M6 Antigravity Privacy Contract
 
-**Goal:** M6-G1
+**Goals:** M6-G1 and M6-SETUP-G1
 **Date:** 2026-08-08
-**Admission state:** `SETUP REQUIRED — OFFICIAL ANTIGRAVITY CLI NOT INSTALLED`
+**Current state:** `SETUP COMPLETE — M6-G1R REQUIRED`
 
 ## 1. Boundary
 
@@ -10,12 +10,14 @@ UMA may eventually consume only normalized current quota facts from one exact,
 trusted, official Antigravity CLI executable. The CLI owns authentication. UMA
 must never receive or inspect provider authentication material.
 
-M6-G1 performed discovery only. It executed no provider command and received no
-provider payload.
+M6-G1 performed discovery only. M6-SETUP-G1 installed the official
+manifest-pinned CLI and executed one authorized read-only `/usage` setup check.
+Raw output existed only transiently in process memory, was reduced to a
+structured-success classification, and was discarded without field inspection.
 
 ## 2. Future process boundary
 
-After separately authorized setup and renewed admission, a source probe must:
+During renewed admission, a source probe must:
 
 - resolve one exact trusted executable outside the repository;
 - reject working-directory shadows, unresolved chains, and symlink escapes;
@@ -28,7 +30,7 @@ After separately authorized setup and renewed admission, a source probe must:
 - terminate and reap only its owned child;
 - persist no raw stdout, stderr, or provider payload.
 
-These are admission constraints, not an M6-G1 runtime implementation.
+These are admission constraints, not an M6-SETUP-G1 runtime implementation.
 
 ## 3. Strict quota allowlist
 
@@ -54,7 +56,8 @@ Numeric rules:
 - independent buckets are never summed, split, or deduplicated by label.
 
 No installed field name, container path, schema marker, reset type, or unlimited
-representation is admitted by M6-G1. Those facts remain unavailable.
+representation is admitted by M6-G1 or M6-SETUP-G1. Those facts remain
+unavailable until M6-G1R.
 
 ## 4. Rejected data
 
@@ -112,10 +115,12 @@ Raw provider messages never enter logs, crash diagnostics, packages, or Git.
 
 ## 6. Authentication
 
-Current-device authentication is unobservable because the CLI is absent. It
-must not be reported as logged out, expired, authenticated, or enterprise.
+M6-G1 authentication was unobservable because the standalone CLI was absent.
+M6-SETUP-G1's single structured readiness read completed without browser login,
+so provider-owned authentication is currently usable. UMA and DEV still have no
+access to the authentication material.
 
-After setup:
+During admission and later runtime:
 
 - a bounded noninteractive provider `loginRequired` state may return
   `SETUP REQUIRED` and suspend reads;
@@ -149,5 +154,9 @@ The single M6-G1 packet was owner-only (`0700` directory, `0600` regular file),
 contained sanitized discovery classifications only, passed source/privacy/QA
 review, was never copied into Git, and was deleted after review.
 
-The only next task is **M6-SETUP-G1** after separate Founder authorization.
-M6-G2 and all production runtime work remain locked.
+The M6-SETUP-G1 read retained only a success/JSON classification; no raw output,
+exact quota value, schema field, identity, credential, or browser data was
+written to disk or durable evidence.
+
+The only next task is **M6-G1R**. M6-G2 and all production runtime work remain
+locked.

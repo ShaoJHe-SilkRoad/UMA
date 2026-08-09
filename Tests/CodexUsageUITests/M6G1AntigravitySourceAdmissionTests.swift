@@ -5,18 +5,18 @@ import Testing
 struct M6G1AntigravitySourceAdmissionTests {
     @Test
     func officialCLIAbsenceRequiresSetupWithoutProviderRead() {
-        let evidence = AntigravityAdmissionEvidence.currentAbsence
+        let evidence = AntigravityAdmissionEvidence.m6G1Snapshot
 
         #expect(evidence.pathLookup == .absent)
         #expect(evidence.documentedPath == .absent)
-        #expect(evidence.application == .absent)
+        #expect(evidence.application == .present)
         #expect(evidence.quotaReads == 0)
         #expect(AntigravityAdmissionHarness.decide(evidence) == .setupRequired)
     }
 
     @Test
     func missingExecutableLeavesCapabilityAndLiveSchemaUnavailable() {
-        let evidence = AntigravityAdmissionEvidence.currentAbsence
+        let evidence = AntigravityAdmissionEvidence.m6G1Snapshot
 
         #expect(evidence.installedVersion == .unavailable)
         #expect(evidence.installedHelp == .unavailable)
@@ -31,7 +31,7 @@ struct M6G1AntigravitySourceAdmissionTests {
 
     @Test
     func setupDecisionPreservesOfficialSourceClass() {
-        let evidence = AntigravityAdmissionEvidence.currentAbsence
+        let evidence = AntigravityAdmissionEvidence.m6G1Snapshot
 
         #expect(evidence.sourceClass == .officialCLI)
         #expect(evidence.publicStructuredPrintContract)
@@ -41,7 +41,7 @@ struct M6G1AntigravitySourceAdmissionTests {
 
     @Test
     func authenticationIsUnobservableNotLoggedOut() {
-        let evidence = AntigravityAdmissionEvidence.currentAbsence
+        let evidence = AntigravityAdmissionEvidence.m6G1Snapshot
 
         #expect(evidence.authentication == .unobservable)
         #expect(evidence.authentication != .loginRequired)
@@ -52,7 +52,7 @@ struct M6G1AntigravitySourceAdmissionTests {
 
     @Test
     func creditsRemainDeferredAndIndependent() {
-        let evidence = AntigravityAdmissionEvidence.currentAbsence
+        let evidence = AntigravityAdmissionEvidence.m6G1Snapshot
 
         #expect(evidence.credits == .defer)
         #expect(evidence.creditReads == 0)
@@ -82,31 +82,35 @@ struct M6G1AntigravitySourceAdmissionTests {
         #expect(!reflection.contains("synthetic-account"))
         #expect(!reflection.contains("synthetic-conversation"))
         #expect(!reflection.contains("synthetic-token"))
-        #expect(AntigravityAdmissionEvidence.currentAbsence.providerPrompts == 0)
-        #expect(AntigravityAdmissionEvidence.currentAbsence.providerTasks == 0)
-        #expect(AntigravityAdmissionEvidence.currentAbsence.intentionalSpend == 0)
+        #expect(AntigravityAdmissionEvidence.m6G1Snapshot.providerPrompts == 0)
+        #expect(AntigravityAdmissionEvidence.m6G1Snapshot.providerTasks == 0)
+        #expect(AntigravityAdmissionEvidence.m6G1Snapshot.intentionalSpend == 0)
     }
 
     @Test
-    func durableRecordsAgreeOnSetupRequiredAndNextTask() throws {
+    func durableRecordsPreserveHistoricalDecisionAndCurrentNextTask() throws {
         let records = try durableRecords()
 
         for record in records {
-            #expect(record.contains("SETUP REQUIRED"))
             #expect(record.contains("CREDITS DEFER"))
-            #expect(record.contains("M6-SETUP-G1"))
+            #expect(record.contains("M6-G1R"))
             #expect(!record.contains("synthetic-private@example.invalid"))
             #expect(!record.contains("/Users/juliushe/.local/bin/agy"))
         }
 
         let dossier = records[0]
-        #expect(dossier.contains("Live installed proof is unavailable"))
-        #expect(dossier.contains("No installed Antigravity command was executed"))
-        #expect(!dossier.contains("current successful structured read"))
+        #expect(dossier.contains("SETUP REQUIRED"))
+        #expect(dossier.contains("M6-SETUP-G1 PASS"))
+
+        let setup = records[4]
+        #expect(setup.contains("PASS — OFFICIAL ANTIGRAVITY CLI SETUP READY FOR M6-G1R"))
+        #expect(setup.contains("$HOME/.local/bin/agy"))
+        #expect(setup.contains("1.1.11"))
+        #expect(setup.contains("structured JSON"))
     }
 
     @Test
-    func g1ScopeContainsOnlyFiveAdmissionFiles() throws {
+    func admissionAndSetupScopeContainsOnlyAuthorizedFiles() throws {
         let ledger = try source("source/UMA M6 Antigravity QA Issue Ledger.md")
         let expected = [
             "Tests/CodexUsageUITests/M6G1AntigravitySourceAdmissionTests.swift",
@@ -114,6 +118,7 @@ struct M6G1AntigravitySourceAdmissionTests {
             "source/UMA M6 Antigravity Admission Decision.md",
             "source/UMA M6 Antigravity Privacy Contract.md",
             "source/UMA M6 Antigravity QA Issue Ledger.md",
+            "source/UMA M6 Antigravity Setup Evidence.md",
         ]
 
         for path in expected {
@@ -123,12 +128,36 @@ struct M6G1AntigravitySourceAdmissionTests {
         #expect(!ledger.contains("script/package_uma_m6"))
     }
 
+    @Test
+    func setupEvidenceUsesOneReadWithoutProviderWork() throws {
+        let setup = try source("source/UMA M6 Antigravity Setup Evidence.md")
+
+        #expect(setup.contains("| Read-only `/usage` executions | 1 |"))
+        #expect(setup.contains("| Retries | 0 |"))
+        #expect(setup.contains("| Provider prompts/tasks | 0 |"))
+        #expect(setup.contains("| Intentional quota spend | 0 |"))
+        #expect(setup.contains("| Browser login actions | 0 |"))
+        #expect(setup.contains("M6-G2 and production connector work remain locked"))
+    }
+
+    @Test
+    func setupEvidenceRetainsNoLiveQuotaOrCredentialMaterial() throws {
+        let setup = try source("source/UMA M6 Antigravity Setup Evidence.md")
+
+        #expect(setup.contains("No exact live quota value or account data was retained"))
+        #expect(!setup.contains("access_token"))
+        #expect(!setup.contains("refresh_token"))
+        #expect(!setup.contains("account_id"))
+        #expect(!setup.contains("synthetic-private@example.invalid"))
+    }
+
     private func durableRecords() throws -> [String] {
         try [
             source("source/UMA M6 Antigravity Local Source Dossier.md"),
             source("source/UMA M6 Antigravity Admission Decision.md"),
             source("source/UMA M6 Antigravity Privacy Contract.md"),
             source("source/UMA M6 Antigravity QA Issue Ledger.md"),
+            source("source/UMA M6 Antigravity Setup Evidence.md"),
         ]
     }
 
@@ -205,10 +234,10 @@ private struct AntigravityAdmissionEvidence: Equatable {
     var creditPercentage: Double?
     var productionConnectorImplemented: Bool
 
-    static let currentAbsence = AntigravityAdmissionEvidence(
+    static let m6G1Snapshot = AntigravityAdmissionEvidence(
         pathLookup: .absent,
         documentedPath: .absent,
-        application: .absent,
+        application: .present,
         installedVersion: .unavailable,
         installedHelp: .unavailable,
         signature: .unavailable,
