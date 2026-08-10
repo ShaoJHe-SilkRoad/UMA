@@ -1,13 +1,13 @@
 # UMA M6 Antigravity QA Issue Ledger
 
-**Goals:** M6-G1, M6-SETUP-G1, M6-G1R, M6-G1R2, M6-G2, M6-G3, M6DBG-G1, M6A-G1, M6A-G1R and M6ADBG-G1
+**Goals:** M6-G1, M6-SETUP-G1, M6-G1R, M6-G1R2, M6-G2, M6-G3, M6DBG-G1, M6A-G1, M6A-G1R, M6ADBG-G1 and M6-CLOSE-G1
 **Date:** 2026-08-08
 **Historical M6-G1 decision:** `SETUP REQUIRED — OFFICIAL ANTIGRAVITY CLI NOT INSTALLED`
 **Historical M6-G1R decision:** `NO-GO — LIVE ADMISSION EVIDENCE INCOMPLETE`
 **Current decision:** `GO — OFFICIAL ANTIGRAVITY CLI QUOTA SOURCE ADMITTED`
 **Credits:** `CREDITS DEFER`
-**Current task:** M6ADBG-G1
-**Only next task after M6ADBG PASS:** M6-CLOSE-G1
+**Current task:** M6-CLOSE-G1 — final current-truth documentation and handoff
+**Only next task after M6 closeout:** M7 — Cursor Source Admission
 
 ## Scope
 
@@ -362,4 +362,33 @@ conversation, prompt or task content.
 | Working-tree preflight package | PASS — build `202608090106`, arm64, strict deep signature and exact package allowlist |
 | Protected M5/provider mechanisms | PASS — accepted 52-file frozen set and Codex/Claude/WorkBuddy/Antigravity source mechanisms unchanged |
 | Independent staged-index review | PASS — exact five-file cached scope; source, QA and privacy reviews found no blocking or actionable issue |
-| Final commit/package/clean state | Pending authorized post-review delivery |
+| Final commit/package/clean state | PASS — commit `e72bd92c476e05152b95ccb9ba95c22be78efef1`, tree `c1358c5b4176383021e87605afc45ca3e347ab89`, commit-exact package verified, worktree clean and index empty |
+
+## M6-CLOSE-G1 current-truth closure
+
+This closeout performs no provider operation and changes no production runtime,
+provider mechanism, package helper, M5 frozen file or checksum-locked reference.
+The authoritative additive record is
+`source/UMA M6 Closeout and Cursor Handoff.md`; older milestone records remain
+retained evidence rather than being silently rewritten.
+
+| Check | Result |
+|---|---|
+| Current provider matrix | PASS — Codex, Claude Code, WorkBuddy and Google Antigravity supported in stable order |
+| Antigravity status | `SUPPORTED — LIVE ACCEPTED`; official CLI `1.1.11`, structured read-only `/usage` |
+| Antigravity Credits | `CREDITS DEFER` |
+| Enterprise coverage | Not qualified during M6; external coverage limitation |
+| Main/Assistant truth | PASS — one shared immutable presentation; four providers supported on both surfaces |
+| Density | PASS — four providers permit Regular; more than four forces Minimalist |
+| Final M6 code/package | PASS — exact commit, tree, version/build, architecture, provenance and local ad-hoc signature recorded |
+| M5 frozen/signing truth | PASS — 52-file frozen set unchanged; Developer ID/notarized distribution remains unproven |
+| Privacy/process lesson | PASS — exact process fields only; broad argv/environment capture prohibited |
+| Provider operations | `/usage` 0; `/credits` 0; prompts/tasks 0; intentional spend 0 |
+| Focused closeout contract | PASS — 6/6 |
+| Affected M6 regression | PASS — 109/109 across 11 suites |
+| Package/provenance audit | PASS — bundle/version/build/revision/archive, arm64, strict deep signature, system dependencies and 21-file allowlist |
+| Scope/privacy audits | PASS — no runtime/reference diff, M5 frozen set unchanged, no identity/secret value retained |
+| `git diff --check` | PASS |
+| Independent M6-CLOSE staged-index review | PASS — exact three-file cached scope; source/protocol, QA and privacy reviews found no blocking or actionable issue |
+| Cursor handoff | M7 source-admission dossier only; no Cursor runtime work |
+| Final status | `M6 CLOSED — GOOGLE ANTIGRAVITY SUPPORTED — M7 SOURCE ADMISSION NEXT` |
