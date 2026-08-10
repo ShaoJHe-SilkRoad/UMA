@@ -196,9 +196,9 @@ Privacy/identity/secret/package scans: PASS
 Protected M5 52-file manifest: unchanged
 Protected Desktop executable SHA-256: unchanged
 Independent staged-index review: PASS — exact ten-file cached scope; no blocker or actionable issue
-Final commit/tree: pending
-Commit-exact package: pending
-Post-commit worktree/index: pending
+Final commit/tree: PASS — `6e15705cf72794e359ac66d8aaa7141353b92ad0` / `f86ee0f79d9d28bbbdf5e480231efc015d7c8302`
+Commit-exact package: PASS — build `202608090104`, archive SHA-256 `69cbbb1b38c2d2a7d5ef1065d80627c0eed96e2655e66f694d9bbe5890d38f5a`
+Post-commit worktree/index: PASS — clean / empty
 ```
 
 The package-wide `/credits` substring is the accepted WorkBuddy extraction

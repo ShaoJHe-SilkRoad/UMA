@@ -1,12 +1,13 @@
 # UMA M6 Antigravity QA Issue Ledger
 
-**Goals:** M6-G1, M6-SETUP-G1, M6-G1R, M6-G1R2, M6-G2, M6-G3, M6DBG-G1, M6A-G1 and M6A-G1R
+**Goals:** M6-G1, M6-SETUP-G1, M6-G1R, M6-G1R2, M6-G2, M6-G3, M6DBG-G1, M6A-G1, M6A-G1R and M6ADBG-G1
 **Date:** 2026-08-08
 **Historical M6-G1 decision:** `SETUP REQUIRED — OFFICIAL ANTIGRAVITY CLI NOT INSTALLED`
 **Historical M6-G1R decision:** `NO-GO — LIVE ADMISSION EVIDENCE INCOMPLETE`
 **Current decision:** `GO — OFFICIAL ANTIGRAVITY CLI QUOTA SOURCE ADMITTED`
 **Credits:** `CREDITS DEFER`
-**Only next task after M6A PASS:** M6ADBG-G1
+**Current task:** M6ADBG-G1
+**Only next task after M6ADBG PASS:** M6-CLOSE-G1
 
 ## Scope
 
@@ -253,7 +254,7 @@ raw provider output, identity, credential, conversation, prompt or task data.
 | Working-tree M6DBG preflight package | PASS — build 202608090002, arm64, strict deep signature, system dependencies, no bundled `agy` |
 | Privacy, frozen M5 and protected provider audits | PASS — no secret/account identity/private provider data; accepted M5 52-file manifest and Desktop executable unchanged; direct Codex/Claude/WorkBuddy paths untouched |
 | Independent staged-index review | PASS — exact ten-file cached scope; no blocker or actionable issue |
-| Commit-exact package | Pending |
+| Commit-exact package | PASS — revision `6e15705cf72794e359ac66d8aaa7141353b92ad0`, build `202608090104`, source archive SHA-256 `69cbbb1b38c2d2a7d5ef1065d80627c0eed96e2655e66f694d9bbe5890d38f5a` |
 | Credits | `CREDITS DEFER` |
 
 ## M6A-G1 Desktop Assistant issue ledger
@@ -286,7 +287,7 @@ credential, conversation, prompt or task data. M6A performs no provider read.
 | Working-tree M6A preflight package | PASS — build 202608090105, arm64, strict deep signature, system dependencies, no bundled `agy` |
 | Privacy, identity, secret and protected M5/provider audits | PASS WITH DISCLOSED CONTAINED INCIDENT — no metadata retained in repository, package, evidence or screenshots; M5 and protected provider mechanisms unchanged |
 | Independent staged-index review | PASS — exact nine-file cached scope; source/protocol, QA and privacy examiners found no blocking or actionable issue |
-| Commit-exact package | Pending |
+| Commit-exact package | PASS — revision `ebc79d778971c7492011b3efc41f4110ff283a7d`, build `202608090105`, source archive SHA-256 `6818b470c923f0287979a59483d413194b63686511f64e35b592bdcd32cb40b4` |
 | Provider reads / prompts / intentional spend | `0 / 0 / 0` |
 | Credits | `CREDITS DEFER` |
 
@@ -334,3 +335,31 @@ within these bounds, the check fails closed instead of widening inspection.
 | Provider reads / `/credits` / prompts or tasks / intentional spend | `0 / 0 / 0 / 0` |
 | `git diff --check` | PASS |
 | Independent staged-index review | PASS — exact three-file cached scope; no blocking or actionable issue |
+
+## M6ADBG-G1 combined closeout issue ledger
+
+This section contains no exact live quota value, pool label or identifier,
+reset timestamp, raw provider output, account identity, credential,
+conversation, prompt or task content.
+
+| ID | Finder | Severity | Evidence / acceptance impact | Repair | Focused retest | Regression retest | Final status |
+|---|---|---:|---|---|---|---|---|
+| M6ADBG-001 | Combined parity review | Acceptance-required | Main Panel and Assistant predecessor matrices used separate fixtures, so same-presentation parity was not one direct oracle | Add one combined suite that drives every provider subset and failure combination through the shared presentation, then adapts that exact result for Assistant | PASS — focused M6ADBG 6/6 | PASS — affected 91/91 and full deterministic serial 588/588 | Closed — PASS |
+| M6ADBG-002 | Delivery review | Gate | The package helper had no persistent-root M6ADBG preflight/final phases | Add exact no-overwrite `m6adbg-preflight` and commit-exact `m6adbg-final` phases without changing package contents | PASS — helper contract and build `202608090106` preflight | PASS — 21-file allowlist, arm64, strict signature, dependency/privacy audits | Closed — PASS; final commit-exact phase is the post-commit delivery gate |
+| M6ADBG-003 | Durable-evidence review | Minor | Accepted M6DBG/M6A records retained stale package completion placeholders | Replace only the stale fields with independently verified commit, tree, archive and package facts | PASS — records agree with accepted package provenance | PASS — no executable behavior or frozen provider source changed | Closed — PASS |
+
+### M6ADBG verification summary
+
+| Check | Result |
+|---|---|
+| Focused combined suite | PASS — 6/6 |
+| Affected M6 suites | PASS — 91/91 across 12 suites |
+| Fresh deterministic serial suite | PASS — 570 UI plus 18 bridge = 588/588 |
+| Debug / Release / strict-concurrency Release | PASS / PASS / PASS with warnings as errors |
+| Appearance and lifecycle matrix | PASS — 15 renderer captures, 50 Assistant visibility transitions / 25 hide-show cycles and exact-path preflight launch/shutdown |
+| Live read accounting | PASS — 2/6 read-only `/usage`; `/credits` 0; prompts/tasks 0; intentional spend 0 |
+| Endurance/resource evidence | PASS — five-minute exact-PID soak, no monotonic growth, zero children/writes and clean teardown |
+| Working-tree preflight package | PASS — build `202608090106`, arm64, strict deep signature and exact package allowlist |
+| Protected M5/provider mechanisms | PASS — accepted 52-file frozen set and Codex/Claude/WorkBuddy/Antigravity source mechanisms unchanged |
+| Independent staged-index review | PASS — exact five-file cached scope; source, QA and privacy reviews found no blocking or actionable issue |
+| Final commit/package/clean state | Pending authorized post-review delivery |
