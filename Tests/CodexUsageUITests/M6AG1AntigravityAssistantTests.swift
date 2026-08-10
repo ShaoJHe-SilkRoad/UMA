@@ -412,6 +412,53 @@ struct M6AG1AntigravityAssistantTests {
         #expect(ledger.contains("CREDITS DEFER"))
     }
 
+    @Test
+    func m6ProcessInspectionIsBoundedAndM6ADBGConsumesTheSafeContract() throws {
+        let package = try source("script/package_uma_m6.sh")
+        let liveHarness = try source(
+            "Tests/CodexUsageUITests/M6G3AntigravityLiveAcceptanceTests.swift"
+        )
+        let debugAcceptance = try source(
+            "source/UMA M6DBG Four-Provider Debug Acceptance.md"
+        )
+        let ledger = try source("source/UMA M6 Antigravity QA Issue Ledger.md")
+        let repositoryOwnedInspection = package + liveHarness
+        let normalizedDebugAcceptance = debugAcceptance
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        let normalizedLedger = ledger
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+
+        for forbidden in [
+            "pgrep -f",
+            "pgrep -l",
+            "ps aux",
+            "ps -ef",
+            "printenv",
+            "env |",
+        ] {
+            #expect(!repositoryOwnedInspection.contains(forbidden))
+        }
+        for required in [
+            "task-owned executable path or exact executable name",
+            "exact PID",
+            "process count",
+            "parent/child ownership",
+            "bounded resource counters",
+            "exit/absence classification",
+            "fails closed",
+        ] {
+            #expect(normalizedDebugAcceptance.contains(required))
+            #expect(normalizedLedger.contains(required))
+        }
+        #expect(ledger.contains("M6A-R-001"))
+        #expect(ledger.contains("Ad-hoc DEV command"))
+        #expect(ledger.contains("Persistence result | NONE"))
+    }
+
     private func card(
         _ provider: M6AProvider,
         connection: SharedConnectionStatus = .connected,

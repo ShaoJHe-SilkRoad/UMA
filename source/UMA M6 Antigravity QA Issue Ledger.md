@@ -1,6 +1,6 @@
 # UMA M6 Antigravity QA Issue Ledger
 
-**Goals:** M6-G1, M6-SETUP-G1, M6-G1R, M6-G1R2, M6-G2, M6-G3, M6DBG-G1 and M6A-G1
+**Goals:** M6-G1, M6-SETUP-G1, M6-G1R, M6-G1R2, M6-G2, M6-G3, M6DBG-G1, M6A-G1 and M6A-G1R
 **Date:** 2026-08-08
 **Historical M6-G1 decision:** `SETUP REQUIRED — OFFICIAL ANTIGRAVITY CLI NOT INSTALLED`
 **Historical M6-G1R decision:** `NO-GO — LIVE ADMISSION EVIDENCE INCOMPLETE`
@@ -269,7 +269,7 @@ credential, conversation, prompt or task data. M6A performs no provider read.
 | M6A-003 | Renderer review | Major | Assistant fixtures could not include Antigravity, and the missing-reset flag altered an unselected bucket | Add an Assistant Antigravity fixture, make the selected bucket own missing-reset evidence and permit deterministic secondary-bucket selection | M6A focused 11/11 PASS | Twelve-image Regular/Minimalist and state renderer matrix PASS | Closed — PASS |
 | M6A-004 | Predecessor contract review | Acceptance-required | Always-run G2/G3 tests still encoded the superseded Assistant exclusion contract | Update only the current product-contract assertions; preserve historical G3/M6DBG records and live accounting unchanged | Affected 78/78 PASS | Full 581/581 PASS | Closed — PASS |
 | M6A-005 | Delivery review | Gate | The M6 package helper had no persistent-root M6A preflight/final phases | Add exact no-overwrite `m6a-preflight` and commit-exact `m6a-final` phases while preserving the package allowlist and M5 companions | Package-contract suite PASS | Working-tree preflight package and package audit PASS | Closed — PASS |
-| M6A-006 | Process-isolation audit | Privacy | A broad read-only process inspection unexpectedly exposed opaque provider-owned argument metadata in transient tool output | Do not retain, reproduce, hash or use the metadata; replace all remaining process checks with exact executable-name/count checks only | Repository, evidence and package scans found no retained metadata | Independent privacy review PASS WITH DISCLOSED CONTAINED INCIDENT | Closed — contained, nonblocking disclosure required |
+| M6A-006 | Process-isolation audit | Privacy | A broad read-only process inspection unexpectedly exposed opaque provider-owned argument metadata in transient tool output | Do not retain, reproduce, hash or use the metadata; replace all remaining process checks with exact executable-name/count checks only | Repository, evidence and package scans found no retained metadata | Independent privacy review PASS WITH DISCLOSED CONTAINED INCIDENT | Superseded by M6A-G1R closure issue M6A-R-001 |
 | M6A-007 | Independent staged-index review | Major | The G3 sanitized live harness required Assistant visibility in its parity check but still named, stored and asserted the superseded Assistant-exclusion evidence flag | Rename and invert the complete sanitized evidence path to Assistant inclusion without changing provider reads or historical accounting | M6A 11/11 plus G3 2/2 focused reproduction PASS | Complete fresh 581/581 suite and independent staged re-review PASS | Closed — PASS |
 | M6A-008 | Independent staged-index review | Acceptance-required | The first focused suite did not explicitly prove non-key/non-main/nonactivating panel behavior or singular host observer installation with symmetric teardown | Add bounded runtime key/main preservation plus source-contract counts for the three host observers and their matching removal paths | M6A focused 11/11 PASS | Complete fresh 581/581 suite PASS | Closed — PASS |
 
@@ -293,3 +293,44 @@ credential, conversation, prompt or task data. M6A performs no provider read.
 After M6A PASS, exactly one next task is permitted:
 
 `M6ADBG-G1 — Four-provider combined closeout`
+
+## M6A-G1R privacy-incident closure
+
+| Field | Result |
+|---|---|
+| Issue ID | `M6A-R-001` |
+| Severity | Privacy — actual transient boundary violation |
+| Discovery | M6A process-isolation audit returned unrelated provider-owned argument metadata in transient DEV tool output |
+| Exposure class | Read-only local process argument metadata; contents were not interpreted or used |
+| Persistence result | NONE — bounded repository, history, final-package and exact task-artifact scans found no retained incident metadata; no credential, token, cookie, session or account identity was copied or persisted |
+| Root cause | Ad-hoc DEV command using `pgrep` full-command matching/listing flags; not a repository script, test harness, preview/debug helper or subagent procedure |
+| Repair | Prohibit broad process command-line and environment capture; M6ADBG must use only exact executable path/name, exact PID, count, required parent/child ownership, bounded resource counters and exit/absence classification |
+| Focused verification | M6A privacy-contract guard PASS; exact retained-artifact scans PASS |
+| Regression verification | M6A 12/12; deterministic serial full suite 564 UI plus 18 bridge = 582/582; Debug, Release and strict-concurrency Release PASS |
+| Final state | CLOSED — containment, enforced safe-inspection contract, proportional verification and independent staged review PASS; post-commit clean-state audit required |
+
+### Safe process-inspection contract
+
+M6ADBG must consume this contract. Process evidence is limited to the exact
+task-owned executable path or exact executable name, exact PID, process count,
+required parent/child ownership, bounded resource counters and exit/absence
+classification. Full command-line listings, unrelated process arguments,
+broad environment dumps and provider credential/session argument capture are
+forbidden. Evidence must contain only the normalized facts needed by the test;
+raw command output is not retained. If the required proof cannot be produced
+within these bounds, the check fails closed instead of widening inspection.
+
+### M6A-G1R verification summary
+
+| Check | Result |
+|---|---|
+| Incident persistence | PASS — zero incident-sentinel files in Git/history, existing final M6A package and exact M6A task-artifact roots |
+| Focused M6A/privacy contract | PASS — 12/12 |
+| Main/Assistant parity, provider order/density and source ownership | PASS — covered by the focused suite without production changes |
+| Fresh full suite | PASS — deterministic serial mode; 564 UI plus 18 bridge = 582/582 |
+| Debug / Release / strict-concurrency Release | PASS / PASS / PASS with warnings as errors |
+| Existing commit-exact M6A package | PASS — revision `ebc79d778971c7492011b3efc41f4110ff283a7d`, strict deep signature, zero incident/secret/email scan hits |
+| Protected M5 and production source | PASS — zero changed files |
+| Provider reads / `/credits` / prompts or tasks / intentional spend | `0 / 0 / 0 / 0` |
+| `git diff --check` | PASS |
+| Independent staged-index review | PASS — exact three-file cached scope; no blocking or actionable issue |

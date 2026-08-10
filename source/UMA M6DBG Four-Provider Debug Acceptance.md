@@ -169,6 +169,16 @@ the sanitized persistence file. All task-owned processes were terminated.
 - no Codex, Claude or WorkBuddy source-mechanism edit;
 - protected M5 manifest and protected Desktop UMA executable remain unchanged.
 
+### Mandatory M6ADBG process-inspection contract
+
+M6ADBG must inspect only the exact task-owned executable path or exact
+executable name, exact PID, process count, required parent/child ownership,
+bounded resource counters and exit/absence classification. It must not collect
+full process command lines, unrelated process arguments or broad process
+environments. Raw process output is not retained. Any check that cannot be
+completed with these normalized facts fails closed rather than widening the
+inspection boundary.
+
 ## Final verification and delivery
 
 Final test, build, staged-index, commit and package facts are recorded here only
