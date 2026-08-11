@@ -189,12 +189,19 @@ struct M7G1CursorSourceAdmissionTests {
         let records = try durableRecords()
 
         for record in records {
-            #expect(record.contains("CONDITIONAL GO — FALLBACK ARCHITECTURE REQUIRES FOUNDER DECISION"))
-            #expect(record.contains("Founder provider-controlled browser fallback architecture decision"))
-            #expect(record.contains("Authenticated quota reads: 0/3"))
+            #expect(record.contains("M7-G1B"))
+            #expect(record.contains("M7-G2 remains locked"))
+            #expect(record.contains("NO-GO"))
+            #expect(record.contains("Founder source-direction decision"))
             #expect(!record.contains("synthetic-private@example.invalid"))
             #expect(!record.contains("/Users/"))
         }
+
+        let combined = records.joined(separator: "\n")
+        #expect(combined.contains("Safari fallback"))
+        #expect(combined.contains("isolated architecture is rejected"))
+        #expect(combined.contains("Successful sanitized observations: 8"))
+        #expect(combined.contains("Provider prompts/tasks/spend: 0/0/0"))
     }
 
     @Test
@@ -203,11 +210,13 @@ struct M7G1CursorSourceAdmissionTests {
 
         for record in records {
             #expect(record.contains("M7-G2 remains locked"))
-            #expect(record.contains("API key"))
-            #expect(record.contains("cookie"))
-            #expect(record.contains("Keychain"))
-            #expect(record.contains("private endpoint"))
         }
+
+        let combined = records.joined(separator: "\n")
+        #expect(combined.contains("API key"))
+        #expect(combined.contains("cookie"))
+        #expect(combined.contains("Keychain"))
+        #expect(combined.contains("private endpoint"))
     }
 
     @Test
@@ -215,8 +224,8 @@ struct M7G1CursorSourceAdmissionTests {
         let ledger = try source("source/UMA M7 Cursor QA Issue Ledger.md")
         let expected = [
             "Tests/CodexUsageUITests/M7G1CursorSourceAdmissionTests.swift",
-            "source/UMA M7 Cursor Local Source Dossier.md",
-            "source/UMA M7 Cursor Admission Decision.md",
+            "source/UMA M7 Cursor Browser Source Dossier.md",
+            "source/UMA M7 Cursor Browser Admission Decision.md",
             "source/UMA M7 Cursor Privacy Contract.md",
             "source/UMA M7 Cursor QA Issue Ledger.md",
         ]
@@ -230,21 +239,172 @@ struct M7G1CursorSourceAdmissionTests {
     }
 
     @Test
-    func currentDecisionDoesNotPublishUnobservedSchemaOrUnits() throws {
-        let dossier = try source("source/UMA M7 Cursor Local Source Dossier.md")
-        let decision = try source("source/UMA M7 Cursor Admission Decision.md")
+    func finalDecisionRejectsAmbiguousFreePlanPercentage() throws {
+        let dossier = try source(
+            "source/UMA M7 Cursor Browser Source Dossier.md"
+        )
+        let decision = try source(
+            "source/UMA M7 Cursor Browser Admission Decision.md"
+        )
 
-        #expect(dossier.contains("Live schema: UNAVAILABLE"))
-        #expect(dossier.contains("Native quota unit: UNAVAILABLE"))
-        #expect(dossier.contains("Stable pool identity: UNAVAILABLE"))
-        #expect(decision.contains("Direct local/CLI quota source:** `NO-GO`"))
-        #expect(decision.contains("Browser fallback:** `CONDITIONAL GO`"))
+        #expect(dossier.contains("| Native unit | PASS — percentage |"))
+        #expect(dossier.contains("`Free Plan usage` stable"))
+        #expect(dossier.contains("| Used-versus-remaining semantic | FAIL"))
+        #expect(dossier.contains("Exact values may exist transiently"))
+        #expect(decision.contains("direct local/CLI result remains `NO-GO`"))
+        #expect(decision.contains("**Final decision:** `NO-GO`"))
+        #expect(decision.contains("not `CONDITIONAL GO`"))
+        #expect(decision.contains("not `SETUP REQUIRED`"))
+    }
+
+    @Test
+    func officialBrowserContractKeepsPoolsAndOnDemandSeparate() throws {
+        let dossier = try source(
+            "source/UMA M7 Cursor Browser Source Dossier.md"
+        )
+
+        #expect(dossier.contains("`Cursor Models` and `Other Models`"))
+        #expect(dossier.contains("reset with the monthly billing cycle"))
+        #expect(dossier.contains("On-demand use is separate"))
+        #expect(dossier.contains("https://cursor.com/dashboard/spending"))
+        #expect(dossier.contains(
+            "`https://cursor.com/dashboard/usage`"
+        ))
+        #expect(dossier.contains("no paid-plan pools manufactured"))
+    }
+
+    @Test
+    func isolatedLoginProbeHasStrictPrivacyBoundary() throws {
+        let dossier = try source(
+            "source/UMA M7 Cursor Browser Source Dossier.md"
+        )
+        let privacy = try source("source/UMA M7 Cursor Privacy Contract.md")
+
+        #expect(dossier.contains("App Sandbox enabled"))
+        #expect(dossier.contains("outbound network-client entitlement only"))
+        #expect(dossier.contains(
+            "dedicated persistent `WKWebsiteDataStore(forIdentifier:)`"
+        ))
+        #expect(dossier.contains("no JavaScript evaluation"))
+        #expect(privacy.contains(
+            "must not call `evaluateJavaScript`"
+        ))
+        #expect(privacy.contains("does not share Safari, Chrome, Cursor"))
+        #expect(privacy.contains("Cookies and storage remain opaque"))
+    }
+
+    @Test
+    func liveAdmissionOperationLedgerAccountsForSanitizedReadsOnly() throws {
+        let dossier = try source(
+            "source/UMA M7 Cursor Browser Source Dossier.md"
+        )
+
+        #expect(dossier.contains("Task-owned isolated probe launches: 3"))
+        #expect(dossier.contains("Human login completions: 1"))
+        #expect(dossier.contains("Authenticated dashboard route navigations: 4"))
+        #expect(dossier.contains("Successful sanitized observations: 8"))
+        #expect(dossier.contains("Safari fallback containing-app launches: 3"))
+        #expect(dossier.contains("website access only on `cursor.com`"))
+        #expect(dossier.contains("**UMA Cursor Browser Companion v2**"))
+        #expect(dossier.contains("older task-owned companion remained disabled"))
+        #expect(dossier.contains("Credential/cookie/private-state reads: 0"))
+        #expect(dossier.contains(
+            "Retained incident identity/screenshot/log/payload copies: 0"
+        ))
+        #expect(dossier.contains("Retained exact-quota/DOM/URL copies: 0"))
+        #expect(dossier.contains("Provider prompts/tasks: 0"))
+        #expect(dossier.contains("Intentional quota spend: 0"))
+    }
+
+    @Test
+    func embeddedAuthFailureAndIdentityIncidentAreContained() throws {
+        let records = try durableRecords()
+        let combined = records.joined(separator: "\n")
+
+        #expect(combined.contains("embedded-auth compatibility failure"))
+        #expect(combined.contains("Unexpected Human-supplied identity exposures: 1 transient"))
+        #expect(combined.contains("Retained incident identity/screenshot/log/payload copies: 0"))
+        #expect(combined.contains("frozen Claude BrowserExtension"))
+    }
+
+    @Test
+    func transientExactQuotaExposuresAreContainedAndFinalCauseIsClosed() throws {
+        let records = try durableRecords()
+        let combined = records.joined(separator: "\n")
+
+        #expect(combined.contains("Unexpected exact-quota accessibility exposures: 2 transient"))
+        #expect(combined.contains("Retained exact-quota/DOM/URL copies: 0"))
+        #expect(combined.contains("settings-window-only UI evidence"))
+        #expect(combined.contains("no page-state read after final repair"))
+        #expect(!combined.contains("exact quota value was"))
+    }
+
+    @Test
+    func browserNoGoRequiresNoNumericInference() {
+        let evidence = CursorBrowserAdmissionEvidence.liveFreeAccount
+
+        #expect(CursorAdmissionHarness.decideBrowser(evidence) == .noGo)
+        #expect(CursorAdmissionHarness.nextBrowserTask(for: evidence)
+            == "Founder source-direction decision")
+
+        var explicitDirection = evidence
+        explicitDirection.semanticDirection = .present
+        explicitDirection.normalizationComplete = .present
+        #expect(CursorAdmissionHarness.decideBrowser(explicitDirection) == .conditionalGo)
+    }
+
+    @Test
+    func browserEvidencePreservesOneFreePoolAcrossEveryOfficialSurface() {
+        let evidence = CursorBrowserAdmissionEvidence.liveFreeAccount
+
+        #expect(evidence.testedRoutes == [.overview, .usage, .spending])
+        #expect(evidence.admissibleRoutes == [.overview, .usage])
+        #expect(evidence.loadingRoutes == [.spending])
+        #expect(evidence.accountMode == .free)
+        #expect(evidence.poolCount == 1)
+        #expect(evidence.stablePoolLabel == "Free Plan usage")
+        #expect(evidence.nativeUnit == .percentage)
+        #expect(evidence.repeatedObservations == 8)
+        #expect(evidence.providerPrompts == 0)
+        #expect(evidence.providerTasks == 0)
+        #expect(evidence.intentionalSpend == 0)
+    }
+
+    @Test
+    func browserSetupRequiredIsReservedForASetupOnlyGap() {
+        var evidence = CursorBrowserAdmissionEvidence.liveFreeAccount
+        evidence.semanticDirection = .present
+        evidence.normalizationComplete = .present
+        evidence.providerOwnedAuthentication = .absent
+        evidence.setupPrerequisiteIsOnlyGap = true
+
+        #expect(CursorAdmissionHarness.decideBrowser(evidence) == .setupRequired)
+        #expect(CursorAdmissionHarness.nextBrowserTask(for: evidence) == "M7-SETUP-G1")
+
+        evidence.semanticDirection = .unavailable
+        #expect(CursorAdmissionHarness.decideBrowser(evidence) == .noGo)
+    }
+
+    @Test
+    func finalBrowserCleanupIsRecordedWithoutRetainingProviderData() throws {
+        let dossier = try source("source/UMA M7 Cursor Browser Source Dossier.md")
+        let privacy = try source("source/UMA M7 Cursor Privacy Contract.md")
+        let ledger = try source("source/UMA M7 Cursor QA Issue Ledger.md")
+
+        #expect(dossier.contains("Allow unsigned extensions` was verified `Off`"))
+        #expect(dossier.contains("legacy and v2 task-owned companions were disabled"))
+        #expect(dossier.contains("extension identifiers were unregistered"))
+        #expect(dossier.contains("two exact `/private/tmp` probe roots are absent"))
+        #expect(dossier.contains("three exact task-owned app-container records were removed"))
+        #expect(privacy.contains("Final cleanup"))
+        #expect(privacy.contains("disabled and unregistered both task-owned extensions"))
+        #expect(ledger.contains("Browser cleanup | PASS"))
     }
 
     private func durableRecords() throws -> [String] {
         try [
-            source("source/UMA M7 Cursor Local Source Dossier.md"),
-            source("source/UMA M7 Cursor Admission Decision.md"),
+            source("source/UMA M7 Cursor Browser Source Dossier.md"),
+            source("source/UMA M7 Cursor Browser Admission Decision.md"),
             source("source/UMA M7 Cursor Privacy Contract.md"),
             source("source/UMA M7 Cursor QA Issue Ledger.md"),
         ]
@@ -309,6 +469,70 @@ private enum CursorSourceTier: Equatable {
     case officialLocalHook
     case providerControlledBrowser
     case unsupported
+}
+
+private enum CursorBrowserRoute: Equatable {
+    case overview
+    case usage
+    case spending
+}
+
+private enum CursorBrowserAccountMode: Equatable {
+    case free
+    case paid
+    case unknown
+}
+
+private enum CursorBrowserNativeUnit: Equatable {
+    case percentage
+    case ratio
+    case unavailable
+}
+
+private struct CursorBrowserAdmissionEvidence: Equatable {
+    var testedRoutes: [CursorBrowserRoute]
+    var admissibleRoutes: [CursorBrowserRoute]
+    var loadingRoutes: [CursorBrowserRoute]
+    var accountMode: CursorBrowserAccountMode
+    var poolCount: Int
+    var stablePoolLabel: String
+    var nativeUnit: CursorBrowserNativeUnit
+    var semanticDirection: CursorEvidenceState
+    var normalizationComplete: CursorEvidenceState
+    var optionalReset: CursorEvidenceState
+    var providerOwnedAuthentication: CursorEvidenceState
+    var setupPrerequisiteIsOnlyGap: Bool
+    var strictPrivacyProjection: CursorEvidenceState
+    var repeatedStructure: CursorEvidenceState
+    var automaticRefreshFeasible: CursorEvidenceState
+    var noProviderWork: CursorEvidenceState
+    var repeatedObservations: Int
+    var providerPrompts: Int
+    var providerTasks: Int
+    var intentionalSpend: Int
+
+    static let liveFreeAccount = CursorBrowserAdmissionEvidence(
+        testedRoutes: [.overview, .usage, .spending],
+        admissibleRoutes: [.overview, .usage],
+        loadingRoutes: [.spending],
+        accountMode: .free,
+        poolCount: 1,
+        stablePoolLabel: "Free Plan usage",
+        nativeUnit: .percentage,
+        semanticDirection: .unavailable,
+        normalizationComplete: .unavailable,
+        optionalReset: .unavailable,
+        providerOwnedAuthentication: .present,
+        setupPrerequisiteIsOnlyGap: false,
+        strictPrivacyProjection: .present,
+        repeatedStructure: .present,
+        automaticRefreshFeasible: .present,
+        noProviderWork: .present,
+        repeatedObservations: 8,
+        providerPrompts: 0,
+        providerTasks: 0,
+        intentionalSpend: 0
+    )
 }
 
 private struct CursorAdmissionEvidence: Equatable {
@@ -480,6 +704,46 @@ private enum CursorAdmissionHarness {
         return evidence.documentedStructuredQuotaCommand
             && evidence.currentQuota == .present
             && !evidence.browserFallbackRequiresNewPrivacySurface
+    }
+
+    static func decideBrowser(
+        _ evidence: CursorBrowserAdmissionEvidence
+    ) -> CursorAdmissionDecision {
+        let mandatorySourceContract = !evidence.admissibleRoutes.isEmpty
+            && evidence.strictPrivacyProjection == .present
+            && evidence.repeatedStructure == .present
+            && evidence.automaticRefreshFeasible == .present
+            && evidence.noProviderWork == .present
+            && evidence.poolCount > 0
+            && !evidence.stablePoolLabel.isEmpty
+            && evidence.nativeUnit != .unavailable
+            && evidence.semanticDirection == .present
+            && evidence.normalizationComplete == .present
+            && evidence.providerPrompts == 0
+            && evidence.providerTasks == 0
+            && evidence.intentionalSpend == 0
+
+        if mandatorySourceContract,
+           evidence.providerOwnedAuthentication != .present,
+           evidence.setupPrerequisiteIsOnlyGap {
+            return .setupRequired
+        }
+
+        guard mandatorySourceContract,
+              evidence.providerOwnedAuthentication == .present
+        else { return .noGo }
+        return evidence.optionalReset == .present ? .go : .conditionalGo
+    }
+
+    static func nextBrowserTask(for evidence: CursorBrowserAdmissionEvidence) -> String {
+        switch decideBrowser(evidence) {
+        case .go, .conditionalGo:
+            return "M7-G2"
+        case .setupRequired:
+            return "M7-SETUP-G1"
+        case .noGo:
+            return "Founder source-direction decision"
+        }
     }
 
     static func nextTask(for evidence: CursorAdmissionEvidence) -> String {
