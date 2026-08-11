@@ -1,210 +1,181 @@
 # UMA M7 Cursor Browser Source Dossier
 
-**Goal:** M7-G1B
-**Date:** 2026-08-10
-**Status:** `NO-GO — FREE-ACCOUNT PERCENTAGE SEMANTIC IS AMBIGUOUS`
+**Goal:** M7-G1C
+**Date:** 2026-08-11
+**Status:** `NO-GO — CURSOR PRODUCTION SUPPORT REMAINS LOCKED`
 **Production runtime:** unchanged
+**Only next task:** Founder source-direction decision
 
-## Purpose
+M7-G1C corrects the M7-G1B source decision using current Cursor-owned public
+evidence. It does not repeat browser testing, authenticate, read provider data,
+or implement Cursor. M7-G2 remains locked.
 
-M7-G1 established that Cursor has no admitted official local or CLI quota
-source. This dossier evaluates the only remaining Founder-authorized source
-class:
-
-```text
-official Cursor dashboard
-→ provider-controlled authentication
-→ bounded browser extraction
-→ sanitized quota observation
-```
-
-The study does not implement the Cursor provider. M7-G2 remains locked until
-this record and the matching admission decision reach one final
-`GO`, `CONDITIONAL GO`, `SETUP REQUIRED`, or `NO-GO` verdict.
-
-## Current official contract
-
-Current Cursor-owned documentation establishes:
-
-- Pro, Pro Plus, and Ultra have two independent monthly usage pools:
-  `Cursor Models` and `Other Models`.
-- `Cursor Models` covers Cursor Grok 4.5 and Composer 2.5.
-- `Other Models` covers selected third-party models at their API price.
-- Both pools reset with the monthly billing cycle and appear in the Cursor
-  editor and usage dashboard.
-- The Start plan is a documented exception: it has the Cursor Models pool but
-  not the Other Models pool or on-demand usage.
-- On-demand use is separate from included plan quota and must not be merged
-  into either included pool.
-
-Official sources:
-
-- <https://cursor.com/docs/models-and-pricing>
-- <https://cursor.com/help/models-and-usage/usage-limits>
-- <https://cursor.com/help/account-and-billing/billing>
-- <https://cursor.com/help/account-and-billing/overages>
-- <https://cursor.com/terms/pricing>
-- <https://cursor.com/blog/teams-pricing-june-2026>
-
-Current Cursor-owned documentation is not consistent on one mandatory route:
-the Help article points to the Spending tab, while Models & Pricing links the
-usage dashboard at `https://cursor.com/dashboard/usage`. The live study
-therefore evaluated `/dashboard`, `/dashboard/usage`, and
-`/dashboard/spending` as one official dashboard family. Route alone is not an
-admission identity.
-
-The documentation explicitly describes remaining allowance and monthly reset
-for its documented two-pool paid-plan surface. It does not define whether the
-single percentage labelled `Free Plan usage` on the live Free-account surface
-means used or remaining. The paid-plan statement is not applied to that
-different one-pool account mode.
-
-## Architecture order
-
-### A. UMA-owned isolated session — rejected
-
-The first test architecture is a task-owned app at:
+## Corrected adjudication
 
 ```text
-/private/tmp/uma-m7-g1b-isolated-probe-2cf4b23/UMA-Cursor-Probe.app
+CURSOR BROWSER SOURCE ARCHITECTURE VIABLE
+FREE PLAN SEMANTICS RESOLVED
+FREE PLAN ENFORCEMENT RELIABILITY NOT ADMITTED
+PAID PLAN CONTRACT NOT LIVE QUALIFIED
+CURSOR PRODUCTION SUPPORT REMAINS LOCKED
 ```
 
-Verified before launch:
+The previous claim that the Free-plan percentage direction was unresolved is
+superseded. Cursor-owned Support material explicitly treats the Overview meter
+as a **used percentage** and describes the complement as remaining. Therefore:
 
-- bundle ID `com.silkrd.uma.m7.cursor-probe`;
-- arm64 executable;
-- strict deep ad-hoc signature;
-- App Sandbox enabled;
-- outbound network-client entitlement only;
-- one visible `WKWebView`;
-- a dedicated persistent `WKWebsiteDataStore(forIdentifier:)`, not the
-  default/shared browser store;
-- HTTPS-only navigation;
-- Cursor-owned hosts allowed and every other provider sign-in host requires a
-  visible Human `Allow Once` decision;
-- no JavaScript evaluation, script message handler, cookie API, storage API,
-  Keychain API, file access, download handler, Accessibility, Screen
-  Recording, Apple Events, network server, or broad process inspection.
+```text
+dashboardPercent = usedPercent
+remainingPercent = 100 - usedPercent
+```
 
-The probe performed authentication compatibility only. The Human completed one
-provider-controlled sign-in attempt, but the embedded authentication flow
-reported a provider-side compatibility failure. A normal reopen and one bounded
-reload returned to provider-controlled login rather than the exact Spending
-route. No login-page DOM or page content was inspected by the probe. The
-isolated architecture is therefore rejected; no bypass or repeat login attempt
-is allowed.
+Normalization is applied exactly once. Values outside the finite 0...100 range
+fail closed. This is a provider-semantic rule, not a range, color, progress-bar,
+or numeric-value inference.
 
-### B. Safari Browser Companion — evaluated, not admitted
+## Current Cursor-owned public evidence
 
-Cursor's authentication provider rejected the isolated WebKit path, so the
-authorized Safari fallback is active. It uses only M7-owned temporary
-components and does not modify the frozen Claude BrowserExtension. It must
-independently prove registration, exact-route validation, bounded extraction,
-sanitized native handoff, repeatability, and cleanup.
+- Cursor Models & Pricing:
+  <https://cursor.com/docs/models-and-pricing>
+  documents two separate monthly pools for Pro, Pro Plus and Ultra:
+  `Cursor Models` and `Other Models`. Both reset with the monthly billing cycle
+  and are visible on the usage dashboard.
+- Cursor Support usage guidance:
+  <https://forum.cursor.com/t/agent-pro-usage-guidance-contradicts-docs-and-live-dashboard/166053/6>
+  identifies the Usage section as the source for real-time usage, remaining
+  allowance and token breakdowns, while keeping on-demand overage separate.
+- Cursor Support Free-plan mismatch:
+  <https://forum.cursor.com/t/auto-immediately-switches-back-to-composer-2-5-fast-locked-on-free-plan/165268>
+  explicitly identifies the Overview meter as used, derives remaining as its
+  complement, and confirms a known condition where the IDE blocks work while
+  the dashboard still displays remaining allowance.
+- Cursor Support two-pool clarification:
+  <https://forum.cursor.com/t/missing-total-usage-bar-in-dashboard/166582/4>
+  confirms that Cursor Models and Other Models remain separate because their
+  overflow rules differ.
 
-The temporary arm64 containing app embeds a real Safari Web Extension under
-`Contents/PlugIns`. Its second, repaired probe identity is
-**UMA Cursor Browser Companion v2**. Its manifest grants only
-`nativeMessaging` and these recognized official routes:
+## Five-part decision
+
+| Dimension | Classification |
+|---|---|
+| Browser source architecture | `VIABLE` |
+| Percentage direction | `USED` |
+| Deterministic normalization | `remainingPercent = 100 - usedPercent` |
+| Dashboard remaining quantity | `YES` |
+| Reliable predictor of continued availability | `NO` |
+| Free-plan production suitability for predicting when work may pause | `NO-GO` |
+| Paid-plan coverage | `DOCUMENTED BUT NOT LIVE QUALIFIED` |
+| Overall Cursor production support | `LOCKED` |
+
+“Truthful provider-rendered observation” means UMA can faithfully report what
+Cursor's dashboard displays. It does not mean that the display is an admitted
+predictor of whether Cursor will accept the next request.
+
+## Account-mode coverage
+
+The live Founder observation remains a one-pool Free-account surface with a
+stable provider-owned label and percentage unit; no paid-plan pools manufactured
+from that fixture are admitted.
+
+Current documentation describes two independent paid-plan pools:
+
+1. `Cursor Models`
+2. `Other Models`
+
+Those contracts are `DOCUMENTED BUT NOT LIVE QUALIFIED`. No authenticated
+Pro, Pro Plus, or Ultra observation established their current DOM identity,
+cardinality, reset projection, repeated stability, or extraction contract.
+Free-plan evidence cannot qualify paid-plan layouts.
+
+On-demand use is separate from the included pools. The recognized official
+route family remains:
 
 - `https://cursor.com/dashboard`
-- `https://cursor.com/dashboard/usage*`
-- `https://cursor.com/dashboard/spending*`
+- `https://cursor.com/dashboard/usage`
+- `https://cursor.com/dashboard/spending`
 
-The content script independently rejects query/hash variants and every path
-outside the three exact route classes before inspecting any page landmark.
-There is no broad host, cookie, storage, Keychain, network-interception, login
-page, or static Google-page permission. Strict nested ad-hoc signature
-verification passes. LaunchServices and `pluginkit` recognize the exact v2
-identifier. Safari listed v2, the Human enabled it, and Safari granted
-website access only on `cursor.com`; the older task-owned companion remained disabled.
+M7-G1B observed the first two as available for the Free account. Spending
+remained visibly loading and is not required when another recognized official
+surface provides a complete contract.
 
-The authenticated Safari session survived restart. The v2 companion emitted
-only schema-2 classifications through a native-message allowlist. Eight
-successful sanitized observations covered every recognized route twice,
-including the post-restart and exact-site-permission path. Every observation
-reported `privateFieldCount: 0`; no raw DOM, HTML, URL, exact quota, reset
-value, identity, billing detail, cookie, token, or session value crossed the
-native handoff.
+## Preserved browser architecture evidence
 
-The same one-pool identity, `Free Plan usage`, was stable on all observations.
-The native unit was a percentage. No bounded visible text, accessibility
-semantic, provider-owned test identity, or current official Free-plan contract
-classified that percentage as used or remaining. No same-pool denominator was
-available. Reset evidence was also unavailable for that one-pool observation.
-The Usage route separated an on-demand section; the other two route
-classifications did not establish that separation. The Spending route remained
-Human-visible as loading, while the v2 probe could still see the shared
-Free-plan label; therefore that route is not treated as a completed usage
-surface.
+### Isolated WebKit attempt
 
-## Live admission fields
+The task-owned prototype had App Sandbox enabled, outbound network-client entitlement only,
+a dedicated persistent `WKWebsiteDataStore(forIdentifier:)`,
+and no JavaScript evaluation before an exact admitted route. It did not share
+Safari, Chrome, Cursor, or the default WebKit store. Provider-controlled Google
+authentication reached an embedded-auth compatibility failure; the isolated
+architecture is rejected without another login attempt.
 
-The authenticated phase must establish, without durable Founder values:
+### Safari Browser Companion
 
-| Field | Current state |
-|---|---|
-| Isolated authentication compatibility | Rejected — provider-controlled embedded-auth incompatibility |
-| Persistent-session reopen | Failed closed — returned to provider login |
-| Authenticated official dashboard family | PASS — provider-controlled Safari session survived restart |
-| `/dashboard` | Available; one bounded Free-account pool classification |
-| `/dashboard/usage` | Available; one bounded Free-account pool classification; on-demand section separate |
-| `/dashboard/spending` | Human-visible loading; shared pool label alone does not prove route readiness |
-| Live plan/pool count | One Free-account pool; no paid-plan pools manufactured |
-| Provider-owned stable pool label | PASS — `Free Plan usage` stable across repeated observations |
-| Native unit | PASS — percentage |
-| Used-versus-remaining semantic | FAIL — explicit semantic unavailable |
-| Complete same-pool denominator, if required | Unavailable |
-| Reset date/time and scope | Unavailable for the observed Free-account pool |
-| On-demand separation | Present on Usage route only; not merged into the pool |
-| Repeated structural identity | PASS — two observations per tested surface |
-| Currentness | Structurally repeatable; no quota-consuming delta manufactured |
-| Bounded automatic refresh feasibility | PASS structurally — automatic post-navigation observations required no toolbar click |
-| Authentication-expiry fail-closed behavior | Contracted — unauthenticated/ambiguous observations do not publish quota |
+The **UMA Cursor Browser Companion v2** proved:
 
-Exact values may exist transiently in the isolated process solely for
-same-time validation. They must not enter Git, files, logs, screenshots,
-clipboard, durable evidence, or the final report.
+- provider-controlled Safari authentication feasibility;
+- exact dashboard-site permission with website access only on `cursor.com`;
+- strict recognized-route checking before bounded semantic extraction;
+- sanitized native handoff without raw DOM, HTML, URL, identity, billing,
+  cookie, token, or session material;
+- eight repeated sanitized observations with stable Free-plan structure;
+- automatic read feasibility;
+- fail-closed handling for unknown layouts;
+- complete disable, unregister, process teardown, and security restoration.
 
-## Operation accounting
+The older task-owned companion remained disabled, and the frozen Claude BrowserExtension
+was not modified.
+
+This architecture result remains viable even though production admission is
+blocked by source reliability and plan coverage.
+
+## Preserved operation accounting
 
 ```text
 Task-owned isolated probe launches: 3
-Provider-controlled login session opened: 1
+Provider-controlled login sessions opened: 1
 Human login completions: 1
 Authenticated dashboard route navigations: 4
 Successful sanitized observations: 8
 Safari fallback containing-app launches: 3
 Credential/cookie/private-state reads: 0
+Provider prompts/tasks: 0
+Intentional quota spend: 0
 Unexpected Human-supplied identity exposures: 1 transient
 Unexpected exact-quota accessibility exposures: 2 transient
 Retained incident identity/screenshot/log/payload copies: 0
 Retained exact-quota/DOM/URL copies: 0
-Provider prompts/tasks: 0
-Intentional quota spend: 0
-Automatic retries: 0
 ```
+
+M7-G1C added no provider operation:
+
+```text
+M7-G1C provider reads/browser logins/prompts/tasks/spend: 0/0/0/0/0
+```
+
+Here, `provider reads` means authenticated quota/dashboard reads from the
+Human's session. Public Cursor source-document retrieval is not an
+authenticated provider read and accessed no account or session data.
 
 ## Final browser cleanup
 
-- The legacy and v2 task-owned companions were disabled and both exact
-  extension identifiers were unregistered.
 - Safari `Allow unsigned extensions` was verified `Off` before Safari quit.
+- The legacy and v2 task-owned companions were disabled.
+- Both task-owned extension identifiers were unregistered.
 - The two exact `/private/tmp` probe roots are absent.
-- The three exact task-owned app-container records were removed without
-  opening or retaining their contents. No Safari profile, history, cookie,
-  provider login, or unrelated browser data was cleared.
-- No task-owned probe process or extension registration remains.
+- The three exact task-owned app-container records were removed.
+- No task-owned companion, probe, native host, process, or retained page
+  evidence remains.
+- Safari login data and unrelated browser state were untouched.
 
-## Current conclusion
+## Final source decision
 
-The Safari fallback proved provider-controlled authentication, narrow website
-permission, sanitized-before-native extraction, stable one-pool identity,
-percentage unit, repeated observation, and automatic read feasibility. It did
-not prove the mandatory numeric direction for the Free-account percentage.
-Interpreting the number would require guessing from its value, visual direction,
-or paid-plan documentation, all of which the Founder prohibited.
+The browser architecture is viable and the Free-plan display semantic is
+resolved. The source is still not suitable for UMA's present product goal:
+predicting when provider work may pause. Cursor itself documents a known
+Free-plan mismatch between dashboard remaining allowance and actual IDE
+enforcement, while paid-plan browser contracts are not live qualified.
 
-**Final browser-source decision: `NO-GO`.** No production architecture is
-admitted. Cursor remains unsupported and hidden. M7-G2 remains locked; the only
-next task is a Founder source-direction decision.
+**Final decision: `NO-GO — CURSOR PRODUCTION SUPPORT REMAINS LOCKED`.**
+Cursor remains unsupported and hidden. M7-G2 remains locked. The only next task
+is a Founder source-direction decision.

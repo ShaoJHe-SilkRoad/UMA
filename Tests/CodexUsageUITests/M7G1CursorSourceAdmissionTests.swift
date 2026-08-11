@@ -189,7 +189,7 @@ struct M7G1CursorSourceAdmissionTests {
         let records = try durableRecords()
 
         for record in records {
-            #expect(record.contains("M7-G1B"))
+            #expect(record.contains("M7-G1C"))
             #expect(record.contains("M7-G2 remains locked"))
             #expect(record.contains("NO-GO"))
             #expect(record.contains("Founder source-direction decision"))
@@ -198,10 +198,16 @@ struct M7G1CursorSourceAdmissionTests {
         }
 
         let combined = records.joined(separator: "\n")
-        #expect(combined.contains("Safari fallback"))
-        #expect(combined.contains("isolated architecture is rejected"))
-        #expect(combined.contains("Successful sanitized observations: 8"))
-        #expect(combined.contains("Provider prompts/tasks/spend: 0/0/0"))
+        #expect(combined.contains("CURSOR BROWSER SOURCE ARCHITECTURE VIABLE"))
+        #expect(combined.contains("FREE PLAN SEMANTICS RESOLVED"))
+        #expect(combined.contains("FREE PLAN ENFORCEMENT RELIABILITY NOT ADMITTED"))
+        #expect(combined.contains("PAID PLAN CONTRACT NOT LIVE QUALIFIED"))
+        #expect(combined.contains("CURSOR PRODUCTION SUPPORT REMAINS LOCKED"))
+        #expect(combined.contains("M7-G1C provider reads/browser logins/prompts/tasks/spend: 0/0/0/0/0"))
+        #expect(combined.contains("Public Cursor source-document retrieval is not an"))
+        #expect(combined.contains(
+            "authenticated provider read and accessed no account or session data"
+        ))
     }
 
     @Test
@@ -239,7 +245,7 @@ struct M7G1CursorSourceAdmissionTests {
     }
 
     @Test
-    func finalDecisionRejectsAmbiguousFreePlanPercentage() throws {
+    func correctedDecisionSeparatesDisplaySemanticsFromEnforcementReliability() throws {
         let dossier = try source(
             "source/UMA M7 Cursor Browser Source Dossier.md"
         )
@@ -247,12 +253,14 @@ struct M7G1CursorSourceAdmissionTests {
             "source/UMA M7 Cursor Browser Admission Decision.md"
         )
 
-        #expect(dossier.contains("| Native unit | PASS — percentage |"))
-        #expect(dossier.contains("`Free Plan usage` stable"))
-        #expect(dossier.contains("| Used-versus-remaining semantic | FAIL"))
-        #expect(dossier.contains("Exact values may exist transiently"))
+        #expect(dossier.contains("| Percentage direction | `USED` |"))
+        #expect(dossier.contains("| Deterministic normalization | `remainingPercent = 100 - usedPercent` |"))
+        #expect(dossier.contains("| Reliable predictor of continued availability | `NO`"))
+        #expect(dossier.contains("`DOCUMENTED BUT NOT LIVE QUALIFIED`"))
         #expect(decision.contains("direct local/CLI result remains `NO-GO`"))
-        #expect(decision.contains("**Final decision:** `NO-GO`"))
+        #expect(decision.contains("**Final decision:** `NO-GO — CURSOR PRODUCTION SUPPORT REMAINS LOCKED`"))
+        #expect(decision.contains("Free-plan percentage semantic: `USED`"))
+        #expect(decision.contains("Free-plan enforcement reliability: `NOT ADMITTED`"))
         #expect(decision.contains("not `CONDITIONAL GO`"))
         #expect(decision.contains("not `SETUP REQUIRED`"))
     }
@@ -340,17 +348,53 @@ struct M7G1CursorSourceAdmissionTests {
     }
 
     @Test
-    func browserNoGoRequiresNoNumericInference() {
+    func resolvedFreeSemanticsDoNotOverrideReliabilityAndCoverageGates() {
         let evidence = CursorBrowserAdmissionEvidence.liveFreeAccount
 
+        #expect(CursorAdmissionHarness.browserArchitectureViable(evidence))
+        #expect(evidence.percentageSemantic == .used)
+        #expect(evidence.normalizationComplete == .present)
+        #expect(evidence.dashboardRemainingObservation == .present)
+        #expect(evidence.enforcementReliability == .notAdmitted)
+        #expect(evidence.paidPlanCoverage == .documentedNotLiveQualified)
         #expect(CursorAdmissionHarness.decideBrowser(evidence) == .noGo)
         #expect(CursorAdmissionHarness.nextBrowserTask(for: evidence)
             == "Founder source-direction decision")
 
-        var explicitDirection = evidence
-        explicitDirection.semanticDirection = .present
-        explicitDirection.normalizationComplete = .present
-        #expect(CursorAdmissionHarness.decideBrowser(explicitDirection) == .conditionalGo)
+        var reliableFreePlan = evidence
+        reliableFreePlan.enforcementReliability = .admitted
+        #expect(CursorAdmissionHarness.decideBrowser(reliableFreePlan) == .noGo)
+
+        reliableFreePlan.paidPlanCoverage = .liveQualified
+        #expect(CursorAdmissionHarness.decideBrowser(reliableFreePlan) == .conditionalGo)
+    }
+
+    @Test
+    func usedPercentageNormalizesToRemainingExactlyOnce() {
+        #expect(CursorAdmissionHarness.normalizationFormula
+            == "remainingPercent = 100 - usedPercent")
+        #expect(CursorAdmissionHarness.remainingPercent(fromUsedPercent: 0) == 100)
+        #expect(CursorAdmissionHarness.remainingPercent(fromUsedPercent: 51) == 49)
+        #expect(CursorAdmissionHarness.remainingPercent(fromUsedPercent: 53) == 47)
+        #expect(CursorAdmissionHarness.remainingPercent(fromUsedPercent: 100) == 0)
+        #expect(CursorAdmissionHarness.remainingPercent(fromUsedPercent: -1) == nil)
+        #expect(CursorAdmissionHarness.remainingPercent(fromUsedPercent: 101) == nil)
+        #expect(CursorAdmissionHarness.remainingPercent(fromUsedPercent: .infinity) == nil)
+    }
+
+    @Test
+    func freeFixtureNeverManufacturesPaidPlanPools() {
+        let evidence = CursorBrowserAdmissionEvidence.liveFreeAccount
+
+        #expect(evidence.accountMode == .free)
+        #expect(evidence.poolCount == 1)
+        #expect(evidence.paidPlanCoverage == .documentedNotLiveQualified)
+
+        var syntheticPaidAccount = evidence
+        syntheticPaidAccount.accountMode = .paid
+        syntheticPaidAccount.poolCount = 2
+        syntheticPaidAccount.enforcementReliability = .admitted
+        #expect(CursorAdmissionHarness.decideBrowser(syntheticPaidAccount) == .noGo)
     }
 
     @Test
@@ -364,6 +408,10 @@ struct M7G1CursorSourceAdmissionTests {
         #expect(evidence.poolCount == 1)
         #expect(evidence.stablePoolLabel == "Free Plan usage")
         #expect(evidence.nativeUnit == .percentage)
+        #expect(evidence.percentageSemantic == .used)
+        #expect(evidence.dashboardRemainingObservation == .present)
+        #expect(evidence.enforcementReliability == .notAdmitted)
+        #expect(evidence.paidPlanCoverage == .documentedNotLiveQualified)
         #expect(evidence.repeatedObservations == 8)
         #expect(evidence.providerPrompts == 0)
         #expect(evidence.providerTasks == 0)
@@ -373,15 +421,15 @@ struct M7G1CursorSourceAdmissionTests {
     @Test
     func browserSetupRequiredIsReservedForASetupOnlyGap() {
         var evidence = CursorBrowserAdmissionEvidence.liveFreeAccount
-        evidence.semanticDirection = .present
-        evidence.normalizationComplete = .present
+        evidence.enforcementReliability = .admitted
+        evidence.paidPlanCoverage = .liveQualified
         evidence.providerOwnedAuthentication = .absent
         evidence.setupPrerequisiteIsOnlyGap = true
 
         #expect(CursorAdmissionHarness.decideBrowser(evidence) == .setupRequired)
         #expect(CursorAdmissionHarness.nextBrowserTask(for: evidence) == "M7-SETUP-G1")
 
-        evidence.semanticDirection = .unavailable
+        evidence.percentageSemantic = .unresolved
         #expect(CursorAdmissionHarness.decideBrowser(evidence) == .noGo)
     }
 
@@ -489,6 +537,24 @@ private enum CursorBrowserNativeUnit: Equatable {
     case unavailable
 }
 
+private enum CursorBrowserPercentageSemantic: Equatable {
+    case used
+    case remaining
+    case unresolved
+}
+
+private enum CursorFreePlanEnforcementReliability: Equatable {
+    case admitted
+    case notAdmitted
+    case unresolved
+}
+
+private enum CursorPaidPlanCoverage: Equatable {
+    case liveQualified
+    case documentedNotLiveQualified
+    case unsupported
+}
+
 private struct CursorBrowserAdmissionEvidence: Equatable {
     var testedRoutes: [CursorBrowserRoute]
     var admissibleRoutes: [CursorBrowserRoute]
@@ -497,8 +563,12 @@ private struct CursorBrowserAdmissionEvidence: Equatable {
     var poolCount: Int
     var stablePoolLabel: String
     var nativeUnit: CursorBrowserNativeUnit
-    var semanticDirection: CursorEvidenceState
+    var percentageSemantic: CursorBrowserPercentageSemantic
     var normalizationComplete: CursorEvidenceState
+    var dashboardRemainingObservation: CursorEvidenceState
+    var enforcementReliability: CursorFreePlanEnforcementReliability
+    var paidPlanCoverage: CursorPaidPlanCoverage
+    var architectureFeasible: CursorEvidenceState
     var optionalReset: CursorEvidenceState
     var providerOwnedAuthentication: CursorEvidenceState
     var setupPrerequisiteIsOnlyGap: Bool
@@ -519,8 +589,12 @@ private struct CursorBrowserAdmissionEvidence: Equatable {
         poolCount: 1,
         stablePoolLabel: "Free Plan usage",
         nativeUnit: .percentage,
-        semanticDirection: .unavailable,
-        normalizationComplete: .unavailable,
+        percentageSemantic: .used,
+        normalizationComplete: .present,
+        dashboardRemainingObservation: .present,
+        enforcementReliability: .notAdmitted,
+        paidPlanCoverage: .documentedNotLiveQualified,
+        architectureFeasible: .present,
         optionalReset: .unavailable,
         providerOwnedAuthentication: .present,
         setupPrerequisiteIsOnlyGap: false,
@@ -658,6 +732,7 @@ private struct CursorSanitizedProjection: Equatable {
 }
 
 private enum CursorAdmissionHarness {
+    static let normalizationFormula = "remainingPercent = 100 - usedPercent"
     static let sourcePriority: [CursorSourceTier] = [
         .officialStructuredLocal,
         .officialDocumentedCLI,
@@ -709,7 +784,7 @@ private enum CursorAdmissionHarness {
     static func decideBrowser(
         _ evidence: CursorBrowserAdmissionEvidence
     ) -> CursorAdmissionDecision {
-        let mandatorySourceContract = !evidence.admissibleRoutes.isEmpty
+        let mandatorySourceContract = browserArchitectureViable(evidence)
             && evidence.strictPrivacyProjection == .present
             && evidence.repeatedStructure == .present
             && evidence.automaticRefreshFeasible == .present
@@ -717,22 +792,46 @@ private enum CursorAdmissionHarness {
             && evidence.poolCount > 0
             && !evidence.stablePoolLabel.isEmpty
             && evidence.nativeUnit != .unavailable
-            && evidence.semanticDirection == .present
+            && evidence.percentageSemantic != .unresolved
             && evidence.normalizationComplete == .present
+            && evidence.dashboardRemainingObservation == .present
             && evidence.providerPrompts == 0
             && evidence.providerTasks == 0
             && evidence.intentionalSpend == 0
 
+        let productionCoverage = evidence.enforcementReliability == .admitted
+            && evidence.paidPlanCoverage == .liveQualified
+
         if mandatorySourceContract,
+           productionCoverage,
            evidence.providerOwnedAuthentication != .present,
            evidence.setupPrerequisiteIsOnlyGap {
             return .setupRequired
         }
 
         guard mandatorySourceContract,
+              productionCoverage,
               evidence.providerOwnedAuthentication == .present
         else { return .noGo }
         return evidence.optionalReset == .present ? .go : .conditionalGo
+    }
+
+    static func browserArchitectureViable(
+        _ evidence: CursorBrowserAdmissionEvidence
+    ) -> Bool {
+        evidence.architectureFeasible == .present
+            && !evidence.admissibleRoutes.isEmpty
+            && evidence.strictPrivacyProjection == .present
+            && evidence.repeatedStructure == .present
+            && evidence.automaticRefreshFeasible == .present
+            && evidence.noProviderWork == .present
+    }
+
+    static func remainingPercent(fromUsedPercent usedPercent: Double) -> Double? {
+        guard usedPercent.isFinite, (0 ... 100).contains(usedPercent) else {
+            return nil
+        }
+        return 100 - usedPercent
     }
 
     static func nextBrowserTask(for evidence: CursorBrowserAdmissionEvidence) -> String {
