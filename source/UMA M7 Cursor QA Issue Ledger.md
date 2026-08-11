@@ -1,18 +1,18 @@
 # UMA M7 Cursor QA Issue Ledger
 
-**Goal:** M7-G1C
+**Goal:** M7-CLOSE-G1
 **Date:** 2026-08-11
-**Decision:** `NO-GO — CURSOR PRODUCTION SUPPORT REMAINS LOCKED`
-**Only next task:** Founder source-direction decision
+**Decision:** `M7 CLOSED — CURSOR UNSUPPORTED — SOURCE NOT ADMITTED`
+**Only next recommendation:** Return to Founder for next-provider selection
 
-## Corrected truth
+## Current M7 closeout truth
 
 ```text
 CURSOR BROWSER SOURCE ARCHITECTURE VIABLE
 FREE PLAN SEMANTICS RESOLVED
 FREE PLAN ENFORCEMENT RELIABILITY NOT ADMITTED
 PAID PLAN CONTRACT NOT LIVE QUALIFIED
-CURSOR PRODUCTION SUPPORT REMAINS LOCKED
+CURSOR PRODUCTION SUPPORT UNSUPPORTED — SOURCE NOT ADMITTED
 ```
 
 ## Issue ledger
@@ -32,8 +32,12 @@ CURSOR PRODUCTION SUPPORT REMAINS LOCKED
 | M7G1C-003 | Blocking | Paid-plan coverage | Two pools are documented for Pro/Pro Plus/Ultra but no paid account was observed | `DOCUMENTED BUT NOT LIVE QUALIFIED`; never infer from Free fixture | Account-mode isolation test | Closed as decision; product remains locked |
 | M7G1C-004 | Architecture | Browser companion adjudication | G1B architecture gates passed independently of source reliability | Preserve `ARCHITECTURE VIABLE`; no new Safari run | Existing sanitized evidence and cleanup audit | Closed |
 | M7G1C-005 | Regression | Scope control | Decision correction could alter runtime or protected providers | Five documentation/test files only | Protected-path audit | Closed |
+| M7CLOSE-001 | Gate | Accepted M7-G1C decision | A technically viable dashboard path does not satisfy reliable pause prediction | Record Cursor as `Unsupported — source not admitted` | Closeout truth tests | Closed |
+| M7CLOSE-002 | Coverage | Paid-plan documentation | Two paid pools are documented but were not live qualified | Preserve documented structure without inferring from Free | Account-mode closeout tests | Closed |
+| M7CLOSE-003 | Product | Runtime/source inventory | Cursor could be mistaken for hidden or experimental support | Verify no Cursor runtime or production browser artifact exists | Four-provider and source-tree tests | Closed |
+| M7CLOSE-004 | Security | Browser closeout | Temporary admission tooling must not survive M7 | Preserve accepted Off/unregistered/removed cleanup truth; do not reopen Safari | Closeout privacy test and protected audit | Closed |
 
-## Exact authorized edit set
+## Historical M7-G1C exact authorized edit set
 
 ```text
 Tests/CodexUsageUITests/M7G1CursorSourceAdmissionTests.swift
@@ -53,6 +57,28 @@ Claude mechanism changed: NO
 WorkBuddy mechanism changed: NO
 Antigravity mechanism changed: NO
 Cursor runtime implemented: NO
+```
+
+## M7-CLOSE-G1 exact authorized edit set
+
+```text
+Tests/CodexUsageUITests/M7CloseCursorSourceAdmissionTests.swift
+source/UMA M7 Cursor Closeout.md
+source/UMA M7 Cursor QA Issue Ledger.md
+```
+
+```text
+Production source files changed: NO
+Browser extension files changed: NO
+Package scripts changed: NO
+M5/M6 records changed: NO
+source/reference/** changed: NO
+Codex mechanism changed: NO
+Claude mechanism changed: NO
+WorkBuddy mechanism changed: NO
+Antigravity mechanism changed: NO
+Cursor runtime implemented: NO
+M7-G2 remains locked: YES
 ```
 
 ## Operation accounting
@@ -79,7 +105,32 @@ authenticated provider read and accessed no account or session data.
 Rejected routes remain API key, copied token, cookie, Keychain, private
 endpoint, browser-profile import, manual quota, and inferred quota.
 
-## Verification ledger
+M7-CLOSE-G1 performed repository-only closeout work:
+
+```text
+Cursor reads/browser login actions/prompts/tasks/intentional spend: 0/0/0/0/0
+```
+
+## M7-CLOSE-G1 verification ledger
+
+| Check | Result |
+|---|---|
+| Focused M7 closeout tests | PASS — 9/9 in one suite |
+| Relevant M7 regression | PASS — 43/43 across three M7 suites |
+| Deterministic serial full suite | PASS — 619/619 UI tests in 64 suites plus 18/18 bridge tests; 637/637 total |
+| Debug/Release/strict builds | Not required — no production/package code changed |
+| `git diff --check` | PASS |
+| Privacy/identity/secret scan | PASS — no retained identity, credential, token, cookie, raw page data, or exact Founder quota value |
+| Existing four-provider protected audit | PASS — no production, M5/M6, or accepted-provider path changed; Desktop UMA unchanged |
+| `source/reference/**` audit | PASS — no checksum-locked reference file changed |
+| Browser cleanup | Accepted G1B/G1C state preserved; no Safari action in M7-CLOSE-G1 |
+| Independent staged-index review | PASS — source, privacy, and QA examiners accepted the exact three-file cached closeout scope after the historical G1C section was explicitly labeled as superseded |
+| Post-commit clean worktree/index | Delivery gate — verified after commit and reported in the final handoff |
+
+## Historical M7-G1C verification ledger — superseded by M7-CLOSE-G1
+
+The following ledger is retained only as predecessor evidence. Its task and
+support-status language is not the current M7 decision.
 
 | Check | Result |
 |---|---|
@@ -97,7 +148,10 @@ endpoint, browser-profile import, manual quota, and inferred quota.
 | Independent staged-index review | PASS — three-examiner review found no blocking or actionable issue after the accounting clarification |
 | Post-commit clean worktree/index | Delivery gate — verified after this commit and reported in the final M7-G1C handoff |
 
-## Completion contract
+## Historical M7-G1C completion contract — superseded by M7-CLOSE-G1
+
+The following block records the G1C state at that earlier boundary. The
+authoritative current state is the Final M7 closure contract below.
 
 ```text
 Corrected decision: NO-GO
@@ -110,4 +164,22 @@ Cursor production support: LOCKED
 M7-G2 remains locked
 Only next task: Founder source-direction decision
 M7-G1C provider reads/browser logins/prompts/tasks/spend: 0/0/0/0/0
+```
+
+## Final M7 closure contract
+
+```text
+M7 status: CLOSED — NO-GO
+Cursor production support: UNSUPPORTED
+Status label: Unsupported — source not admitted
+Direct local/CLI source: NO-GO
+Browser architecture: TECHNICALLY VIABLE
+Free semantic: USED
+Normalization: remainingPercent = 100 - usedPercent
+Free enforcement reliability: NOT ADMITTED
+Paid-plan coverage: DOCUMENTED BUT NOT LIVE QUALIFIED
+Current supported providers: Codex, Claude Code, WorkBuddy, Google Antigravity
+M7-G2 remains locked
+Only next recommendation: Return to Founder for next-provider selection
+Cursor reads/browser login actions/prompts/tasks/intentional spend: 0/0/0/0/0
 ```
