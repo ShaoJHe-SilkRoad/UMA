@@ -1,25 +1,28 @@
 import Foundation
 import Testing
 
-@Suite("M8 G1 Kimi unified source admission")
+@Suite("M8 G1/G1R Kimi source admission")
 struct M8G1KimiSourceAdmissionTests {
     @Test
-    func currentDeviceRoutesOnlyToOfficialSetup() {
+    func currentDeviceIsNoGoAfterObservationCapExhaustion() {
         let evidence = KimiAdmissionEvidence.currentDevice
 
         #expect(evidence.officialCLICandidate)
-        #expect(evidence.cliInstalled == false)
-        #expect(evidence.setupPrerequisiteIsOnlyCurrentGate)
-        #expect(KimiAdmissionHarness.decide(evidence) == .setupRequired)
-        #expect(KimiAdmissionHarness.nextTask(for: evidence) == "M8-SETUP-G1")
+        #expect(evidence.cliInstalled)
+        #expect(!evidence.setupPrerequisiteIsOnlyCurrentGate)
+        #expect(!evidence.cliSourceObserved)
+        #expect(evidence.quotaSourceObservations == evidence.observationCap)
+        #expect(evidence.successfulSanitizedObservations == 0)
+        #expect(KimiAdmissionHarness.decide(evidence) == .noGo)
+        #expect(KimiAdmissionHarness.nextTask(for: evidence) == "Founder source-direction decision")
     }
 
     @Test
     func currentChannelsRemainUnadmitted() {
         let evidence = KimiAdmissionEvidence.currentDevice
 
-        #expect(evidence.sharedMembership == .conditional)
-        #expect(evidence.kimiCodeLimits == .conditional)
+        #expect(evidence.sharedMembership == .missing)
+        #expect(evidence.kimiCodeLimits == .noGo)
         #expect(evidence.extraUsage == .unreadable)
         #expect(evidence.accountMode == .unknownUnsupported)
     }
@@ -27,12 +30,15 @@ struct M8G1KimiSourceAdmissionTests {
     @Test
     func setupRequiredNeedsAnOfficialRecoverableSource() {
         var evidence = KimiAdmissionEvidence.currentDevice
+        evidence.cliInstalled = false
+        evidence.setupPrerequisiteIsOnlyCurrentGate = true
         #expect(KimiAdmissionHarness.decide(evidence) == .setupRequired)
 
         evidence.officialCLICandidate = false
         #expect(KimiAdmissionHarness.decide(evidence) == .noGo)
 
         evidence = .currentDevice
+        evidence.cliInstalled = false
         evidence.setupPrerequisiteIsOnlyCurrentGate = false
         #expect(KimiAdmissionHarness.decide(evidence) == .noGo)
     }
@@ -49,6 +55,7 @@ struct M8G1KimiSourceAdmissionTests {
 
         evidence.cliSourceObserved = false
         #expect(KimiAdmissionHarness.decide(evidence) == .noGo)
+        #expect(KimiAdmissionHarness.nextTask(for: evidence) == "Founder source-direction decision")
     }
 
     @Test
@@ -100,32 +107,66 @@ struct M8G1KimiSourceAdmissionTests {
     }
 
     @Test
-    func promptModeIsNeverAcceptedAsUsageControl() {
+    func promptModeIsRejectedAndBuiltInSubmitRequiresPositiveRecognition() {
         let evidence = KimiAdmissionEvidence.currentDevice
 
         #expect(evidence.usageIsDocumentedInteractiveTUI)
         #expect(evidence.promptModeIsStructuredAgentMode)
-        #expect(evidence.documentedStandaloneStructuredUsage == false)
-        #expect(KimiAdmissionHarness.acceptsPromptModeAsUsage(evidence) == false)
+        #expect(!evidence.documentedStandaloneStructuredUsage)
+        #expect(evidence.positiveBuiltinGate)
+        #expect(!KimiAdmissionHarness.acceptsPromptModeAsUsage(evidence))
     }
 
     @Test
-    func operationAccountingIsZero() {
+    func operationAccountingIsExactlyCappedWithNoProviderWork() {
         let evidence = KimiAdmissionEvidence.currentDevice
 
-        #expect(evidence.quotaSourceObservations == 0)
+        #expect(evidence.quotaSourceObservations == 3)
+        #expect(evidence.observationCap == 3)
+        #expect(evidence.successfulSanitizedObservations == 0)
         #expect(evidence.providerPrompts == 0)
         #expect(evidence.providerTasks == 0)
         #expect(evidence.intentionalSpend == 0)
         #expect(evidence.loginBrowserActions == 0)
         #expect(evidence.credentialReads == 0)
+        #expect(evidence.noProviderWork)
+        #expect(!evidence.noAttributableDecrement)
+    }
+
+    @Test
+    func normalizationPreservesProviderSemantics() {
+        #expect(KimiAdmissionHarness.remainingPercent(fromUsedPercent: 0) == 100)
+        #expect(KimiAdmissionHarness.remainingPercent(fromUsedPercent: 37.5) == 62.5)
+        #expect(KimiAdmissionHarness.remainingPercent(fromUsedPercent: 100) == 0)
+        #expect(KimiAdmissionHarness.remainingFraction(used: 3, total: 12) == 0.75)
+        #expect(KimiAdmissionHarness.remainingFraction(used: 3, total: 0) == nil)
+        #expect(KimiAdmissionHarness.normalizesMissingAsZero == false)
+        #expect(KimiAdmissionHarness.normalizesUnlimitedAsPercent == false)
+        #expect(KimiAdmissionHarness.normalizesNativeMoneyAsPercent == false)
+    }
+
+    @Test
+    func liveIdentityAndRepeatabilityAreMandatory() {
+        var evidence = KimiAdmissionEvidence.admissibleSynthetic
+        evidence.stableIdentities = false
+        #expect(KimiAdmissionHarness.decide(evidence) == .noGo)
+
+        evidence = .admissibleSynthetic
+        evidence.repeatedObservations = false
+        #expect(KimiAdmissionHarness.decide(evidence) == .noGo)
+
+        #expect(!KimiAdmissionHarness.acceptsIdentityAuthority("array-order"))
+        #expect(!KimiAdmissionHarness.acceptsIdentityAuthority("reset-time"))
+        #expect(!KimiAdmissionHarness.acceptsIdentityAuthority("quota-value"))
+        #expect(KimiAdmissionHarness.acceptsIdentityAuthority("provider-stable-id"))
     }
 
     @Test
     func sanitizationProjectsOnlyDurableAllowlist() {
         let raw: [String: Any] = [
             "sourceClass": "official-cli",
-            "observations": 0,
+            "observations": 3,
+            "successfulObservations": 0,
             "email": "synthetic-private@example.invalid",
             "accountID": "synthetic-account",
             "token": "synthetic-token",
@@ -140,7 +181,11 @@ struct M8G1KimiSourceAdmissionTests {
         let projection = KimiAdmissionHarness.sanitize(raw)
         let reflection = String(reflecting: projection)
 
-        #expect(projection == .init(sourceClass: "official-cli", observations: 0))
+        #expect(projection == .init(
+            sourceClass: "official-cli",
+            observations: 3,
+            successfulObservations: 0
+        ))
         for rejected in [
             "synthetic-private", "synthetic-account", "synthetic-token",
             "synthetic-cookie", "synthetic-exact-value", "synthetic-reset-date",
@@ -151,32 +196,34 @@ struct M8G1KimiSourceAdmissionTests {
     }
 
     @Test
-    func durableRecordsAgreeOnDecisionChannelsAndRouting() throws {
+    func durableRecordsAgreeOnDecisionChannelsAccountingAndRouting() throws {
         let records = try durableRecords()
 
         for record in records {
-            #expect(record.contains("SETUP REQUIRED"))
+            #expect(record.contains("NO-GO"))
             #expect(record.contains("M8-G2 remains locked"))
             #expect(!record.contains("synthetic-private@example.invalid"))
             #expect(!record.contains("/Users/"))
         }
 
         let combined = records.joined(separator: "\n")
-        #expect(combined.contains("SHARED MEMBERSHIP: CONDITIONAL"))
-        #expect(combined.contains("KIMI CODE LIMITS: CONDITIONAL"))
+        #expect(combined.contains("SHARED MEMBERSHIP: MISSING"))
+        #expect(combined.contains("KIMI CODE LIMITS: NO-GO"))
         #expect(combined.contains("EXTRA USAGE: UNREADABLE"))
-        #expect(combined.contains("M8-SETUP-G1"))
-        #expect(combined.contains("quota/source observations: 0"))
+        #expect(combined.contains("3 / 3"))
+        #expect(combined.contains("Successful sanitized observations retained: 0"))
+        #expect(combined.contains("Founder source-direction decision"))
+        #expect(combined.contains("M8-WEB-G1 remains locked"))
     }
 
     @Test
-    func durableRecordsRejectPrivateAndEstimatedSources() throws {
+    func durableRecordsRejectPrivateEstimatedAndAgentSources() throws {
         let combined = try durableRecords().joined(separator: "\n").lowercased()
 
         for required in [
-            "api key", "oauth", "keychain", "cookie", "browser-profile",
-            "private/internal", "manual values", "screenshot/ocr",
-            "raw cli/tui output", "full process `argv`",
+            "api key", "oauth", "keychain", "cookies", "browser profiles",
+            "private/internal", "manual values", "screenshots/ocr",
+            "raw cli/tui output", "process command-line", "prompt mode",
         ] {
             #expect(combined.contains(required))
         }
@@ -198,17 +245,27 @@ struct M8G1KimiSourceAdmissionTests {
         }
         #expect(ledger.contains("Production source files changed: NO"))
         #expect(ledger.contains("Existing provider mechanisms changed: NO"))
+        #expect(ledger.contains("M5 frozen files changed: NO"))
         #expect(ledger.contains("Package scripts changed: NO"))
     }
 
     @Test
-    func publicDocumentationDoesNotBecomeLiveAdmission() throws {
+    func publicContractDoesNotBecomeLiveAdmissionEvidence() throws {
         let dossier = try source("source/UMA M8 Kimi Local Source Dossier.md")
 
-        #expect(dossier.contains("documentation evidence, not an"))
-        #expect(dossier.contains("installed version claim"))
+        #expect(dossier.contains("official contract facts, not current-account live admission"))
         #expect(dossier.contains("No channel is admitted from documentation alone"))
-        #expect(dossier.contains("future `/usage` read remains `unproven`"))
+        #expect(dossier.contains("did not retain one successful sanitized"))
+        #expect(dossier.contains("could not fall through to an Agent"))
+    }
+
+    @Test
+    func taskOwnedTrustMarkerHasExactCleanupContract() throws {
+        let privacy = try source("source/UMA M8 Kimi Privacy Contract.md")
+
+        #expect(privacy.contains("workspace-trust choice"))
+        #expect(privacy.contains("remove only that exact marker"))
+        #expect(privacy.contains("No provider-owned authentication or unrelated Kimi state may be modified"))
     }
 
     private func durableRecords() throws -> [String] {
@@ -275,6 +332,7 @@ private struct KimiAdmissionEvidence {
     var stableIdentities: Bool
     var repeatedObservations: Bool
     var noProviderWork: Bool
+    var noAttributableDecrement: Bool
     var optionalResetMissing: Bool
     var prohibitedCredentialRoute: Bool
     var privateEndpointRequired: Bool
@@ -282,7 +340,10 @@ private struct KimiAdmissionEvidence {
     var usageIsDocumentedInteractiveTUI: Bool
     var promptModeIsStructuredAgentMode: Bool
     var documentedStandaloneStructuredUsage: Bool
+    var positiveBuiltinGate: Bool
     var quotaSourceObservations: Int
+    var successfulSanitizedObservations: Int
+    var observationCap: Int
     var providerPrompts: Int
     var providerTasks: Int
     var intentionalSpend: Int
@@ -291,17 +352,18 @@ private struct KimiAdmissionEvidence {
 
     static let currentDevice = KimiAdmissionEvidence(
         officialCLICandidate: true,
-        cliInstalled: false,
-        setupPrerequisiteIsOnlyCurrentGate: true,
+        cliInstalled: true,
+        setupPrerequisiteIsOnlyCurrentGate: false,
         cliSourceObserved: false,
         officialBrowserCandidate: true,
-        sharedMembership: .conditional,
-        kimiCodeLimits: .conditional,
+        sharedMembership: .missing,
+        kimiCodeLimits: .noGo,
         extraUsage: .unreadable,
         accountMode: .unknownUnsupported,
         stableIdentities: false,
         repeatedObservations: false,
-        noProviderWork: false,
+        noProviderWork: true,
+        noAttributableDecrement: false,
         optionalResetMissing: false,
         prohibitedCredentialRoute: false,
         privateEndpointRequired: false,
@@ -309,7 +371,10 @@ private struct KimiAdmissionEvidence {
         usageIsDocumentedInteractiveTUI: true,
         promptModeIsStructuredAgentMode: true,
         documentedStandaloneStructuredUsage: false,
-        quotaSourceObservations: 0,
+        positiveBuiltinGate: true,
+        quotaSourceObservations: 3,
+        successfulSanitizedObservations: 0,
+        observationCap: 3,
         providerPrompts: 0,
         providerTasks: 0,
         intentionalSpend: 0,
@@ -330,6 +395,7 @@ private struct KimiAdmissionEvidence {
         stableIdentities: true,
         repeatedObservations: true,
         noProviderWork: true,
+        noAttributableDecrement: true,
         optionalResetMissing: false,
         prohibitedCredentialRoute: false,
         privateEndpointRequired: false,
@@ -337,7 +403,10 @@ private struct KimiAdmissionEvidence {
         usageIsDocumentedInteractiveTUI: true,
         promptModeIsStructuredAgentMode: true,
         documentedStandaloneStructuredUsage: false,
+        positiveBuiltinGate: true,
         quotaSourceObservations: 2,
+        successfulSanitizedObservations: 2,
+        observationCap: 3,
         providerPrompts: 0,
         providerTasks: 0,
         intentionalSpend: 0,
@@ -349,9 +418,14 @@ private struct KimiAdmissionEvidence {
 private struct KimiSanitizedProjection: Equatable {
     let sourceClass: String
     let observations: Int
+    let successfulObservations: Int
 }
 
 private enum KimiAdmissionHarness {
+    static let normalizesMissingAsZero = false
+    static let normalizesUnlimitedAsPercent = false
+    static let normalizesNativeMoneyAsPercent = false
+
     static func decide(_ evidence: KimiAdmissionEvidence) -> KimiOverallDecision {
         if evidence.prohibitedCredentialRoute
             || evidence.privateEndpointRequired
@@ -371,6 +445,7 @@ private enum KimiAdmissionHarness {
             && evidence.stableIdentities
             && evidence.repeatedObservations
             && evidence.noProviderWork
+            && evidence.successfulSanitizedObservations >= 2
 
         guard sourceCore else { return .noGo }
 
@@ -410,10 +485,25 @@ private enum KimiAdmissionHarness {
             && !evidence.promptModeIsStructuredAgentMode
     }
 
+    static func remainingPercent(fromUsedPercent usedPercent: Double) -> Double? {
+        guard usedPercent.isFinite, (0...100).contains(usedPercent) else { return nil }
+        return 100 - usedPercent
+    }
+
+    static func remainingFraction(used: Decimal, total: Decimal) -> Decimal? {
+        guard total > 0, used >= 0, used <= total else { return nil }
+        return (total - used) / total
+    }
+
+    static func acceptsIdentityAuthority(_ authority: String) -> Bool {
+        authority == "provider-stable-id"
+    }
+
     static func sanitize(_ raw: [String: Any]) -> KimiSanitizedProjection {
         KimiSanitizedProjection(
             sourceClass: raw["sourceClass"] as? String ?? "unavailable",
-            observations: raw["observations"] as? Int ?? 0
+            observations: raw["observations"] as? Int ?? 0,
+            successfulObservations: raw["successfulObservations"] as? Int ?? 0
         )
     }
 }

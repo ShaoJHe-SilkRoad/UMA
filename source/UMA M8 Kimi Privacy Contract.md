@@ -1,142 +1,124 @@
 # UMA M8 Kimi Privacy Contract
 
-Applies to: M8-G1 and any later Kimi source-admission recheck
-Current result: `SETUP REQUIRED`
+Applies to: M8-G1R and any later Founder-authorized Kimi source recheck
+Current result: `NO-GO`
 
-## Purpose
+## Purpose and source boundary
 
-This contract permits only the minimum provider-owned usage evidence needed to
-decide whether Kimi can be monitored honestly. It does not admit credentials,
-identity, private account state, conversations, workspaces, or raw payloads.
+Only the minimum provider-owned usage semantics needed for an honest admission
+decision may be observed. Credentials, identity, private account state,
+conversations, workspaces, raw terminal output, and exact Founder values are
+outside the contract.
 
-## Source priority
+Allowed source priority remains:
 
-1. official Kimi Code CLI `/usage` after exact installed capability proof;
-2. official Kimi Code Console only under a separately admitted browser Goal;
-3. official Subscription / My Quota only under a separately admitted browser
-   Goal.
+1. exact trusted official Kimi Code CLI interactive `/usage` built-in;
+2. official Kimi account surfaces only under a separately authorized Goal.
 
-Kimi Open Platform/API-key routes, credential/config files, private endpoints,
-manual values, local estimates, and screenshot/OCR sources are prohibited.
+API keys, credential/config files, Keychain, cookies, browser profiles, private
+endpoints, manual values, local estimates, conversation history, screenshots,
+and OCR are prohibited.
 
-## Pre-qualification boundary
+## Control-path contract
 
-Permitted before a quota observation:
+The current official contract admits no standalone structured usage command.
+`-p` / `--prompt` is an Agent route and must never carry `/usage`.
 
-- exact executable/app presence;
-- resolved executable path and symlink chain;
-- file type, architecture, owner, mode, version, signature, Gatekeeper, and
-  installer/release provenance;
-- bounded `--version` and `--help` capability output;
-- authentication state classification only when exposed by an approved public
-  command without revealing authentication material.
+A bounded CLI observation must:
 
-Forbidden:
+- execute only `$HOME/.kimi-code/bin/kimi` after exact trust verification;
+- use an empty owner-only task directory and a safe environment allowlist;
+- open no resumed session and provide no prompt/session argument;
+- wait for an idle TUI marker;
+- type only a partial `/usag` prefix;
+- require the exact provider-owned built-in autocomplete description before
+  appending the final character and sending Enter;
+- abort without Enter if positive recognition is absent;
+- capture only bounded in-memory PTY bytes and emit classifications only;
+- terminate and reap the exact task-owned process group;
+- inspect executable path/PID/count only, never broad argv or environment.
 
-- reading provider credential, token, config, Keychain, cookie, browser-profile,
-  local/session-storage, or authentication-database contents;
-- broad filesystem, process argument, or environment inspection;
-- invoking Agent prompt mode as a substitute for a quota control command.
+The positive autocomplete gate prevents unknown slash input from falling
+through to an Agent message.
 
-## Qualified observation limits
+## M8-G1R operation bounds and result
 
 ```text
-maximum qualified quota/source observations: 3
-maximum live-source window: 15 minutes
+maximum /usage observations: 3
+conservatively consumed: 3
+successful sanitized observations retained: 0
 automatic retries: 0
-provider prompts/tasks/conversations: 0
+provider prompts / Agent turns / tasks: 0 / 0 / 0
 intentional model/token spend: 0
-Extra Usage purchase/settings mutations: 0
+/credits reads: 0
+account/Extra Usage mutations: 0
+credential/private-state reads: 0
 ```
 
-If no candidate qualifies, use zero reads. M8-G1 used zero.
-
-## CLI execution contract
-
-A later qualified CLI read must use:
-
-- one exact trusted executable, never PATH-only authority;
-- installed-help-derived control input;
-- one empty owner-only UMA task directory;
-- no shell interpolation;
-- no environment credential injection;
-- closed stdin except the exact proven control sequence;
-- bounded in-memory stdout/stderr or PTY capture;
-- 15-second request timeout and 20-second hard timeout unless later evidence
-  justifies a narrower bound;
-- one owned process/read, complete cancellation, termination, and reap;
-- no raw transcript persistence.
-
-Safe process evidence is limited to exact executable path/name, exact PID,
-owned parent/child relationship, process count, bounded resource counters, and
-exit/absence classification. Full process `argv` and environment are forbidden.
+No additional live read is authorized after this result.
 
 ## Durable retention allowlist
 
-Only these classifications may enter Git, QA evidence, or final reports:
+Only these classifications may enter Git or final reporting:
 
-- source/version classification;
-- safe bounded window labels or stable IDs;
-- field names/types;
-- explicit used/remaining/used-plus-total semantic classifications;
-- cycle/reset type, without exact Founder reset date;
+- CLI version/source/control class and trust classification;
+- safe bounded field names/types or semantic labels from official contracts;
+- USED / REMAINING / used-plus-total classification;
+- cycle/reset type without an exact private timestamp;
 - minimum account-mode class;
-- source freshness and repeatability classifications;
-- booleans such as `ZERO_TURN_CONFIRMED`;
-- operation counts and teardown result.
+- presence/absence/readability and repeatability classifications;
+- native-money type without an exact balance;
+- no-work/no-spend booleans, counts, teardown, and output-size class;
+- source decision and next-task routing.
 
 ## Durable retention denylist
 
-Never retain or reproduce:
+Never retain, hash, reproduce, or traverse into:
 
-- email, phone, account ID, organization identity, or account name;
-- plan/billing identity beyond the minimum account-mode class;
-- OAuth/access/refresh tokens, API keys, login URLs/codes, cookies, sessions,
-  Keychain values, browser profiles, local/session storage, or auth databases;
-- payment method, payment history, invoices, or transaction history;
-- raw CLI/TUI output, raw account responses, raw DOM/HTML, screenshots, or OCR;
-- prompts, responses, conversations, tasks, transcripts, workspace paths, or
-  source code;
-- exact Founder quota values or reset dates in durable evidence;
-- full process command lines, `argv`, or environment dumps.
+- email, phone, name/avatar, account/organization ID, or billing identity;
+- tokens, API keys, credentials, login/device codes, cookies, sessions,
+  Keychain values, browser profiles, or authentication databases;
+- payment methods, invoices, transaction history, or exact wallet balance;
+- raw CLI/TUI output, raw account responses, DOM/HTML, screenshots, or OCR;
+- prompts, responses, conversations, tasks, source code, or workspace content;
+- exact Founder percentages, credits, resets, or plan values;
+- full command lines, argv, process environment, or unrelated process data.
 
-Sanitization must occur before business logic, test evidence, logging, or native
-handoff. Unknown/private fields fail closed and are discarded, not traversed or
-projected.
+Sanitization occurs in memory before durable evidence. Unknown/private content
+is rejected and discarded, not logged or projected.
 
-## No-work/no-spend acceptance
+## No-work/no-spend and process contract
 
-A source may be admitted only when bounded evidence supports:
+The current built-in gate plus official public implementation evidence supports
+zero Agent prompt, response, turn, conversation, and task creation for the
+bounded control attempts. The neutral workspace remained empty. No residual
+task-owned process remained.
 
-- zero provider prompt and model response;
-- zero Agent turn, task, or conversation creation;
-- no workspace discovery, read, or mutation;
-- no attributable quota decrement within provider granularity;
-- no residual child, listener, helper, or task-owned state;
-- no login URL/code or authentication material retained.
+An exact no-decrement claim is not admitted because no two successful
+normalized observations were retained. Missing comparison evidence must not be
+rewritten as zero spend beyond provider measurement precision.
 
-Documentation alone cannot prove these runtime properties. M8-G1 claims zero
-work/spend only for its own zero-execution path.
+Safe process evidence is limited to exact executable path, exact PID,
+task-owned parent/child relationship, exact Kimi-process count, bounded resource
+counters, and exit/absence classification. Broad process command-line or
+environment inspection remains forbidden.
 
-## Browser boundary
+## Temporary state restoration
 
-Browser observation remains locked unless an accepted result explicitly routes
-to M8-WEB-G1. Any later browser source requires provider-controlled login,
-exact official routes, bounded semantic extraction, sanitized output before
-handoff, and no cookie/profile/token/raw DOM/HTML access or persistence.
+The first observation selected the provider's default workspace-trust choice
+instead of dispatching `/usage`. That created one exact local trust marker for
+the empty task-owned directory. It is not credential or account state. Closeout
+must remove only that exact marker, the empty neutral directory, the sanitized
+probe, its task-owned bytecode cache, and the read-only official-source clone.
+No provider-owned authentication or unrelated Kimi state may be modified.
 
-## M8-G1 privacy result
+## Current channel result
 
 ```text
-quota/source observations: 0
-credentials/private-state reads: 0
-login/browser actions: 0
-raw payloads retained: 0
-identity retained: 0
-provider prompts/tasks/spend: 0/0/0
+SHARED MEMBERSHIP: MISSING
+KIMI CODE LIMITS: NO-GO
+EXTRA USAGE: UNREADABLE
 ```
 
-`SHARED MEMBERSHIP: CONDITIONAL`
-`KIMI CODE LIMITS: CONDITIONAL`
-`EXTRA USAGE: UNREADABLE`
+`M8-WEB-G1 remains locked.`
 `M8-G2 remains locked.`
