@@ -1,6 +1,6 @@
 # UMA M8 Kimi Privacy Contract
 
-Applies to: M8-G1R and any later Founder-authorized Kimi source recheck
+Applies to: M8-G1R, M8-WEB-G1, and any later Founder-authorized Kimi source recheck
 Current result: `NO-GO`
 
 ## Purpose and source boundary
@@ -13,7 +13,7 @@ outside the contract.
 Allowed source priority remains:
 
 1. exact trusted official Kimi Code CLI interactive `/usage` built-in;
-2. official Kimi account surfaces only under a separately authorized Goal.
+2. official Kimi account surfaces under M8-WEB-G1's provider-controlled Safari contract.
 
 API keys, credential/config files, Keychain, cookies, browser profiles, private
 endpoints, manual values, local estimates, conversation history, screenshots,
@@ -56,6 +56,38 @@ credential/private-state reads: 0
 ```
 
 No additional live read is authorized after this result.
+
+## M8-WEB-G1 Safari fallback contract
+
+The isolated Kimi web session failed provider-controlled Human authentication
+twice and is classified `NOT SUITABLE FOR ADMISSION / HUMAN AUTH UX`. It must not
+be retried without a new Founder direction.
+
+The temporary Safari companion may operate only after Human enablement and one
+Human current-site toolbar action. It must:
+
+- use only the normal provider-owned Safari login/session;
+- request exactly `activeTab`, `nativeMessaging`, and `scripting`;
+- declare no host permissions, static content scripts, cookie, storage, history,
+  web-request, profile, Keychain, or credential access;
+- admit only exact HTTPS Kimi Membership quota and Kimi Code Console routes;
+- reject an unknown route before DOM inspection;
+- inspect only bounded semantic leaf nodes on admitted quota routes;
+- sanitize inside the browser layer before native handoff;
+- emit only fixed route/layout, pool identity, direction, validity, reset,
+  Extra Usage state/native currency class, freshness, and safe failure fields;
+- never export exact Founder values during source admission.
+
+M8-WEB-G1 used 5 of 8 authenticated page observations. Four validated receipts
+were retained as classification-only evidence; one earlier page extraction was
+discarded by a strict timestamp validator and retained no payload. Provider
+prompts, Agent turns, tasks, intentional spend, account changes, `/credits`, and
+credential/private-state reads remained zero.
+
+Repeated membership receipts returned `UNSUPPORTED_LAYOUT`. This is a safe
+failure classification, not permission to broaden extraction or retain page
+text. No further provider observation is needed after the mandatory Shared
+Membership gate failed.
 
 ## Durable retention allowlist
 
@@ -112,13 +144,39 @@ must remove only that exact marker, the empty neutral directory, the sanitized
 probe, its task-owned bytecode cache, and the read-only official-source clone.
 No provider-owned authentication or unrelated Kimi state may be modified.
 
+For M8-WEB-G1 closeout, the exact task-owned companion, app container, probe
+root, and task-owned processes must be removed after unregistering/disabling the
+extension. Safari `Allow unsigned extensions` must be restored to Off and
+verified. Kimi's provider-owned Safari authentication must remain untouched.
+
+The 2026-08-17 closeout verified Safari `Allow unsigned extensions` Off, no
+task-owned extension registration or process, and no M8-WEB-G1 `/private/tmp`
+root. Finder removed the empty metadata-only companion container from
+`$HOME/Library/Containers`; after explicit Human confirmation, only its exact
+task-owned Trash item was permanently deleted. No Safari data was cleared and
+no Kimi provider operation was performed during cleanup.
+
+## Privacy incident containment
+
+One broad read-only Safari accessibility inspection during setup transiently
+exposed unrelated non-Kimi accessibility metadata. It exposed no Kimi quota,
+identity, credential, cookie, token, session, or account data. No output from
+that inspection entered Git, screenshots, package content, task evidence, or
+temporary retained artifacts. The repeatable cause was an ad-hoc broad Safari
+accessibility command, not repository code. It is retired.
+
+Future browser/process evidence is restricted to exact task-owned bundle paths,
+bundle identifiers, PIDs, process counts, ownership, signature, enablement,
+exact-route classification, and sanitized receipt state. Broad page trees,
+process argv, environments, and unrelated application state are forbidden.
+
 ## Current channel result
 
 ```text
-SHARED MEMBERSHIP: MISSING
-KIMI CODE LIMITS: NO-GO
-EXTRA USAGE: UNREADABLE
+SHARED MEMBERSHIP: NO-GO
+KIMI CODE LIMITS: MISSING
+EXTRA USAGE: ABSENT
 ```
 
-`M8-WEB-G1 remains locked.`
+`M8-WEB-G1 result: NO-GO.`
 `M8-G2 remains locked.`

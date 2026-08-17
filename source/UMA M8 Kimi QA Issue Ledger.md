@@ -1,6 +1,6 @@
 # UMA M8 Kimi QA Issue Ledger
 
-Goal: M8-G1R — live installed Kimi CLI source re-admission
+Goal: M8-G1R and M8-WEB-G1 source admission
 Decision: `NO-GO`
 
 ## Exact authorized file scope
@@ -76,4 +76,82 @@ Channel result: `MISSING / NO-GO / UNREADABLE`
 Exactly one next task: `Founder source-direction decision`.
 
 `M8-WEB-G1 remains locked.`
+`M8-G2 remains locked.`
+
+## M8-WEB-G1 exact authorized file scope
+
+```text
+source/UMA M8 Kimi Browser Source Dossier.md
+source/UMA M8 Kimi Browser Admission Decision.md
+source/UMA M8 Kimi Privacy Contract.md
+source/UMA M8 Kimi QA Issue Ledger.md
+Tests/CodexUsageUITests/M8WEBG1KimiBrowserAdmissionTests.swift
+```
+
+Production source files changed: NO
+Existing provider mechanisms changed: NO
+WorkBuddy mechanism changed: NO
+M5 frozen files changed: NO
+`source/reference/**` changed: NO
+Package scripts changed: NO
+Production browser extension files changed: NO
+Installed Desktop UMA changed: NO
+Claude-related changes: NONE
+
+## M8-WEB-G1 issues
+
+| Issue ID | Severity | Discovery | Exposure class | Root cause | Repair / disposition | Focused verification | Regression verification | Final state |
+|---|---|---|---|---|---|---|---|---|
+| M8WEB-001 | Blocking architecture | Provider-controlled login completed twice in the isolated Kimi web session, but the window closed and no authenticated quota state persisted | No credential or account payload retained | Kimi authentication was incompatible with the isolated session and the Human's normal Safari/Apple Passwords workflow | Classify isolated session as not suitable; do not request another isolated login; select bounded Safari fallback | Architecture-selection assertions | Durable-record agreement | CLOSED |
+| M8WEB-002 | Major privacy | One broad read-only Safari accessibility command transiently exposed unrelated non-Kimi accessibility metadata | Transient unrelated application metadata; no Kimi/account/credential content | Ad-hoc DEV inspection was broader than the exact task-owned evidence contract | Retire broad accessibility inspection; use exact task paths/IDs/PIDs/counts and classification-only receipts; retain none of the transient output | Privacy-contract and incident-containment assertions | Identity/secret/privacy scans | CLOSED |
+| M8WEB-003 | Major probe | One valid browser extraction was rejected by native validation | Sanitized in-memory receipt only; nothing retained | Native ISO-8601 parsing rejected valid fractional-second browser timestamps | Accept fractional and whole-second ISO-8601 timestamps; keep strict schema and output allowlist | Temporary native-validator contract retest | Four later classification-only receipts accepted | CLOSED |
+| M8WEB-004 | Major probe | Short-lived containing-app dispatch acknowledged without reaching the extension background | No provider payload | The transient sender exited before reliable Safari extension delivery | Move dispatch ownership to the long-running task app; retain Human toolbar activation for the capped admission reads | Task-app lifecycle/signature/registration checks | No production runtime changed | CLOSED AS PROBE |
+| M8WEB-005 | Blocking admission | Four retained authenticated receipts on the exact Membership route repeated `UNSUPPORTED_LAYOUT`; Shared Membership, direction, and cycle remained absent | Classification-only receipt; no exact value or raw DOM | Current provider-rendered layout does not match the bounded semantic contract | Fail closed; do not broaden to raw page text, OCR, private APIs, or account-specific values; stop after 5/8 page observations | M8-WEB-G1 admission tests | Full deterministic suite 683/683 PASS | CLOSED AS DECISION — NO-GO |
+| M8WEB-006 | Cleanup | The empty metadata-only companion container was protected from direct deletion | No provider or account data | macOS container protection denied the exact command-line deletion path | Finder removed the exact container from `$HOME/Library/Containers`; after explicit Human confirmation, the isolated exact Trash item was permanently deleted | Exact path, owner, non-symlink, process, and registration checks | Safari Off and zero-provider-operation audit | CLOSED |
+
+## M8-WEB-G1 verification ledger
+
+| Check | Result |
+|---|---|
+| Starting lineage and clean state | PASS — accepted M8-G1R HEAD/tree; clean worktree; empty index |
+| Isolated-session classification | PASS — not suitable for admission/Human auth UX; no repeat login requested |
+| Safari companion architecture | PASS — real embedded extension, exact-site activeTab flow, browser-layer sanitizer, native classification-only receipts |
+| Manifest/route/privacy contract | PASS — exact three permissions; no host permissions/static injection/cookie/storage/history/private route |
+| Authenticated observation accounting | PASS — 5/8 page observations; 4 retained valid receipts; 0 raw/exact/private values |
+| Provider prompts / turns / tasks / intentional spend | PASS — 0 / 0 / 0 / 0 |
+| Shared Membership decision | PASS — `NO-GO`; mandatory semantic contract unavailable |
+| Kimi Code / Extra Usage decisions | PASS — `MISSING` / `ABSENT` |
+| WorkBuddy and existing-provider protection | PASS — no production provider mechanism changed |
+| Focused M8-WEB-G1 and predecessor tests | PASS — 32/32 |
+| Complete deterministic `script/test.sh --no-parallel` | PASS — 683/683 (665 application tests plus 18 bridge tests) |
+| Privacy / identity / secret scans | PASS — no real identity, secret signature, raw provider payload, or exact Founder value retained |
+| M5 frozen set and `source/reference/**` | PASS — no changed path |
+| Safari unsigned-extension restoration | PASS — Developer setting visibly verified Off; Safari closed |
+| Task extension/process/temporary-root cleanup | PASS — extension unregistered; task processes zero; exact M8-WEB-G1 `/private/tmp` roots absent |
+| Exact companion container cleanup | PASS — exact container and isolated exact Trash item absent |
+| `git diff --check` | PASS |
+| Independent staged-index review | PASS — exact five-file cached scope; no blocking or actionable issue |
+| Post-commit clean worktree and empty index | Required after commit; final report records the audit |
+
+## M8-WEB-G1 operation accounting
+
+```text
+Authenticated page observations used: 5 / 8
+Valid sanitized receipts retained: 4
+Automatic retries: 0
+Provider prompts / Agent turns / tasks: 0 / 0 / 0
+Intentional spend / account changes: 0 / 0
+/credits reads: 0
+Credential/cookie/token/browser-profile reads: 0
+Raw DOM/HTML/page-text receipts retained: 0
+Exact Founder quota/balance values retained: 0
+Kimi provider operations during cleanup: 0
+```
+
+## M8-WEB-G1 completion boundary
+
+Overall result: `NO-GO`
+Channel result: `NO-GO / MISSING / ABSENT`
+Exactly one next task: `Founder Kimi source-direction / M8 closeout decision`.
+
 `M8-G2 remains locked.`
