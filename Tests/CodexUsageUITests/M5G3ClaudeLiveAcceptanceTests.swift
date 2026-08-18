@@ -101,7 +101,7 @@ struct M5G3ClaudeLiveAcceptanceTests {
                 && observation.fiveHour.usedPercentage === 44
                 && observation.weeklyAllModels === null
                 && Object.keys(observation).sort().join(",")
-                  === "extractorSchemaVersion,fiveHour,modelSpecificWeekly,observedAt,weeklyAllModels";
+                  === "extractorSchemaVersion,fiveHour,modelSpecificWeekly,observedAt,sourceLayoutVersion,weeklyAllModels";
             })()
             """
         )?.toBool()
@@ -383,6 +383,24 @@ struct M5G3ClaudeLiveAcceptanceTests {
             #expect(snapshot.channels[0].rateLimitWindows.map(\.normalizedRemainingPercent) == [75, 50])
             #expect(snapshot.channels[0].coverageNote?.contains("Browser Sync") == true)
         }
+    }
+
+    @Test
+    func duplicateObservationNonceIsRejectedWithoutReplacingLastValidQuota() async {
+        let fixture = BrowserConnectorFixture(consent: true)
+        let connector = fixture.connector()
+        await connector.start()
+        let observation = browserEnvelope(five: 25, seven: 50, browser: .safari)
+
+        await fixture.bridge.send(observation)
+        await fixture.bridge.send(observation)
+
+        let diagnostics = await connector.diagnostics()
+        #expect(diagnostics.acceptedObservationCount == 1)
+        #expect(diagnostics.rejectedObservationCount == 1)
+        let snapshot = await connector.currentSnapshot()
+        #expect(snapshot.hasValidData)
+        #expect(snapshot.channels[0].rateLimitWindows.map(\.normalizedRemainingPercent) == [75, 50])
     }
 
     @Test

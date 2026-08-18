@@ -24,10 +24,10 @@ public enum ClaudeBrowserBridgeError: Error, Equatable, Sendable {
 
 public enum ClaudeBrowserMessageDecoder {
     private static let envelopeKeys: Set<String> = [
-        "kind", "schemaVersion", "sourceID", "browserFamily", "routeState", "observation",
+        "kind", "schemaVersion", "sourceID", "browserFamily", "routeState", "observationID", "observation",
     ]
     private static let observationKeys: Set<String> = [
-        "fiveHour", "weeklyAllModels", "modelSpecificWeekly", "observedAt", "extractorSchemaVersion",
+        "fiveHour", "weeklyAllModels", "modelSpecificWeekly", "observedAt", "extractorSchemaVersion", "sourceLayoutVersion",
     ]
     private static let windowKeys: Set<String> = ["usedPercentage", "resetAt"]
     private static let modelWindowKeys: Set<String> = ["modelFamily", "window"]
@@ -55,7 +55,7 @@ public enum ClaudeBrowserMessageDecoder {
         try requireExactKeys(
             observation,
             allowed: observationKeys,
-            required: ["observedAt", "extractorSchemaVersion"]
+            required: ["observedAt", "extractorSchemaVersion", "sourceLayoutVersion"]
         )
         if let fiveHour = nonNullDictionary(observation["fiveHour"]) {
             try requireExactKeys(fiveHour, allowed: windowKeys, required: ["usedPercentage"])
@@ -97,7 +97,9 @@ public enum ClaudeBrowserMessageDecoder {
               envelope.schemaVersion == ClaudeBrowserBridgeContract.schemaVersion,
               envelope.sourceID == ClaudeBrowserBridgeContract.sourceID,
               envelope.routeState == .verifiedUsage,
-              envelope.observation.extractorSchemaVersion == ClaudeBrowserBridgeContract.extractorSchemaVersion
+              UUID(uuidString: envelope.observationID) != nil,
+              envelope.observation.extractorSchemaVersion == ClaudeBrowserBridgeContract.extractorSchemaVersion,
+              envelope.observation.sourceLayoutVersion == ClaudeBrowserBridgeContract.sourceLayoutVersion
         else {
             throw ClaudeBrowserBridgeError.invalidContract
         }

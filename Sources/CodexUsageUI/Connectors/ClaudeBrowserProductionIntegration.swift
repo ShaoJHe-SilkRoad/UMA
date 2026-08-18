@@ -136,7 +136,7 @@ extension ClaudeBrowserProductionIntegration {
         category: "ClaudeAutomaticRefresh"
     )
     private static let safariExtensionIdentifier =
-        "com.silkrd.uma.ClaudeBrowserCompanion"
+        ClaudeBrowserBridgeContract.safariExtensionIdentifier
     private static let safariWakeMessageName = "umaClaudeWakeBridge"
     private static let safariWorkerSettleTimeout: TimeInterval = 5
 
@@ -198,10 +198,39 @@ extension ClaudeBrowserProductionIntegration {
     }
 
     private static func safariExtensionHealth() async -> ClaudeBrowserCompanionHealth {
+        let embeddedHealth = embeddedSafariExtensionHealth
+        guard embeddedHealth == .ready else { return embeddedHealth }
         guard let state = try? await SFSafariExtensionManager.stateOfSafariExtension(
             withIdentifier: safariExtensionIdentifier
         ) else { return .nativeHostMissing }
         return state.isEnabled ? .ready : .disabled
+    }
+
+    /// The signed containing app is the source of truth for extension identity
+    /// and version. Safari activation alone is insufficient because an older
+    /// registered companion can otherwise look healthy after an app upgrade.
+    private static var embeddedSafariExtensionHealth: ClaudeBrowserCompanionHealth {
+        guard let plugins = Bundle.main.builtInPlugInsURL,
+              let bundle = Bundle(
+                url: plugins.appendingPathComponent(
+                    "ClaudeBrowserCompanion.appex",
+                    isDirectory: true
+                )
+              )
+        else { return .nativeHostMissing }
+        guard bundle.bundleIdentifier == ClaudeBrowserBridgeContract.safariExtensionIdentifier,
+              let extensionDictionary = bundle.object(
+                forInfoDictionaryKey: "NSExtension"
+              ) as? [String: Any],
+              extensionDictionary["NSExtensionPointIdentifier"] as? String
+                == "com.apple.Safari.web-extension"
+        else { return .nativeHostMismatched }
+        guard bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+                == ClaudeBrowserBridgeContract.safariExtensionVersion,
+              bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+                == ClaudeBrowserBridgeContract.safariExtensionBuild
+        else { return .outdated }
+        return .ready
     }
 
     private static func openOfficialUsagePage() async -> Bool {

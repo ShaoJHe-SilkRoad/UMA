@@ -1,10 +1,10 @@
 # UMA M5RMX QA Issue Ledger
 
-**Version:** 1.1
+**Version:** 1.2
 
 **Opened:** 2026-08-17
 
-**Current task:** `M5RMX-G1`
+**Current task:** `M5RMX-SAFARI-G1`
 
 ## 1. Scope and baseline
 
@@ -49,6 +49,55 @@ Full deterministic serial suite: 700/700 PASS
 Production runtime / extension / package changes: 0
 Claude provider operations: 0
 ```
+
+## 2A. SAFARI-G1 issues
+
+| ID | Severity | Discovery | Root cause / classification | Required repair or control | Verification | State |
+|---|---|---|---|---|---|---|
+| M5RMXSAFARI-001 | Major / lifecycle | A successful or unavailable automatic cycle retained the inactive extension-owned Usage tab | The prior implementation closed only selected authentication/route failures, even though the accepted automation contract requires one owned tab per cycle | Close the proven extension-owned tab for every terminal cycle; convert closure uncertainty to ownership loss; never query, adopt, navigate, or close a user-owned tab | focused source/lifecycle tests plus Browser/Protocol Auditor; affected 21/21 PASS | CLOSED |
+| M5RMXSAFARI-002 | Blocking / privacy | Losing the ownership proof cleared the durable record while leaving the unproven hidden tab open | A later cycle could create a second hidden tab because the first could no longer be correlated safely | Retain the bounded ownership record on proof loss so future cycles fail closed; clear it only when the exact tab is absent or a proven tab is closed | owned-tab loss and no-multiplication tests; affected 21/21 PASS | CLOSED |
+| M5RMXSAFARI-003 | Blocking / transport | File handoff used one exclusive pending slot but consecutive native messages could arrive before the app consumed the prior file | `RENAME_EXCL` correctly prevented overwrite, but the second safe message could be dropped by the browser bridge | Serialize local handoff delivery by waiting a bounded two seconds for the prior validated owner-only packet to drain; retain exclusive atomic publication and perform no provider retry | bridge concurrency, three-packet ordering, and pending-slot tests; bridge 20/20 PASS | CLOSED |
+| M5RMXSAFARI-004 | Major / provenance | The Browser Sync packet had no replay nonce or explicit source-layout version | Schema/version checks alone could not distinguish a duplicate observation from a current browser result | Advance the closed schema to v2, add a UUID observation nonce and exact source-layout version, reject duplicate nonces in a bounded 64-entry runtime set, and invalidate v1 cache/messages | decoder, connector, packet allowlist and duplicate-replay tests; affected 21/21 PASS | CLOSED |
+| M5RMXSAFARI-005 | Major / setup | Safari health returned only enabled/disabled and could not classify a missing, mismatched, or outdated embedded appex | Activation state was treated as sufficient even when the containing app's embedded identity/version was not current | Validate the exact embedded appex identifier, extension point, version 1.3.0, and build 8 before asking Safari for activation state | setup-health and package-contract tests; focused 7/7 PASS | CLOSED |
+| M5RMXSAFARI-006 | Blocking / distribution | Existing M5/M6 phases permitted ad-hoc 0.11 packages | A development package could be mistaken for the production-ready 0.12 signed Safari preflight | Add a dedicated M5RMX wrapper and phase requiring explicit Developer ID, commit-exact source, 0.12, child-first Hardened Runtime signing, secure timestamps, Team `C6TUZVJ6SJ`, exact durable output, and no notarization | helper contract, signed package, strict-deep and identity audits | Repaired in source; signed preflight pending packaging phase |
+| M5RMXSAFARI-007 | Major / lifecycle truth | Independent staged review found login/route redirects could not satisfy the exact Usage-route close proof | The truthful `signInRequired` or `routeRejected` terminal status was overwritten as ownership loss even though retaining the record was the required fail-closed behavior | Preserve the original redirected terminal status, retain the ownership record, and refuse a later tab while proof remains unavailable; continue fresh proof and closure for normal exact-route terminals | redirected-terminal classification and no-multiplication regression tests; focused 17/17 and affected 76/76 PASS | CLOSED |
+| M5RMXSAFARI-008 | Blocking / lifecycle | Independent staged review found a tab-removal error was swallowed before the ownership record was cleared | A failed removal could leave the tab alive but erase the only bounded ownership correlation, permitting a later duplicate | Treat removal failure as closure failure, retain the ownership record, and clear it only after successful removal | removal-failure ownership-retention regression test; focused 17/17 and affected 76/76 PASS | CLOSED |
+| M5RMXSAFARI-009 | Major / lifecycle truth | Final staged review found a stored login/redirect tab was token-proved before its route was classified | Exact-route token proof necessarily fails on a provider redirect, collapsing the next cycle to `ownedTabOwnershipLost` instead of the truthful sanitized login/route status | Classify the stored tab from URL route state only before token proof, retain its ownership record, create no replacement tab, and continue requiring exact-route token proof for an actual Usage route | stored-redirect next-cycle ordering and no-clear/no-multiplication regression tests; focused 18/18 and affected 77/77 PASS | CLOSED |
+| M5RMXSAFARI-010 | Blocking / packaging | The first post-commit signed-package attempt reached Developer ID signing but `codesign` reported the confirmed Team `C6TUZVJ6SJ` identity unavailable | The helper intentionally exported a task-owned isolated `HOME` for SwiftPM before signing, which also hid the normal user signing search context from `codesign` | Capture the original user HOME before build isolation and restore it only on each bounded `codesign` signing, verification and inspection command; keep SwiftPM HOME/cache/config/security paths isolated and perform no keychain enumeration or credential export | focused package contract, shell syntax and diff checks; first attempt produced no accepted package output | Repaired in helper; signed package rerun pending |
+
+SAFARI-G1 independent verification evidence:
+
+```text
+Independent QA full deterministic suite after M5RMXSAFARI-009: 715/715 PASS
+  - UI: 695/695 PASS across 71 suites
+  - Bridge: 20/20 PASS
+Focused SAFARI-G1 suite after M5RMXSAFARI-009: 12/12 PASS
+Focused M5-AUTO suite: 31/31 PASS
+Debug build: PASS
+Release build: PASS
+Strict-concurrency Release build: PASS
+Native-host strict build: PASS
+Extension JavaScript syntax and manifest/plist audits: PASS
+Privacy, identity, secret and content audits: PASS
+M5 frozen-set audit: PASS
+Independent Packaging/Signing Auditor: PASS for the source and packaging/signing contract
+Root signing-identity check: exactly one valid Developer ID Application identity for Team C6TUZVJ6SJ
+Post-review lifecycle-repair focused B0/SAFARI suites: 18/18 PASS
+Post-review affected Browser/automation/bridge suites: 77/77 PASS
+```
+
+The independent Packaging/Signing Auditor result verifies the current helper,
+manifest, embedding, identity, Hardened Runtime and child-first signing
+contract. It is not evidence that the dedicated signed package has already
+been built. The commit-exact signed-package execution and the live Safari
+registration, enablement, exact-route observation, automatic-refresh and
+cleanup/restoration gates remain **PENDING**. No final package or live Safari
+result is claimed by this record.
+
+The `715/715` deterministic run completed after the final stored-redirect
+repair recorded as M5RMXSAFARI-009. Its focused Safari, automatic-refresh and
+affected browser/bridge reruns also pass as recorded above. Package execution
+and live Safari gates remain pending exactly as stated.
 
 ## 3. B0 issues
 

@@ -46,8 +46,8 @@ struct M5RMXG1ClaudeSourceContractTests {
     func bridgePacketRemainsClosedVersionedAndBounded() throws {
         #expect(ClaudeBrowserBridgeContract.messageKind == "claudeUsageObservation")
         #expect(ClaudeBrowserBridgeContract.sourceID == "claude-browser-usage")
-        #expect(ClaudeBrowserBridgeContract.schemaVersion == 1)
-        #expect(ClaudeBrowserBridgeContract.extractorSchemaVersion == 1)
+        #expect(ClaudeBrowserBridgeContract.schemaVersion == 2)
+        #expect(ClaudeBrowserBridgeContract.extractorSchemaVersion == 2)
         #expect(ClaudeBrowserBridgeContract.maximumMessageBytes == 4_096)
         #expect(
             ClaudeBrowserBridgeContract.officialUsageURL.absoluteString

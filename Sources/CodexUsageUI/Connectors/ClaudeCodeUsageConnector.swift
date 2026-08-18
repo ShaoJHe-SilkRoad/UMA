@@ -137,7 +137,7 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         providerName: "Claude Code",
         officialSource: "Claude official Usage page · Browser Sync · Experimental",
         sourceTier: .authorizedReadOnlyRemote,
-        sourceVersion: "browser-1",
+        sourceVersion: "browser-2",
         supportedScopes: [.account, .device, .session, .task],
         capabilities: capabilities,
         configurationRequirements: [
@@ -216,6 +216,8 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
     private var automaticRequestID: String?
     private var automaticRefreshInFlight = false
     private var acceptedObservationCount = 0
+    private var acceptedObservationIDs: Set<String> = []
+    private var acceptedObservationIDOrder: [String] = []
     private var rejectedObservationCount = 0
     private var pageOpenCount = 0
     private var coalescedActionCount = 0
@@ -644,6 +646,13 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         case let .success(envelope):
             do {
                 try ClaudeBrowserMessageDecoder.validate(envelope)
+                guard acceptedObservationIDs.insert(envelope.observationID).inserted else {
+                    throw ClaudeBrowserBridgeError.invalidContract
+                }
+                acceptedObservationIDOrder.append(envelope.observationID)
+                if acceptedObservationIDOrder.count > 64 {
+                    acceptedObservationIDs.remove(acceptedObservationIDOrder.removeFirst())
+                }
                 guard let observedAt = Self.parseTimestamp(envelope.observation.observedAt),
                       now().timeIntervalSince(observedAt) >= -Self.maximumFutureSkew,
                       now().timeIntervalSince(observedAt) <= Self.freshnessInterval
@@ -830,6 +839,8 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         retentionTask = nil
         lastGood = nil
         currentSessionValidated = false
+        acceptedObservationIDs.removeAll(keepingCapacity: false)
+        acceptedObservationIDOrder.removeAll(keepingCapacity: false)
         lifecycle = routeChanged ? .routeChanged : .failed
         replace(Self.unavailableSnapshot(
             state: .failed,
@@ -885,6 +896,8 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
     }
 
     private func transitionToDisconnected() {
+        acceptedObservationIDs.removeAll(keepingCapacity: false)
+        acceptedObservationIDOrder.removeAll(keepingCapacity: false)
         lifecycle = .disconnected
         replace(Self.unavailableSnapshot(
             state: .authenticationRequired,
@@ -1035,7 +1048,7 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         let channel = AgentUsageChannel(
             id: .account,
             sourceTier: .authorizedReadOnlyRemote,
-            sourceVersion: "browser-1",
+            sourceVersion: "browser-2",
             scopes: [.account],
             provenance: .providerReported,
             freshness: freshness,

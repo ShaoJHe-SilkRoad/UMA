@@ -177,10 +177,10 @@ The current Safari extension identity is
 `com.silkrd.uma.claude_browser`. The containing app identity is
 `com.silkrd.uma`.
 
-The current Safari manifest is version `1.2.3`, uses Manifest V2 persistent
-background scripts, and requests exactly `nativeMessaging`, `storage`, and
-`https://claude.ai/new*`. Because a URL fragment cannot be expressed in static
-host permissions, production code must revalidate the exact
+The production Safari manifest is version `1.3.0` (build `8`), uses Manifest V2
+persistent background scripts, and requests exactly `nativeMessaging`,
+`storage`, and `https://claude.ai/new*`. Because a URL fragment cannot be
+expressed in static host permissions, production code must revalidate the exact
 `https://claude.ai/new#settings/usage` route before every DOM query. There are no
 static content scripts or broad host permissions.
 
@@ -190,14 +190,14 @@ read/write exception limited to
 no network-client entitlement. Whether Apple accepts this temporary exception
 for final distribution remains an explicit M5RMX-SAFARI/H1 gate.
 
-The current package helper embeds the app executable, native host, real Safari
-`.appex`, shared extractor/control resources, unverified Chromium manual companion,
-native-host manifest, app icon, and provenance plist. It supports ad-hoc builds
-by default and optional Developer ID Hardened Runtime, secure timestamp,
-notarytool, stapling, and Gatekeeper assessment when explicitly supplied the
-accepted identity/profile. Its current marketing version is `0.11`; M5RMX must
-not represent it as a final `0.12` package until a later authorized Goal repairs
-and verifies that delivery contract.
+The package helper embeds the app executable, native host, real Safari `.appex`,
+shared extractor/control resources, unverified Chromium manual companion,
+native-host manifest, app icon, and provenance plist. Historical phases retain
+their existing behavior. The dedicated `m5rmx-safari-preflight` phase is
+commit-exact, reports marketing version `0.12`, requires an explicit Developer
+ID Application identity, signs the native host then appex then containing app
+with Hardened Runtime and secure timestamps, verifies Team ID `C6TUZVJ6SJ`, and
+refuses both ad-hoc signing and notarization submission.
 
 ## 7. Apple parallel record — no B0 action
 

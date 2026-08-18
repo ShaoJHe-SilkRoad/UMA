@@ -6,8 +6,9 @@ import Foundation
 public enum ClaudeBrowserBridgeContract {
     public static let messageKind = "claudeUsageObservation"
     public static let sourceID = "claude-browser-usage"
-    public static let schemaVersion = 1
-    public static let extractorSchemaVersion = 1
+    public static let schemaVersion = 2
+    public static let extractorSchemaVersion = 2
+    public static let sourceLayoutVersion = 1
     public static let maximumMessageBytes = 4_096
     public static let officialOrigin = "https://claude.ai"
     public static let officialUsagePath = "/new"
@@ -19,6 +20,10 @@ public enum ClaudeBrowserBridgeContract {
     public static let chromiumExtensionOrigin = "chrome-extension://\(chromiumExtensionID)/"
     public static let chromiumNativeHostName = "com.silkrd.uma.claude_browser"
     public static let safariApplicationIdentifier = "com.silkrd.uma"
+    public static let safariExtensionIdentifier =
+        "com.silkrd.uma.ClaudeBrowserCompanion"
+    public static let safariExtensionVersion = "1.3.0"
+    public static let safariExtensionBuild = "8"
     public static let automationMessageKind = "claudeBrowserAutomationEvent"
     public static let automaticRefreshMessageName = "umaClaudeAutomaticRefresh"
     public static let closeOwnedTabMessageName = "umaClaudeCloseOwnedUsageTab"
@@ -71,19 +76,22 @@ public struct ClaudeBrowserObservation: Codable, Equatable, Sendable {
     public let modelSpecificWeekly: ClaudeBrowserModelWindow?
     public let observedAt: String
     public let extractorSchemaVersion: Int
+    public let sourceLayoutVersion: Int
 
     public init(
         fiveHour: ClaudeBrowserQuotaWindow?,
         weeklyAllModels: ClaudeBrowserQuotaWindow?,
         modelSpecificWeekly: ClaudeBrowserModelWindow? = nil,
         observedAt: String,
-        extractorSchemaVersion: Int = ClaudeBrowserBridgeContract.extractorSchemaVersion
+        extractorSchemaVersion: Int = ClaudeBrowserBridgeContract.extractorSchemaVersion,
+        sourceLayoutVersion: Int = ClaudeBrowserBridgeContract.sourceLayoutVersion
     ) {
         self.fiveHour = fiveHour
         self.weeklyAllModels = weeklyAllModels
         self.modelSpecificWeekly = modelSpecificWeekly
         self.observedAt = observedAt
         self.extractorSchemaVersion = extractorSchemaVersion
+        self.sourceLayoutVersion = sourceLayoutVersion
     }
 }
 
@@ -93,6 +101,9 @@ public struct ClaudeBrowserObservationEnvelope: Codable, Equatable, Sendable {
     public let sourceID: String
     public let browserFamily: ClaudeBrowserFamily
     public let routeState: ClaudeBrowserRouteState
+    /// A per-observation nonce. The app rejects duplicates for the lifetime of
+    /// the current listener, preventing a captured handoff from being replayed.
+    public let observationID: String
     public let observation: ClaudeBrowserObservation
 
     public init(
@@ -101,13 +112,15 @@ public struct ClaudeBrowserObservationEnvelope: Codable, Equatable, Sendable {
         kind: String = ClaudeBrowserBridgeContract.messageKind,
         schemaVersion: Int = ClaudeBrowserBridgeContract.schemaVersion,
         sourceID: String = ClaudeBrowserBridgeContract.sourceID,
-        routeState: ClaudeBrowserRouteState = .verifiedUsage
+        routeState: ClaudeBrowserRouteState = .verifiedUsage,
+        observationID: String = UUID().uuidString.lowercased()
     ) {
         self.kind = kind
         self.schemaVersion = schemaVersion
         self.sourceID = sourceID
         self.browserFamily = browserFamily
         self.routeState = routeState
+        self.observationID = observationID
         self.observation = observation
     }
 }

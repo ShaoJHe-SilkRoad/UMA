@@ -25,6 +25,10 @@
     "ownedTabClosed",
     "ownedTabOwnershipLost",
   ]);
+  const redirectedTerminalStatuses = new Set([
+    "signInRequired",
+    "routeRejected",
+  ]);
   const requestIDPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const pollingIntervalMilliseconds = 200;
   const navigationSettleMilliseconds = 1_000;
@@ -53,21 +57,39 @@
     try { return extractor.exactUsageURL(new URL(raw)); } catch (_) { return false; }
   }
 
+  function redirectedTerminalStatusForURL(raw) {
+    try {
+      const url = new URL(raw);
+      if (url.origin !== extractor.CONTRACT.origin) return "signInRequired";
+      const normalizedPath = url.pathname.toLowerCase().replace(/\/+$/, "") || "/";
+      return /^\/(?:auth(?:\/|$)|login(?:\/|$)|sign-?in(?:\/|$))/.test(normalizedPath)
+        ? "signInRequired"
+        : "routeRejected";
+    } catch (_) {
+      return "routeRejected";
+    }
+  }
+
   function delay(milliseconds) {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
 
   function sendNative(payload) {
-    nativeQueue = nativeQueue
-      .then(() => api.runtime.sendNativeMessage(config.nativeApplication, payload))
-      .catch(() => undefined);
-    return nativeQueue;
+    const operation = nativeQueue.then(async () => {
+      const reply = await api.runtime.sendNativeMessage(config.nativeApplication, payload);
+      if (!exactKeys(reply, ["ok"]) || reply.ok !== true) {
+        throw new Error("Native host rejected the packet");
+      }
+      return true;
+    });
+    nativeQueue = operation.catch(() => false);
+    return operation.catch(() => false);
   }
 
   function automationEnvelope(requestID, status) {
     return {
       kind: "claudeBrowserAutomationEvent",
-      schemaVersion: 1,
+      schemaVersion: 2,
       sourceID: "claude-browser-usage",
       browserFamily: "safari",
       requestID,
@@ -79,10 +101,11 @@
   function observationEnvelope(observation) {
     return {
       kind: "claudeUsageObservation",
-      schemaVersion: 1,
+      schemaVersion: 2,
       sourceID: "claude-browser-usage",
       browserFamily: config.browserFamily,
       routeState: "verifiedUsage",
+      observationID: crypto.randomUUID(),
       observation,
     };
   }
@@ -187,19 +210,25 @@
     }
   }
 
-  async function closeProvenOwnedTab(record, directlyCreated) {
+  async function closeProvenOwnedTab(record) {
     if (!validOwnershipRecord(record) || !api.tabs?.get || !api.tabs?.remove) return false;
     let tab;
     try { tab = await api.tabs.get(record.tabID); } catch (_) {
       await clearOwnershipRecord();
       return true;
     }
-    const proven = directlyCreated || await proveOwnedTab(record, tab);
+    // Re-prove both the exact route and the per-tab token immediately before
+    // removal. A proof from earlier in the cycle cannot authorize closing a
+    // tab after the user or provider has navigated it elsewhere.
+    const proven = await proveOwnedTab(record, tab);
     if (!proven) {
-      await clearOwnershipRecord();
       return false;
     }
-    try { await api.tabs.remove(record.tabID); } catch (_) {}
+    try {
+      await api.tabs.remove(record.tabID);
+    } catch (_) {
+      return false;
+    }
     await clearOwnershipRecord();
     return true;
   }
@@ -211,16 +240,22 @@
 
     automaticRead = null;
 
-    if (status === "signInRequired" || status === "routeRejected") {
-      await closeProvenOwnedTab(read.record, read.directlyCreated);
-    } else if (status === "tabUnavailable" || status === "ownedTabOwnershipLost") {
-      await clearOwnershipRecord();
+    let finalStatus = status;
+    if (read.record && !(await closeProvenOwnedTab(read.record))) {
+      // A provider/login redirect cannot satisfy exact Usage-route proof. Keep
+      // the truthful terminal classification while retaining the ownership
+      // record so a later cycle fails closed instead of multiplying tabs.
+      if (!redirectedTerminalStatuses.has(status)) {
+        finalStatus = "ownedTabOwnershipLost";
+      }
     }
 
-    if (status === "refreshCompleted" && extractor.validateObservation(observation)) {
-      await sendNative(observationEnvelope(observation));
+    if (finalStatus === "refreshCompleted" && extractor.validateObservation(observation)) {
+      if (!(await sendNative(observationEnvelope(observation)))) {
+        finalStatus = "usageUnavailable";
+      }
     }
-    await sendNative(automationEnvelope(read.requestID, status));
+    await sendNative(automationEnvelope(read.requestID, finalStatus));
   }
 
   async function handleContentResult(message, sender) {
@@ -272,7 +307,7 @@
         if (!allowedSenderURL(tab.url || "")) {
           // No DOM access occurs on redirects or login pages. Authentication
           // uncertainty is reported using only the owned tab's route state.
-          await finishAutomatic(read, "signInRequired");
+          await finishAutomatic(read, redirectedTerminalStatusForURL(tab.url || ""));
           return;
         }
         if (!(await injectExactUsageRoute(tab))) {
@@ -298,12 +333,14 @@
       requestID,
       tabID: null,
       record: null,
-      directlyCreated: false,
       timeoutID: null,
       finished: false,
     };
     automaticRead = read;
-    await sendNative(automationEnvelope(requestID, "refreshStarted"));
+    if (!(await sendNative(automationEnvelope(requestID, "refreshStarted")))) {
+      automaticRead = null;
+      return;
+    }
 
     if (!(await persistentUsageAccessGranted())) {
       await finishAutomatic(read, "permissionRequired");
@@ -324,13 +361,18 @@
       }
     }
     if (record && tab) {
+      read.record = record;
+      read.tabID = record.tabID;
+      if (!allowedSenderURL(tab.url || "")) {
+        // A stored redirect is classified from URL route state only. Keep the
+        // record so the extension neither adopts nor creates another tab.
+        await finishAutomatic(read, redirectedTerminalStatusForURL(tab.url || ""));
+        return;
+      }
       if (!(await proveOwnedTab(record, tab))) {
-        await clearOwnershipRecord();
         await finishAutomatic(read, "ownedTabOwnershipLost");
         return;
       }
-      read.record = record;
-      read.tabID = record.tabID;
       try {
         await api.tabs.reload(record.tabID);
       } catch (_) {
@@ -356,7 +398,6 @@
       }
       read.record = record;
       read.tabID = tab.id;
-      read.directlyCreated = true;
     }
     read.timeoutID = setTimeout(() => {
       void finishAutomatic(read, "usageUnavailable");
@@ -375,7 +416,7 @@
       if (read.timeoutID !== null) clearTimeout(read.timeoutID);
       read.finished = true;
       automaticRead = null;
-      const closed = await closeProvenOwnedTab(read.record, read.directlyCreated);
+      const closed = !read.record || await closeProvenOwnedTab(read.record);
       await sendNative(automationEnvelope(
         requestID,
         closed ? "ownedTabClosed" : "ownedTabOwnershipLost"
@@ -384,7 +425,7 @@
     }
     const record = await loadOwnershipRecord();
     if (!record) return;
-    const closed = await closeProvenOwnedTab(record, false);
+    const closed = await closeProvenOwnedTab(record);
     await sendNative(automationEnvelope(
       requestID,
       closed ? "ownedTabClosed" : "ownedTabOwnershipLost"

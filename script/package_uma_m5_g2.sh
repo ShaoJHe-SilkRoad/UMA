@@ -27,6 +27,7 @@ readonly SAFARI_EXTENSION_ID="$BUNDLE_ID.ClaudeBrowserCompanion"
 readonly CHROMIUM_HOST_NAME="com.silkrd.uma.claude_browser"
 readonly DEFAULT_BUILD="202608010001"
 readonly SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk"
+readonly user_home="$HOME"
 # Delivery artifacts must outlive the operating system's periodic purge of
 # temporary items, which silently destroyed every earlier M5 package. Only the
 # scratch build tree below stays under /private/tmp, where automatic cleanup of
@@ -35,7 +36,7 @@ readonly DELIVERY_ROOT="$HOME/Developer/UMA-Packages"
 
 usage() {
     printf '%s\n' \
-        "Usage: $0 --commit <40-hex-sha> [--build <12-digit-number>] --phase <m5-browser-preflight|m5-browser-final|m5adbg-preflight|m5adbg-final|m5-auto-preflight|m5-auto-final|m5-slr-final> --output <exact-path>" \
+        "Usage: $0 --commit <40-hex-sha> [--build <12-digit-number>] --phase <m5-browser-preflight|m5-browser-final|m5adbg-preflight|m5adbg-final|m5-auto-preflight|m5-auto-final|m5-slr-final|m5rmx-safari-preflight> --output <exact-path>" \
         "Packages are delivered under $DELIVERY_ROOT and are not purged with /private/tmp." \
         "" \
         "Signing and notarization (both optional):" \
@@ -85,6 +86,7 @@ readonly codesign_options
 [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { usage >&2; exit 2; }
 [[ "$build_number" =~ ^[0-9]{12}$ ]] || { usage >&2; exit 2; }
 [[ -d "$SDK" ]] || { printf 'Missing offline SDK: %s\n' "$SDK" >&2; exit 1; }
+resolved_marketing_version="$MARKETING_VERSION"
 case "$phase" in
     m5-browser-preflight)
         expected_output="$DELIVERY_ROOT/uma-m5-browser-preflight-${commit:0:12}/UMA.app"
@@ -128,9 +130,24 @@ case "$phase" in
         integration_status="AUTOMATIC-BROWSER-SYNC-ACCEPTED-STATUS-LINE-REMOVED"
         commit_exact=1
         ;;
+    m5rmx-safari-preflight)
+        expected_output="$DELIVERY_ROOT/uma-m5rmx-safari-preflight-$commit/UMA.app"
+        source_state="commit-exact-signed-preflight"
+        integration_status="SIGNED-SAFARI-EXTENSION-PREFLIGHT"
+        commit_exact=1
+        resolved_marketing_version="0.12"
+        [[ "$signing_identity" != "-" ]] || {
+            printf '%s\n' "M5RMX Safari preflight requires a Developer ID Application identity." >&2
+            exit 2
+        }
+        [[ -z "$notary_profile" ]] || {
+            printf '%s\n' "M5RMX Safari preflight does not submit for notarization." >&2
+            exit 2
+        }
+        ;;
     *) usage >&2; exit 2 ;;
 esac
-readonly expected_output source_state integration_status commit_exact
+readonly expected_output source_state integration_status commit_exact resolved_marketing_version
 [[ "$output" == "$expected_output" ]] || {
     printf 'Refusing output outside %s\n' "$expected_output" >&2
     exit 2
@@ -173,6 +190,7 @@ case "$phase" in
     m5adbg-*) package_root="/private/tmp/uma-m5adbg-package-$phase-$commit" ;;
     m5-auto-*) package_root="/private/tmp/uma-m5-auto-package-$phase-$commit" ;;
     m5-slr-*) package_root="/private/tmp/uma-m5-slr-package-$phase-$commit" ;;
+    m5rmx-safari-*) package_root="/private/tmp/uma-m5rmx-safari-package-$phase-$commit" ;;
     *) package_root="/private/tmp/uma-m5-browser-package-$phase-$commit" ;;
 esac
 [[ ! -e "$package_root" && ! -L "$package_root" ]] || {
@@ -240,7 +258,9 @@ if /usr/bin/grep -R -E -q "$forbidden_payload" \
 fi
 readonly safari_manifest="$source_root/BrowserExtension/Safari/manifest.json"
 readonly chromium_manifest="$source_root/BrowserExtension/Chromium/manifest.json"
-if [[ "$phase" == m5-auto-* || "$phase" == m5-slr-* ]]; then
+if [[ "$phase" == m5-auto-* \
+    || "$phase" == m5-slr-* \
+    || "$phase" == m5rmx-safari-* ]]; then
     /usr/bin/grep -F -q '"manifest_version": 2' "$safari_manifest"
     /usr/bin/grep -F -q '"permissions": ["nativeMessaging", "storage", "https://claude.ai/new*"]' "$safari_manifest"
     /usr/bin/grep -F -q '"Shared/claude-usage-extractor.js"' "$safari_manifest"
@@ -390,7 +410,7 @@ cat > "$contents/Info.plist" <<PLIST
 <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
 <key>CFBundleName</key><string>UMA</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>$MARKETING_VERSION</string>
+<key>CFBundleShortVersionString</key><string>$resolved_marketing_version</string>
 <key>CFBundleVersion</key><string>$build_number</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
@@ -414,15 +434,39 @@ for json in \
     /usr/bin/ruby -rjson -e 'JSON.parse(File.binread(ARGV.fetch(0)))' "$json"
 done
 
-/usr/bin/codesign "${codesign_options[@]}" \
+HOME="$user_home" /usr/bin/codesign "${codesign_options[@]}" \
     --identifier "$BUNDLE_ID.ClaudeBrowserNativeHost" \
     "$contents/Helpers/$NATIVE_HOST"
-/usr/bin/codesign "${codesign_options[@]}" \
+HOME="$user_home" /usr/bin/codesign "${codesign_options[@]}" \
     --identifier "$SAFARI_EXTENSION_ID" \
     --entitlements "$source_root/BrowserExtension/Safari/Native/ClaudeBrowserCompanion.entitlements" \
     "$appex"
-/usr/bin/codesign "${codesign_options[@]}" --identifier "$BUNDLE_ID" "$output"
-/usr/bin/codesign --verify --deep --strict --verbose=2 "$output"
+HOME="$user_home" /usr/bin/codesign \
+    "${codesign_options[@]}" --identifier "$BUNDLE_ID" "$output"
+HOME="$user_home" /usr/bin/codesign --verify --deep --strict --verbose=2 "$output"
+
+if [[ "$phase" == "m5rmx-safari-preflight" ]]; then
+    for signed_target in \
+        "$contents/Helpers/$NATIVE_HOST" \
+        "$appex" \
+        "$output"; do
+        signing_report="$package_root/$(basename "$signed_target")-signing.txt"
+        HOME="$user_home" /usr/bin/codesign \
+            -d --verbose=4 "$signed_target" 2> "$signing_report"
+        /usr/bin/grep -q '^TeamIdentifier=C6TUZVJ6SJ$' "$signing_report" || {
+            printf 'Unexpected signing Team ID: %s\n' "$signed_target" >&2
+            exit 1
+        }
+        /usr/bin/grep -q '^Runtime Version=' "$signing_report" || {
+            printf 'Hardened Runtime missing: %s\n' "$signed_target" >&2
+            exit 1
+        }
+        /usr/bin/grep -q '^Timestamp=' "$signing_report" || {
+            printf 'Secure timestamp missing: %s\n' "$signed_target" >&2
+            exit 1
+        }
+    done
+fi
 
 for executable in \
     "$contents/MacOS/$PRODUCT" \
@@ -529,7 +573,7 @@ printf 'PACKAGED output=%s commit=%s source_state=%s archive_sha256=%s executabl
     "$native_host_sha256" \
     "$appex_sha256" \
     "$manifest_sha256" \
-    "$MARKETING_VERSION" \
+    "$resolved_marketing_version" \
     "$build_number" \
     "$BUNDLE_ID" \
     "$integration_status"

@@ -46,8 +46,8 @@ struct M5AUTOG1ClaudeAutomaticRefreshTests {
                 "BrowserExtension/Safari/Native/Info.plist"
             )) as? [String: Any]
         )
-        #expect(extensionInfo["CFBundleShortVersionString"] as? String == "1.2.3")
-        #expect(extensionInfo["CFBundleVersion"] as? String == "7")
+        #expect(extensionInfo["CFBundleShortVersionString"] as? String == "1.3.0")
+        #expect(extensionInfo["CFBundleVersion"] as? String == "8")
     }
 
     @Test @MainActor
@@ -91,7 +91,7 @@ struct M5AUTOG1ClaudeAutomaticRefreshTests {
     }
 
     @Test
-    func safariWorkerReusesOneProvenOwnedTabWithoutEnumeratingOrAdoptingUserTabs() throws {
+    func safariWorkerClosesEachProvenOwnedTabWithoutEnumeratingOrAdoptingUserTabs() throws {
         let source = try String(
             contentsOf: autoBrowserRepositoryRoot().appendingPathComponent(
                 "BrowserExtension/Shared/background-core.js"
@@ -108,6 +108,23 @@ struct M5AUTOG1ClaudeAutomaticRefreshTests {
         #expect(source.contains("proveOwnedTab(record, tab)"))
         #expect(source.contains("ownedTabOwnershipLost"))
         #expect(source.contains("automaticRead = null"))
+        #expect(source.contains("if (read.record && !(await closeProvenOwnedTab(read.record)))"))
+        #expect(source.contains("finalStatus = \"ownedTabOwnershipLost\""))
+        #expect(source.contains("if (!redirectedTerminalStatuses.has(status))"))
+        #expect(source.contains("function redirectedTerminalStatusForURL(raw)"))
+        #expect(source.contains(
+            "finishAutomatic(read, redirectedTerminalStatusForURL(tab.url || \"\"))"
+        ))
+        #expect(source.contains("const proven = await proveOwnedTab(record, tab)"))
+        #expect(source.contains(
+            "await api.tabs.remove(record.tabID);\n"
+                + "    } catch (_) {\n"
+                + "      return false;"
+        ))
+        #expect(!source.contains("ownershipProven"))
+        #expect(!source.contains(
+            "if (status === \"tabUnavailable\") {\n      await clearOwnershipRecord();"
+        ))
         #expect(source.contains("api.permissions.contains({ origins: [config.exactHostPermission] })"))
         #expect(source.contains("api.runtime.connectNative(config.nativeApplication)"))
         #expect(source.contains("api.scripting?.executeScript"))
@@ -119,6 +136,7 @@ struct M5AUTOG1ClaudeAutomaticRefreshTests {
         #expect(!source.contains("await closeExactOwnedTab(read);"))
         #expect(source.contains("await storeOwnershipRecord(record)"))
         #expect(source.contains("await clearOwnershipRecord()"))
+        #expect(!source.contains("if (!proven) {\n      await clearOwnershipRecord();"))
         for forbidden in [
             "tabs.query", "tabs.onUpdated", "tabs.onCreated", "active: true",
             "windowId", "cookie", "localStorage", "sessionStorage", "eval(",

@@ -117,8 +117,15 @@ struct M5RMXB0PlanTests {
         ] {
             #expect((scope + retrospective).contains(required))
         }
-        #expect(scope.contains("exactly `nativeMessaging`, `storage`, and\n`https://claude.ai/new*`"))
-        #expect(scope.contains("There are no\nstatic content scripts or broad host permissions."))
+        #expect(scope.contains("requests exactly"))
+        for permission in [
+            "`nativeMessaging`",
+            "`storage`",
+            "`https://claude.ai/new*`",
+        ] {
+            #expect(scope.contains(permission))
+        }
+        #expect(scope.contains("static content scripts or broad host permissions."))
     }
 
     @Test

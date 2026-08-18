@@ -10,7 +10,8 @@
   "use strict";
 
   const CONTRACT = Object.freeze({
-    schemaVersion: 1,
+    schemaVersion: 2,
+    sourceLayoutVersion: 1,
     origin: "https://claude.ai",
     path: "/new",
     hash: "#settings/usage",
@@ -207,8 +208,9 @@
   function validateObservation(value) {
     if (!value || Object.getPrototypeOf(value) !== Object.prototype) return false;
     const keys = Object.keys(value).sort().join(",");
-    if (keys !== "extractorSchemaVersion,fiveHour,modelSpecificWeekly,observedAt,weeklyAllModels") return false;
+    if (keys !== "extractorSchemaVersion,fiveHour,modelSpecificWeekly,observedAt,sourceLayoutVersion,weeklyAllModels") return false;
     if (value.extractorSchemaVersion !== CONTRACT.schemaVersion) return false;
+    if (value.sourceLayoutVersion !== CONTRACT.sourceLayoutVersion) return false;
     if (!normalizedTimestamp(value.observedAt)) return false;
     if (!validateWindow(value.fiveHour) || !validateWindow(value.weeklyAllModels)) return false;
     if (value.fiveHour === null && value.weeklyAllModels === null) return false;
@@ -231,6 +233,7 @@
       modelSpecificWeekly: modelSpecificWindow(documentLike),
       observedAt: (now || new Date()).toISOString(),
       extractorSchemaVersion: CONTRACT.schemaVersion,
+      sourceLayoutVersion: CONTRACT.sourceLayoutVersion,
     };
     // The SPA may navigate while extraction is in progress. Revalidate both
     // route and login absence after reading the bounded landmarks so a click

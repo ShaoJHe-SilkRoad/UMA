@@ -49,6 +49,7 @@ public enum ClaudeBrowserFileHandoffWriter {
         try validatePrivateDirectory(endpoint.directoryPath, uid: uid)
         try requireActiveListener(endpoint.listenerLockPath, uid: uid)
         try removeOwnedRegularFileIfPresent(endpoint.temporaryPath, uid: uid)
+        try waitForPendingSlot(endpoint.pendingPath, uid: uid)
 
         let descriptor = open(
             endpoint.temporaryPath,
@@ -97,6 +98,28 @@ public enum ClaudeBrowserFileHandoffWriter {
             throw ClaudeBrowserBridgeError.socketUnsafe
         }
     }
+}
+
+/// Native-message replies can arrive faster than the app's directory event
+/// handler consumes the prior file. Keep the local bridge lossless without
+/// overwriting or retrying a provider read: each writer waits only for the
+/// preceding validated handoff slot to drain.
+private func waitForPendingSlot(_ path: String, uid: uid_t) throws {
+    for _ in 0..<200 {
+        var metadata = stat()
+        if lstat(path, &metadata) != 0 {
+            guard errno == ENOENT else { throw ClaudeBrowserBridgeError.socketUnsafe }
+            return
+        }
+        guard (metadata.st_mode & S_IFMT) == S_IFREG,
+              metadata.st_uid == uid,
+              (metadata.st_mode & 0o777) == 0o600,
+              metadata.st_size > 0,
+              metadata.st_size <= ClaudeBrowserBridgeContract.maximumMessageBytes
+        else { throw ClaudeBrowserBridgeError.socketUnsafe }
+        usleep(10_000)
+    }
+    throw ClaudeBrowserBridgeError.socketWriteFailed
 }
 
 public final class ClaudeBrowserFileHandoffServer: @unchecked Sendable {

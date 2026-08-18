@@ -96,6 +96,35 @@ struct ClaudeBrowserBridgeCoreTests {
         }
     }
 
+    @Test("observation packets require one UUID replay nonce and the current layout")
+    func observationIdentityAndLayoutContract() throws {
+        let encoded = try ClaudeBrowserMessageDecoder.encode(envelope())
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        #expect(Set(object.keys) == [
+            "kind", "schemaVersion", "sourceID", "browserFamily",
+            "routeState", "observationID", "observation",
+        ])
+        #expect(UUID(uuidString: try #require(object["observationID"] as? String)) != nil)
+
+        var invalidID = object
+        invalidID["observationID"] = "not-a-uuid"
+        #expect(throws: ClaudeBrowserBridgeError.invalidContract) {
+            try ClaudeBrowserMessageDecoder.decode(
+                JSONSerialization.data(withJSONObject: invalidID)
+            )
+        }
+
+        var invalidLayout = object
+        var observation = try #require(invalidLayout["observation"] as? [String: Any])
+        observation["sourceLayoutVersion"] = ClaudeBrowserBridgeContract.sourceLayoutVersion + 1
+        invalidLayout["observation"] = observation
+        #expect(throws: ClaudeBrowserBridgeError.invalidContract) {
+            try ClaudeBrowserMessageDecoder.decode(
+                JSONSerialization.data(withJSONObject: invalidLayout)
+            )
+        }
+    }
+
     @Test("nested unknown fields fail closed")
     func nestedUnexpectedField() throws {
         let encoded = try ClaudeBrowserMessageDecoder.encode(envelope())
@@ -196,10 +225,11 @@ struct ClaudeBrowserBridgeCoreTests {
         try server.start()
         defer { server.stop() }
 
-        let payload = try ClaudeBrowserMessageDecoder.encode(envelope())
+        let expected = envelope()
+        let payload = try ClaudeBrowserMessageDecoder.encode(expected)
         try ClaudeBrowserFileHandoffWriter.write(payload, endpoint: endpoint)
         #expect(signal.wait(timeout: .now() + 2) == .success)
-        #expect(received.value == envelope())
+        #expect(received.value == expected)
         #expect(!FileManager.default.fileExists(atPath: endpoint.pendingPath))
     }
 
@@ -266,10 +296,11 @@ struct ClaudeBrowserBridgeCoreTests {
             try second.start()
         }
 
-        let payload = try ClaudeBrowserMessageDecoder.encode(envelope())
+        let expected = envelope()
+        let payload = try ClaudeBrowserMessageDecoder.encode(expected)
         try ClaudeBrowserFileHandoffWriter.write(payload, endpoint: endpoint)
         #expect(signal.wait(timeout: .now() + 2) == .success)
-        #expect(received.value == envelope())
+        #expect(received.value == expected)
     }
 
     @Test("pending observations are never replaced before the listener consumes them")
@@ -313,6 +344,64 @@ struct ClaudeBrowserBridgeCoreTests {
         }
         #expect(try Data(contentsOf: URL(fileURLWithPath: endpoint.pendingPath)) == first)
         #expect(!FileManager.default.fileExists(atPath: endpoint.temporaryPath))
+    }
+
+    @Test("a complete refresh sequence crosses the one-slot handoff without packet loss")
+    func fileHandoffDeliversRefreshSequenceInOrder() throws {
+        let root = URL(fileURLWithPath: "/private/tmp", isDirectory: true)
+            .appendingPathComponent(
+                "uma-m5rmx-safari-bridge-sequence.\(getpid())",
+                isDirectory: true
+            )
+        try? FileManager.default.removeItem(at: root)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let endpoint = ClaudeBrowserFileHandoffEndpoint(directoryPath: root.path)
+        let received = LockedPacketKinds()
+        let signal = DispatchSemaphore(value: 0)
+        let server = ClaudeBrowserFileHandoffServer(
+            endpoint: endpoint,
+            observationHandler: { _ in
+                received.append("observation")
+                signal.signal()
+            },
+            automationHandler: { event in
+                received.append(event.status.rawValue)
+                signal.signal()
+            }
+        )
+        try server.start()
+        defer { server.stop() }
+
+        let requestID = "6e6f5e38-70bf-4b1b-81b0-e0903081f980"
+        let started = ClaudeBrowserAutomationEvent(
+            requestID: requestID,
+            status: .refreshStarted,
+            occurredAt: "2026-08-17T12:00:00Z"
+        )
+        let completed = ClaudeBrowserAutomationEvent(
+            requestID: requestID,
+            status: .refreshCompleted,
+            occurredAt: "2026-08-17T12:00:01Z"
+        )
+        try ClaudeBrowserFileHandoffWriter.write(
+            ClaudeBrowserAutomationEventDecoder.encode(started),
+            endpoint: endpoint
+        )
+        try ClaudeBrowserFileHandoffWriter.write(
+            ClaudeBrowserMessageDecoder.encode(envelope()),
+            endpoint: endpoint
+        )
+        try ClaudeBrowserFileHandoffWriter.write(
+            ClaudeBrowserAutomationEventDecoder.encode(completed),
+            endpoint: endpoint
+        )
+
+        for _ in 0..<3 {
+            #expect(signal.wait(timeout: .now() + 2) == .success)
+        }
+        #expect(received.values == ["refreshStarted", "observation", "refreshCompleted"])
+        #expect(!FileManager.default.fileExists(atPath: endpoint.pendingPath))
     }
 
     @Test("handoff rejects a symlink in the task-owned path")
@@ -517,6 +606,23 @@ private final class LockedAutomationEvent: @unchecked Sendable {
     func set(_ value: ClaudeBrowserAutomationEvent) {
         lock.lock()
         storage = value
+        lock.unlock()
+    }
+}
+
+private final class LockedPacketKinds: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String] = []
+
+    var values: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func append(_ value: String) {
+        lock.lock()
+        storage.append(value)
         lock.unlock()
     }
 }
