@@ -34,7 +34,6 @@ struct M5RMXB0PlanTests {
     @Test
     func providerTruthAndCompletionLockAdmitOnlyM5RMXG1() throws {
         let scope = try record("source/UMA M5RMX Scope Lock.md")
-        let qa = try record("source/UMA M5RMX QA Issue Ledger.md")
 
         var previous = scope.startIndex
         for provider in ["1. Codex", "2. Claude Code", "3. WorkBuddy", "4. Google Antigravity"] {
@@ -44,7 +43,6 @@ struct M5RMXB0PlanTests {
         #expect(scope.contains("Cursor and Kimi\nare unsupported/hidden"))
         #expect(scope.contains("sole next task is `M5RMX-G1`"))
         #expect(scope.contains("starts automatically"))
-        #expect(qa.contains("The sole next task is `M5RMX-G1`"))
     }
 
     @Test

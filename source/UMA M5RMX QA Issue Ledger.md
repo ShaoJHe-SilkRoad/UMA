@@ -1,10 +1,10 @@
 # UMA M5RMX QA Issue Ledger
 
-**Version:** 1.0
+**Version:** 1.1
 
 **Opened:** 2026-08-17
 
-**Current task:** `M5RMX-B0`
+**Current task:** `M5RMX-G1`
 
 ## 1. Scope and baseline
 
@@ -24,7 +24,33 @@ HISTORICAL / RETIRED records/tests. Current privacy policy:
 
 `Credential existence is not the problem; credential crossing into UMA is the problem.`
 
-## 2. B0 issues
+## 2. G1 issues
+
+| ID | Severity | Discovery | Root cause / classification | Required repair or control | Verification | State |
+|---|---|---|---|---|---|---|
+| M5RMXG1-001 | Blocking | Accepted Claude source truth was distributed across historical M5 records and current runtime | Without one current decision, a future Goal could revive status-line or replace Browser Sync without promotion evidence | Create the M5RMX source dossier and decision; retain Safari Browser Sync until every replacement gate passes | focused source-contract tests and independent source review | Closed; QA verification PASS |
+| M5RMXG1-002 | Privacy | Provider-owned authentication could be confused with credential access by UMA | Credential existence and credential crossing were not expressed as one normative current contract | Create the M5RMX privacy contract with a closed browser/native allowlist and explicit forbidden mechanisms | protocol/source scan, privacy/identity/secret scan | Closed; QA verification PASS |
+| M5RMXG1-003 | Semantic | Current account windows and continuation state needed separate admission | Five-hour/weekly quota is accepted, while continuation, usage credits, billing, and purchase state have no admitted bounded schema | Admit only explicit used-percentage windows with one conversion; classify continuation and usage-credit state unavailable | deterministic semantics and source-decision tests | Closed; QA verification PASS |
+| M5RMXG1-004 | Source | Historical status-line callback remains a superficially attractive local source | It required a running CLI and Human-initiated provider response, so it cannot supply automatic no-work account truth | Keep the route HISTORICAL / RETIRED; require current official authority and all promotion gates before reconsideration | Package target/source reintroduction guards | Closed; QA verification PASS |
+| M5RMXG1-005 | Protection | G1 could accidentally become a production extension rewrite | Source/privacy admission does not authorize Safari implementation, signing, package, or UI work | Restrict G1 delivery to current records, focused tests, and this ledger; production runtime/extension changes remain zero | exact Git scope and independent staged-index review | Closed; independent staged review PASS after repair |
+| M5RMXG1-006 | Privacy / truth | Privacy Steward objected that an early G1 draft described selectors too narrowly and did not explicitly supersede historical toolbar-only records | Current extraction tries explicit selectors first, then bounded exact leaf-text matching across at most 4096 nodes; current Safari uses persistent exact host scope, storage, background ownership, one owned inactive tab, and automatic refresh | State transient in-browser fallback inspection honestly, forbid raw/broad text crossing, and lock the current persistent Safari contract in deterministic tests | manifest/extractor source assertions and privacy-record review | Closed; QA verification PASS |
+| M5RMXG1-007 | Source / privacy | Source Examiner confirmed official status-line five-hour/seven-day used/reset fields but objected to treating their existence as promotion evidence | Fields appear only after the first API response, timer rerun freshness is unproven, raw stdin carries broader sensitive context, and documented quota coverage is Pro/Max only | Record exact fields and limitations; keep status-line HISTORICAL / RETIRED; leave Team/Enterprise/unknown unqualified | focused source-contract and privacy assertions | Closed; QA verification PASS |
+| M5RMXG1-008 | Trust | Strict read-only verification currently fails for installed CLI 2.1.220 and `/Applications/Claude.app` | Current local executables cannot anchor a promoted local quota source without a valid trust result | Record sanitized arm64 invalid-signature errors; keep local service/CLI candidates unadmitted without changing Safari Browser Sync | exact read-only `codesign --verify --strict` and focused record tests | Repaired; local trust remains unadmitted |
+| M5RMXG1-009 | Semantic | Included-plan exhaustion could be misreported as all Claude work stopping | Official usage-credit continuation means `0%` included remaining does not establish overall provider unavailability | Keep continuation/usage-credit state unavailable and overall work availability unknown; do not infer from percentage | deterministic continuation decision tests | Closed; QA verification PASS |
+| M5RMXG1-010 | Regression | The B0 test read the mutable QA ledger for B0's former next-task gate | Advancing the current ledger to M5RMX-SAFARI-G1 made the historical B0 assertion stale even though the immutable B0 Scope Lock remained correct | Anchor the B0 next-task assertion only to the immutable B0 Scope Lock; keep the current ledger free to advance with the active Goal | focused B0 and G1 contract tests plus full deterministic regression | Closed; focused 12/12 and full 700/700 PASS |
+| M5RMXG1-011 | Privacy / evidence | Independent staged review found the draft privacy contract placed login-landmark absence before the first DOM query and omitted the affected-suite count | The actual extractor correctly gates the exact route before a narrow login-form DOM query, then refuses quota inspection on login; QA evidence existed but was not fully carried into the durable record | Correct the contract to the route-gate → narrow login-landmark → quota-query order; record all focused, affected, and full results | focused source-contract recheck and independent staged-delta review | Closed; independent staged-delta review PASS |
+
+G1 verification evidence:
+
+```text
+Focused M5RMX-G1 plus B0 regression: 12/12 PASS
+Affected Claude Browser / M5 AUTO / M5RMX: 114/114 PASS
+Full deterministic serial suite: 700/700 PASS
+Production runtime / extension / package changes: 0
+Claude provider operations: 0
+```
+
+## 3. B0 issues
 
 | ID | Severity | Discovery | Root cause / classification | Required repair or control | Verification | State |
 |---|---|---|---|---|---|---|
@@ -43,7 +69,7 @@ HISTORICAL / RETIRED records/tests. Current privacy policy:
 | M5RMXB0-013 | Distribution | Apple credential/signing infrastructure readiness could be mistaken for a signed/notarized current product | The historical smoke is blocked by a backend anomaly and the current M5RMX package has not passed final distribution gates | Record infrastructure and protected local smoke presence separately from current product distribution status | local path presence only; no Apple query | Closed in records; final distribution remains unproven |
 | M5RMXB0-014 | Evidence | Bounded local verification found both the retained smoke app and an isolated extraction of its archive currently fail strict signature verification as code modified | The current preserved state does not support repeating the historical signature-valid claim; matching executable SHA-256 values show the retained app and archive payload agree | Record the discrepancy without querying Apple or repairing, re-signing, deleting, or mutating either protected artifact; remove only the scratch extraction | protected-path presence, matching executable hashes, strict local signature classification, scratch absence | Closed for B0 truth; external Apple resolution remains open |
 
-## 3. Required B0 verification ledger
+## 4. Required B0 verification ledger
 
 | Gate | Required result | Current record |
 |---|---|---|
@@ -63,7 +89,7 @@ HISTORICAL / RETIRED records/tests. Current privacy policy:
 | whitespace | all six staged files clean | Plan/Goal mutable copies normalized; cached `git diff --check` PASS |
 | staged index | exact B0 files; independent cached-diff PASS | exact six-file scope; PASS |
 
-## 4. Apple and Desktop non-operation record
+## 5. Apple and Desktop non-operation record
 
 Apple state is record-only:
 
@@ -88,10 +114,13 @@ B0 performed no production/provider/Apple/Desktop actions. It did not query or
 resubmit notarization, touch the profile/private key, launch a provider, read an
 account, mutate a Desktop app, or push.
 
-## 5. Completion boundary
+## 6. G1 completion boundary
 
-B0 can close only after the fresh baseline, build, privacy, protection, exact
-staging, independent review, local commit, and clean worktree/index gates pass.
-The sole next task is `M5RMX-G1`. No production Claude work, provider action,
+G1 can close only after the source/privacy decision, focused and affected
+Claude verification, full deterministic regression, bounded privacy scans,
+exact staging, independent review, local commit, and clean worktree/index gates
+pass. This implementer pass used zero Claude observations, zero prompts/tasks,
+zero intentional provider spend, and zero production runtime/extension changes.
+The sole next task is `M5RMX-SAFARI-G1`. No Safari implementation, package,
 Apple action, Desktop delivery, remote synchronization, or later M5RMX Goal
 starts automatically.
