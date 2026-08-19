@@ -96,6 +96,10 @@ struct ClaudeBrowserConnectorDiagnostics: Equatable, Sendable {
     let scheduledCycleCount: Int
     let automaticRefreshInFlight: Bool
     let schedulerActive: Bool
+    /// Architectural zero: Browser Sync owns no local-activity dependency.
+    let localActivityReaderInvocationCount: Int
+    /// Architectural zero: Browser Sync owns no Claude project-filesystem path.
+    let claudeProjectsAccessCount: Int
 }
 
 actor ClaudeCodeUsageConnector: AgentUsageConnector {
@@ -124,12 +128,7 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         .rateLimits,
         .sanitizedLastValidRestore,
         .automaticRefresh,
-        .localActivity,
     ]
-
-    /// Local activity is secondary analytics and is rescanned at most this
-    /// often. It never gates, delays, or influences an account observation.
-    static let localActivityRefreshInterval: TimeInterval = 5 * 60
 
     nonisolated let id = connectorID
     nonisolated let descriptor = AgentConnectorDescriptor(
@@ -138,7 +137,7 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         officialSource: "Claude official Usage page · Browser Sync · Experimental",
         sourceTier: .authorizedReadOnlyRemote,
         sourceVersion: "browser-2",
-        supportedScopes: [.account, .device, .session, .task],
+        supportedScopes: [.account],
         capabilities: capabilities,
         configurationRequirements: [
             .userAuthorization,
@@ -153,9 +152,6 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
             "modelSpecificWeeklyUsedPercentage",
             "modelSpecificWeeklyResetAt",
             "observedAt",
-            "localActivityTokenCounts",
-            "localActivityModelIdentifier",
-            "localActivityTimestamp",
         ],
         supportsRestore: false,
         supportsUninstall: false,
@@ -194,13 +190,6 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
     private let allowSafariLaunch: PreferenceReader
     private let sleep: Sleeper
 
-    /// Nil in tests and wherever local analytics are not wanted, which keeps
-    /// every other construction path off the filesystem.
-    private let localActivityReader: (any ClaudeLocalActivityReading)?
-    private var cachedLocalActivity: ClaudeLocalActivitySnapshot?
-    private var localActivityRefreshedAt: Date?
-    private var localActivityRefreshInFlight = false
-
     private var snapshot: AgentUsageSnapshot
     private var lastGood: AgentUsageSnapshot?
     private var priorSessionCache: AgentUsageSnapshot?
@@ -237,10 +226,8 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         allowSafariLaunch: @escaping PreferenceReader = { false },
         sleep: @escaping Sleeper = { interval in
             try await Task.sleep(for: .seconds(interval))
-        },
-        localActivityReader: (any ClaudeLocalActivityReading)? = nil
+        }
     ) {
-        self.localActivityReader = localActivityReader
         self.integration = integration
         self.hasConsent = hasConsent
         self.clearConsent = clearConsent
@@ -266,8 +253,7 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         writeCache: @escaping CacheWriter = { _ in },
         clearCache: @escaping CacheClearer = {},
         autoRefreshEnabled: @escaping PreferenceReader = { false },
-        allowSafariLaunch: @escaping PreferenceReader = { false },
-        localActivityReader: (any ClaudeLocalActivityReading)? = ClaudeLocalActivityReader()
+        allowSafariLaunch: @escaping PreferenceReader = { false }
     ) -> ClaudeCodeUsageConnector {
         ClaudeCodeUsageConnector(
             integration: integration,
@@ -277,8 +263,7 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
             writeCache: writeCache,
             clearCache: clearCache,
             autoRefreshEnabled: autoRefreshEnabled,
-            allowSafariLaunch: allowSafariLaunch,
-            localActivityReader: localActivityReader
+            allowSafariLaunch: allowSafariLaunch
         )
     }
 
@@ -478,7 +463,9 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
             automaticDispatchCount: automaticDispatchCount,
             scheduledCycleCount: scheduledCycleCount,
             automaticRefreshInFlight: automaticRefreshInFlight,
-            schedulerActive: automaticRefreshTask != nil
+            schedulerActive: automaticRefreshTask != nil,
+            localActivityReaderInvocationCount: 0,
+            claudeProjectsAccessCount: 0
         )
     }
 
@@ -907,107 +894,8 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
     }
 
     private func replace(_ next: AgentUsageSnapshot) {
-        let merged = Self.merging(next, localActivity: cachedLocalActivity)
-        snapshot = merged
-        continuation?.yield(merged)
-        scheduleLocalActivityRefreshIfNeeded()
-    }
-
-    /// Rescans local session metadata off the actor so no published account
-    /// observation ever waits on filesystem work.
-    private func scheduleLocalActivityRefreshIfNeeded() {
-        guard let reader = localActivityReader, !localActivityRefreshInFlight else { return }
-        let current = now()
-        if let last = localActivityRefreshedAt,
-           current.timeIntervalSince(last) < Self.localActivityRefreshInterval {
-            return
-        }
-        localActivityRefreshInFlight = true
-        localActivityRefreshedAt = current
-        Task.detached(priority: .utility) { [weak self] in
-            let sample = reader.read(now: current)
-            await self?.storeLocalActivity(sample)
-        }
-    }
-
-    private func storeLocalActivity(_ sample: ClaudeLocalActivitySnapshot) {
-        localActivityRefreshInFlight = false
-        cachedLocalActivity = sample
-        let merged = Self.merging(snapshot, localActivity: sample)
-        guard merged != snapshot else { return }
-        snapshot = merged
-        continuation?.yield(merged)
-    }
-
-    /// Replaces any existing local channel so the operation is idempotent, and
-    /// leaves the account channel untouched. Local activity never contributes a
-    /// rate-limit window and therefore can never be read as account quota.
-    private static func merging(
-        _ base: AgentUsageSnapshot,
-        localActivity: ClaudeLocalActivitySnapshot?
-    ) -> AgentUsageSnapshot {
-        let accountChannels = base.channels.filter { $0.id != .localActivity }
-        guard let localActivity, localActivity.availability == .available else {
-            guard accountChannels.count != base.channels.count else { return base }
-            return replacing(base, channels: accountChannels)
-        }
-        return replacing(
-            base,
-            channels: accountChannels
-                + [localChannel(from: localActivity, freshness: base.freshness)]
-        )
-    }
-
-    private static func replacing(
-        _ base: AgentUsageSnapshot,
-        channels: [AgentUsageChannel]
-    ) -> AgentUsageSnapshot {
-        AgentUsageSnapshot(
-            id: base.id,
-            providerName: base.providerName,
-            state: base.state,
-            capturedAt: base.capturedAt,
-            lastSuccessfulAt: base.lastSuccessfulAt,
-            freshness: base.freshness,
-            channels: channels,
-            capabilities: base.capabilities,
-            safeFailure: base.safeFailure,
-            selectedWindowID: base.selectedWindowID
-        )
-    }
-
-    private static func localChannel(
-        from activity: ClaudeLocalActivitySnapshot,
-        freshness: AgentConnectorFreshness
-    ) -> AgentUsageChannel {
-        let estimate = activity.apiEquivalentCost
-        let observed = estimate?.observedTokens ?? 0
-        let coverage = observed > 0
-            ? Int((Double(estimate?.pricedTokens ?? 0) / Double(observed) * 100).rounded())
-            : nil
-        return AgentUsageChannel(
-            id: .localActivity,
-            sourceTier: .officialCLIOrMetadata,
-            sourceVersion: "claude-jsonl-v1",
-            scopes: [.device, .session, .task],
-            provenance: .locallyEstimated,
-            freshness: freshness == .unavailable ? .unavailable : freshness,
-            capturedAt: activity.capturedAt,
-            coverageNote: "aggregate metadata coverage",
-            rateLimitWindows: [],
-            accountMetrics: nil,
-            localActivityMetrics: AgentLocalActivityMetrics(
-                recentTaskCount: activity.tasks.count,
-                recentTaskTokens: activity.tasks.map(\.totalTokens),
-                recentTaskCapturedAt: activity.tasks.map(\.modifiedAt),
-                sessionTokens: activity.tasks.reduce(0) { $0 + $1.totalTokens },
-                estimatedSevenDayUSD: estimate?.sevenDayUSD,
-                estimatedLifetimeUSD: estimate?.lifetimeUSD,
-                coveragePercent: coverage,
-                recognizedModelCount: estimate?.recognizedModelCount
-            ),
-            safeFailure: nil
-        )
+        snapshot = next
+        continuation?.yield(next)
     }
 
     private static func snapshot(

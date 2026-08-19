@@ -64,6 +64,7 @@ Claude provider operations: 0
 | M5RMXSAFARI-008 | Blocking / lifecycle | Independent staged review found a tab-removal error was swallowed before the ownership record was cleared | A failed removal could leave the tab alive but erase the only bounded ownership correlation, permitting a later duplicate | Treat removal failure as closure failure, retain the ownership record, and clear it only after successful removal | removal-failure ownership-retention regression test; focused 17/17 and affected 76/76 PASS | CLOSED |
 | M5RMXSAFARI-009 | Major / lifecycle truth | Final staged review found a stored login/redirect tab was token-proved before its route was classified | Exact-route token proof necessarily fails on a provider redirect, collapsing the next cycle to `ownedTabOwnershipLost` instead of the truthful sanitized login/route status | Classify the stored tab from URL route state only before token proof, retain its ownership record, create no replacement tab, and continue requiring exact-route token proof for an actual Usage route | stored-redirect next-cycle ordering and no-clear/no-multiplication regression tests; focused 18/18 and affected 77/77 PASS | CLOSED |
 | M5RMXSAFARI-010 | Blocking / packaging | The first post-commit signed-package attempt reached Developer ID signing but `codesign` reported the confirmed Team `C6TUZVJ6SJ` identity unavailable | The helper intentionally exported a task-owned isolated `HOME` for SwiftPM before signing, which also hid the normal user signing search context from `codesign` | Capture the original user HOME before build isolation and restore it only on each bounded `codesign` signing, verification and inspection command; keep SwiftPM HOME/cache/config/security paths isolated and perform no keychain enumeration or credential export | focused package contract, shell syntax, strict signature, staple and Gatekeeper checks | CLOSED — exact signed/notarized candidate certified in Phase A |
+| M5RMXSAFARI-011 | Blocking / privacy | Final signed live preflight stopped before Observation 1 when source review found production Browser Sync constructed `ClaudeLocalActivityReader` and scheduled it from every snapshot publication | The account-quota connector still owned the historical local analytics dependency; publishing connect, cache, callback, refresh, or failure state could scan prompt-bearing records beneath `~/.claude/projects` | Remove all Local Activity ownership, construction, scheduling, merging, capability and allowlist claims from Browser Sync; retain the standalone reader only as a deferred separate feature; lock invocation and projects-access diagnostics to architectural zero | old-fail/new-pass suite covers connect, callback, preseeded cache load/publication, disconnect clear, scheduled/manual refresh/coalescing, reconnect and failure/recovery: 4/4 PASS; affected Claude Browser Sync/M5/M5RMX 116/116 PASS; deterministic full 724/724 PASS; Debug, Release, strict-concurrency Release, native-host arm64, Assistant UIFIX, privacy and provider-protection audits PASS | SOURCE REPAIR VERIFIED — SIGNED LIVE ACCEPTANCE PENDING |
 
 SAFARI-G1 independent verification evidence:
 
@@ -94,6 +95,12 @@ unregistered; the old Desktop 1.2.3 registration and its original inactive
 state were restored; task-owned runtime/cache state was removed; Safari
 unsigned-extension mode remained OFF. Exact private quota values were not
 retained.
+
+That historical candidate remains immutable distribution evidence, but its
+live acceptance was superseded when the production account-quota path was found
+to schedule the prompt-bearing Local Activity reader. `M5RMXSAFARI-011` must
+pass source, fresh signing/notarization, and fresh signed live acceptance before
+SAFARI-G1 can close again.
 
 ## 2B. CERT-UI Phase A issue ledger
 

@@ -251,7 +251,7 @@ struct M5LAG1ClaudeLocalActivityTests {
     // MARK: - Connector contract
 
     @Test
-    func connectorDeclaresLocalActivityWithoutLosingAnyExistingCapability() {
+    func browserConnectorDefersLocalActivityWithoutLosingQuotaCapabilities() {
         let descriptor = ClaudeCodeUsageConnector.production().descriptor
         for required in [
             AgentConnectorCapability.connect,
@@ -261,12 +261,15 @@ struct M5LAG1ClaudeLocalActivityTests {
             .rateLimits,
             .sanitizedLastValidRestore,
             .automaticRefresh,
-            .localActivity,
         ] {
             #expect(descriptor.capabilities.contains(required))
         }
+        #expect(!descriptor.capabilities.contains(.localActivity))
         #expect(!descriptor.capabilities.contains(.hiddenFromDesktopAssistant))
-        #expect(descriptor.supportedScopes == [.account, .device, .session, .task])
+        #expect(descriptor.supportedScopes == [.account])
+        #expect(!descriptor.privacyAllowlist.contains("localActivityTokenCounts"))
+        #expect(!descriptor.privacyAllowlist.contains("localActivityModelIdentifier"))
+        #expect(!descriptor.privacyAllowlist.contains("localActivityTimestamp"))
     }
 
     @Test
@@ -282,8 +285,8 @@ struct M5LAG1ClaudeLocalActivityTests {
             .read(now: now)
         let metrics = try #require(snapshot.apiEquivalentCost)
         #expect(metrics.observedTokens > 0)
-        // The reader itself has no window type to produce; the connector's
-        // local channel is constructed with an empty window list.
+        // The reader itself has no window type to produce, and Browser Sync
+        // does not integrate this deferred source into its account channel.
         #expect(ClaudeCodeUsageConnector.production().descriptor.supportedScopes.contains(.account))
     }
 

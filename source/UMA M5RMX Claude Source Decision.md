@@ -65,8 +65,14 @@ Current strict verification of both `$HOME/.local/bin/claude`
 unadmitted. This does not change the accepted Safari Browser Sync decision.
 
 The Main Panel and Desktop Assistant continue to consume the same normalized
-snapshot and freshness state. Local Claude activity and API-equivalent cost
-remain a separate this-Mac estimate channel.
+snapshot and freshness state. The production Browser Sync connector is now an
+account-quota-only channel and owns no local-activity reader, scheduler, cache,
+or filesystem fallback. Local Claude activity and API-equivalent cost remain a
+conceptually separate this-Mac feature, but the current reader is not activated
+or advertised by Browser Sync because it scans prompt-bearing project/session
+records.
+
+`CLAUDE LOCAL ACTIVITY — DEFERRED TO M5RMX-G2 PRIVACY REQUALIFICATION`
 
 ## Live and mutation record
 

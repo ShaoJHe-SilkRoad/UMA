@@ -1,10 +1,10 @@
 # UMA M5RMX Claude Privacy Contract
 
-**Version:** 1.0
+**Version:** 1.1
 
-**Date:** 2026-08-17
+**Date:** 2026-08-19
 
-**Goal:** M5RMX-G1
+**Goal:** M5RMX-SAFARI-G1 privacy decoupling repair
 
 **Status:** mandatory current credential and data boundary
 
@@ -116,6 +116,27 @@ not contain exact Founder percentages or resets, raw URLs, page content,
 identity, credential material, or provider-owned process arguments. Durable
 live evidence is limited to statements such as window present, reset present,
 schema valid, route verified, observation Fresh, or observation repeatable.
+
+### 6.1 Browser Sync and Local Activity are separate channels
+
+The production `claude.browserSync` connector is account-quota-only. Its
+initializer and production factory own no `ClaudeLocalActivityReading`
+dependency, its descriptor exposes only account scope, and every connect,
+callback, cache, scheduler, refresh, reconnect, and recovery path is forbidden
+from constructing or invoking `ClaudeLocalActivityReader` or accessing
+`~/.claude/projects`.
+
+Claude Local Activity remains source code for a conceptually separate local
+analytics feature, but it is not registered or advertised by Browser Sync.
+Because the current reader scans prompt-bearing project/session records, its
+production activation is deferred:
+
+`CLAUDE LOCAL ACTIVITY — DEFERRED TO M5RMX-G2 PRIVACY REQUALIFICATION`
+
+No quota failure may enable Local Activity as a fallback. Browser Sync
+diagnostics expose architectural zeroes for local-reader invocation and Claude
+projects access, while deterministic source-contract tests reject any hidden
+factory, publication, or lazy fallback path.
 
 ## 7. Disconnect and cleanup
 
