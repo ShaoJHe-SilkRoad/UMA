@@ -2,9 +2,105 @@ import AppKit
 import CodexUsageUI
 import SwiftUI
 
-private final class DesktopAssistantPanel: NSPanel {
+final class DesktopAssistantDragGestureRecognizer: NSGestureRecognizer {
+    static let movementThreshold: CGFloat = 4
+
+    private(set) var initialPointerLocationInWindow: NSPoint?
+    private(set) var pointerLocationInWindow: NSPoint = .zero
+
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        initialPointerLocationInWindow = event.locationInWindow
+        pointerLocationInWindow = event.locationInWindow
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        super.mouseDragged(with: event)
+        pointerLocationInWindow = event.locationInWindow
+        guard let initialPointerLocationInWindow else {
+            state = .failed
+            return
+        }
+        switch state {
+        case .possible:
+            let deltaX = pointerLocationInWindow.x - initialPointerLocationInWindow.x
+            let deltaY = pointerLocationInWindow.y - initialPointerLocationInWindow.y
+            if hypot(deltaX, deltaY) >= Self.movementThreshold {
+                state = .began
+            }
+        case .began, .changed:
+            state = .changed
+        default:
+            break
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        pointerLocationInWindow = event.locationInWindow
+        switch state {
+        case .possible:
+            state = .failed
+        case .began, .changed:
+            state = .ended
+        default:
+            break
+        }
+    }
+
+    override func reset() {
+        super.reset()
+        initialPointerLocationInWindow = nil
+        pointerLocationInWindow = .zero
+    }
+}
+
+final class DesktopAssistantPanel: NSPanel {
+    private var dragStartPointer: NSPoint?
+    private var dragStartWindowOrigin: NSPoint?
+
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    @objc func handleAssistantDrag(_ recognizer: DesktopAssistantDragGestureRecognizer) {
+        let pointer = convertPoint(toScreen: recognizer.pointerLocationInWindow)
+        switch recognizer.state {
+        case .began:
+            let initialPointer = recognizer.initialPointerLocationInWindow
+                .map { convertPoint(toScreen: $0) }
+                ?? pointer
+            beginAssistantDrag(at: initialPointer)
+            continueAssistantDrag(to: pointer)
+        case .changed:
+            continueAssistantDrag(to: pointer)
+        case .ended, .cancelled, .failed:
+            endAssistantDrag()
+        default:
+            break
+        }
+    }
+
+    func beginAssistantDrag(at pointer: NSPoint) {
+        dragStartPointer = pointer
+        dragStartWindowOrigin = frame.origin
+    }
+
+    func continueAssistantDrag(to pointer: NSPoint) {
+        guard isMovable,
+              let dragStartPointer,
+              let dragStartWindowOrigin else { return }
+        setFrameOrigin(
+            NSPoint(
+                x: dragStartWindowOrigin.x + pointer.x - dragStartPointer.x,
+                y: dragStartWindowOrigin.y + pointer.y - dragStartPointer.y
+            )
+        )
+    }
+
+    func endAssistantDrag() {
+        dragStartPointer = nil
+        dragStartWindowOrigin = nil
+    }
 }
 
 /// Host-owned presentation controller. It receives immutable display cards and
@@ -50,6 +146,19 @@ final class DesktopAssistantPanelController {
     var isVisible: Bool { panel.isVisible }
     var isAlwaysOnTop: Bool { preferences.isAlwaysOnTop }
     var density: DesktopAssistantDensity { preferences.density }
+    var usesWindowBackgroundDragging: Bool { panel.isMovableByWindowBackground }
+    var hasWindowShadow: Bool { panel.hasShadow }
+    var assistantDragRecognizerCount: Int {
+        panel.contentView?.gestureRecognizers.count {
+            $0 is DesktopAssistantDragGestureRecognizer
+        } ?? 0
+    }
+    var assistantDragDelaysClicks: Bool {
+        panel.contentView?.gestureRecognizers
+            .compactMap { $0 as? DesktopAssistantDragGestureRecognizer }
+            .first?.delaysPrimaryMouseButtonEvents ?? false
+    }
+    var assistantPanelForTesting: DesktopAssistantPanel { panel }
 
     func update(cards: [DesktopAssistantCard]) {
         let cardsChanged = cards != self.cards
@@ -128,11 +237,13 @@ final class DesktopAssistantPanelController {
     private func configurePanel() {
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        // The clipped material boundary is the Assistant's sole contour owner.
+        panel.hasShadow = false
         panel.hidesOnDeactivate = false
         panel.isFloatingPanel = true
         panel.isMovable = true
-        panel.isMovableByWindowBackground = true
+        // The hosting view's one AppKit pan recognizer owns drag arbitration.
+        panel.isMovableByWindowBackground = false
         panel.isReleasedWhenClosed = false
         panel.becomesKeyOnlyIfNeeded = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
@@ -153,6 +264,12 @@ final class DesktopAssistantPanelController {
         )
         hostingView.wantsLayer = true
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
+        let dragRecognizer = DesktopAssistantDragGestureRecognizer(
+            target: panel,
+            action: #selector(DesktopAssistantPanel.handleAssistantDrag(_:))
+        )
+        dragRecognizer.delaysPrimaryMouseButtonEvents = true
+        hostingView.addGestureRecognizer(dragRecognizer)
         panel.contentView = hostingView
     }
 

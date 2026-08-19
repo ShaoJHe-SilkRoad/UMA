@@ -258,7 +258,9 @@ struct UMA011G2VisualSystemTests {
         #expect(design.contains("AnyShapeStyle(.thinMaterial)"))
         #expect(design.contains(".strokeBorder("))
         #expect(!design.contains("radius: usesReducedTransparency ? 2 : 5"))
-        #expect(assistant.contains(".strokeBorder("))
+        #expect(assistant.contains(".background { glassBackground }"))
+        #expect(assistant.contains(".clipShape(RoundedRectangle("))
+        #expect(!assistant.contains(".strokeBorder("))
         #expect(panel.contains(".strokeBorder("))
     }
 

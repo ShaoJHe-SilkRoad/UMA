@@ -750,16 +750,6 @@ private struct DesktopAssistantCardView: View {
         .frame(width: size.width, height: size.height)
         .background { glassBackground }
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .strokeBorder(
-                    Color.primary.opacity(hasIncreasedContrast ? 0.56 : 0.22),
-                    lineWidth: AppBorders.assistantLineWidth(
-                        increaseContrast: hasIncreasedContrast
-                    )
-                )
-                .allowsHitTesting(false)
-        }
         .opacity(card.isStale ? 0.78 : 1)
         .help(card.toolTip)
         .contentShape(Rectangle())

@@ -1,10 +1,10 @@
 # UMA M5RMX QA Issue Ledger
 
-**Version:** 1.2
+**Version:** 1.3
 
 **Opened:** 2026-08-17
 
-**Current task:** `M5RMX-SAFARI-G1`
+**Current task:** `M5RMX-CERT-UI-G1`
 
 ## 1. Scope and baseline
 
@@ -59,11 +59,11 @@ Claude provider operations: 0
 | M5RMXSAFARI-003 | Blocking / transport | File handoff used one exclusive pending slot but consecutive native messages could arrive before the app consumed the prior file | `RENAME_EXCL` correctly prevented overwrite, but the second safe message could be dropped by the browser bridge | Serialize local handoff delivery by waiting a bounded two seconds for the prior validated owner-only packet to drain; retain exclusive atomic publication and perform no provider retry | bridge concurrency, three-packet ordering, and pending-slot tests; bridge 20/20 PASS | CLOSED |
 | M5RMXSAFARI-004 | Major / provenance | The Browser Sync packet had no replay nonce or explicit source-layout version | Schema/version checks alone could not distinguish a duplicate observation from a current browser result | Advance the closed schema to v2, add a UUID observation nonce and exact source-layout version, reject duplicate nonces in a bounded 64-entry runtime set, and invalidate v1 cache/messages | decoder, connector, packet allowlist and duplicate-replay tests; affected 21/21 PASS | CLOSED |
 | M5RMXSAFARI-005 | Major / setup | Safari health returned only enabled/disabled and could not classify a missing, mismatched, or outdated embedded appex | Activation state was treated as sufficient even when the containing app's embedded identity/version was not current | Validate the exact embedded appex identifier, extension point, version 1.3.0, and build 8 before asking Safari for activation state | setup-health and package-contract tests; focused 7/7 PASS | CLOSED |
-| M5RMXSAFARI-006 | Blocking / distribution | Existing M5/M6 phases permitted ad-hoc 0.11 packages | A development package could be mistaken for the production-ready 0.12 signed Safari preflight | Add a dedicated M5RMX wrapper and phase requiring explicit Developer ID, commit-exact source, 0.12, child-first Hardened Runtime signing, secure timestamps, Team `C6TUZVJ6SJ`, exact durable output, and no notarization | helper contract, signed package, strict-deep and identity audits | Repaired in source; signed preflight pending packaging phase |
+| M5RMXSAFARI-006 | Blocking / distribution | Existing M5/M6 phases permitted ad-hoc 0.11 packages | A development package could be mistaken for the production-ready 0.12 signed Safari preflight | Add a dedicated M5RMX wrapper and phase requiring explicit Developer ID, commit-exact source, 0.12, child-first Hardened Runtime signing, secure timestamps, Team `C6TUZVJ6SJ`, exact durable output, and no notarization | helper contract, signed package, strict-deep, staple, Gatekeeper and identity audits | CLOSED — exact signed/notarized candidate certified in Phase A |
 | M5RMXSAFARI-007 | Major / lifecycle truth | Independent staged review found login/route redirects could not satisfy the exact Usage-route close proof | The truthful `signInRequired` or `routeRejected` terminal status was overwritten as ownership loss even though retaining the record was the required fail-closed behavior | Preserve the original redirected terminal status, retain the ownership record, and refuse a later tab while proof remains unavailable; continue fresh proof and closure for normal exact-route terminals | redirected-terminal classification and no-multiplication regression tests; focused 17/17 and affected 76/76 PASS | CLOSED |
 | M5RMXSAFARI-008 | Blocking / lifecycle | Independent staged review found a tab-removal error was swallowed before the ownership record was cleared | A failed removal could leave the tab alive but erase the only bounded ownership correlation, permitting a later duplicate | Treat removal failure as closure failure, retain the ownership record, and clear it only after successful removal | removal-failure ownership-retention regression test; focused 17/17 and affected 76/76 PASS | CLOSED |
 | M5RMXSAFARI-009 | Major / lifecycle truth | Final staged review found a stored login/redirect tab was token-proved before its route was classified | Exact-route token proof necessarily fails on a provider redirect, collapsing the next cycle to `ownedTabOwnershipLost` instead of the truthful sanitized login/route status | Classify the stored tab from URL route state only before token proof, retain its ownership record, create no replacement tab, and continue requiring exact-route token proof for an actual Usage route | stored-redirect next-cycle ordering and no-clear/no-multiplication regression tests; focused 18/18 and affected 77/77 PASS | CLOSED |
-| M5RMXSAFARI-010 | Blocking / packaging | The first post-commit signed-package attempt reached Developer ID signing but `codesign` reported the confirmed Team `C6TUZVJ6SJ` identity unavailable | The helper intentionally exported a task-owned isolated `HOME` for SwiftPM before signing, which also hid the normal user signing search context from `codesign` | Capture the original user HOME before build isolation and restore it only on each bounded `codesign` signing, verification and inspection command; keep SwiftPM HOME/cache/config/security paths isolated and perform no keychain enumeration or credential export | focused package contract, shell syntax and diff checks; first attempt produced no accepted package output | Repaired in helper; signed package rerun pending |
+| M5RMXSAFARI-010 | Blocking / packaging | The first post-commit signed-package attempt reached Developer ID signing but `codesign` reported the confirmed Team `C6TUZVJ6SJ` identity unavailable | The helper intentionally exported a task-owned isolated `HOME` for SwiftPM before signing, which also hid the normal user signing search context from `codesign` | Capture the original user HOME before build isolation and restore it only on each bounded `codesign` signing, verification and inspection command; keep SwiftPM HOME/cache/config/security paths isolated and perform no keychain enumeration or credential export | focused package contract, shell syntax, strict signature, staple and Gatekeeper checks | CLOSED — exact signed/notarized candidate certified in Phase A |
 
 SAFARI-G1 independent verification evidence:
 
@@ -86,18 +86,68 @@ Post-review lifecycle-repair focused B0/SAFARI suites: 18/18 PASS
 Post-review affected Browser/automation/bridge suites: 77/77 PASS
 ```
 
-The independent Packaging/Signing Auditor result verifies the current helper,
-manifest, embedding, identity, Hardened Runtime and child-first signing
-contract. It is not evidence that the dedicated signed package has already
-been built. The commit-exact signed-package execution and the live Safari
-registration, enablement, exact-route observation, automatic-refresh and
-cleanup/restoration gates remain **PENDING**. No final package or live Safari
-result is claimed by this record.
+The exact commit-exact 0.12 candidate passed child-first Developer ID signing,
+notarization, staple, Gatekeeper and normal-Safari acceptance. Signed Browser
+Sync completed one current sanitized observation and one completion-relative
+automatic refresh. The candidate was then disconnected, disabled and
+unregistered; the old Desktop 1.2.3 registration and its original inactive
+state were restored; task-owned runtime/cache state was removed; Safari
+unsigned-extension mode remained OFF. Exact private quota values were not
+retained.
 
-The `715/715` deterministic run completed after the final stored-redirect
-repair recorded as M5RMXSAFARI-009. Its focused Safari, automatic-refresh and
-affected browser/bridge reruns also pass as recorded above. Package execution
-and live Safari gates remain pending exactly as stated.
+## 2B. CERT-UI Phase A issue ledger
+
+| ID | Severity | Discovery | Root cause / classification | Required repair or control | Verification | State |
+|---|---|---|---|---|---|---|
+| CERT-01 | Blocking / distribution | The signed 0.12 candidate had been notarized but had not yet been consolidated into one durable certified baseline | Signing, notarization and local runtime acceptance were spread across transient evidence | Freeze the exact candidate/archive and record Developer ID, Accepted submission, strict signature, staple and Gatekeeper evidence without secrets | exact paths/hashes; strict deep signature PASS; stapler PASS; Gatekeeper `Notarized Developer ID`; independent Packaging/Signing Auditor PASS | CLOSED |
+| CERT-02 | Blocking / Safari | Old Desktop 1.2.3 and candidate 1.3.0 shared one Safari extension identifier | Duplicate PlugInKit/LaunchServices registration could make Safari expose the old build | Temporarily unregister only the old registration, register and enable the exact signed/notarized 1.3.0 candidate in normal Safari with exact-site access, then restore the old disabled state | Safari visibly listed/enabled 1.3.0; `claude.ai` only; unsigned mode OFF; Browser/Protocol Auditor PASS | CLOSED |
+| CERT-03 | Blocking / protocol | Distribution acceptance required the complete signed extension → sanitizer → native helper → UMA chain, including automation | A signed bundle alone does not prove sanitized live handoff or scheduler behavior | Perform at most three sanitized observations with zero prompts/tasks/spend; require one current read and one completion-relative refresh | two successful sanitized observations; automatic refresh PASS; one scheduler/read in flight; native handoff PASS; privacy review PASS | CLOSED |
+| CERT-04 | Major / lifecycle | Temporary registration and runtime state could contaminate future Safari debugging | Candidate registration, old-registration displacement, cache, handoff or helper state could survive the certification cycle | Disconnect; clear UMA-owned sanitized state; disable/unregister candidate; restore old registration and inactive state; verify unsigned mode OFF and task-owned processes absent | cache absent; handoff empty; candidate absent; old 1.2.3 restored/inactive; no task-owned process; unsigned mode OFF | CLOSED |
+
+Phase A role evidence:
+
+```text
+Packaging / Signing Auditor: PASS — immutable identity, nested payload, archive hash and package permission surface independently verified.
+Browser / Protocol Auditor: PASS — exact-site route gate, sanitizer, native handoff, scheduler and owned-tab lifecycle independently verified.
+Privacy Steward: PASS — provider-owned authentication stayed outside UMA; no retained credential, identity, raw page or exact quota evidence.
+qa_runner: PASS — 102/102 focused and affected tests; exact artifact hashes, strict signature, staple, Gatekeeper, bookkeeping, whitespace and empty-index checks PASS.
+examiner: PHASE A PASS — no material certification, distribution, protocol, privacy, cleanup or evidence objection.
+Primary live observations: 2/3 maximum; prompts/tasks 0; intentional spend 0; account mutations 0; automatic retries 0.
+```
+
+`UMA CERTIFIED DEBUG BASELINE — PASS`
+
+`M5RMX-SAFARI-G1 — PASS`
+
+## M5RMX-UIFIX-G1 issue ledger
+
+| ID | Severity | Reproduction | Root cause | Exact repair | Focused retest | Human physical result | Regression result | Final status |
+|---|---|---|---|---|---|---|---|---|
+| UIFIX-01 | Blocking / Major | Founder physical evidence: the original Assistant did not drag; the perimeter-only repair also failed because most visible pixels still could not start a drag | The full-size `NSHostingView` consumes events before window-background dragging, while the failed replacement admitted only a six-point perimeter and row gaps. Card centers, labels, icons and percentages were explicitly classified as non-draggable | Keep background dragging disabled and attach exactly one native AppKit gesture recognizer to the full hosting view. A four-point threshold and delayed primary-button delivery preserve stationary/small-wobble clicks, intentional movement translates the native panel, and no SwiftUI drag gesture or overlay competes | PASS — 5/5 focused tests send native mouse sequences through the real four-card SwiftUI Assistant stack in Regular and Minimalist. Fourteen named drag starts cover edge, gap, center, title/mark, percentage, icon and a lower clickable card; every drag moves the panel without selection, while every interactive stationary and 3.5-point wobble sequence selects exactly once without movement | PASS — Founder confirmed universal dragging, three-position movement, and Regular/Minimalist behavior | PASS — 101/101 affected regressions; 720/720 full deterministic suite; Release and strict-concurrency Release PASS | CLOSED |
+| UIFIX-02 | Minor regression | Founder physical evidence: the original Assistant and first repair both showed a duplicated outer edge | Renderer-only captures exclude the panel and reproduce both edges: the clipped material/opaque boundary and explicit rounded `strokeBorder` were separate contour producers, while the panel shadow added another edge in the live window | Remove the explicit Assistant `strokeBorder`, disable the panel shadow, and retain the clipped material/opaque boundary as the single contour owner | PASS — composed live-panel assertions verify transparent borderless panel ownership, zero window shadow, zero hosting-layer border/shadow and exactly one root recognizer; 18/18 affected visual-system tests verify one clipped material boundary, no Assistant stroke and frozen geometry | PASS — Founder confirmed exactly one visible outer contour in Light/Dark × Regular/Minimalist | PASS — Light/Dark and Regular/Minimalist contracts plus full deterministic suite and builds | CLOSED |
+| UIFIX-03 | Blocking / interaction | Universal drag from interactive cards and control-like surfaces could swallow a click or deliver a trailing click after movement | A full-surface drag owner needs deterministic threshold arbitration rather than a transparent overlay, background-only movement, or two competing gestures | Use one native recognizer with a four-point threshold and delayed primary events: below threshold forwards one click; threshold-crossing movement moves the panel and suppresses the underlying click | PASS — all 12 interactive probes select exactly once when stationary or moved 3.5 points; all intentional drags suppress selection and move the native panel in both densities | PASS — Founder confirmed stationary click preservation and no click after drag | PASS — focused, accessibility, lifecycle, Main Panel, provider-order and full regression gates | CLOSED |
+
+Phase B final evidence:
+
+```text
+Founder physical validation: DRAG PASS; CLICK PRESERVATION PASS; DOUBLE BORDER PASS.
+Focused UIFIX: 5/5 PASS.
+Affected UI/provider regressions: 101/101 PASS across 9 suites.
+Full deterministic suite: 720/720 PASS — 700 UI across 72 suites plus 20 bridge.
+Release: PASS.
+Strict-concurrency Release with Swift warnings as errors: PASS.
+M5RMX source/privacy protection: 23/23 PASS.
+Light/Dark; Regular/Minimalist; Main Panel; provider order; accessibility; lifecycle: PASS.
+Implementer: PASS.
+qa_runner: PASS.
+examiner: PASS — no remaining pre-Human blocker.
+Product UX / Accessibility QA: PASS — no material finding after the 14-region four-card recheck.
+```
+
+This bounded repair performed no provider read, provider/source edit, Apple
+query, notarization action, package mutation, Desktop installation, or remote
+Git action. The current submitted Safari preflight app and frozen notarization
+archive remain external read-only evidence.
 
 ## 3. B0 issues
 
