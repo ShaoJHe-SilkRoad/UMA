@@ -521,21 +521,22 @@ public enum SharedUsagePresentationPolicy {
         guard !snapshot.capabilities.contains(.hiddenFromProviderSurfaces) else {
             return false
         }
-        let permitsSanitizedLastValid = snapshot.capabilities.contains(
-            .sanitizedLastValidRestore
+        let permitsRetainedValue = ProviderUsageSurfacePolicy.permitsRetainedValue(
+            snapshot: snapshot,
+            capabilities: snapshot.capabilities
         )
-        if permitsSanitizedLastValid,
+        if permitsRetainedValue,
            (snapshot.state == .ready || snapshot.state == .stale),
            [.cached, .stale].contains(snapshot.freshness),
            let account = snapshot.channels.first(where: { $0.id == .account }),
-           (account.provenance == .providerReported
-               || (snapshot.id == ClaudeCodeUsageConnector.connectorID
-                   && account.provenance == .locallyEstimated)),
+           ProviderUsageSurfacePolicy.hasAdmissibleAccountProvenance(
+                snapshot: snapshot,
+                account: account
+           ),
            account.freshness == snapshot.freshness,
-           !account.rateLimitWindows.isEmpty,
-           account.rateLimitWindows.allSatisfy({
-               $0.isUnlimited || $0.normalizedRemainingPercent != nil
-           }) {
+           ProviderUsageSurfacePolicy.validatesUsage(account),
+           ProviderUsageSurfacePolicy.isAdmissibleRetainedFailure(snapshot.safeFailure),
+           ProviderUsageSurfacePolicy.isAdmissibleRetainedFailure(account.safeFailure) {
             return true
         }
         guard snapshot.state == .ready,
@@ -543,11 +544,13 @@ public enum SharedUsagePresentationPolicy {
               snapshot.safeFailure == nil,
               let account = snapshot.channels.first(where: { $0.id == .account }),
               account.sourceTier != .manualUserConfirmed,
-              (account.provenance == .providerReported
-                  || (snapshot.id == ClaudeCodeUsageConnector.connectorID
-                      && account.provenance == .locallyEstimated)),
+              ProviderUsageSurfacePolicy.hasAdmissibleAccountProvenance(
+                snapshot: snapshot,
+                account: account
+              ),
               account.freshness == .fresh,
-              account.safeFailure == nil
+              account.safeFailure == nil,
+              ProviderUsageSurfacePolicy.validatesUsage(account)
         else { return false }
         if account.availabilitySourceState == .officialStructured
             || account.availabilitySourceState == .authenticatedAccountWeb {
@@ -575,8 +578,9 @@ public enum SharedUsagePresentationPolicy {
             || accountChannel?.freshness == .stale
             || snapshot.state == .stale
         let sourceIsRetained = sourceIsCached || sourceIsStale
-        let usesSanitizedLastValid = snapshot.capabilities.contains(
-            .sanitizedLastValidRestore
+        let usesSanitizedLastValid = ProviderUsageSurfacePolicy.permitsRetainedValue(
+            snapshot: snapshot,
+            capabilities: snapshot.capabilities
         ) && sourceIsRetained
         let sourceIsUnavailable = accountChannel == nil
             || accountChannel?.freshness == .unavailable
@@ -692,10 +696,10 @@ public enum SharedUsagePresentationPolicy {
                 : snapshot.id == GoogleAntigravityUsageConnector.connectorID
                     ? language.antigravitySourceLabel
                     : snapshot.id == ClaudeCodeUsageConnector.connectorID
-                        ? (accountChannel?.sourceTier == .authorizedLocalEstimate
-                            ? (accountChannel?.coverageNote
-                                ?? language.claudeBrowserSourceLabel)
-                            : language.claudeBrowserSourceLabel)
+                        ? claudeSourceDescription(
+                            channel: accountChannel,
+                            language: language
+                        )
                         : snapshot.capabilities.contains(.sanitizedLastValidRestore)
                             ? accountChannel?.coverageNote
                             : nil,
@@ -778,6 +782,28 @@ public enum SharedUsagePresentationPolicy {
             resetsAt: window.resetsAt,
             resetText: language.resetDescription(for: window.resetsAt, now: now)
         )
+    }
+
+    private static func claudeSourceDescription(
+        channel: AgentUsageChannel?,
+        language: AppLanguage
+    ) -> String {
+        switch channel?.sourceVersion {
+        case "smart-1-desktop-estimate":
+            language.claudeDesktopEstimateSourceLabel
+        case "smart-1-local-estimate":
+            language.claudeLocalSmartEstimateSourceLabel
+        case "smart-1-local-exact":
+            language.claudeLocalExactSourceLabel
+        case "smart-1-safari-exact":
+            language.claudeBrowserSourceLabel
+        case "smart-1-mixed", "smart-1-stale":
+            language.claudeCombinedSourceLabel
+        default:
+            channel?.provenance == .locallyEstimated
+                ? language.claudeLocalSmartEstimateSourceLabel
+                : language.claudeCombinedSourceLabel
+        }
     }
 
     private static func selectedWindowID(

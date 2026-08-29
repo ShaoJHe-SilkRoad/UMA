@@ -214,7 +214,7 @@ struct M5RMXClaudeDesktopSupportTests {
         #expect(ClaudeSmartSourceSelector.select(
             windowKind: .fiveHour, statusLineAnchors: [status], safariAnchors: [safari],
             estimate: calibrated, desktopEstimate: desktop, staleExact: safari, now: now
-        )?.source == .exactSafariAccuracy)
+        )?.source == .exactLocalStatusLine)
         #expect(ClaudeSmartSourceSelector.select(
             windowKind: .fiveHour, statusLineAnchors: [], safariAnchors: [safari],
             estimate: calibrated, desktopEstimate: desktop, staleExact: status, now: now
@@ -279,6 +279,10 @@ struct M5RMXClaudeDesktopSupportTests {
         let account = try #require(snapshot.channels.first(where: { $0.id == .account }))
         #expect(account.sourceTier == .authorizedLocalEstimate)
         #expect(account.coverageNote?.contains("Desktop plan usage") == true)
+        #expect(LocalProviderEligibilityScanner.admission(
+            for: snapshot,
+            descriptor: connector.descriptor
+        ).admittedSnapshot == snapshot)
         let card = SharedUsagePresentationPolicy.makeCard(
             snapshot: snapshot,
             previous: nil,
@@ -286,7 +290,16 @@ struct M5RMXClaudeDesktopSupportTests {
             now: now
         )
         #expect(card.sourceDescription == "Claude Desktop plan usage · estimated")
+        #expect(card.remainingDisplayText.hasPrefix("≈"))
         #expect(card.windows.allSatisfy { $0.isEstimated == true })
+        let chineseCard = SharedUsagePresentationPolicy.makeCard(
+            snapshot: snapshot,
+            previous: nil,
+            language: .simplifiedChinese,
+            now: now
+        )
+        #expect(chineseCard.sourceDescription == "Claude Desktop 计划用量 · 估算")
+        #expect(chineseCard.remainingDisplayText.hasPrefix("≈"))
         #expect(snapshot.channels.first(where: { $0.id == .localActivity }) == nil)
         let diagnostics = await connector.diagnostics()
         #expect(diagnostics.desktopPlanUsageReadCount >= 1)

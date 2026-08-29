@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleDisplayName</key><string>UMA</string>
+<key>CFBundleExecutable</key><string>CodexUsageMonitor</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
+<key>CFBundleIdentifier</key><string>com.silkrd.uma</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>0.13.0</string>
+<key>CFBundleVersion</key><string>0</string>
+<key>LSMinimumSystemVersion</key><string>14.0</string>
+<key>LSUIElement</key><true/>
+<key>UMAPackagingMode</key><string>PRODUCTION_SPLIT_APP</string>
+<key>UMARuntimeChannel</key><string>production-safari-host</string>
+<key>UMASafariHostBundleIdentifier</key><string>com.silkrd.uma.safarihost</string>
+<key>UMASafariHostExtensionBundleIdentifier</key><string>com.silkrd.uma.ClaudeBrowserCompanion</string>
+<key>UMAAppGroupIdentifier</key><string>group.com.silkrd.uma.bridge</string>
+<key>UMATeamIdentifier</key><string>C6TUZVJ6SJ</string>
+</dict></plist>

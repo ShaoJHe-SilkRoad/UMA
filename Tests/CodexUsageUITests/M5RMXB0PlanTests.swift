@@ -9,8 +9,8 @@ struct M5RMXB0PlanTests {
         let goal = try record("source/M5RMX_Goal.md")
         let scope = try record("source/UMA M5RMX Scope Lock.md")
 
-        #expect(plan.contains("**Version:** 2.0"))
-        #expect(goal.contains("**Version:** 2.0"))
+        #expect(plan.contains("**Version:** 3.0"))
+        #expect(goal.contains("**Version:** 3.0"))
         #expect(plan.split(separator: "\n", omittingEmptySubsequences: false).allSatisfy {
             !$0.hasSuffix(" ") && !$0.hasSuffix("\t")
         })

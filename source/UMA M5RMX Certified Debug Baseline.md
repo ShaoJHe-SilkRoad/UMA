@@ -4,6 +4,21 @@
 **Certified:** 2026-08-19
 **Status:** `UMA CERTIFIED DEBUG BASELINE — PASS`
 
+## Historical-scope notice
+
+This file certifies only the frozen 0.12 combined-app bytes named below. It is
+not the current 0.13 release architecture, manifest inventory, or installation
+procedure. Current UMA separates the mutable app from an immutable Safari Host,
+and its Companion uses the exact `https://claude.ai/new*` Safari Manifest V2
+site entry plus a static top-frame `document_start` ownership/content script for
+Human-requested one-shot Accuracy Sync. The current manifest has no `storage`
+permission and no `activeTab`/`scripting` permission. All extraction remains
+gated to the exact Usage hash route, and the current normative boundary is
+`UMA M5RMX Claude Privacy Contract.md`.
+
+Nothing in this notice changes, rewrites, or requalifies the immutable 0.12
+notarization evidence below.
+
 ## Certified immutable artifacts
 
 The certified source baseline is commit

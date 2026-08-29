@@ -13,6 +13,7 @@ struct UMASafariBridgeHostRuntimeContext: Equatable, Sendable {
     let teamIdentifier: String
     let version: String
     let build: String
+    let appGroupIdentifier: String
 
     var ipcDescriptor: ClaudeSafariHostIPCRuntimeDescriptor {
         .init(
@@ -27,8 +28,12 @@ struct UMASafariBridgeHostRuntimeContext: Equatable, Sendable {
     }
 
     static func current(bundle: Bundle = .main) -> Self? {
-        guard bundle.bundleIdentifier
-                == ClaudeSafariHostIPCContract.hostApplicationIdentifier,
+        guard let channelRaw = bundle.object(
+                forInfoDictionaryKey: ClaudeBrowserBridgeContract.runtimeChannelInfoKey
+              ) as? String,
+              let channel = ClaudeBrowserRuntimeChannel(rawValue: channelRaw),
+              let profile = ClaudeSafariHostRuntimeProfile.matchingRuntimeChannel(channel),
+              bundle.bundleIdentifier == profile.identity.containingApplicationIdentifier,
               let generation = bundle.object(
                 forInfoDictionaryKey:
                     ClaudeBrowserBridgeContract.runtimeGenerationInfoKey
@@ -37,18 +42,19 @@ struct UMASafariBridgeHostRuntimeContext: Equatable, Sendable {
               bundle.object(
                 forInfoDictionaryKey:
                     ClaudeBrowserBridgeContract.containingApplicationInfoKey
-              ) as? String == ClaudeSafariHostIPCContract.hostApplicationIdentifier,
+              ) as? String == profile.identity.containingApplicationIdentifier,
               bundle.object(
                 forInfoDictionaryKey:
                     ClaudeBrowserBridgeContract.extensionIdentifierInfoKey
-              ) as? String == ClaudeSafariHostIPCContract.hostExtensionIdentifier,
+              ) as? String == profile.identity.extensionIdentifier,
+              bundle.object(
+                forInfoDictionaryKey:
+                    ClaudeBrowserBridgeContract.appGroupIdentifierInfoKey
+              ) as? String == profile.appGroupIdentifier,
               let team = bundle.object(
                 forInfoDictionaryKey: ClaudeBrowserBridgeContract.teamIdentifierInfoKey
               ) as? String,
               team == ClaudeBrowserBridgeContract.expectedTeamIdentifier,
-              bundle.object(
-                forInfoDictionaryKey: ClaudeBrowserBridgeContract.runtimeChannelInfoKey
-              ) as? String == ClaudeBrowserRuntimeChannel.testSafariHost.rawValue,
               let version = bundle.object(
                 forInfoDictionaryKey: "CFBundleShortVersionString"
               ) as? String,
@@ -59,12 +65,12 @@ struct UMASafariBridgeHostRuntimeContext: Equatable, Sendable {
         else { return nil }
         return Self(
             runtimeGenerationID: generation.lowercased(),
-            containingApplicationIdentifier:
-                ClaudeSafariHostIPCContract.hostApplicationIdentifier,
-            extensionIdentifier: ClaudeSafariHostIPCContract.hostExtensionIdentifier,
+            containingApplicationIdentifier: profile.identity.containingApplicationIdentifier,
+            extensionIdentifier: profile.identity.extensionIdentifier,
             teamIdentifier: team,
             version: version,
-            build: build
+            build: build,
+            appGroupIdentifier: profile.appGroupIdentifier
         )
     }
 }
@@ -864,7 +870,7 @@ actor UMASafariBridgeHostCoordinator {
 @MainActor
 final class UMASafariBridgeHostApplicationDelegate: NSObject, NSApplicationDelegate {
     private let logger = Logger(
-        subsystem: ClaudeSafariHostIPCContract.hostApplicationIdentifier,
+        subsystem: "com.silkrd.uma.safarihost.runtime",
         category: "Host"
     )
     private var requestServer: ClaudeSafariHostIPCRequestServer?
@@ -873,7 +879,9 @@ final class UMASafariBridgeHostApplicationDelegate: NSObject, NSApplicationDeleg
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard let runtime = UMASafariBridgeHostRuntimeContext.current(),
-              let endpoint = try? ClaudeSafariHostIPCEndpoint.appGroup()
+              let endpoint = try? ClaudeSafariHostIPCEndpoint.appGroup(
+                identifier: runtime.appGroupIdentifier
+              )
         else {
             logger.error("Safari Host startup rejected: signed-runtime-or-app-group")
             NSApplication.shared.terminate(nil)

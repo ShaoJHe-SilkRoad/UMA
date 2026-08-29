@@ -180,7 +180,16 @@ struct ClaudeBrowserBridgeCoreTests {
                 companionBuild: carriesRuntimeIdentity
                     ? ClaudeBrowserBridgeContract.safariExtensionBuild : nil,
                 protocolSchemaVersion: carriesRuntimeIdentity
-                    ? ClaudeBrowserBridgeContract.schemaVersion : nil
+                    ? ClaudeBrowserBridgeContract.schemaVersion : nil,
+                containingApplicationIdentifier: carriesRuntimeIdentity
+                    ? ClaudeBrowserRuntimeIdentity.testSafariHost
+                        .containingApplicationIdentifier : nil,
+                extensionIdentifier: carriesRuntimeIdentity
+                    ? ClaudeBrowserRuntimeIdentity.testSafariHost.extensionIdentifier : nil,
+                teamIdentifier: carriesRuntimeIdentity
+                    ? ClaudeBrowserBridgeContract.expectedTeamIdentifier : nil,
+                runtimeGenerationID: carriesRuntimeIdentity
+                    ? "6e6f5e38-70bf-4b1b-81b0-e0903081f980" : nil
             )
             let data = try ClaudeBrowserAutomationEventDecoder.encode(source)
             #expect(try ClaudeBrowserAutomationEventDecoder.decode(data) == source)
@@ -204,14 +213,13 @@ struct ClaudeBrowserBridgeCoreTests {
                 #expect(object["protocolSchemaVersion"] as? Int
                     == ClaudeBrowserBridgeContract.schemaVersion)
                 #expect(object["containingApplicationIdentifier"] as? String
-                    == ClaudeBrowserBridgeContract.safariApplicationIdentifier)
+                    == ClaudeBrowserBridgeContract.safariHostTestApplicationIdentifier)
                 #expect(object["extensionIdentifier"] as? String
-                    == ClaudeBrowserBridgeContract.safariExtensionIdentifier)
+                    == ClaudeBrowserBridgeContract.safariHostTestExtensionIdentifier)
                 #expect(object["teamIdentifier"] as? String
                     == ClaudeBrowserBridgeContract.expectedTeamIdentifier)
-                #expect(UUID(uuidString: try #require(
-                    object["runtimeGenerationID"] as? String
-                )) != nil)
+                #expect(object["runtimeGenerationID"] as? String
+                    == "6e6f5e38-70bf-4b1b-81b0-e0903081f980")
             }
             #expect(Set(object.keys) == expectedKeys)
         }

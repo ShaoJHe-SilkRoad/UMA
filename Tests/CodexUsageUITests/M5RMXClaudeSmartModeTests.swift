@@ -761,7 +761,7 @@ struct M5RMXClaudeSmartModeTests {
     }
 
     @Test
-    func sourceOrderIsFreshSafariThenExactLocalThenEstimateThenStale() throws {
+    func sourceOrderIsExactLocalThenFreshSafariThenEstimateThenStale() throws {
         let now = Date(timeIntervalSince1970: 1_898_596_800)
         let reset = now.addingTimeInterval(3_600)
         let local = try #require(anchor(
@@ -787,7 +787,7 @@ struct M5RMXClaudeSmartModeTests {
             estimate: estimate,
             staleExact: safari,
             now: now
-        )?.source == .exactSafariAccuracy)
+        )?.source == .exactLocalStatusLine)
         #expect(ClaudeSmartSourceSelector.select(
             windowKind: .fiveHour,
             statusLineAnchors: [],
@@ -977,8 +977,17 @@ struct M5RMXClaudeSmartModeTests {
         let diagnostics = await connector.diagnostics()
         #expect(snapshot.freshness == .fresh)
         #expect(account.sourceConfidence == "exact")
+        #expect(account.sourceVersion == "smart-1-safari-exact")
         #expect(quota.remainingPercent == 77)
         #expect(quota.isEstimated == false)
+        let card = SharedUsagePresentationPolicy.makeCard(
+            snapshot: snapshot,
+            previous: nil,
+            language: .english,
+            now: now
+        )
+        #expect(card.sourceDescription == "Claude Accuracy Sync · on demand")
+        #expect(!card.remainingDisplayText.hasPrefix("≈"))
         #expect(diagnostics.currentQuotaIncludesSafariAccuracy)
         #expect(diagnostics.lastLiveLinkStage == .localStatusLinePending)
         #expect(diagnostics.acceptedObservationCount == 0)
@@ -1393,7 +1402,7 @@ struct M5RMXClaudeSmartModeTests {
         let account = AgentUsageChannel(
             id: .account,
             sourceTier: .officialStructuredHook,
-            sourceVersion: "smart-1",
+            sourceVersion: "smart-1-local-estimate",
             scopes: [.account],
             provenance: .locallyEstimated,
             freshness: .cached,
@@ -1436,7 +1445,7 @@ struct M5RMXClaudeSmartModeTests {
             now: now
         )
         #expect(english.tooltipText.contains("approximately 72 percent remaining"))
-        #expect(english.sourceDescription == "Claude Local Smart Mode · on-demand Accuracy Sync")
+        #expect(english.sourceDescription == "Claude Local Smart Mode · estimated")
         #expect(!english.tooltipText.contains("EXACT_LOCAL_STATUSLINE"))
 
         let chinese = SharedUsagePresentationPolicy.makeCard(
@@ -1446,7 +1455,7 @@ struct M5RMXClaudeSmartModeTests {
             now: now
         )
         #expect(chinese.tooltipText.contains("预计剩余 72%"))
-        #expect(chinese.sourceDescription == "Claude 本地智能模式 · 按需精确同步")
+        #expect(chinese.sourceDescription == "Claude 本地智能模式 · 估算")
         #expect(!chinese.tooltipText.contains("EXACT_LOCAL_STATUSLINE"))
 
         let panel = try? String(
@@ -1465,7 +1474,7 @@ struct M5RMXClaudeSmartModeTests {
         let account = AgentUsageChannel(
             id: .account,
             sourceTier: .officialStructuredHook,
-            sourceVersion: "smart-1",
+            sourceVersion: "smart-1-local-estimate",
             scopes: [.account],
             provenance: .locallyEstimated,
             freshness: .cached,

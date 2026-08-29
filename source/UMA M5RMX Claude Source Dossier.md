@@ -1,6 +1,6 @@
 # UMA M5RMX Claude Source Dossier
 
-**Version:** 1.3
+**Version:** 1.4
 
 **Date:** 2026-08-29
 
@@ -66,11 +66,13 @@ create one inactive extension-owned exact Usage tab, perform one bounded read,
 and close only that proven-owned tab. There is no persistent scheduler,
 automatic retry, catch-up burst, or permanent owned tab.
 
-The current installed immutable Safari Host build `202608281805` and runtime
-generation `e55245ee-7baf-4791-aadc-f13b52209986` are forensic evidence, not a
-final candidate. No current live Accuracy Sync has been admitted. The next
-Safari enablement is suspended until the consolidated state-machine, API,
-owned-tab, native-IPC, privacy, package/signing and examiner gates all pass.
+The immutable Safari Host build `202608281805` and runtime generation
+`e55245ee-7baf-4791-aadc-f13b52209986` below remain historical forensic
+evidence, not a final candidate. They predate the admitted transaction in this
+record and are not its package identity. The current live result admits the
+bounded source architecture and Test transaction described above; final release
+still requires a fresh, exact signed package identity and its own package,
+privacy, lifecycle and examiner gates.
 
 Read-only installed-runtime evidence at forensic entry:
 
@@ -459,18 +461,27 @@ and privacy-safe extraction. Until then it is `UNAVAILABLE / NOT ADMITTED`.
 
 ## 7. Browser and native boundary
 
-The current contract identifiers are:
+The current packet and admitted Test Host identifiers are:
 
 ```text
 source ID: claude-browser-usage
 message kind: claudeUsageObservation
-bridge schema: 1
-extractor schema: 1
+bridge schema: 2
+extractor schema: 2
 maximum message: 4096 bytes
-Safari extension: com.silkrd.uma.ClaudeBrowserCompanion
+Test Safari Host: com.silkrd.uma.test.safarihost
+Test Safari extension: com.silkrd.uma.test.safarihost.ClaudeBrowserCompanion
+Test App Group: group.com.silkrd.uma.test.bridge
 native message identity: com.silkrd.uma.claude_browser
 exact Usage route: https://claude.ai/new#settings/usage
 ```
+
+The protocol source also retains the historical combined-app production
+compatibility identifiers `com.silkrd.uma` and
+`com.silkrd.uma.ClaudeBrowserCompanion`. They are not evidence of a qualified
+production split Host. A final production package must substitute and sign one
+internally consistent production Host/Companion/App Group generation before it
+can be admitted.
 
 The current Safari manifest requests exactly `nativeMessaging` and
 `https://claude.ai/new*`, with a persistent background script. This supersedes
@@ -478,7 +489,12 @@ historical activeTab/toolbar-only records; those describe an earlier product
 stage, not the current runtime. The fragment cannot be represented in a host
 permission, so the extension revalidates protocol, host, path, empty query, and
 `#settings/usage` before any DOM query and again before returning a result.
-There are no static content scripts or broader host permissions.
+One static top-frame content script runs at `document_start` on that exact
+`/new*` scope to capture and synchronously remove the request-owned fragment
+capability, establish the isolated Port, and wait for exact-route readiness. It
+does not inspect the DOM before the exact Usage route and provider-document gate.
+There is no broader host permission, general tab enumeration, Cookie API,
+browser-storage extraction, or unrelated-page injection.
 
 On the exact route, the extractor tries explicit provider-owned Usage-card
 selectors first. If they are absent, it performs bounded in-browser matching of

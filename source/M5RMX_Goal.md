@@ -1,24 +1,40 @@
 # Usage Monitor Altoget — M5RMX Goals
 
-**Program:** M5RMX — Claude Code Results Merge, Safari Extension Completion, Runtime Debug, Experience Polish, and UMA 0.12 Delivery
-**Version:** 2.0
-**Date:** 2026-08-17
+**Program:** M5RMX-FINAL — current UMA major-version completion and UMA 0.13.0 delivery
+**Version:** 3.0
+**Date:** 2026-08-29
 **Execution owner:** Codex DEV
 **Default model:** GPT-5.6 Sol
 **Authority profile:** `LOCAL_FULL_THROTTLE`
 **Apple Team ID:** `C6TUZVJ6SJ`
-**Target app:** `UMA_0.12.app`
-**Founder repository:** `https://github.com/ShaoJHe-SilkRoad/CodexUsageMonitor`
+**Target app:** `UMA_0.13.0.app`
+**Founder repository:** `https://github.com/ShaoJHe-SilkRoad/UMA`
 **Subagent rule:** Every M5RMX Goal must use role-separated subagents from Stage 1
 **Completion rule:** Every Goal ends under Completion Lock
 
 ---
 
+## Current master Goal — M5RMX-FINAL
+
+Release truth is `UMA 0.13.0`; `0.11` remains the rollback line and all `0.12`
+targets below are historical stage evidence only. This Goal completes the whole
+admitted product, then freezes, signs, notarizes, delivers, and synchronizes the
+Founder repository. It does not reopen the accepted Claude root repair without
+new regression evidence.
+
+The final production architecture must contain a Safari-free mutable UMA app
+and a separately signed immutable Safari Host/Claude Companion. No Test bundle
+identifier, Test profile, or Apple Development signature may ship. Completion
+requires real package, notarization, Desktop delivery, rollback, and Founder
+remote readback evidence; earlier Test-channel acceptance is not a substitute.
+
 ## Current continuation — final provider and lifecycle closeout
 
-**Current result:** live product acceptance, affected regression, signing
-trust, two consecutive full deterministic suite runs, independent staged-index
-review, and exact Git delivery passed. Completion Lock is active.
+**Historical root-repair result:** live product acceptance, affected regression,
+signing trust, two consecutive full deterministic suite runs, independent
+staged-index review, and exact root-repair Git delivery passed. That predecessor
+Completion Lock was released only for `M5RMX-FINAL`; it is not final 0.13.0
+production-package, notarization, Desktop-delivery, or remote-sync evidence.
 
 The real, current Test path has passed its sole required provider transaction:
 

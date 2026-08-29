@@ -33,27 +33,55 @@ struct ClaudeBrowserRuntimeContext: Equatable, Sendable {
     let extensionBuild: String
     let teamIdentifier: String
     let runtimeGenerationID: String
+    let appGroupIdentifier: String
+
+    init(
+        identity: ClaudeBrowserRuntimeIdentity,
+        canonicalAppPath: String,
+        appVersion: String,
+        appBuild: String,
+        extensionVersion: String,
+        extensionBuild: String,
+        teamIdentifier: String,
+        runtimeGenerationID: String,
+        appGroupIdentifier: String =
+            ClaudeBrowserBridgeContract.safariHostTestAppGroupIdentifier
+    ) {
+        self.identity = identity
+        self.canonicalAppPath = canonicalAppPath
+        self.appVersion = appVersion
+        self.appBuild = appBuild
+        self.extensionVersion = extensionVersion
+        self.extensionBuild = extensionBuild
+        self.teamIdentifier = teamIdentifier
+        self.runtimeGenerationID = runtimeGenerationID
+        self.appGroupIdentifier = appGroupIdentifier
+    }
 
     static func current(bundle: Bundle = .main) -> Self? {
-        guard bundle.bundleIdentifier == ClaudeBrowserBridgeContract.safariTestApplicationIdentifier,
+        guard let profile = ClaudeSafariHostRuntimeProfile
+                .matchingMutableApplicationIdentifier(bundle.bundleIdentifier),
               let generation = bundle.object(
                 forInfoDictionaryKey: "UMASafariHostRuntimeGenerationID"
               ) as? String,
               UUID(uuidString: generation) != nil,
               bundle.object(forInfoDictionaryKey: "UMASafariHostBundleIdentifier") as? String
-                == ClaudeSafariHostIPCContract.hostApplicationIdentifier,
+                == profile.identity.containingApplicationIdentifier,
               bundle.object(forInfoDictionaryKey: "UMASafariHostExtensionBundleIdentifier") as? String
-                == ClaudeSafariHostIPCContract.hostExtensionIdentifier
+                == profile.identity.extensionIdentifier,
+              bundle.object(forInfoDictionaryKey: "UMAAppGroupIdentifier") as? String
+                == profile.appGroupIdentifier
         else { return nil }
         return Self(
-            identity: .testSafariHost,
+            identity: profile.identity,
             canonicalAppPath: bundle.bundleURL.resolvingSymlinksInPath().path,
             appVersion: bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0",
             appBuild: bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0",
             extensionVersion: bundle.object(forInfoDictionaryKey: "UMASafariHostExtensionVersion") as? String ?? "0",
             extensionBuild: bundle.object(forInfoDictionaryKey: "UMASafariHostExtensionBuild") as? String ?? "0",
             teamIdentifier: ClaudeBrowserBridgeContract.expectedTeamIdentifier,
-            runtimeGenerationID: generation.lowercased()
+            runtimeGenerationID: generation.lowercased(),
+            appGroupIdentifier: profile.appGroupIdentifier
         )
     }
 
@@ -371,17 +399,15 @@ public struct ClaudeBrowserCompanionDiagnosticResult: Codable, Equatable, Sendab
         occurredAt = ISO8601DateFormatter().string(from: Date())
         reachedStages = []
         self.firstFailureReason = firstFailureReason
-        clientApplicationIdentifier = context.map { _ in
-            ClaudeBrowserBridgeContract.safariTestApplicationIdentifier
+        clientApplicationIdentifier = context.map {
+            $0.identity.channel == .productionSafariHost
+                ? ClaudeBrowserBridgeContract.safariApplicationIdentifier
+                : ClaudeBrowserBridgeContract.safariTestApplicationIdentifier
         }
         clientVersion = context?.appVersion
         clientBuild = context?.appBuild
-        hostApplicationIdentifier = context.map { _ in
-            ClaudeSafariHostIPCContract.hostApplicationIdentifier
-        }
-        extensionIdentifier = context.map { _ in
-            ClaudeSafariHostIPCContract.hostExtensionIdentifier
-        }
+        hostApplicationIdentifier = context?.identity.containingApplicationIdentifier
+        extensionIdentifier = context?.identity.extensionIdentifier
         teamIdentifier = context?.teamIdentifier
         hostVersion = nil
         hostBuild = nil
@@ -404,15 +430,17 @@ public struct ClaudeBrowserCompanionDiagnosticResult: Codable, Equatable, Sendab
         occurredAt = trace.occurredAt
         reachedStages = trace.reachedStages
         firstFailureReason = trace.firstFailureReason
-        clientApplicationIdentifier = context.map { _ in
-            ClaudeBrowserBridgeContract.safariTestApplicationIdentifier
+        clientApplicationIdentifier = context.map {
+            $0.identity.channel == .productionSafariHost
+                ? ClaudeBrowserBridgeContract.safariApplicationIdentifier
+                : ClaudeBrowserBridgeContract.safariTestApplicationIdentifier
         }
         clientVersion = context?.appVersion
         clientBuild = context?.appBuild
         hostApplicationIdentifier = trace.runtimeDescriptor?.hostApplicationIdentifier
-            ?? context.map { _ in ClaudeSafariHostIPCContract.hostApplicationIdentifier }
+            ?? context?.identity.containingApplicationIdentifier
         extensionIdentifier = trace.runtimeDescriptor?.extensionIdentifier
-            ?? context.map { _ in ClaudeSafariHostIPCContract.hostExtensionIdentifier }
+            ?? context?.identity.extensionIdentifier
         teamIdentifier = trace.runtimeDescriptor?.teamIdentifier ?? context?.teamIdentifier
         hostVersion = trace.runtimeDescriptor?.hostVersion
         hostBuild = trace.runtimeDescriptor?.hostBuild

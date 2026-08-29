@@ -46,7 +46,7 @@ struct M5AUTOG1ClaudeAutomaticRefreshTests {
         #expect(integration.contains("startListening: { handler in _ = await runtime.start(handler) }"))
         #expect(integration.contains("await runtime.submit(requestID: requestID, oneShot: allowSafariLaunch)"))
         #expect(adapter.contains("guard listen() else"))
-        #expect(adapter.contains("guard await Self.wakeHost() else"))
+        #expect(adapter.contains("guard await wakeHost() else"))
         #expect(adapter.contains("waiters[request.requestID] = continuation"))
         #expect(adapter.contains("try client.submit(request)"))
         #expect(adapter.contains("activeWorkRequestIDs.isEmpty"))
@@ -517,7 +517,7 @@ struct M5AUTOG1ClaudeAutomaticRefreshTests {
         #expect(language.contains("Last exact observation"))
         #expect(!settings.contains("Every 5 minutes"))
         #expect(!settings.contains("Allow UMA to launch Safari when needed"))
-        #expect(language.contains("按需精确同步"))
+        #expect(language.contains("Claude 精确同步 · 按需"))
         #expect(!language.contains("toolbar click"))
     }
 

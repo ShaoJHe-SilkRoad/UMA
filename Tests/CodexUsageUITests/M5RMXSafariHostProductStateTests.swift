@@ -45,8 +45,12 @@ struct M5RMXSafariHostProductStateTests {
         ] {
             #expect(source.contains(operation))
         }
-        #expect(source.contains("ClaudeSafariHostIPCContract.hostApplicationIdentifier"))
-        #expect(source.contains("ClaudeSafariHostIPCContract.hostExtensionIdentifier"))
+        #expect(source.contains("ClaudeSafariHostIPCEndpoint.appGroup("))
+        #expect(source.contains("identifier: context.appGroupIdentifier"))
+        #expect(source.contains(
+            "hostApplicationIdentifier = context.identity.containingApplicationIdentifier"
+        ))
+        #expect(!source.contains("ClaudeSafariHostIPCContract.hostApplicationIdentifier"))
     }
 
     @Test("Local Smart construction remains independent from Safari Host IPC")

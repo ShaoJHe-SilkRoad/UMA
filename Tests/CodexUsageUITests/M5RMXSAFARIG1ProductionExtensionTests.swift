@@ -121,7 +121,8 @@ struct M5RMXSAFARIG1ProductionExtensionTests {
             extensionVersion: "1.4.0",
             extensionBuild: "10",
             teamIdentifier: ClaudeBrowserBridgeContract.expectedTeamIdentifier,
-            runtimeGenerationID: generation
+            runtimeGenerationID: generation,
+            appGroupIdentifier: ClaudeBrowserBridgeContract.safariHostTestAppGroupIdentifier
         )
         func event(
             identity: ClaudeBrowserRuntimeIdentity = .test,
@@ -161,12 +162,114 @@ struct M5RMXSAFARIG1ProductionExtensionTests {
         #expect(context.runtimeGenerationID == hostGeneration)
 
         let wrongChannel = try runtimeBundle(
-            identity: .production,
+            identity: .test,
             appGeneration: appGeneration,
-            extensionGeneration: hostGeneration
+            extensionGeneration: hostGeneration,
+            hostProfileOverride: .production
         )
         defer { try? FileManager.default.removeItem(at: wrongChannel.bundleURL) }
         #expect(ClaudeBrowserRuntimeContext.current(bundle: wrongChannel) == nil)
+    }
+
+    @Test
+    func mutableProductionBundleQualifiesOnlyProductionImmutableHostMetadata() throws {
+        let hostGeneration = UUID().uuidString.lowercased()
+        let exact = try runtimeBundle(
+            identity: .production,
+            appGeneration: UUID().uuidString.lowercased(),
+            extensionGeneration: hostGeneration
+        )
+        defer { try? FileManager.default.removeItem(at: exact.bundleURL) }
+        let context = try #require(ClaudeBrowserRuntimeContext.current(bundle: exact))
+        #expect(context.identity == .productionSafariHost)
+        #expect(context.appGroupIdentifier == "group.com.silkrd.uma.bridge")
+        #expect(context.runtimeGenerationID == hostGeneration)
+    }
+
+    @Test
+    func nativeHandlerQualifiesExactSplitHostPairsAndRoutesEachAppGroup() throws {
+        let handler = try source(
+            "BrowserExtension/Safari/Native/SafariWebExtensionHandler.swift"
+        )
+
+        // The production Companion ID is shared with the retired combined app,
+        // so the handler must select by the signed containing-app/appex pair.
+        #expect(handler.contains(
+            ".matchingHostApplicationIdentifier(declaredContainingIdentifier)"
+        ))
+        #expect(handler.contains(
+            "profile.identity.extensionIdentifier == extensionIdentifier"
+        ))
+        #expect(handler.contains(
+            "combinedIdentity.extensionIdentifier == extensionIdentifier"
+        ))
+        #expect(handler.contains(
+            "combinedIdentity.channel == .production"
+        ))
+        #expect(handler.contains(
+            "combinedIdentity.channel == .test"
+        ))
+
+        // Split Host IPC is selected by the exact runtime channel and its
+        // signed App Group. There is no Test App Group fallback for production.
+        #expect(handler.contains(
+            "case .productionSafariHost:"
+        ))
+        #expect(handler.contains(
+            "runtime.identity == .productionSafariHost"
+        ))
+        #expect(handler.contains(
+            "ClaudeBrowserBridgeContract.safariHostProductionAppGroupIdentifier"
+        ))
+        #expect(handler.contains(
+            "case .testSafariHost:"
+        ))
+        #expect(handler.contains(
+            "runtime.identity == .testSafariHost"
+        ))
+        #expect(handler.contains(
+            "ClaudeBrowserBridgeContract.safariHostTestAppGroupIdentifier"
+        ))
+        #expect(handler.contains(
+            "forSecurityApplicationGroupIdentifier: profile.appGroupIdentifier"
+        ))
+        #expect(!handler.contains(
+            "forSecurityApplicationGroupIdentifier:\n                ClaudeBrowserBridgeContract.safariHostTestAppGroupIdentifier"
+        ))
+        #expect(handler.contains(
+            "return .safariHostAppGroup(containerDirectoryPath: containerPath)"
+        ))
+        #expect(handler.contains(
+            "return .safariHostOwnedTab(containerDirectoryPath: containerPath)"
+        ))
+
+        let production = try #require(
+            ClaudeSafariHostRuntimeProfile.matchingHostApplicationIdentifier(
+                ClaudeBrowserRuntimeIdentity.productionSafariHost
+                    .containingApplicationIdentifier
+            )
+        )
+        #expect(production.identity == .productionSafariHost)
+        #expect(production.appGroupIdentifier == "group.com.silkrd.uma.bridge")
+        #expect(
+            production.identity.extensionIdentifier
+                == ClaudeBrowserRuntimeIdentity.production.extensionIdentifier
+        )
+
+        let test = try #require(
+            ClaudeSafariHostRuntimeProfile.matchingHostApplicationIdentifier(
+                ClaudeBrowserRuntimeIdentity.testSafariHost
+                    .containingApplicationIdentifier
+            )
+        )
+        #expect(test.identity == .testSafariHost)
+        #expect(test.appGroupIdentifier == "group.com.silkrd.uma.test.bridge")
+        #expect(test.identity.extensionIdentifier != production.identity.extensionIdentifier)
+        #expect(
+            ClaudeSafariHostRuntimeProfile.matchingHostApplicationIdentifier(
+                ClaudeBrowserRuntimeIdentity.production.containingApplicationIdentifier
+            ) == nil
+        )
     }
 
     @Test
@@ -530,8 +633,14 @@ struct M5RMXSAFARIG1ProductionExtensionTests {
     private func runtimeBundle(
         identity: ClaudeBrowserRuntimeIdentity,
         appGeneration: String,
-        extensionGeneration: String
+        extensionGeneration: String,
+        hostProfileOverride: ClaudeSafariHostRuntimeProfile? = nil
     ) throws -> Bundle {
+        let profile = try #require(hostProfileOverride ??
+            ClaudeSafariHostRuntimeProfile.matchingMutableApplicationIdentifier(
+                identity.containingApplicationIdentifier
+            )
+        )
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "uma-runtime-bundle-\(UUID().uuidString).app",
             isDirectory: true
@@ -570,12 +679,14 @@ struct M5RMXSAFARIG1ProductionExtensionTests {
         appInfo["CFBundleVersion"] = appBuild
         appInfo[ClaudeBrowserBridgeContract.runtimeGenerationInfoKey] = appGeneration
         appInfo["UMASafariHostBundleIdentifier"] =
-            ClaudeSafariHostIPCContract.hostApplicationIdentifier
+            profile.identity.containingApplicationIdentifier
         appInfo["UMASafariHostExtensionBundleIdentifier"] =
-            ClaudeSafariHostIPCContract.hostExtensionIdentifier
+            profile.identity.extensionIdentifier
         appInfo["UMASafariHostRuntimeGenerationID"] = extensionGeneration
         appInfo["UMASafariHostExtensionVersion"] = extensionVersion
         appInfo["UMASafariHostExtensionBuild"] = extensionBuild
+        appInfo[ClaudeBrowserBridgeContract.appGroupIdentifierInfoKey] =
+            profile.appGroupIdentifier
         var extensionInfo = common
         extensionInfo["CFBundleIdentifier"] = identity.extensionIdentifier
         extensionInfo["CFBundlePackageType"] = "XPC!"

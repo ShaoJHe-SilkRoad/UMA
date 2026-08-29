@@ -12,6 +12,7 @@ actor ClaudeSafariHostClientAdapter {
 
     private let client: ClaudeSafariHostIPCClient
     private let generation: String
+    private let hostApplicationIdentifier: String
     private var listener: ClaudeSafariHostIPCResponseListener?
     private var consumer: ClaudeBrowserOrderedConsumer?
     private var waiters: [String: CheckedContinuation<ClaudeSafariHostVerificationTrace, Never>] = [:]
@@ -22,15 +23,14 @@ actor ClaudeSafariHostClientAdapter {
     private var activeWorkRequestIDs: Set<String> = []
 
     init?(bundle: Bundle = .main) {
-        _ = ClaudeSafariHostIPCContract.hostExtensionIdentifier
-        guard let generation = bundle.object(
-            forInfoDictionaryKey: "UMASafariHostRuntimeGenerationID"
-        ) as? String,
-              UUID(uuidString: generation) != nil,
-              let client = try? ClaudeSafariHostIPCClient()
+        guard let context = ClaudeBrowserRuntimeContext.current(bundle: bundle),
+              let endpoint = try? ClaudeSafariHostIPCEndpoint.appGroup(
+                identifier: context.appGroupIdentifier
+              )
         else { return nil }
-        self.client = client
-        self.generation = generation.lowercased()
+        client = ClaudeSafariHostIPCClient(endpoint: endpoint)
+        generation = context.runtimeGenerationID
+        hostApplicationIdentifier = context.identity.containingApplicationIdentifier
     }
 
     func start(_ handler: @escaping ClaudeBrowserProductionIntegration.MessageHandler) -> Bool {
@@ -82,7 +82,7 @@ actor ClaudeSafariHostClientAdapter {
             .requestCreated,
             .wakeDispatchStarted,
         ]
-        guard await Self.wakeHost() else {
+        guard await wakeHost() else {
             return localFailure(
                 requestID: request.requestID,
                 stages: initialStages,
@@ -117,7 +117,7 @@ actor ClaudeSafariHostClientAdapter {
               activeWorkRequestIDs.isEmpty,
               listen()
         else { return .workDispatchFailed }
-        guard await Self.wakeHost() else { return .browserUnavailable }
+        guard await wakeHost() else { return .browserUnavailable }
         let operation: ClaudeSafariHostIPCOperation = oneShot ? .accuracySync : .automaticRefresh
         // Register before publishing the request file. The Host may consume and
         // answer immediately on a warm App Group listener; no valid terminal
@@ -138,7 +138,7 @@ actor ClaudeSafariHostClientAdapter {
     }
 
     func close(_ requestID: String) async {
-        guard UUID(uuidString: requestID) != nil, listen(), await Self.wakeHost() else { return }
+        guard UUID(uuidString: requestID) != nil, listen(), await wakeHost() else { return }
         let commandID = UUID().uuidString.lowercased()
         rememberControlRequest(commandID)
         do {
@@ -368,8 +368,8 @@ actor ClaudeSafariHostClientAdapter {
     }
 
     @MainActor
-    private static func wakeHost() async -> Bool {
-        let id = ClaudeSafariHostIPCContract.hostApplicationIdentifier
+    private func wakeHost() async -> Bool {
+        let id = hostApplicationIdentifier
         if !NSRunningApplication.runningApplications(withBundleIdentifier: id).isEmpty {
             return true
         }

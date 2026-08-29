@@ -81,9 +81,7 @@ classify_launchservices_path() {
         || "$candidate" == *'/Rollback/'* ]]; then
         printf '%s\n' 'PROTECTED_APP'
     elif [[ "$candidate" == "$DELIVERY_ROOT"/uma-*/UMA_0.13.0-Test.app \
-        || "$candidate" == "$LEGACY_DEVELOPMENT_PACKAGE_ROOT"/uma-*/UMA_0.13.0-Test.app \
-        || "$candidate" == "$DELIVERY_ROOT"/uma-*/UMA_0.13.0.app \
-        || "$candidate" == "$LEGACY_DEVELOPMENT_PACKAGE_ROOT"/uma-*/UMA_0.13.0.app ]]; then
+        || "$candidate" == "$LEGACY_DEVELOPMENT_PACKAGE_ROOT"/uma-*/UMA_0.13.0-Test.app ]]; then
         if [[ "$candidate" == "$DELIVERY_ROOT"/* ]]; then
             package_directory="${candidate#"$DELIVERY_ROOT"/}"
         else
@@ -161,7 +159,7 @@ retire_historical_development_apps() {
             return 1
         }
         bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")"
-        [[ "$bundle_id" == com.silkrd.uma || "$bundle_id" == com.silkrd.uma.test ]] || {
+        [[ "$bundle_id" == "$APP_ID" ]] || {
             printf 'Refusing unexpected historical bundle identity: %s\n' "$bundle_id" >&2
             return 1
         }
@@ -216,7 +214,7 @@ retire_historical_development_apps() {
                 exit 1
             }
             /usr/bin/find -H "$package_root" -mindepth 2 -maxdepth 2 -type d \
-                \( -name UMA_0.13.0-Test.app -o -name UMA_0.13.0.app \) -print
+                -name UMA_0.13.0-Test.app -print
         done | while IFS= read -r candidate; do
             [[ "$(classify_launchservices_path "$candidate")" \
                 == RETIRE_TASK_OWNED_DEVELOPMENT_REGISTRATION ]] \

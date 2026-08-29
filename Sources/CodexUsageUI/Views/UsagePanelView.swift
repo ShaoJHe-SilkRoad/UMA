@@ -211,6 +211,7 @@ public struct UsagePanelView: View {
                         workBuddyLogin: workBuddyLogin,
                         workBuddyAccountWebSync: workBuddyAccountWebSync,
                         providerLoginOptions: store.providerLoginOptions,
+                        providerPresentations: store.presentationCards,
                         agentSettings: store.agentSettings,
                         searchForAgents: {
                             Task { await store.searchForAgents() }

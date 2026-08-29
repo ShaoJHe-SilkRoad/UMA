@@ -5,7 +5,8 @@ actor WorkBuddyAccountWebCreditsConnector: AgentUsageConnector {
         rawValue: "workbuddy.accountWebCredits"
     )!
     private static let accountWebCapabilities: Set<AgentConnectorCapability> = [
-        .connect, .reconnect, .refresh, .disconnect, .accountUsage
+        .connect, .reconnect, .refresh, .disconnect, .accountUsage,
+        .sanitizedLastValidRestore
     ]
 
     nonisolated let id = connectorID
@@ -70,6 +71,7 @@ actor WorkBuddyAccountWebCreditsConnector: AgentUsageConnector {
         @MainActor @Sendable () async -> WorkBuddyAccountWebReadResult
     private let disconnectOwnedSession: @MainActor @Sendable () async -> Void
     private var snapshot: AgentUsageSnapshot
+    private var lastSuccessfulSnapshot: AgentUsageSnapshot?
     private var continuation: AsyncStream<AgentUsageSnapshot>.Continuation?
     private var inFlightRead:
         (generation: UInt64, task: Task<WorkBuddyAccountWebReadResult, Never>)?
@@ -131,6 +133,7 @@ actor WorkBuddyAccountWebCreditsConnector: AgentUsageConnector {
         case .disconnect:
             invalidateInFlightRead()
             await disconnectOwnedSession()
+            lastSuccessfulSnapshot = nil
             replace(
                 Self.unavailableSnapshot(
                     state: .authenticationRequired,
@@ -195,8 +198,11 @@ actor WorkBuddyAccountWebCreditsConnector: AgentUsageConnector {
         completedReadCount += 1
         switch result {
         case let .success(reading):
-            replace(Self.snapshot(for: reading))
+            let successful = Self.snapshot(for: reading)
+            lastSuccessfulSnapshot = successful
+            replace(successful)
         case .authenticationRequired:
+            lastSuccessfulSnapshot = nil
             replace(
                 Self.unavailableSnapshot(
                     state: .authenticationRequired,
@@ -204,12 +210,26 @@ actor WorkBuddyAccountWebCreditsConnector: AgentUsageConnector {
                 )
             )
         case let .failure(failure):
-            replace(
-                Self.unavailableSnapshot(
-                    state: .failed,
-                    failure: Self.safeFailure(for: failure)
+            let safeFailure = Self.safeFailure(for: failure)
+            if safeFailure != .authorizationRequired,
+               let lastSuccessfulSnapshot {
+                replace(Self.retainedSnapshot(
+                    from: lastSuccessfulSnapshot,
+                    failure: safeFailure
+                ))
+            } else {
+                if safeFailure == .authorizationRequired {
+                    lastSuccessfulSnapshot = nil
+                }
+                replace(
+                    Self.unavailableSnapshot(
+                        state: safeFailure == .authorizationRequired
+                            ? .authenticationRequired
+                            : .failed,
+                        failure: safeFailure
+                    )
                 )
-            )
+            }
         }
     }
 
@@ -283,6 +303,45 @@ actor WorkBuddyAccountWebCreditsConnector: AgentUsageConnector {
             channels: [],
             capabilities: accountWebCapabilities,
             safeFailure: failure
+        )
+    }
+
+    private static func retainedSnapshot(
+        from successful: AgentUsageSnapshot,
+        failure: AgentSafeFailure
+    ) -> AgentUsageSnapshot {
+        let capturedAt = Date()
+        let retainedChannels = successful.channels.map { channel in
+            AgentUsageChannel(
+                id: channel.id,
+                sourceTier: channel.sourceTier,
+                sourceVersion: channel.sourceVersion,
+                scopes: channel.scopes,
+                provenance: channel.provenance,
+                freshness: .stale,
+                capturedAt: channel.capturedAt,
+                coverageNote: channel.coverageNote,
+                sourceConfidence: channel.sourceConfidence,
+                lastExactAt: channel.lastExactAt,
+                rateLimitWindows: channel.rateLimitWindows,
+                accountMetrics: channel.accountMetrics,
+                localActivityMetrics: channel.localActivityMetrics,
+                safeFailure: failure,
+                availability: channel.availability,
+                accountCreditSnapshot: channel.accountCreditSnapshot
+            )
+        }
+        return AgentUsageSnapshot(
+            id: successful.id,
+            providerName: successful.providerName,
+            state: .stale,
+            capturedAt: capturedAt,
+            lastSuccessfulAt: successful.lastSuccessfulAt,
+            freshness: .stale,
+            channels: retainedChannels,
+            capabilities: accountWebCapabilities,
+            safeFailure: failure,
+            selectedWindowID: successful.selectedWindowID
         )
     }
 

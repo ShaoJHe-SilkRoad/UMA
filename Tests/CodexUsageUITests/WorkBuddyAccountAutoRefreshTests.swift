@@ -242,6 +242,68 @@ struct WorkBuddyAccountAutoRefreshTests {
     }
 
     @Test @MainActor
+    func transientFailureRetainsLastKnownGoodButAuthenticationFailsClosed() async throws {
+        let observedAt = Date(timeIntervalSince1970: 2_000_000_000)
+        let balance = try CreditBalance(
+            validatingDecimalRemaining: 125,
+            scope: .buddyAIUnknown,
+            observedAt: observedAt,
+            provenance: .authenticatedAccountWeb(observedAt: observedAt)
+        )
+        let creditSnapshot = WorkBuddyAccountCreditSnapshot(
+            subscriptionRemaining: 100,
+            addOnRemaining: 20,
+            benefitGiftRemaining: 5,
+            calculatedTotalRemaining: 125,
+            authoritativePageBalance: 125,
+            observedAt: observedAt,
+            source: .authenticatedAccountWeb,
+            extractorVersion: "2",
+            includedPoolCount: 3
+        )
+        let reading = WorkBuddyAccountWebReading(
+            balance: balance,
+            creditSnapshot: creditSnapshot,
+            extractorVersion: 2
+        )
+        var results: [WorkBuddyAccountWebReadResult] = [
+            .success(reading),
+            .failure(.timedOut),
+            .authenticationRequired,
+        ]
+        let connector = WorkBuddyAccountWebCreditsConnector(
+            hasConsent: { true },
+            reader: { results.removeFirst() },
+            disconnectOwnedSession: {}
+        )
+
+        await connector.refresh(trigger: .manual)
+        let fresh = await connector.currentSnapshot()
+        #expect(fresh.state == .ready)
+        #expect(fresh.freshness == .fresh)
+
+        await connector.refresh(trigger: .timer)
+        let retained = await connector.currentSnapshot()
+        #expect(retained.state == .stale)
+        #expect(retained.freshness == .stale)
+        #expect(retained.safeFailure == .timedOut)
+        #expect(retained.channels.first?.availability == fresh.channels.first?.availability)
+        #expect(LocalProviderEligibilityScanner.admission(
+            for: retained,
+            descriptor: connector.descriptor
+        ).admittedSnapshot == retained)
+
+        await connector.refresh(trigger: .timer)
+        let expired = await connector.currentSnapshot()
+        #expect(expired.state == .authenticationRequired)
+        #expect(expired.channels.isEmpty)
+        #expect(LocalProviderEligibilityScanner.admission(
+            for: expired,
+            descriptor: connector.descriptor
+        ) == .hiddenNotAuthenticated)
+    }
+
+    @Test @MainActor
     func disconnectInvalidatesTheSessionControllersInFlightRead() async {
         let suite =
             "WorkBuddyAccountAutoRefreshTests.disconnect-race."

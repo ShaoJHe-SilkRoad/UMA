@@ -172,6 +172,43 @@ struct ClaudeSafariHostIPCTests {
     }
 
     @Test
+    func productionHostKeepsEstablishedCompanionIdentityAndRejectsMixedChannels() {
+        let profile = ClaudeSafariHostRuntimeProfile.production
+        #expect(profile.mutableApplicationIdentifier == "com.silkrd.uma")
+        #expect(profile.identity.channel == .productionSafariHost)
+        #expect(profile.identity.containingApplicationIdentifier
+            == "com.silkrd.uma.safarihost")
+        #expect(profile.identity.extensionIdentifier
+            == "com.silkrd.uma.ClaudeBrowserCompanion")
+        #expect(profile.appGroupIdentifier == "group.com.silkrd.uma.bridge")
+        #expect(ClaudeSafariHostIPCContract.accepts(
+            hostApplicationIdentifier: profile.identity.containingApplicationIdentifier,
+            extensionIdentifier: profile.identity.extensionIdentifier
+        ))
+        #expect(!ClaudeSafariHostIPCContract.accepts(
+            hostApplicationIdentifier: profile.identity.containingApplicationIdentifier,
+            extensionIdentifier:
+                ClaudeSafariHostRuntimeProfile.test.identity.extensionIdentifier
+        ))
+        #expect(!ClaudeSafariHostIPCContract.accepts(
+            hostApplicationIdentifier:
+                ClaudeSafariHostRuntimeProfile.test.identity.containingApplicationIdentifier,
+            extensionIdentifier: profile.identity.extensionIdentifier
+        ))
+
+        let descriptor = ClaudeSafariHostIPCRuntimeDescriptor(
+            hostApplicationIdentifier: profile.identity.containingApplicationIdentifier,
+            extensionIdentifier: profile.identity.extensionIdentifier,
+            teamIdentifier: ClaudeBrowserBridgeContract.expectedTeamIdentifier,
+            hostVersion: "1.5.0",
+            hostBuild: "202608290001",
+            runtimeGenerationID: UUID().uuidString.lowercased(),
+            bridgeProtocolVersion: ClaudeBrowserBridgeContract.schemaVersion
+        )
+        #expect(descriptor.isStructurallyValid)
+    }
+
+    @Test
     func requestSchemaContainsOnlyBoundedCorrelationMetadata() throws {
         let request = ClaudeSafariHostIPCRequest(
             requestID: "2534cd98-23ef-4d73-8f78-34421c99c950",

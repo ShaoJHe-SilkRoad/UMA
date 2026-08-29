@@ -222,7 +222,7 @@ struct M5RMXAppleDevelopmentSigningTests {
         ) == "RETIRE_TASK_OWNED_DEVELOPMENT_REGISTRATION")
         #expect(try classifyLaunchServicesPath(
             "/Volumes/HE/DEV/UMA/Packages/uma-0.13-development-test-fixture/UMA_0.13.0.app"
-        ) == "RETIRE_TASK_OWNED_DEVELOPMENT_REGISTRATION")
+        ) == "UNRELATED")
         #expect(try classifyLaunchServicesPath(
             "/Volumes/HE/DEV/UMA/Packages/uma-0.13-final-fixture/UMA_0.13.0-Test.app"
         ) == "PROTECTED_PACKAGE_ARTIFACT")
@@ -232,6 +232,11 @@ struct M5RMXAppleDevelopmentSigningTests {
         #expect(try classifyLaunchServicesPath(
             "/private/tmp/Unrelated.app"
         ) == "UNRELATED")
+
+        let installer = try source("script/install_uma_apple_development_test.sh")
+        #expect(!installer.contains("$bundle_id\" == com.silkrd.uma ||"))
+        #expect(installer.contains("[[ \"$bundle_id\" == \"$APP_ID\" ]]"))
+        #expect(!installer.contains("-name UMA_0.13.0.app"))
     }
 
     @Test

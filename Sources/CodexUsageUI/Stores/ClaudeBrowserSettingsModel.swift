@@ -300,7 +300,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     }
 
     func verifyCompanion() {
-        run(.checkingCompanion) { connector in await connector.openUsagePage() }
+        run(.checkingCompanion) { connector in await connector.checkCompanion() }
     }
 
     func repairCompanion() {
@@ -603,7 +603,10 @@ public enum ClaudeAccuracySyncMachineVerifier {
     }
 
     static func hostOwnedTabReceiptAbsent() -> Bool? {
-        guard let endpoint = try? ClaudeSafariHostIPCEndpoint.appGroup() else {
+        guard let context = ClaudeBrowserRuntimeContext.current(),
+              let endpoint = try? ClaudeSafariHostIPCEndpoint.appGroup(
+                identifier: context.appGroupIdentifier
+              ) else {
             return nil
         }
         let containerPath = URL(fileURLWithPath: endpoint.rootDirectoryPath)

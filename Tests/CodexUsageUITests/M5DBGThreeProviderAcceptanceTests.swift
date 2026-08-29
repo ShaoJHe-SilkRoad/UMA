@@ -34,7 +34,7 @@ struct M5DBGThreeProviderAcceptanceTests {
         )
         #expect(card.id == ClaudeCodeUsageConnector.connectorID.rawValue)
         #expect(card.providerName == "Claude Code")
-        #expect(card.sourceDescription?.contains("Local Smart Mode") == true)
+        #expect(card.sourceDescription == "Claude Accuracy Sync · on demand")
         #expect(card.isVisibleInDesktopAssistant)
         #expect(card.windows.map(\.remaining) == [.finite(56), .finite(29)])
         #expect(SharedUsagePresentationPolicy.assistantCards(from: [card]) == [card])

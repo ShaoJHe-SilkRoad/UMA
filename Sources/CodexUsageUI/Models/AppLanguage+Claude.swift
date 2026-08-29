@@ -1,12 +1,36 @@
 import Foundation
 
 extension AppLanguage {
+    var claudeDesktopEstimateSourceLabel: String {
+        self == .simplifiedChinese
+            ? "Claude Desktop 计划用量 · 估算"
+            : "Claude Desktop plan usage · estimated"
+    }
+
+    var claudeLocalSmartEstimateSourceLabel: String {
+        self == .simplifiedChinese
+            ? "Claude 本地智能模式 · 估算"
+            : "Claude Local Smart Mode · estimated"
+    }
+
+    var claudeLocalExactSourceLabel: String {
+        self == .simplifiedChinese
+            ? "Claude 状态栏 · 精确"
+            : "Claude status line · exact"
+    }
+
+    var claudeCombinedSourceLabel: String {
+        self == .simplifiedChinese
+            ? "Claude 本地智能模式 · 精确同步"
+            : "Claude Local Smart Mode · Accuracy Sync"
+    }
+
     var claudeCodeName: String { "Claude Code" }
 
     var claudeBrowserSourceLabel: String {
         switch self {
-        case .simplifiedChinese: "Claude 本地智能模式 · 按需精确同步"
-        case .english: "Claude Local Smart Mode · on-demand Accuracy Sync"
+        case .simplifiedChinese: "Claude 精确同步 · 按需"
+        case .english: "Claude Accuracy Sync · on demand"
         }
     }
 
@@ -173,7 +197,7 @@ extension AppLanguage {
         case (.english, .accuracyHandshakeUnavailable):
             "Accuracy Sync could not verify the Browser Companion."
         case (.simplifiedChinese, .accuracyHandshakeUnavailable):
-            "精确同步无法验证浏览器伴侣。请检查已启用的伴侣后重试。"
+            "精确同步无法验证浏览器伴侣。请查看伴侣运行状态后重试。"
         case (.english, .accuracyWorkDispatchFailed):
             "Accuracy Sync could not start the usage check. No page content was read."
         case (.simplifiedChinese, .accuracyWorkDispatchFailed):

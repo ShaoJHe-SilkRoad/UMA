@@ -1,6 +1,6 @@
 # UMA M5RMX Claude Privacy Contract
 
-**Version:** 1.6
+**Version:** 1.7
 
 **Date:** 2026-08-29
 
@@ -68,11 +68,13 @@ must not cross. Safari is one-shot only: no background scheduler, permanent tab,
 silent retry, or automatic launch from ordinary local refresh. This section
 supersedes any predecessor requirement for persistent Browser Sync.
 
-The installed Safari Host build `202608281805` is not a final frozen candidate,
-and no live Accuracy Sync result from it is admitted. Current forensic
-diagnosis is content-free. Until final offline verification passes, the
-Goal does not request or mutate Companion enablement, provider access is zero,
-and no Safari registration, site permission, or user data is mutated.
+The earlier installed Safari Host build `202608281805` remains historical
+forensic evidence only and is not a release candidate. The current admitted
+Test result is the one-shot transaction described above; it does not admit the
+`1805` bytes or authorize reuse of any intermediate generation. A final release
+must independently prove the exact signed Host/Companion generation, site scope,
+packet allowlist, owned-tab cleanup, and absence of private evidence before it
+may inherit this privacy disposition.
 
 ### Current Safari Host / Companion privacy addendum
 
@@ -110,14 +112,16 @@ or unrelated tab ID. A candidate ID is never close or extraction authority.
 Unknown, ambiguous, stale-generation, replacement-only and otherwise unproven
 tabs are never closed. Recovery never uses `tabs.query({})` or scans user tabs.
 
-The mutable UMA app, immutable Safari Host and Companion share only the exact
-development App Group `group.com.silkrd.uma.test.bridge`. Effective signed
-entitlements must prove this group independently for all three products before
-the final Test package is admitted. The shared group does not authorize broad
-filesystem inspection: the active bridge may access only its bounded,
-owner-only request, response and ownership-receipt locations. The Companion
-must not receive arbitrary mutable-app container access, enumerate unrelated
-files, or treat the group as a logging directory.
+The admitted Test channel's mutable UMA app, immutable Safari Host and Companion
+share only the exact development App Group
+`group.com.silkrd.uma.test.bridge`. Effective signed entitlements must prove
+this group independently for all three products. A production package must use
+its separately declared, package-consistent production group and must not
+silently reuse the Test group or Test identities. Either shared group authorizes
+only the bounded, owner-only request, response and ownership-receipt locations;
+it does not authorize broad filesystem inspection. The Companion must not
+receive arbitrary mutable-app container access, enumerate unrelated files, or
+treat the group as a logging directory.
 
 Content-free forensic and runtime diagnostics may contain only:
 

@@ -31,6 +31,12 @@ public enum ClaudeBrowserBridgeContract {
         "com.silkrd.uma.test.safarihost.ClaudeBrowserCompanion"
     public static let safariHostTestAppGroupIdentifier =
         "group.com.silkrd.uma.test.bridge"
+    public static let safariHostProductionApplicationIdentifier =
+        "com.silkrd.uma.safarihost"
+    public static let safariHostProductionExtensionIdentifier =
+        safariExtensionIdentifier
+    public static let safariHostProductionAppGroupIdentifier =
+        "group.com.silkrd.uma.bridge"
     public static let safariExtensionVersion = "1.4.0"
     public static let safariExtensionBuild = "10"
     public static let automationMessageKind = "claudeBrowserAutomationEvent"
@@ -57,6 +63,7 @@ public enum ClaudeBrowserBridgeContract {
     public static let appBuildInfoKey = "UMAAppBuild"
     public static let extensionVersionInfoKey = "UMAExtensionVersion"
     public static let extensionBuildInfoKey = "UMAExtensionBuild"
+    public static let appGroupIdentifierInfoKey = "UMAAppGroupIdentifier"
     public static let expectedTeamIdentifier = "C6TUZVJ6SJ"
 }
 
@@ -65,6 +72,7 @@ public enum ClaudeBrowserBridgeContract {
 /// handoff identity with a production UMA installation.
 public enum ClaudeBrowserRuntimeChannel: String, Codable, CaseIterable, Sendable {
     case production
+    case productionSafariHost = "production-safari-host"
     case test
     case testSafariHost = "test-safari-host"
 }
@@ -128,11 +136,30 @@ public struct ClaudeBrowserRuntimeIdentity: Codable, Equatable, Sendable {
                 + "/ClaudeSafariHost/NativeInbox"
     )
 
+    /// The immutable Developer ID Safari containing Host used by release UMA.
+    /// The mutable product keeps `com.silkrd.uma`; the established production
+    /// Companion identifier remains unchanged while its containing Host gains
+    /// an independently versioned, stable identity.
+    public static let productionSafariHost = Self(
+        channel: .productionSafariHost,
+        containingApplicationIdentifier:
+            ClaudeBrowserBridgeContract.safariHostProductionApplicationIdentifier,
+        extensionIdentifier:
+            ClaudeBrowserBridgeContract.safariHostProductionExtensionIdentifier,
+        nativeApplicationIdentifier:
+            ClaudeBrowserBridgeContract.safariHostProductionApplicationIdentifier,
+        handoffDirectoryRelativePath:
+            "Library/Group Containers/"
+                + ClaudeBrowserBridgeContract.safariHostProductionAppGroupIdentifier
+                + "/ClaudeSafariHost/NativeInbox"
+    )
+
     public static func matching(
         containingApplicationIdentifier: String
     ) -> Self? {
         switch containingApplicationIdentifier {
         case production.containingApplicationIdentifier: production
+        case productionSafariHost.containingApplicationIdentifier: productionSafariHost
         case test.containingApplicationIdentifier: test
         case testSafariHost.containingApplicationIdentifier: testSafariHost
         default: nil
@@ -142,8 +169,68 @@ public struct ClaudeBrowserRuntimeIdentity: Codable, Equatable, Sendable {
     public static func matching(extensionIdentifier: String) -> Self? {
         switch extensionIdentifier {
         case production.extensionIdentifier: production
+        // The established production Companion identifier is shared by the
+        // retired combined runtime and the immutable production Host. Callers
+        // that qualify a signed package must match both containing and
+        // extension identifiers; extension-only matching remains historical.
         case test.extensionIdentifier: test
         case testSafariHost.extensionIdentifier: testSafariHost
+        default: nil
+        }
+    }
+}
+
+/// Exact signed-package identities for the immutable Safari Host boundary.
+/// Selection is by the mutable or Host bundle identifier and every remaining
+/// field is then compared as one unit. Unknown or mixed channel metadata has no
+/// fallback and is rejected before IPC is opened.
+public struct ClaudeSafariHostRuntimeProfile: Equatable, Sendable {
+    public let mutableApplicationIdentifier: String
+    public let identity: ClaudeBrowserRuntimeIdentity
+    public let appGroupIdentifier: String
+
+    public static let production = Self(
+        mutableApplicationIdentifier:
+            ClaudeBrowserBridgeContract.safariApplicationIdentifier,
+        identity: .productionSafariHost,
+        appGroupIdentifier:
+            ClaudeBrowserBridgeContract.safariHostProductionAppGroupIdentifier
+    )
+
+    public static let test = Self(
+        mutableApplicationIdentifier:
+            ClaudeBrowserBridgeContract.safariTestApplicationIdentifier,
+        identity: .testSafariHost,
+        appGroupIdentifier:
+            ClaudeBrowserBridgeContract.safariHostTestAppGroupIdentifier
+    )
+
+    public static func matchingMutableApplicationIdentifier(
+        _ identifier: String?
+    ) -> Self? {
+        switch identifier {
+        case production.mutableApplicationIdentifier: production
+        case test.mutableApplicationIdentifier: test
+        default: nil
+        }
+    }
+
+    public static func matchingHostApplicationIdentifier(
+        _ identifier: String?
+    ) -> Self? {
+        switch identifier {
+        case production.identity.containingApplicationIdentifier: production
+        case test.identity.containingApplicationIdentifier: test
+        default: nil
+        }
+    }
+
+    public static func matchingRuntimeChannel(
+        _ channel: ClaudeBrowserRuntimeChannel?
+    ) -> Self? {
+        switch channel {
+        case .productionSafariHost: production
+        case .testSafariHost: test
         default: nil
         }
     }
@@ -325,27 +412,21 @@ public struct ClaudeBrowserAutomationEvent: Codable, Equatable, Sendable {
         self.requestID = requestID
         self.status = status
         self.occurredAt = occurredAt
-        self.companionVersion = companionVersion
-            ?? (carriesRuntimeIdentity
-                ? ClaudeBrowserBridgeContract.safariExtensionVersion : nil)
-        self.companionBuild = companionBuild
-            ?? (carriesRuntimeIdentity
-                ? ClaudeBrowserBridgeContract.safariExtensionBuild : nil)
-        self.protocolSchemaVersion = protocolSchemaVersion
-            ?? (carriesRuntimeIdentity
-                ? ClaudeBrowserBridgeContract.schemaVersion : nil)
-        self.containingApplicationIdentifier = containingApplicationIdentifier
-            ?? (carriesRuntimeIdentity
-                ? ClaudeBrowserRuntimeIdentity.production.containingApplicationIdentifier
-                : nil)
-        self.extensionIdentifier = extensionIdentifier
-            ?? (carriesRuntimeIdentity
-                ? ClaudeBrowserRuntimeIdentity.production.extensionIdentifier : nil)
-        self.teamIdentifier = teamIdentifier
-            ?? (carriesRuntimeIdentity
-                ? ClaudeBrowserBridgeContract.expectedTeamIdentifier : nil)
-        self.runtimeGenerationID = runtimeGenerationID
-            ?? (carriesRuntimeIdentity ? UUID().uuidString.lowercased() : nil)
+        // Runtime identity is package-authoritative. Never synthesize stale
+        // production IDs, builds, or a random generation in this shared
+        // protocol layer. Runtime-bearing events with missing fields fail
+        // decoding instead of masquerading as another signed channel.
+        self.companionVersion = carriesRuntimeIdentity ? companionVersion : nil
+        self.companionBuild = carriesRuntimeIdentity ? companionBuild : nil
+        self.protocolSchemaVersion = carriesRuntimeIdentity
+            ? protocolSchemaVersion : nil
+        self.containingApplicationIdentifier = carriesRuntimeIdentity
+            ? containingApplicationIdentifier : nil
+        self.extensionIdentifier = carriesRuntimeIdentity
+            ? extensionIdentifier : nil
+        self.teamIdentifier = carriesRuntimeIdentity ? teamIdentifier : nil
+        self.runtimeGenerationID = carriesRuntimeIdentity
+            ? runtimeGenerationID?.lowercased() : nil
     }
 }
 

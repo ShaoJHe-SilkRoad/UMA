@@ -211,6 +211,7 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         let extensionBuild: String
         let teamIdentifier: String
         let runtimeGenerationID: String
+        let appGroupIdentifier: String?
     }
 
     private enum OwnedTabReceiptCommand {
@@ -247,12 +248,10 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
     private static func signedRuntimeIdentity() -> SignedRuntimeIdentity? {
         let extensionBundle = Bundle.main
         guard let extensionIdentifier = extensionBundle.bundleIdentifier,
-              let identity = ClaudeBrowserRuntimeIdentity.matching(
-                extensionIdentifier: extensionIdentifier
-              ),
-              extensionBundle.object(
-                forInfoDictionaryKey: ClaudeBrowserBridgeContract.runtimeChannelInfoKey
-              ) as? String == identity.channel.rawValue,
+              let declaredContainingIdentifier = extensionBundle.object(
+                forInfoDictionaryKey:
+                    ClaudeBrowserBridgeContract.containingApplicationInfoKey
+              ) as? String,
               let extensionVersion = extensionBundle.object(
                 forInfoDictionaryKey: "CFBundleShortVersionString"
               ) as? String,
@@ -260,10 +259,6 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
                 forInfoDictionaryKey: "CFBundleVersion"
               ) as? String,
               extensionBuild.allSatisfy(\.isNumber),
-              let declaredContainingIdentifier = extensionBundle.object(
-                forInfoDictionaryKey:
-                    ClaudeBrowserBridgeContract.containingApplicationInfoKey
-              ) as? String,
               let extensionTeamIdentifier = extensionBundle.object(
                 forInfoDictionaryKey: ClaudeBrowserBridgeContract.teamIdentifierInfoKey
               ) as? String,
@@ -272,6 +267,41 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
                 forInfoDictionaryKey: ClaudeBrowserBridgeContract.runtimeGenerationInfoKey
               ) as? String,
               UUID(uuidString: extensionGeneration) != nil
+        else { return nil }
+
+        // The production split Host intentionally keeps the established
+        // production Companion identifier. Extension-only lookup therefore
+        // cannot distinguish it from the retired combined production app.
+        // Resolve the signed containing-app/appex pair first and reject every
+        // mixed pair instead of falling back to either the Test or retired
+        // production runtime.
+        let identity: ClaudeBrowserRuntimeIdentity
+        let appGroupIdentifier: String?
+        if let profile = ClaudeSafariHostRuntimeProfile
+            .matchingHostApplicationIdentifier(declaredContainingIdentifier) {
+            guard profile.identity.extensionIdentifier == extensionIdentifier,
+                  extensionBundle.object(
+                    forInfoDictionaryKey:
+                        ClaudeBrowserBridgeContract.appGroupIdentifierInfoKey
+                  ) as? String == profile.appGroupIdentifier
+            else { return nil }
+            identity = profile.identity
+            appGroupIdentifier = profile.appGroupIdentifier
+        } else {
+            guard let combinedIdentity = ClaudeBrowserRuntimeIdentity.matching(
+                containingApplicationIdentifier: declaredContainingIdentifier
+            ),
+                combinedIdentity.extensionIdentifier == extensionIdentifier,
+                combinedIdentity.channel == .production
+                    || combinedIdentity.channel == .test
+            else { return nil }
+            identity = combinedIdentity
+            appGroupIdentifier = nil
+        }
+
+        guard extensionBundle.object(
+            forInfoDictionaryKey: ClaudeBrowserBridgeContract.runtimeChannelInfoKey
+        ) as? String == identity.channel.rawValue
         else { return nil }
 
         // Safari may execute the appex in a sandboxed host whose process can
@@ -310,7 +340,8 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             extensionVersion: extensionVersion,
             extensionBuild: extensionBuild,
             teamIdentifier: extensionTeamIdentifier,
-            runtimeGenerationID: extensionGeneration.lowercased()
+            runtimeGenerationID: extensionGeneration.lowercased(),
+            appGroupIdentifier: appGroupIdentifier
         )
     }
 
@@ -359,31 +390,57 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         return true
     }
 
-    private static func appGroupContainerPath() -> String? {
-        FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier:
-                ClaudeBrowserBridgeContract.safariHostTestAppGroupIdentifier
+    private static func appGroupContainerPath(
+        for runtime: SignedRuntimeIdentity
+    ) -> String? {
+        let profile: ClaudeSafariHostRuntimeProfile
+        switch runtime.identity.channel {
+        case .productionSafariHost:
+            guard runtime.identity == .productionSafariHost,
+                  runtime.appGroupIdentifier
+                    == ClaudeBrowserBridgeContract.safariHostProductionAppGroupIdentifier
+            else { return nil }
+            profile = .production
+        case .testSafariHost:
+            guard runtime.identity == .testSafariHost,
+                  runtime.appGroupIdentifier
+                    == ClaudeBrowserBridgeContract.safariHostTestAppGroupIdentifier
+            else { return nil }
+            profile = .test
+        case .production, .test:
+            return nil
+        }
+        return FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: profile.appGroupIdentifier
         )?.path
     }
 
     private static func nativeHandoffEndpoint(
         for runtime: SignedRuntimeIdentity
     ) -> ClaudeBrowserFileHandoffEndpoint? {
-        guard runtime.identity == .testSafariHost else {
+        switch runtime.identity.channel {
+        case .production, .test:
             return .runtime(runtime.identity)
+        case .productionSafariHost, .testSafariHost:
+            guard let containerPath = appGroupContainerPath(for: runtime) else {
+                return nil
+            }
+            return .safariHostAppGroup(containerDirectoryPath: containerPath)
         }
-        guard let containerPath = appGroupContainerPath() else { return nil }
-        return .safariHostAppGroup(containerDirectoryPath: containerPath)
     }
 
     private static func ownedTabEndpoint(
         for runtime: SignedRuntimeIdentity
     ) -> ClaudeBrowserFileHandoffEndpoint? {
-        guard runtime.identity == .testSafariHost else {
+        switch runtime.identity.channel {
+        case .production, .test:
             return .runtime(runtime.identity)
+        case .productionSafariHost, .testSafariHost:
+            guard let containerPath = appGroupContainerPath(for: runtime) else {
+                return nil
+            }
+            return .safariHostOwnedTab(containerDirectoryPath: containerPath)
         }
-        guard let containerPath = appGroupContainerPath() else { return nil }
-        return .safariHostOwnedTab(containerDirectoryPath: containerPath)
     }
 
     private static func qualificationReply(

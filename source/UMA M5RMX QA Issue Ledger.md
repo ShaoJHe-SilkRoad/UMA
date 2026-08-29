@@ -1,10 +1,35 @@
 # UMA M5RMX QA Issue Ledger
 
-**Version:** 1.6
+**Version:** 1.7
 
 **Opened:** 2026-08-17
 
-**Current task:** `M5RMX Claude root-repair final closeout`
+**Current task:** `M5RMX-FINAL — UMA 0.13.0 current-major completion`
+
+## Current-major completion issues — 2026-08-29
+
+The accepted Claude root-repair closeout below is predecessor evidence. It is
+not evidence that the production 0.13.0 split-host package, notarization,
+Desktop delivery, or Founder-remote synchronization has completed.
+
+| Issue | Severity | Discovery / exposure | Repair | Verification | State |
+|---|---|---|---|---|---|
+| `M5RMX-FINAL-001` Claude source admission and source truth | Major | Shared presentation admitted every nonnegative reading and several labels collapsed exact local status-line, exact Safari, estimate, and stale states | Centralized provider surface admission, restored the required exact-local → exact-Safari → estimate → stale precedence, and made source labels explicit | Focused product integration, Claude Smart/Desktop, privacy/source, accessibility, and localization tests | CLOSED — source repair verified |
+| `M5RMX-FINAL-002` retained last-good provider behavior | Major | Codex and WorkBuddy did not expose one consistent sanitized retained-last-valid contract across transient failure | Added sanitized last-valid restore descriptors and safe transient retention; authentication/disconnect still clears state | Focused provider presentation and WorkBuddy refresh/regression tests | CLOSED — source repair verified |
+| `M5RMX-FINAL-003` Settings/Main/Assistant parity | Major | Settings reconstructed provider summaries independently and could drift from the Main Panel/Assistant; Claude source details and resetless copy were incomplete | Settings now consumes the same resolved presentation cards, exposes the admitted Claude detail controls, and omits empty reset separators | Focused four-provider integration, presentation, Assistant, accessibility, and localization tests | CLOSED — source repair verified |
+| `M5RMX-FINAL-004` verification/protocol fail-closed boundary | Major | Companion verification could be coupled to provider consent and bridge events could synthesize stale production identity/generation | Kept verification content-free, removed consent coupling, and fail closed when signed runtime identity is absent | Bridge/Host IPC, consent-handshake, generation, privacy, and source-contract tests | CLOSED — source repair verified |
+| `M5RMX-FINAL-005` release/version/Test-channel truth | Major | Historical 0.12 and Test-channel statements could be mistaken for current 0.13.0 production delivery; Test cleanup could target production-named artifacts | Declared 0.13.0/0.11 release truth, Founder remote, production/Test isolation, and exact Test cleanup classification | Governance/source tests and Apple Development signing/package-isolation tests | CLOSED — release truth verified; production delivery pending |
+| `M5RMX-FINAL-006` production split-host runtime and package | Blocking | Production protocol/IPC constants existed, but the production Safari native handler qualified only the retired combined-app identity and hard-coded the Test App Group; no commit-exact Developer ID split-host release exists yet | Added a fail-closed 0.13.0 split production package/seal/install contract for the Safari-free mutable app and immutable Host/Companion, with exact Developer ID distribution profiles, effective entitlements, one generation, child-first Hardened Runtime signing, joint notary provenance, sealed-artifact hashes, rollback protection, and atomic delivery. Repaired the handler to resolve the exact signed containing-app/appex pair first, route production and Test split hosts through their own App Groups, retain only explicit retired combined channels, and reject mixed identities. | Production packaging contract `8/8 PASS`; production extension/package focused tests `31/31 PASS`; Host IPC focused tests `23/23 PASS`; affected matrix `281/281 PASS`; full deterministic suite `928/928` UI/product plus `56/56` bridge/Host PASS; Debug, Release, strict-concurrency Release, native-host Release, and Safari-host Release PASS. Pending exact Developer ID identity/profiles, source freeze, notary, consolidated Human smoke, delivery, and remote readback | OPEN — source/runtime repair verified; external Apple distribution assets and release acceptance remain |
+| `M5RMX-FINAL-007` tracked legacy binary artifact | Major / hygiene | `outputs/CodexUsageMonitor.app.zip` was a tracked obsolete binary with the retired `com.kevinchen.CodexUsageMonitor` identity | After exact Founder authorization, verified its canonical path, current-user ownership, non-symlink state, retired bundle ID, size, and SHA-256 `b984a29d2776b925a224a4057c444d0b3724f0ade940434580af21226d9f5976`, then removed only that tracked artifact; no replacement binary belongs in Git | Exact deletion plus repository generated/private-artifact and staged-hygiene review | CLOSED — authorized legacy artifact removed |
+
+Current pre-freeze evidence: the affected product/provider/Assistant/
+accessibility/localization/lifecycle matrix is `281/281 PASS`; the current full
+deterministic suite is `928/928 PASS` for UI/product tests plus `56/56 PASS`
+for bridge/Host tests. Debug, Release, strict-concurrency Release, native-host
+Release, and Safari-host Release builds pass. These results prove the current
+repair set but are not final release evidence: the final frozen commit still
+requires the governing release verification, notarization, Human smoke,
+delivery, and Founder-remote readback sequence.
 
 ## 0. Final-closeout issue disposition — 2026-08-29
 

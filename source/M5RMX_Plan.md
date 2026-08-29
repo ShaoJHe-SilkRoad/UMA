@@ -1,8 +1,8 @@
 # Usage Monitor Altoget — M5RMX Plan
 
-**Program:** M5RMX — Claude Code Results Merge, Safari Extension Completion, Runtime Debug, Experience Polish, and UMA 0.12 Delivery
-**Version:** 2.0
-**Date:** 2026-08-17
+**Program:** M5RMX-FINAL — current UMA major-version completion and UMA 0.13.0 delivery
+**Version:** 3.0
+**Date:** 2026-08-29
 **Product:** UMA — Usage Monitor Altoget
 **Execution owner:** Codex DEV
 **Execution model family:** GPT-5.6 Sol
@@ -11,13 +11,31 @@
 **Apple Developer Team ID:** `C6TUZVJ6SJ`
 **Current Claude status:** Supported in the accepted runtime
 **Claude Safari Extension:** Core M5RMX deliverable
-**Target application:** `UMA_0.12.app`
-**Target Founder GitHub repository:** `https://github.com/ShaoJHe-SilkRoad/CodexUsageMonitor` — verify live remote before push
+**Target application:** `UMA_0.13.0.app`
+**Target Founder GitHub repository:** `https://github.com/ShaoJHe-SilkRoad/UMA` — verify live remote before push
 **Cursor/Kimi/new-provider work:** Out of scope
-**Status:** M5RMX Claude root repair — FUNDAMENTAL PASS; Completion Lock active
+**Status:** Claude root repair accepted; current-major 0.13.0 release integration in progress
 **Canonical workspace:** `/Volumes/HE/DEV/UMA/Worktrees/UMA-M5RMX-Claude`
 
 ---
+
+## Current master closeout override — 2026-08-29
+
+The authoritative release version is `0.13.0`; the last accepted rollback line
+is `0.11`. Historical `0.12` targets below are retained only as stage evidence
+and do not authorize a `0.12` package or delivery. The current release must use
+the split architecture: a Safari-free production UMA application, an immutable
+production Safari Host, and the production Claude Companion. Test bundle IDs,
+Test provisioning, and Apple Development signatures are forbidden from the
+distributed release.
+
+The Founder remote is `https://github.com/ShaoJHe-SilkRoad/UMA`. The `upstream`
+remote is read-only for this closeout and must never receive a push. A final
+PASS requires an exact source freeze, Developer ID signing, notarization,
+stapling, Gatekeeper acceptance, rollback-preserving Desktop delivery, Founder
+remote readback, and a clean worktree/index. Earlier closeout records document
+accepted Claude Test-channel evidence; they are not evidence that the final
+0.13.0 production package already exists.
 
 ## Current final-closeout authority — 2026-08-29
 
@@ -36,9 +54,10 @@ UMA relaunch both preserved the committed exact anchor without re-setup.
 Mutable-app classification/installer truth, deterministic regression,
 signing-trust stability, and independent product review passed. Provider-read
 budget used: `1/2`; the unused second read is not a sampling or retry allowance.
-Exact Git delivery completed after independent staged-index review. No
-Host/Companion mutation, push, notarization, production replacement, or next
-Goal is permitted.
+The exact Git delivery referenced in this historical closeout applies only to
+the accepted Claude root-repair commit. It does not mean the final 0.13.0
+production release has been staged, committed, packaged, notarized, delivered,
+or pushed. Those actions remain governed by the current master closeout above.
 
 ## Current Founder lifecycle override — Owned Provider Tab V2
 

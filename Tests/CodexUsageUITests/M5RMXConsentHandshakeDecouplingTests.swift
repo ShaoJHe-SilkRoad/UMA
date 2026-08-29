@@ -70,6 +70,20 @@ struct M5RMXConsentHandshakeDecouplingTests {
     }
 
     @Test
+    func noConsentSettingsCompanionCheckUsesOnlyContentFreeHandshake() async {
+        let fixture = BrowserConnectorFixture(consent: false)
+        let connector = browserConnector(fixture)
+        await fixture.bridge.setVerificationResult(.verified)
+
+        await connector.checkCompanion()
+
+        let diagnostics = await connector.diagnostics()
+        #expect(diagnostics.browserAccuracyState == .ready)
+        #expect(await fixture.bridge.openCount == 0)
+        #expect(await fixture.bridge.automaticRequests.isEmpty)
+    }
+
+    @Test
     func grantedConsentAllowsExistingAccuracyPathWithoutChangingQualification() async {
         let fixture = BrowserConnectorFixture(consent: true)
         let connector = browserConnector(fixture)
@@ -146,8 +160,12 @@ struct M5RMXConsentHandshakeDecouplingTests {
         )
 
         #expect(integration.contains(
-            "clientApplicationIdentifier = context.map { _ in\n"
-                + "            ClaudeBrowserBridgeContract.safariTestApplicationIdentifier"
+            "clientApplicationIdentifier = context.map {\n"
+                + "            $0.identity.channel == .productionSafariHost"
+        ))
+        #expect(integration.contains(
+            "? ClaudeBrowserBridgeContract.safariApplicationIdentifier\n"
+                + "                : ClaudeBrowserBridgeContract.safariTestApplicationIdentifier"
         ))
         #expect(integration.contains(
             "hostApplicationIdentifier = trace.runtimeDescriptor?.hostApplicationIdentifier"
@@ -476,6 +494,8 @@ struct M5RMXConsentHandshakeDecouplingTests {
         #expect(!settings.contains("openUsagePage: true"))
         #expect(settings.contains("func verifyCompanion()"))
         #expect(settings.contains("run(.checkingCompanion)"))
+        #expect(settings.contains("await connector.checkCompanion()"))
+        #expect(!settings.contains("await connector.openUsagePage()"))
     }
 
     @Test

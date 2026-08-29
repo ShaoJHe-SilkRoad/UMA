@@ -536,10 +536,8 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
     }
 
     func checkCompanion() async {
-        guard await hasConsent() else {
-            transitionToDisconnected()
-            return
-        }
+        // Companion qualification is content-free and deliberately precedes
+        // the provider-consent boundary. Accuracy Sync remains consent-gated.
         await startBrowserListenerIfNeeded()
         lifecycle = .checking
         let health = await integration.checkHealth()
@@ -1449,12 +1447,28 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         let lastExactAt = values.filter {
             $0.source == .exactLocalStatusLine || $0.source == .exactSafariAccuracy
         }.map(\.observedAt).max()
+        let sourceKinds = Set(values.map(\.source))
+        let sourceVersion: String
+        switch sourceKinds {
+        case [.estimatedDesktopCache]:
+            sourceVersion = "smart-1-desktop-estimate"
+        case [.estimatedLocal]:
+            sourceVersion = "smart-1-local-estimate"
+        case [.exactLocalStatusLine]:
+            sourceVersion = "smart-1-local-exact"
+        case [.exactSafariAccuracy]:
+            sourceVersion = "smart-1-safari-exact"
+        case [.staleExact]:
+            sourceVersion = "smart-1-stale"
+        default:
+            sourceVersion = "smart-1-mixed"
+        }
         let account = AgentUsageChannel(
             id: .account,
             sourceTier: containsEstimate
                 ? .authorizedLocalEstimate
                 : .officialStructuredHook,
-            sourceVersion: "smart-1",
+            sourceVersion: sourceVersion,
             scopes: [.account],
             provenance: containsEstimate ? .locallyEstimated : .providerReported,
             freshness: freshness,

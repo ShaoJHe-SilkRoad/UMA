@@ -7,6 +7,9 @@ import Foundation
 /// it is not a browser cache and is never an authority for Safari tab state.
 public enum ClaudeSafariHostIPCContract {
     public static let schemaVersion = 2
+    /// Historical aliases retained for Test-channel fixtures. Runtime code
+    /// must select an exact `ClaudeSafariHostRuntimeProfile` from signed bundle
+    /// metadata rather than assuming these values.
     public static let appGroupIdentifier =
         ClaudeBrowserBridgeContract.safariHostTestAppGroupIdentifier
     public static let hostApplicationIdentifier =
@@ -16,6 +19,16 @@ public enum ClaudeSafariHostIPCContract {
     public static let maximumMessageBytes = 8_192
     public static let maximumQueuedMessages = 16
     public static let maximumMessageAge: TimeInterval = 120
+
+    public static func accepts(
+        hostApplicationIdentifier: String,
+        extensionIdentifier: String
+    ) -> Bool {
+        guard let profile = ClaudeSafariHostRuntimeProfile
+            .matchingHostApplicationIdentifier(hostApplicationIdentifier)
+        else { return false }
+        return profile.identity.extensionIdentifier == extensionIdentifier
+    }
 }
 
 public enum ClaudeSafariHostIPCOperation: String, Codable, CaseIterable, Sendable {
@@ -297,8 +310,10 @@ public struct ClaudeSafariHostIPCRuntimeDescriptor: Codable, Equatable, Sendable
     }
 
     public var isStructurallyValid: Bool {
-        hostApplicationIdentifier == ClaudeSafariHostIPCContract.hostApplicationIdentifier
-            && extensionIdentifier == ClaudeSafariHostIPCContract.hostExtensionIdentifier
+        ClaudeSafariHostIPCContract.accepts(
+            hostApplicationIdentifier: hostApplicationIdentifier,
+            extensionIdentifier: extensionIdentifier
+        )
             && teamIdentifier == ClaudeBrowserBridgeContract.expectedTeamIdentifier
             && !hostVersion.isEmpty && hostVersion.utf8.count <= 32
             && !hostBuild.isEmpty && hostBuild.utf8.count <= 32
@@ -416,11 +431,11 @@ public struct ClaudeSafariHostIPCEndpoint: Equatable, Sendable {
     }
 
     public static func appGroup(
+        identifier: String = ClaudeSafariHostIPCContract.appGroupIdentifier,
         fileManager: FileManager = .default
     ) throws -> Self {
         guard let container = fileManager.containerURL(
-            forSecurityApplicationGroupIdentifier:
-                ClaudeSafariHostIPCContract.appGroupIdentifier
+            forSecurityApplicationGroupIdentifier: identifier
         ) else { throw ClaudeSafariHostIPCError.appGroupUnavailable }
         return Self(
             rootDirectoryPath: container

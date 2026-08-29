@@ -14,7 +14,7 @@ actor CodexUsageConnector: AgentUsageConnector {
         sourceTier: .officialLocalService,
         sourceVersion: "m1a-g1",
         supportedScopes: [.account, .device, .session, .task],
-        capabilities: [.connect, .reconnect, .refresh, .disconnect, .localActivity, .rateLimits, .accountUsage],
+        capabilities: [.connect, .reconnect, .refresh, .disconnect, .localActivity, .rateLimits, .accountUsage, .sanitizedLastValidRestore],
         configurationRequirements: [.userAuthorization, .officialManagedSession, .privacySafeLocalMetadataAccess],
         privacyAllowlist: ["account availability", "rate limits", "aggregate account usage", "metadata-only local aggregates"],
         supportsRestore: true,

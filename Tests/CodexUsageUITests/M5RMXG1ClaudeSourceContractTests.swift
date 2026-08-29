@@ -24,6 +24,33 @@ struct M5RMXG1ClaudeSourceContractTests {
     }
 
     @Test
+    func currentPrivacyRecordsMatchTheSplitHostManifestAndDoNotReviveHistoricalClaims() throws {
+        let dossier = try record("source/UMA M5RMX Claude Source Dossier.md")
+        let privacy = try record("source/UMA M5RMX Claude Privacy Contract.md")
+        let historicalBrowser = try record("source/UMA M5 Claude Browser Privacy Contract.md")
+        let historicalBaseline = try record("source/UMA M5RMX Certified Debug Baseline.md")
+
+        for required in [
+            "bridge schema: 2",
+            "extractor schema: 2",
+            "Test Safari Host: com.silkrd.uma.test.safarihost",
+            "One static top-frame content script runs at `document_start`",
+            "does not inspect the DOM before the exact Usage route",
+        ] {
+            #expect(dossier.contains(required))
+        }
+        #expect(!dossier.contains("No current live Accuracy Sync has been admitted"))
+        #expect(!dossier.contains("There are no static content scripts or broader host permissions"))
+
+        #expect(privacy.contains("A production package must use\nits separately declared, package-consistent production group"))
+        #expect(privacy.contains("it does not authorize broad filesystem inspection"))
+        #expect(historicalBrowser.contains("historical manual-click contract"))
+        #expect(historicalBrowser.contains("must not be used to audit the current Safari package"))
+        #expect(historicalBaseline.contains("Historical-scope notice"))
+        #expect(historicalBaseline.contains("not the current 0.13 release architecture"))
+    }
+
+    @Test
     func credentialExistenceIsSeparatedFromCredentialCrossing() throws {
         let privacy = try record("source/UMA M5RMX Claude Privacy Contract.md")
         #expect(privacy.contains(

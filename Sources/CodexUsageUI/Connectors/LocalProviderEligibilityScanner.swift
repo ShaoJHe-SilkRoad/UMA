@@ -87,6 +87,67 @@ struct LocalProviderEligibilityScannerDiagnostics: Sendable, Equatable {
     let activeGeneration: UInt64?
 }
 
+/// One provider-neutral admission contract shared by discovery and every
+/// product surface. Claude's explicitly authorized local estimate is the only
+/// non-provider-reported account provenance admitted here; it remains visibly
+/// estimated and must still contain bounded, validated quota windows.
+enum ProviderUsageSurfacePolicy {
+    static func permitsRetainedValue(
+        snapshot: AgentUsageSnapshot,
+        capabilities: Set<AgentConnectorCapability>
+    ) -> Bool {
+        capabilities.contains(.sanitizedLastValidRestore)
+            || isAuthorizedClaudeEstimate(snapshot)
+    }
+
+    static func hasAdmissibleAccountProvenance(
+        snapshot: AgentUsageSnapshot,
+        account: AgentUsageChannel
+    ) -> Bool {
+        account.provenance == .providerReported
+            || (snapshot.id == ClaudeCodeUsageConnector.connectorID
+                && account.provenance == .locallyEstimated
+                && account.rateLimitWindows.contains(where: { $0.isEstimated == true }))
+    }
+
+    static func validatesUsage(_ channel: AgentUsageChannel) -> Bool {
+        if channel.availabilitySourceState == .officialStructured
+            || channel.availabilitySourceState == .authenticatedAccountWeb {
+            return true
+        }
+        if channel.rateLimitWindows.isEmpty {
+            return channel.accountMetrics != nil
+        }
+        return channel.rateLimitWindows.allSatisfy { window in
+            if window.isUnlimited { return true }
+            return window.normalizedRemainingPercent != nil
+        }
+    }
+
+    static func isAdmissibleRetainedFailure(
+        _ failure: AgentSafeFailure?
+    ) -> Bool {
+        switch failure {
+        case nil, .unavailable, .timedOut, .malformedResponse:
+            true
+        default:
+            false
+        }
+    }
+
+    private static func isAuthorizedClaudeEstimate(
+        _ snapshot: AgentUsageSnapshot
+    ) -> Bool {
+        guard snapshot.id == ClaudeCodeUsageConnector.connectorID,
+              let account = snapshot.channels.first(where: { $0.id == .account })
+        else { return false }
+        return account.sourceTier == .authorizedLocalEstimate
+            && account.provenance == .locallyEstimated
+            && !account.rateLimitWindows.isEmpty
+            && account.rateLimitWindows.allSatisfy { $0.isEstimated == true }
+    }
+}
+
 /// The one provider-neutral discovery owner. It scans only registered
 /// descriptors, coalesces concurrent requests, and produces the sole admitted
 /// provider set consumed by both product surfaces.
@@ -236,8 +297,9 @@ actor LocalProviderEligibilityScanner {
         for snapshot: AgentUsageSnapshot,
         descriptor: AgentConnectorDescriptor
     ) -> ProviderSurfaceAdmission {
-        let permitsSanitizedLastValid = descriptor.capabilities.contains(
-            .sanitizedLastValidRestore
+        let permitsRetainedValue = ProviderUsageSurfacePolicy.permitsRetainedValue(
+            snapshot: snapshot,
+            capabilities: descriptor.capabilities
         )
         switch snapshot.state {
         case .inactive:
@@ -248,7 +310,7 @@ actor LocalProviderEligibilityScanner {
             return .hiddenUnsupported
         case .waitingForFirstResponse, .failed:
             return .hiddenCurrentReadFailed
-        case .stale where !permitsSanitizedLastValid:
+        case .stale where !permitsRetainedValue:
             return .hiddenCurrentReadFailed
         case .stale:
             break
@@ -259,16 +321,19 @@ actor LocalProviderEligibilityScanner {
         guard descriptor.hasSurfaceAdmissibleReadContract,
               let account = snapshot.channels.first(where: { $0.id == .account }),
               account.sourceTier != .manualUserConfirmed,
-              account.provenance == .providerReported,
-              validatesCurrentUsage(account)
+              ProviderUsageSurfacePolicy.hasAdmissibleAccountProvenance(
+                snapshot: snapshot,
+                account: account
+              ),
+              ProviderUsageSurfacePolicy.validatesUsage(account)
         else {
             return .hiddenCurrentReadFailed
         }
-        if permitsSanitizedLastValid,
+        if permitsRetainedValue,
            [.cached, .stale].contains(snapshot.freshness),
            account.freshness == snapshot.freshness,
-           Self.isAdmissibleRetainedFailure(snapshot.safeFailure),
-           Self.isAdmissibleRetainedFailure(account.safeFailure) {
+           ProviderUsageSurfacePolicy.isAdmissibleRetainedFailure(snapshot.safeFailure),
+           ProviderUsageSurfacePolicy.isAdmissibleRetainedFailure(account.safeFailure) {
             return .admitted(LocalLiveProviderSnapshot(snapshot: snapshot))
         }
         guard snapshot.safeFailure == nil,
@@ -279,33 +344,6 @@ actor LocalProviderEligibilityScanner {
             return .hiddenCurrentReadFailed
         }
         return .admitted(LocalLiveProviderSnapshot(snapshot: snapshot))
-    }
-
-    private static func isAdmissibleRetainedFailure(
-        _ failure: AgentSafeFailure?
-    ) -> Bool {
-        switch failure {
-        case nil, .unavailable, .timedOut, .malformedResponse:
-            true
-        default:
-            false
-        }
-    }
-
-    private static func validatesCurrentUsage(
-        _ channel: AgentUsageChannel
-    ) -> Bool {
-        if channel.availabilitySourceState == .officialStructured
-            || channel.availabilitySourceState == .authenticatedAccountWeb {
-            return true
-        }
-        if channel.rateLimitWindows.isEmpty {
-            return channel.accountMetrics != nil
-        }
-        return channel.rateLimitWindows.allSatisfy { window in
-            if window.isUnlimited { return true }
-            return window.normalizedRemainingPercent != nil
-        }
     }
 
     static func loginOption(

@@ -261,63 +261,63 @@ struct M5RMXSafariInventoryLifecycleTests {
             ("\(home)/Applications/UMA_0.13.0-Test.app", "CANONICAL_TEST_APP"),
             (
                 "/Volumes/HE/DEV/UMA/Packages/uma-0.13-apple-dev-test-0001/UMA_0.13.0.app",
-                "RETIRE_TASK_OWNED_DEVELOPMENT_REGISTRATION"
+                "UNRELATED"
             ),
             (
                 "/Volumes/HE/DEV/UMA/Packages/uma-0.13-dev-0001/UMA_0.13.0.app",
-                "RETIRE_TASK_OWNED_DEVELOPMENT_REGISTRATION"
+                "UNRELATED"
             ),
             (
                 "\(home)/Developer/UMA-Packages/uma-0.13-dev-legacy1/UMA_0.13.0.app",
-                "RETIRE_TASK_OWNED_DEVELOPMENT_REGISTRATION"
+                "UNRELATED"
             ),
             (
                 "\(home)/Developer/UMA-Packages/uma-0.13-dev-final-legacy2/UMA_0.13.0.app",
-                "PROTECTED_PACKAGE_ARTIFACT"
+                "UNRELATED"
             ),
             (
                 "\(home)/Developer/UMA-Packages/uma-0.13-dev-preflight-legacy3/UMA_0.13.0.app",
-                "PROTECTED_PACKAGE_ARTIFACT"
+                "UNRELATED"
             ),
             (
                 "/Volumes/HE/DEV/UMA/Packages/uma-m5rmx-inventory-test-0002/UMA_0.13.0.app",
-                "RETIRE_TASK_OWNED_DEVELOPMENT_REGISTRATION"
+                "UNRELATED"
             ),
             (
                 "/Volumes/HE/DEV/UMA/Packages/uma-m5rmx-development-test-0002/UMA_0.13.0.app",
-                "RETIRE_TASK_OWNED_DEVELOPMENT_REGISTRATION"
+                "UNRELATED"
             ),
             (
                 "/Volumes/HE/DEV/UMA/Packages/uma-m5rmx-signed-test-0002/UMA_0.13.0.app",
-                "RETIRE_TASK_OWNED_DEVELOPMENT_REGISTRATION"
+                "UNRELATED"
             ),
             (
                 "/Volumes/HE/DEV/UMA/Packages/uma-m5rmx-safari-test-0002/UMA_0.13.0.app",
-                "RETIRE_TASK_OWNED_DEVELOPMENT_REGISTRATION"
+                "UNRELATED"
             ),
             (
                 "/Volumes/HE/DEV/UMA/Packages/uma-m5rmx-final-0003/UMA_0.13.0.app",
-                "PROTECTED_PACKAGE_ARTIFACT"
+                "UNRELATED"
             ),
             (
                 "/Volumes/HE/DEV/UMA/Packages/uma-m5rmx-preflight-0004/UMA_0.13.0.app",
-                "PROTECTED_PACKAGE_ARTIFACT"
+                "UNRELATED"
             ),
             (
                 "/Volumes/HE/DEV/UMA/Packages/uma-m5rmx-release-0005/UMA_0.13.0.app",
-                "PROTECTED_PACKAGE_ARTIFACT"
+                "UNRELATED"
             ),
             (
                 "/Volumes/HE/DEV/UMA/Packages/uma-m5rmx-archive-0006/UMA_0.13.0.app",
-                "PROTECTED_PACKAGE_ARTIFACT"
+                "UNRELATED"
             ),
             (
                 "/Volumes/HE/DEV/UMA/Packages/uma-m5rmx-rollback-0007/UMA_0.13.0.app",
-                "PROTECTED_PACKAGE_ARTIFACT"
+                "UNRELATED"
             ),
             (
                 "/Volumes/HE/DEV/UMA/Packages/uma-m5rmx-notary-0008/UMA_0.13.0.app",
-                "PROTECTED_PACKAGE_ARTIFACT"
+                "UNRELATED"
             ),
             ("\(home)/Desktop/UMA_0.12.app", "PROTECTED_APP"),
             ("/Applications/UMA.app", "PROTECTED_APP"),
@@ -330,11 +330,11 @@ struct M5RMXSafariInventoryLifecycleTests {
         }
         let retireableAlias = try run([
             "--classify-launchservices-path",
-            "\(home)/Developer/UMA-Packages/uma-0.13-dev-alias/UMA_0.13.0.app",
+            "\(home)/Developer/UMA-Packages/uma-0.13-dev-alias/UMA_0.13.0-Test.app",
         ])
         let maliciousResolvedTarget = try run([
             "--classify-launchservices-path",
-            "/Volumes/HE/DEV/UMA/Packages/uma-0.13-dev-final-target/UMA_0.13.0.app",
+            "/Volumes/HE/DEV/UMA/Packages/uma-0.13-dev-final-target/UMA_0.13.0-Test.app",
         ])
         #expect(retireableAlias.output == "RETIRE_TASK_OWNED_DEVELOPMENT_REGISTRATION")
         #expect(maliciousResolvedTarget.output == "PROTECTED_PACKAGE_ARTIFACT")
@@ -384,8 +384,9 @@ struct M5RMXSafariInventoryLifecycleTests {
             "for package_root in \"$DELIVERY_ROOT\" \"$LEGACY_DEVELOPMENT_PACKAGE_ROOT\""
         ))
         #expect(installer.contains(
-            "\\( -name UMA_0.13.0-Test.app -o -name UMA_0.13.0.app \\) -print"
+            "-name UMA_0.13.0-Test.app -print"
         ))
+        #expect(!installer.contains("-name UMA_0.13.0.app"))
         #expect(installer.contains(
             "== RETIRE_TASK_OWNED_DEVELOPMENT_REGISTRATION"
         ))

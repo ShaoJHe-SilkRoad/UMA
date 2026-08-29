@@ -32,7 +32,7 @@
 
 ### 下载
 
-从 [Releases](https://github.com/ower93/CodexUsageMonitor/releases/latest) 下载 `CodexUsageMonitor.app.zip`，解压后打开应用。
+从 UMA Founder 仓库的 [Releases](https://github.com/ShaoJHe-SilkRoad/UMA/releases/latest) 下载 `UMA_0.13.0.zip` 与配套的 `UMA-Safari-Bridge.zip`。安装 `UMA_0.13.0.app`；如需 Claude Accuracy Sync，再安装并在 Safari 中一次性启用独立的 UMA Safari Bridge Companion。两个包必须来自同一个 0.13.0 发布版本。
 
 运行要求：macOS 14 或更高版本，并已安装且登录 `/Applications/Codex.app`。
 
@@ -75,7 +75,7 @@ It uses a native `NSStatusItem` menu bar entry and a transparent, borderless cus
 
 ### Download
 
-Download `CodexUsageMonitor.app.zip` from the latest [GitHub Release](https://github.com/ower93/CodexUsageMonitor/releases/latest), unzip it, and open the app.
+Download `UMA_0.13.0.zip` and its matching `UMA-Safari-Bridge.zip` from the UMA Founder repository's latest [GitHub Release](https://github.com/ShaoJHe-SilkRoad/UMA/releases/latest). Install `UMA_0.13.0.app`; for Claude Accuracy Sync, also install the separate UMA Safari Bridge and enable its Companion once in Safari. Both archives must come from the same 0.13.0 release.
 
 Requirements: macOS 14 or later, with `/Applications/Codex.app` installed and signed in.
 

@@ -16,6 +16,7 @@ struct UsageSettingsCard: View {
     let workBuddyLogin: WorkBuddyLoginCoordinator?
     let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
     let providerLoginOptions: [ProviderLoginOption]
+    let providerPresentations: [SharedUsageCardPresentation]
     var agentSettings: AgentSettingsCoordinator? = nil
     var searchForAgents: (() -> Void)? = nil
     let destination: UsageSettingsDestination?
@@ -106,6 +107,9 @@ struct UsageSettingsCard: View {
                     workBuddySettings: workBuddySettings,
                     workBuddyLogin: workBuddyLogin,
                     workBuddyAccountWebSync: workBuddyAccountWebSync,
+                    presentation: providerPresentations.first {
+                        $0.id == selectedAgentID
+                    },
                     checkAgain: checkAgain,
                     syncWorkBuddyAccount: syncWorkBuddyAccount,
                     disconnectWorkBuddyAccount:
@@ -384,6 +388,7 @@ private struct AgentSpecificSettingsContent: View {
     let workBuddySettings: WorkBuddySettingsModel?
     let workBuddyLogin: WorkBuddyLoginCoordinator?
     let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
+    let presentation: SharedUsageCardPresentation?
     let checkAgain: () -> Void
     let syncWorkBuddyAccount: () -> Void
     let disconnectWorkBuddyAccount: () -> Void
@@ -400,6 +405,13 @@ private struct AgentSpecificSettingsContent: View {
         VStack(alignment: .leading, spacing: 9) {
             Text(displayName)
                 .font(AppTypography.font(13, weight: .semibold, language: language))
+
+            if let presentation {
+                ResolvedProviderUsageSummary(
+                    presentation: presentation,
+                    language: language
+                )
+            }
 
             if entry?.requiresSetup == true {
                 VStack(alignment: .leading, spacing: 2) {
@@ -490,6 +502,22 @@ private struct AgentSpecificSettingsContent: View {
                 )
             }
 
+            if providerID == AgentPreferenceRecord.claudeProviderID {
+                Divider().opacity(0.35)
+                SettingsToggleRow(
+                    title: language.recentTasks,
+                    systemImage: "list.bullet.rectangle",
+                    language: language,
+                    isOn: $showRecentTasks
+                )
+                SettingsToggleRow(
+                    title: language.costCard,
+                    systemImage: "dollarsign.circle",
+                    language: language,
+                    isOn: $showAPICost
+                )
+            }
+
             if providerID == AgentPreferenceRecord.claudeProviderID,
                let claudeSettings {
                 Divider().opacity(0.35)
@@ -543,6 +571,53 @@ private struct AgentSpecificSettingsContent: View {
                 coordinator.setCodexDetails(details, for: providerID)
             }
         )
+    }
+}
+
+/// Settings renders the exact same provider-neutral presentation object as
+/// the Main Panel and Desktop Assistant. It must never reinterpret quota or
+/// provenance independently.
+private struct ResolvedProviderUsageSummary: View {
+    let presentation: SharedUsageCardPresentation
+    let language: AppLanguage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text(language.remaining)
+                    .font(AppTypography.font(9.5, weight: .semibold, language: language))
+                Spacer()
+                Text(primaryValue)
+                    .font(AppTypography.font(11, weight: .bold, language: language))
+                    .monospacedDigit()
+            }
+            if let window = presentation.selectedWindow {
+                Text(window.resetText.isEmpty
+                    ? window.compactLabel
+                    : "\(window.compactLabel) · \(window.resetText)")
+                    .font(AppTypography.font(8.5, language: language))
+                    .foregroundStyle(.secondary)
+            }
+            if let source = presentation.sourceDescription {
+                Text(source)
+                    .font(AppTypography.font(8.5, language: language))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.secondary.opacity(0.07))
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(presentation.accessibilityLabel)
+        .accessibilityIdentifier("settings.provider.resolved-usage")
+    }
+
+    private var primaryValue: String {
+        presentation.availability?.compactText
+            ?? presentation.remainingDisplayText
     }
 }
 

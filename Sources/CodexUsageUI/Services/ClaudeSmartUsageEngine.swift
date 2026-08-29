@@ -2,7 +2,7 @@ import ClaudeStatusLineCore
 import Darwin
 import Foundation
 
-enum ClaudeSmartSourceKind: String, Codable, CaseIterable, Sendable {
+enum ClaudeSmartSourceKind: String, Codable, CaseIterable, Hashable, Sendable {
     case exactLocalStatusLine = "EXACT_LOCAL_STATUSLINE"
     case exactSafariAccuracy = "EXACT_SAFARI_ACCURACY"
     case estimatedLocal = "ESTIMATED_LOCAL"
@@ -266,10 +266,10 @@ enum ClaudeSmartSourceSelector {
         staleExact: ClaudeSmartWindowAnchor?,
         now: Date
     ) -> ClaudeSmartWindowValue? {
-        if let anchor = latestCurrent(safariAnchors, kind: windowKind, now: now) {
+        if let anchor = latestCurrent(statusLineAnchors, kind: windowKind, now: now) {
             return exactValue(anchor)
         }
-        if let anchor = latestCurrent(statusLineAnchors, kind: windowKind, now: now) {
+        if let anchor = latestCurrent(safariAnchors, kind: windowKind, now: now) {
             return exactValue(anchor)
         }
         if let estimated = [estimate, desktopEstimate]

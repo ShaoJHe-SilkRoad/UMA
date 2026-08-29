@@ -2,7 +2,25 @@
 
 Date: 2026-08-01
 Goal: M5-BROWSER-G1
-Status: mandatory production boundary
+Status: historical manual-click contract; superseded by the current
+`UMA M5RMX Claude Privacy Contract.md`
+
+## Current-truth notice
+
+This document records the original M5-BROWSER-G1 manual `activeTab` design. It
+must not be used to audit the current Safari package. The current one-shot
+Accuracy Sync architecture uses an immutable Safari Host, a Safari Manifest V2
+Companion with only `nativeMessaging` plus the exact
+`https://claude.ai/new*` site entry, and one static top-frame content script at
+`document_start`. That script removes the one-time ownership fragment before
+any provider inspection and performs zero DOM access until it proves the exact
+`https://claude.ai/new#settings/usage` route. The native/App Group receipt is
+content-free and exists only to prove the one request-owned temporary tab.
+
+The historical permission and toolbar-click rules below remain evidence of the
+retired stage, not current release requirements. The standing prohibitions on
+credentials, cookies, tokens, identity, raw page content, broad site access,
+unrelated tabs, and private provider endpoints remain current.
 
 ## Core promise
 
