@@ -189,13 +189,13 @@ struct WorkBuddyLoginAssistanceTests {
     }
 
     @MainActor
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func trustedLaunchCheckAgainAndConcurrentCoalescingStayHonest() async {
         let access = FakeWorkBuddyApplicationAccess(
             status: .available(application(trust: .trusted)),
             launchResult: .launched
         )
-        let checker = CountingWorkBuddyLoginChecker(delay: .milliseconds(25))
+        let checker = CountingWorkBuddyLoginChecker()
         let coordinator = WorkBuddyLoginCoordinator(
             applicationAccess: access,
             persistence: InMemoryWorkBuddyLoginPersistence(),
@@ -216,7 +216,7 @@ struct WorkBuddyLoginAssistanceTests {
 
         coordinator.checkAgain()
         coordinator.checkAgain()
-        await settle(milliseconds: 60)
+        await waitUntil { coordinator.completedEligibilityCheckCount == 1 }
         #expect(await checker.count == 1)
         #expect(coordinator.completedEligibilityCheckCount == 1)
         #expect(coordinator.flowState == .completed)
@@ -473,6 +473,17 @@ struct WorkBuddyLoginAssistanceTests {
 
     private func settle(milliseconds: Int = 15) async {
         try? await Task.sleep(for: .milliseconds(milliseconds))
+    }
+
+    @MainActor
+    private func waitUntil(_ condition: @MainActor () -> Bool) async {
+        while !condition() {
+            guard !Task.isCancelled else {
+                Issue.record("WorkBuddy observable condition was cancelled")
+                return
+            }
+            await Task.yield()
+        }
     }
 
     private func repositoryRoot() -> URL {

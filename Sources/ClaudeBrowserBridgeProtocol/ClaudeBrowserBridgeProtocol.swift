@@ -22,12 +22,131 @@ public enum ClaudeBrowserBridgeContract {
     public static let safariApplicationIdentifier = "com.silkrd.uma"
     public static let safariExtensionIdentifier =
         "com.silkrd.uma.ClaudeBrowserCompanion"
-    public static let safariExtensionVersion = "1.3.0"
-    public static let safariExtensionBuild = "8"
+    public static let safariTestApplicationIdentifier = "com.silkrd.uma.test"
+    public static let safariTestExtensionIdentifier =
+        "com.silkrd.uma.test.ClaudeBrowserCompanion"
+    public static let safariHostTestApplicationIdentifier =
+        "com.silkrd.uma.test.safarihost"
+    public static let safariHostTestExtensionIdentifier =
+        "com.silkrd.uma.test.safarihost.ClaudeBrowserCompanion"
+    public static let safariHostTestAppGroupIdentifier =
+        "group.com.silkrd.uma.test.bridge"
+    public static let safariExtensionVersion = "1.4.0"
+    public static let safariExtensionBuild = "10"
     public static let automationMessageKind = "claudeBrowserAutomationEvent"
+    public static let terminalMessageKind = "claudeBrowserTerminalPacket"
     public static let automaticRefreshMessageName = "umaClaudeAutomaticRefresh"
+    public static let wakeBridgeMessageName = "umaClaudeWakeBridge"
+    public static let runtimeQualificationMessageName =
+        "umaClaudeRuntimeQualification"
     public static let closeOwnedTabMessageName = "umaClaudeCloseOwnedUsageTab"
     public static let exactUsageHostPermission = "https://claude.ai/new*"
+    public static let runtimeQualificationMessageKind =
+        "claudeBrowserRuntimeQualificationRequest"
+    public static let runtimeQualificationReplyKind =
+        "claudeBrowserRuntimeQualificationReply"
+    public static let runtimeQualificationAcknowledgementKind =
+        "claudeBrowserRuntimeQualificationAcknowledgement"
+    public static let runtimeGenerationInfoKey = "UMARuntimeGenerationID"
+    public static let containingApplicationInfoKey =
+        "UMAContainingApplicationIdentifier"
+    public static let teamIdentifierInfoKey = "UMATeamIdentifier"
+    public static let runtimeChannelInfoKey = "UMARuntimeChannel"
+    public static let extensionIdentifierInfoKey = "UMAExtensionBundleIdentifier"
+    public static let appVersionInfoKey = "UMAAppVersion"
+    public static let appBuildInfoKey = "UMAAppBuild"
+    public static let extensionVersionInfoKey = "UMAExtensionVersion"
+    public static let extensionBuildInfoKey = "UMAExtensionBuild"
+    public static let expectedTeamIdentifier = "C6TUZVJ6SJ"
+}
+
+/// A runtime channel is an identity boundary, not a packaging label. The Test
+/// channel never shares a LaunchServices, PlugInKit, native-message, or local
+/// handoff identity with a production UMA installation.
+public enum ClaudeBrowserRuntimeChannel: String, Codable, CaseIterable, Sendable {
+    case production
+    case test
+    case testSafariHost = "test-safari-host"
+}
+
+public struct ClaudeBrowserRuntimeIdentity: Codable, Equatable, Sendable {
+    public let channel: ClaudeBrowserRuntimeChannel
+    public let containingApplicationIdentifier: String
+    public let extensionIdentifier: String
+    public let nativeApplicationIdentifier: String
+    public let handoffDirectoryRelativePath: String
+
+    public init(
+        channel: ClaudeBrowserRuntimeChannel,
+        containingApplicationIdentifier: String,
+        extensionIdentifier: String,
+        nativeApplicationIdentifier: String,
+        handoffDirectoryRelativePath: String
+    ) {
+        self.channel = channel
+        self.containingApplicationIdentifier = containingApplicationIdentifier
+        self.extensionIdentifier = extensionIdentifier
+        self.nativeApplicationIdentifier = nativeApplicationIdentifier
+        self.handoffDirectoryRelativePath = handoffDirectoryRelativePath
+    }
+
+    public static let production = Self(
+        channel: .production,
+        containingApplicationIdentifier: ClaudeBrowserBridgeContract.safariApplicationIdentifier,
+        extensionIdentifier: ClaudeBrowserBridgeContract.safariExtensionIdentifier,
+        nativeApplicationIdentifier: ClaudeBrowserBridgeContract.safariApplicationIdentifier,
+        handoffDirectoryRelativePath:
+            "Library/Application Support/CodexUsageMonitor/ClaudeBrowserCompanion"
+    )
+
+    public static let test = Self(
+        channel: .test,
+        containingApplicationIdentifier:
+            ClaudeBrowserBridgeContract.safariTestApplicationIdentifier,
+        extensionIdentifier: ClaudeBrowserBridgeContract.safariTestExtensionIdentifier,
+        nativeApplicationIdentifier:
+            ClaudeBrowserBridgeContract.safariTestApplicationIdentifier,
+        handoffDirectoryRelativePath:
+            "Library/Application Support/CodexUsageMonitor/TestChannel/ClaudeBrowserCompanion"
+    )
+
+    /// The immutable Apple Development Safari containing Host. This identity
+    /// is intentionally distinct from the frequently replaced mutable UMA
+    /// Test application. Only this Host owns Safari dispatch, native callbacks,
+    /// and durable owned-tab receipts for the Test channel.
+    public static let testSafariHost = Self(
+        channel: .testSafariHost,
+        containingApplicationIdentifier:
+            ClaudeBrowserBridgeContract.safariHostTestApplicationIdentifier,
+        extensionIdentifier:
+            ClaudeBrowserBridgeContract.safariHostTestExtensionIdentifier,
+        nativeApplicationIdentifier:
+            ClaudeBrowserBridgeContract.safariHostTestApplicationIdentifier,
+        handoffDirectoryRelativePath:
+            "Library/Group Containers/"
+                + ClaudeBrowserBridgeContract.safariHostTestAppGroupIdentifier
+                + "/ClaudeSafariHost/NativeInbox"
+    )
+
+    public static func matching(
+        containingApplicationIdentifier: String
+    ) -> Self? {
+        switch containingApplicationIdentifier {
+        case production.containingApplicationIdentifier: production
+        case test.containingApplicationIdentifier: test
+        case testSafariHost.containingApplicationIdentifier: testSafariHost
+        default: nil
+        }
+    }
+
+    public static func matching(extensionIdentifier: String) -> Self? {
+        switch extensionIdentifier {
+        case production.extensionIdentifier: production
+        case test.extensionIdentifier: test
+        case testSafariHost.extensionIdentifier: testSafariHost
+        default: nil
+        }
+    }
 }
 
 public enum ClaudeBrowserFamily: String, Codable, CaseIterable, Sendable {
@@ -101,6 +220,10 @@ public struct ClaudeBrowserObservationEnvelope: Codable, Equatable, Sendable {
     public let sourceID: String
     public let browserFamily: ClaudeBrowserFamily
     public let routeState: ClaudeBrowserRouteState
+    /// The exact one-shot request that authorized this observation. A packet
+    /// from an older or parallel companion instance cannot satisfy a current
+    /// Accuracy Sync merely by carrying a fresh observation nonce.
+    public let requestID: String
     /// A per-observation nonce. The app rejects duplicates for the lifetime of
     /// the current listener, preventing a captured handoff from being replayed.
     public let observationID: String
@@ -113,6 +236,7 @@ public struct ClaudeBrowserObservationEnvelope: Codable, Equatable, Sendable {
         schemaVersion: Int = ClaudeBrowserBridgeContract.schemaVersion,
         sourceID: String = ClaudeBrowserBridgeContract.sourceID,
         routeState: ClaudeBrowserRouteState = .verifiedUsage,
+        requestID: String = UUID().uuidString.lowercased(),
         observationID: String = UUID().uuidString.lowercased()
     ) {
         self.kind = kind
@@ -120,6 +244,7 @@ public struct ClaudeBrowserObservationEnvelope: Codable, Equatable, Sendable {
         self.sourceID = sourceID
         self.browserFamily = browserFamily
         self.routeState = routeState
+        self.requestID = requestID
         self.observationID = observationID
         self.observation = observation
     }
@@ -128,12 +253,20 @@ public struct ClaudeBrowserObservationEnvelope: Codable, Equatable, Sendable {
 /// A content-free control result for one app-owned automatic refresh request.
 /// It contains no URL, tab title, page text, account value, or browser identity.
 public enum ClaudeBrowserAutomationStatus: String, Codable, CaseIterable, Sendable {
+    case extensionBackgroundReady
+    case nativeHandlerEntered
+    case nativeRequestDecoded
+    case runtimeGenerationValidated
+    case nativeResponseCreated
+    case nativeResponseSent
+    case extensionResponseReceived
     case bridgeReady
     case refreshStarted
     case refreshCompleted
     case permissionRequired
     case signInRequired
     case routeRejected
+    case browserUnavailable
     case usageUnavailable
     case tabUnavailable
     case ownedTabClosed
@@ -148,12 +281,148 @@ public struct ClaudeBrowserAutomationEvent: Codable, Equatable, Sendable {
     public let requestID: String
     public let status: ClaudeBrowserAutomationStatus
     public let occurredAt: String
+    /// Present only on runtime lifecycle receipts. These fixed values prove
+    /// that the responding companion matches the embedded candidate before
+    /// qualification or provider work is dispatched.
+    public let companionVersion: String?
+    public let companionBuild: String?
+    public let protocolSchemaVersion: Int?
+    public let containingApplicationIdentifier: String?
+    public let extensionIdentifier: String?
+    public let teamIdentifier: String?
+    public let runtimeGenerationID: String?
 
     public init(
         requestID: String,
         status: ClaudeBrowserAutomationStatus,
         occurredAt: String,
+        companionVersion: String? = nil,
+        companionBuild: String? = nil,
+        protocolSchemaVersion: Int? = nil,
+        containingApplicationIdentifier: String? = nil,
+        extensionIdentifier: String? = nil,
+        teamIdentifier: String? = nil,
+        runtimeGenerationID: String? = nil,
         kind: String = ClaudeBrowserBridgeContract.automationMessageKind,
+        schemaVersion: Int = ClaudeBrowserBridgeContract.schemaVersion,
+        sourceID: String = ClaudeBrowserBridgeContract.sourceID,
+        browserFamily: ClaudeBrowserFamily = .safari
+    ) {
+        let carriesRuntimeIdentity: Bool
+        switch status {
+        case .extensionBackgroundReady, .nativeHandlerEntered,
+             .nativeRequestDecoded, .runtimeGenerationValidated,
+             .nativeResponseCreated, .nativeResponseSent,
+             .extensionResponseReceived, .bridgeReady:
+            carriesRuntimeIdentity = true
+        default:
+            carriesRuntimeIdentity = false
+        }
+        self.kind = kind
+        self.schemaVersion = schemaVersion
+        self.sourceID = sourceID
+        self.browserFamily = browserFamily
+        self.requestID = requestID
+        self.status = status
+        self.occurredAt = occurredAt
+        self.companionVersion = companionVersion
+            ?? (carriesRuntimeIdentity
+                ? ClaudeBrowserBridgeContract.safariExtensionVersion : nil)
+        self.companionBuild = companionBuild
+            ?? (carriesRuntimeIdentity
+                ? ClaudeBrowserBridgeContract.safariExtensionBuild : nil)
+        self.protocolSchemaVersion = protocolSchemaVersion
+            ?? (carriesRuntimeIdentity
+                ? ClaudeBrowserBridgeContract.schemaVersion : nil)
+        self.containingApplicationIdentifier = containingApplicationIdentifier
+            ?? (carriesRuntimeIdentity
+                ? ClaudeBrowserRuntimeIdentity.production.containingApplicationIdentifier
+                : nil)
+        self.extensionIdentifier = extensionIdentifier
+            ?? (carriesRuntimeIdentity
+                ? ClaudeBrowserRuntimeIdentity.production.extensionIdentifier : nil)
+        self.teamIdentifier = teamIdentifier
+            ?? (carriesRuntimeIdentity
+                ? ClaudeBrowserBridgeContract.expectedTeamIdentifier : nil)
+        self.runtimeGenerationID = runtimeGenerationID
+            ?? (carriesRuntimeIdentity ? UUID().uuidString.lowercased() : nil)
+    }
+}
+
+/// One generation-bound terminal result emitted only after the Companion has
+/// completed its proven-tab and durable-receipt cleanup. A successful packet
+/// carries the allowlisted observation; every failure is content-free. Close
+/// acknowledgements bind their own command ID to the target operation so a
+/// stale cancellation can never complete a newer request.
+public enum ClaudeBrowserProviderFailureReason: String, Codable, CaseIterable, Sendable {
+    case routeNotReady = "ROUTE_NOT_READY"
+    case routeReadinessTimeout = "ROUTE_READINESS_TIMEOUT"
+    case providerDocumentNotReady = "PROVIDER_DOCUMENT_NOT_READY"
+    case targetDataNotReady = "TARGET_DATA_NOT_READY"
+    case targetDataTimeout = "TARGET_DATA_TIMEOUT"
+    case providerStructureUnsupported = "PROVIDER_STRUCTURE_UNSUPPORTED"
+    case providerSessionUnavailable = "PROVIDER_SESSION_UNAVAILABLE"
+    case sitePermissionMissing = "SITE_PERMISSION_MISSING"
+    case extractionValidationFailed = "EXTRACTION_VALIDATION_FAILED"
+    case requestCancelled = "REQUEST_CANCELLED"
+    case providerTabClosed = "PROVIDER_TAB_CLOSED"
+}
+
+public struct ClaudeBrowserTerminalPacket: Codable, Equatable, Sendable {
+    public let kind: String
+    public let schemaVersion: Int
+    public let sourceID: String
+    public let browserFamily: ClaudeBrowserFamily
+    public let requestID: String
+    public let targetRequestID: String?
+    public let runtimeGenerationID: String
+    public let status: ClaudeBrowserAutomationStatus
+    public let occurredAt: String
+    public let observation: ClaudeBrowserObservationEnvelope?
+    public let providerFailureReason: ClaudeBrowserProviderFailureReason?
+
+    public init(
+        requestID: String,
+        targetRequestID: String? = nil,
+        runtimeGenerationID: String,
+        status: ClaudeBrowserAutomationStatus,
+        occurredAt: String,
+        observation: ClaudeBrowserObservationEnvelope? = nil,
+        providerFailureReason: ClaudeBrowserProviderFailureReason? = nil,
+        kind: String = ClaudeBrowserBridgeContract.terminalMessageKind,
+        schemaVersion: Int = ClaudeBrowserBridgeContract.schemaVersion,
+        sourceID: String = ClaudeBrowserBridgeContract.sourceID,
+        browserFamily: ClaudeBrowserFamily = .safari
+    ) {
+        self.kind = kind
+        self.schemaVersion = schemaVersion
+        self.sourceID = sourceID
+        self.browserFamily = browserFamily
+        self.requestID = requestID.lowercased()
+        self.targetRequestID = targetRequestID?.lowercased()
+        self.runtimeGenerationID = runtimeGenerationID.lowercased()
+        self.status = status
+        self.occurredAt = occurredAt
+        self.observation = observation
+        self.providerFailureReason = providerFailureReason
+    }
+}
+
+/// A content-free request from the Safari background page to its signed native
+/// extension handler. The handler, rather than JavaScript configuration,
+/// creates the authoritative runtime identity receipt.
+public struct ClaudeBrowserRuntimeQualificationRequest: Codable, Equatable, Sendable {
+    public let kind: String
+    public let schemaVersion: Int
+    public let sourceID: String
+    public let browserFamily: ClaudeBrowserFamily
+    public let requestID: String
+    public let runtimeGenerationID: String
+
+    public init(
+        requestID: String,
+        runtimeGenerationID: String,
+        kind: String = ClaudeBrowserBridgeContract.runtimeQualificationMessageKind,
         schemaVersion: Int = ClaudeBrowserBridgeContract.schemaVersion,
         sourceID: String = ClaudeBrowserBridgeContract.sourceID,
         browserFamily: ClaudeBrowserFamily = .safari
@@ -163,7 +432,99 @@ public struct ClaudeBrowserAutomationEvent: Codable, Equatable, Sendable {
         self.sourceID = sourceID
         self.browserFamily = browserFamily
         self.requestID = requestID
-        self.status = status
-        self.occurredAt = occurredAt
+        self.runtimeGenerationID = runtimeGenerationID
+    }
+}
+
+/// The signed native handler's content-free answer to one qualification
+/// request. JavaScript must validate every field and echo the reply ID in a
+/// separate acknowledgement before the handler may publish `bridgeReady`.
+public struct ClaudeBrowserRuntimeQualificationReply: Codable, Equatable, Sendable {
+    public enum Reason: String, Codable, Equatable, Sendable {
+        case accepted
+        case runtimeGenerationMismatch
+    }
+
+    public let kind: String
+    public let schemaVersion: Int
+    public let sourceID: String
+    public let browserFamily: ClaudeBrowserFamily
+    public let requestID: String
+    public let replyID: String
+    public let runtimeGenerationID: String
+    public let companionVersion: String
+    public let companionBuild: String
+    public let protocolSchemaVersion: Int
+    public let containingApplicationIdentifier: String
+    public let extensionIdentifier: String
+    public let teamIdentifier: String
+    public let accepted: Bool
+    public let reason: Reason
+
+    public init(
+        requestID: String,
+        replyID: String,
+        runtimeGenerationID: String,
+        companionVersion: String,
+        companionBuild: String,
+        containingApplicationIdentifier: String,
+        extensionIdentifier: String,
+        teamIdentifier: String,
+        accepted: Bool,
+        reason: Reason,
+        kind: String = ClaudeBrowserBridgeContract.runtimeQualificationReplyKind,
+        schemaVersion: Int = ClaudeBrowserBridgeContract.schemaVersion,
+        sourceID: String = ClaudeBrowserBridgeContract.sourceID,
+        browserFamily: ClaudeBrowserFamily = .safari,
+        protocolSchemaVersion: Int = ClaudeBrowserBridgeContract.schemaVersion
+    ) {
+        self.kind = kind
+        self.schemaVersion = schemaVersion
+        self.sourceID = sourceID
+        self.browserFamily = browserFamily
+        self.requestID = requestID
+        self.replyID = replyID
+        self.runtimeGenerationID = runtimeGenerationID
+        self.companionVersion = companionVersion
+        self.companionBuild = companionBuild
+        self.protocolSchemaVersion = protocolSchemaVersion
+        self.containingApplicationIdentifier = containingApplicationIdentifier
+        self.extensionIdentifier = extensionIdentifier
+        self.teamIdentifier = teamIdentifier
+        self.accepted = accepted
+        self.reason = reason
+    }
+}
+
+/// A content-free proof that the WebExtension received and accepted the exact
+/// native reply. The native handler consumes each reply ID at most once.
+public struct ClaudeBrowserRuntimeQualificationAcknowledgement: Codable, Equatable, Sendable {
+    public let kind: String
+    public let schemaVersion: Int
+    public let sourceID: String
+    public let browserFamily: ClaudeBrowserFamily
+    public let requestID: String
+    public let replyID: String
+    public let runtimeGenerationID: String
+    public let accepted: Bool
+
+    public init(
+        requestID: String,
+        replyID: String,
+        runtimeGenerationID: String,
+        accepted: Bool = true,
+        kind: String = ClaudeBrowserBridgeContract.runtimeQualificationAcknowledgementKind,
+        schemaVersion: Int = ClaudeBrowserBridgeContract.schemaVersion,
+        sourceID: String = ClaudeBrowserBridgeContract.sourceID,
+        browserFamily: ClaudeBrowserFamily = .safari
+    ) {
+        self.kind = kind
+        self.schemaVersion = schemaVersion
+        self.sourceID = sourceID
+        self.browserFamily = browserFamily
+        self.requestID = requestID
+        self.replyID = replyID
+        self.runtimeGenerationID = runtimeGenerationID
+        self.accepted = accepted
     }
 }

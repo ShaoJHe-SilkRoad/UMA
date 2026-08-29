@@ -23,6 +23,17 @@ struct UsagePanelNavigationRequest: Equatable {
 
 @MainActor
 final class TransparentUsagePanelController {
+    struct DiagnosticState: Equatable {
+        let isVisible: Bool
+        let isEffectivelyOpen: Bool
+        let isResponsive: Bool
+        let eventMonitorCount: Int
+        let level: Int
+        let alpha: Double
+        let frame: String
+        let ignoresMouseEvents: Bool
+    }
+
     private enum Layout {
         static let width = UsagePanelMetrics.width
         static let initialHeight = UsagePanelMetrics.minimumHeight
@@ -33,34 +44,34 @@ final class TransparentUsagePanelController {
 
     private let panel: TransparentUsagePanel
     private let tuning: GlassTuning
-    private let store: UsageStore
-    private let claudeSettings: ClaudeBrowserSettingsModel
-    private let antigravitySettings: AntigravitySettingsModel
-    private let workBuddySettings: WorkBuddySettingsModel
-    private let workBuddyLogin: WorkBuddyLoginCoordinator
-    private let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController
     private weak var statusItem: NSStatusItem?
     private let visibilityDidChange: (Bool) -> Void
     private let navigation = UsagePanelNavigationCoordinator()
     private var globalEventMonitor: Any?
     private var localEventMonitor: Any?
+    private var diagnosticEvent: ((AppShellDiagnosticStage, Bool, String?) -> Void)?
+    private var hasAttachedContent = false
+    private weak var placeholderLabel: NSTextField?
+
+    var diagnosticState: DiagnosticState {
+        DiagnosticState(
+            isVisible: panel.isVisible,
+            isEffectivelyOpen: isEffectivelyOpen,
+            isResponsive: panel.contentView?.hitTest(
+                NSPoint(x: panel.contentView?.bounds.midX ?? 0, y: panel.contentView?.bounds.midY ?? 0)
+            ) != nil,
+            eventMonitorCount: [globalEventMonitor, localEventMonitor].compactMap { $0 }.count,
+            level: Int(panel.level.rawValue),
+            alpha: panel.alphaValue,
+            frame: NSStringFromRect(panel.frame),
+            ignoresMouseEvents: panel.ignoresMouseEvents
+        )
+    }
 
     init(
-        store: UsageStore,
         statusItem: NSStatusItem,
-        claudeSettings: ClaudeBrowserSettingsModel,
-        antigravitySettings: AntigravitySettingsModel,
-        workBuddySettings: WorkBuddySettingsModel,
-        workBuddyLogin: WorkBuddyLoginCoordinator,
-        workBuddyAccountWebSync: WorkBuddyAccountWebSessionController,
         visibilityDidChange: @escaping (Bool) -> Void
     ) {
-        self.store = store
-        self.claudeSettings = claudeSettings
-        self.antigravitySettings = antigravitySettings
-        self.workBuddySettings = workBuddySettings
-        self.workBuddyLogin = workBuddyLogin
-        self.workBuddyAccountWebSync = workBuddyAccountWebSync
         self.statusItem = statusItem
         self.visibilityDidChange = visibilityDidChange
         tuning = .final
@@ -75,7 +86,19 @@ final class TransparentUsagePanelController {
             backing: .buffered,
             defer: false
         )
+        configurePanelShell()
+    }
 
+    func attachContent(
+        store: UsageStore,
+        claudeSettings: ClaudeBrowserSettingsModel,
+        antigravitySettings: AntigravitySettingsModel,
+        workBuddySettings: WorkBuddySettingsModel,
+        workBuddyLogin: WorkBuddyLoginCoordinator,
+        workBuddyAccountWebSync: WorkBuddyAccountWebSessionController
+    ) {
+        guard !hasAttachedContent else { return }
+        hasAttachedContent = true
         configurePanel(
             store: store,
             claudeSettings: claudeSettings,
@@ -88,7 +111,15 @@ final class TransparentUsagePanelController {
     }
 
     func toggle() {
-        panel.isVisible ? close() : show()
+        diagnosticEvent?(.panelControllerExists, true, nil)
+        diagnosticEvent?(.panelWindowExists, true, nil)
+        isEffectivelyOpen ? close() : show()
+    }
+
+    func setDiagnosticEventHandler(
+        _ handler: @escaping (AppShellDiagnosticStage, Bool, String?) -> Void
+    ) {
+        diagnosticEvent = handler
     }
 
     func show(expandingProviderID providerID: String) {
@@ -126,18 +157,6 @@ final class TransparentUsagePanelController {
         workBuddyAccountWebSync: WorkBuddyAccountWebSessionController,
         expandedProviderIDs: Set<String>
     ) {
-        panel.level = .popUpMenu
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.hidesOnDeactivate = false
-        panel.isFloatingPanel = true
-        panel.becomesKeyOnlyIfNeeded = true
-        panel.animationBehavior = .utilityWindow
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
-        panel.isMovable = false
-        panel.isReleasedWhenClosed = false
-
         let rootView = AdaptivePanelMaterialHostView(
             frame: NSRect(
                 x: 0,
@@ -185,6 +204,46 @@ final class TransparentUsagePanelController {
         panel.contentView = rootView
     }
 
+    func markRuntimeAttachmentFailed() {
+        placeholderLabel?.stringValue = "UMA shell ready — usage data unavailable"
+    }
+
+    private func configurePanelShell() {
+        panel.level = .popUpMenu
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.isFloatingPanel = true
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.animationBehavior = .utilityWindow
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
+        panel.isMovable = false
+        panel.isReleasedWhenClosed = false
+
+        let placeholder = NSVisualEffectView(
+            frame: NSRect(x: 0, y: 0, width: Layout.width, height: Layout.initialHeight)
+        )
+        placeholder.material = .popover
+        placeholder.blendingMode = .behindWindow
+        placeholder.state = .active
+        placeholder.wantsLayer = true
+        placeholder.layer?.cornerRadius = Layout.cornerRadius
+        let label = NSTextField(labelWithString: "UMA is starting…")
+        label.alignment = .center
+        label.textColor = .secondaryLabelColor
+        label.frame = NSRect(
+            x: 24,
+            y: (Layout.initialHeight - 24) / 2,
+            width: Layout.width - 48,
+            height: 24
+        )
+        label.autoresizingMask = [.minYMargin, .maxYMargin, .width]
+        placeholder.addSubview(label)
+        placeholderLabel = label
+        panel.contentView = placeholder
+    }
+
     private func resizePanel(to height: CGFloat) {
         let height = min(
             UsagePanelMetrics.height,
@@ -206,9 +265,22 @@ final class TransparentUsagePanelController {
     }
 
     private func show() {
+        // Converge from any stale/invisible-open window state before ordering.
+        NSApp.unhide(nil)
+        panel.alphaValue = 1
+        panel.ignoresMouseEvents = false
         positionPanel()
         panel.makeKeyAndOrderFront(nil)
+        if !panel.isVisible { panel.orderFrontRegardless() }
         panel.invalidateShadow()
+        diagnosticEvent?(.panelWindowOrderedFront, panel.isVisible, nil)
+        diagnosticEvent?(.panelWindowKeyState, panel.isKeyWindow, nil)
+        diagnosticEvent?(.panelVisible, panel.isVisible, nil)
+        diagnosticEvent?(
+            .hitTestingEnabled,
+            !panel.ignoresMouseEvents && panel.alphaValue > 0.01,
+            nil
+        )
         visibilityDidChange(true)
         DispatchQueue.main.async { [weak self] in
             guard let self, self.panel.isVisible else { return }
@@ -222,6 +294,18 @@ final class TransparentUsagePanelController {
             visibilityDidChange(false)
         }
         removeEventMonitors()
+        diagnosticEvent?(.panelClosed, !panel.isVisible, nil)
+    }
+
+    private var isEffectivelyOpen: Bool {
+        guard panel.isVisible,
+              panel.alphaValue > 0.01,
+              !panel.ignoresMouseEvents,
+              panel.frame.width > 1,
+              panel.frame.height > 1 else { return false }
+        return NSScreen.screens.contains { screen in
+            screen.frame.intersects(panel.frame)
+        }
     }
 
     private func positionPanel() {

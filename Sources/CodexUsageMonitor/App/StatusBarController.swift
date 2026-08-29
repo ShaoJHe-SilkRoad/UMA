@@ -4,82 +4,184 @@ import Combine
 
 @MainActor
 final class StatusBarController: NSObject {
-    private let store: UsageStore
-    private let workBuddyLogin: WorkBuddyLoginCoordinator
-    private let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController
+    private var store: UsageStore?
+    private var workBuddyLogin: WorkBuddyLoginCoordinator?
+    private var workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
+    private let lifecycleGeneration: UUID
+    private let diagnostics: AppShellDiagnosticRecorder
     private let statusItem: NSStatusItem
-    private var panelController: TransparentUsagePanelController!
-    private var assistantController: DesktopAssistantPanelController!
+    private var panelController: TransparentUsagePanelController?
+    private var assistantController: DesktopAssistantPanelController?
     private var storeObserver: AnyCancellable?
     private var statusUpdateScheduled = false
+    private var isTornDown = false
+    private var statusEventMonitor: Any?
+    private var statusEventBeganAt: TimeInterval?
 
     init(
-        store: UsageStore,
-        claudeSettings: ClaudeBrowserSettingsModel,
-        antigravitySettings: AntigravitySettingsModel,
-        workBuddySettings: WorkBuddySettingsModel,
-        workBuddyLogin: WorkBuddyLoginCoordinator,
-        workBuddyAccountWebSync: WorkBuddyAccountWebSessionController
+        lifecycleGeneration: UUID = UUID(),
+        diagnostics: AppShellDiagnosticRecorder = AppShellDiagnosticRecorder()
     ) {
-        self.store = store
-        self.workBuddyLogin = workBuddyLogin
-        self.workBuddyAccountWebSync = workBuddyAccountWebSync
+        self.lifecycleGeneration = lifecycleGeneration
+        self.diagnostics = diagnostics
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
+        configureStatusButton()
         panelController = TransparentUsagePanelController(
-            store: store,
             statusItem: statusItem,
-            claudeSettings: claudeSettings,
-            antigravitySettings: antigravitySettings,
-            workBuddySettings: workBuddySettings,
-            workBuddyLogin: workBuddyLogin,
-            workBuddyAccountWebSync: workBuddyAccountWebSync,
             visibilityDidChange: { [weak self] isVisible in
                 self?.statusItem.button?.highlight(isVisible)
-                self?.store.setPanelVisible(isVisible)
+                self?.store?.setPanelVisible(isVisible)
             }
         )
+        panelController?.setDiagnosticEventHandler { [weak self] stage, reached, detail in
+            self?.record(stage, reached: reached, detail: detail)
+        }
         assistantController = DesktopAssistantPanelController(
             onSelectProvider: { [weak self] providerID in
-                self?.panelController.show(expandingProviderID: providerID)
+                self?.panelController?.show(expandingProviderID: providerID)
             }
         )
-        configureStatusButton()
+        updateStatusButton()
+        installStatusEventMonitor()
+    }
+
+    func attach(runtime: UsageMonitorRuntime) {
+        guard store == nil, !isTornDown else { return }
+        store = runtime.store
+        workBuddyLogin = runtime.workBuddyLogin
+        workBuddyAccountWebSync = runtime.workBuddyAccountWebSync
+        panelController?.attachContent(
+            store: runtime.store,
+            claudeSettings: runtime.claudeSettings,
+            antigravitySettings: runtime.antigravitySettings,
+            workBuddySettings: runtime.workBuddySettings,
+            workBuddyLogin: runtime.workBuddyLogin,
+            workBuddyAccountWebSync: runtime.workBuddyAccountWebSync
+        )
         observeUsageChanges()
         updateStatusButton()
+        record(.runtimeAttached)
+    }
+
+    func recordRuntimeAttachmentFailure() {
+        panelController?.markRuntimeAttachmentFailed()
+        record(.runtimeAttachmentFailed, reached: false, detail: "compositionRejected")
+    }
+
+    func runMachineDiagnostic(toggleCount: Int) async -> AppShellMachineDiagnosticResult {
+        guard let button = statusItem.button else {
+            return machineDiagnosticResult(
+                requested: toggleCount,
+                completed: 0,
+                failure: "STATUS_ITEM_BUTTON_MISSING"
+            )
+        }
+        guard button.target === self,
+              button.action == #selector(handleStatusItemAction) else {
+            return machineDiagnosticResult(
+                requested: toggleCount,
+                completed: 0,
+                failure: "STATUS_ITEM_TARGET_ACTION_INVALID"
+            )
+        }
+        var completed = 0
+        for index in 0..<toggleCount {
+            button.performClick(nil)
+            await Task.yield()
+            guard let state = panelController?.diagnosticState else {
+                return machineDiagnosticResult(
+                    requested: toggleCount,
+                    completed: completed,
+                    failure: "PANEL_WINDOW_MISSING"
+                )
+            }
+            let expectsOpen = index.isMultiple(of: 2)
+            let converged = expectsOpen
+                ? state.isEffectivelyOpen && state.isResponsive
+                : !state.isVisible && state.eventMonitorCount == 0
+            guard converged else {
+                return machineDiagnosticResult(
+                    requested: toggleCount,
+                    completed: completed,
+                    failure: expectsOpen
+                        ? "PANEL_OPEN_CONVERGENCE_FAILED"
+                        : "PANEL_CLOSE_CONVERGENCE_FAILED"
+                )
+            }
+            completed += 1
+        }
+        return machineDiagnosticResult(
+            requested: toggleCount,
+            completed: completed,
+            failure: nil
+        )
+    }
+
+    private func machineDiagnosticResult(
+        requested: Int,
+        completed: Int,
+        failure: String?
+    ) -> AppShellMachineDiagnosticResult {
+        let panel = panelController?.diagnosticState
+        return AppShellMachineDiagnosticResult(
+            requestedToggleCount: requested,
+            completedToggleCount: completed,
+            statusItemCount: isTornDown ? 0 : 1,
+            panelWindowCount: panelController == nil ? 0 : 1,
+            eventMonitorCount: panel?.eventMonitorCount ?? 0,
+            applicationIsHidden: NSApp.isHidden,
+            finalPanelVisible: panel?.isVisible ?? false,
+            providerStartupEnabled: false,
+            passed: failure == nil,
+            firstFailure: failure
+        )
     }
 
     func tearDown() {
-        panelController.tearDown()
-        workBuddyLogin.tearDown()
-        workBuddyAccountWebSync.tearDown()
-        assistantController.tearDown()
+        guard !isTornDown else { return }
+        isTornDown = true
+        panelController?.tearDown()
+        workBuddyLogin?.tearDown()
+        workBuddyAccountWebSync?.tearDown()
+        assistantController?.tearDown()
         storeObserver?.cancel()
+        if let statusEventMonitor { NSEvent.removeMonitor(statusEventMonitor) }
+        statusEventMonitor = nil
         NSStatusBar.system.removeStatusItem(statusItem)
     }
 
+    func recordShellCreated() {
+        record(.shellCreated)
+        record(.statusItemExists)
+        record(.statusItemButtonExists, reached: statusItem.button != nil)
+        record(.statusItemEnabled, reached: statusItem.button?.isEnabled == true)
+        record(.targetPresent, reached: statusItem.button?.target === self)
+        record(.actionPresent, reached: statusItem.button?.action == #selector(handleStatusItemAction))
+    }
+
     func setDesktopAssistantEnabled(_ isEnabled: Bool) {
-        assistantController.setEnabled(isEnabled)
+        assistantController?.setEnabled(isEnabled)
     }
 
     func setDesktopAssistantAlwaysOnTop(_ isAlwaysOnTop: Bool) {
-        assistantController.setAlwaysOnTop(isAlwaysOnTop)
+        assistantController?.setAlwaysOnTop(isAlwaysOnTop)
     }
 
     func setDesktopAssistantDensity(_ density: DesktopAssistantDensity) {
-        assistantController.setDensity(density)
+        assistantController?.setDensity(density)
     }
 
     func toggleDesktopAssistantVisibility() {
-        assistantController.toggleVisibility()
+        assistantController?.toggleVisibility()
     }
 
     private func configureStatusButton() {
         guard let button = statusItem.button else { return }
         let image = NSImage(
             systemSymbolName: "gauge.with.dots.needle.67percent",
-            accessibilityDescription: store.language.appTitle
+            accessibilityDescription: "UMA"
         )
         image?.isTemplate = true
         button.image = image
@@ -88,11 +190,11 @@ final class StatusBarController: NSObject {
         button.target = self
         button.action = #selector(handleStatusItemAction)
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        button.toolTip = store.language.appTitle
+        button.toolTip = "UMA"
     }
 
     private func observeUsageChanges() {
-        storeObserver = store.objectWillChange.sink { [weak self] _ in
+        storeObserver = store?.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self, !self.statusUpdateScheduled else { return }
                 self.statusUpdateScheduled = true
@@ -106,28 +208,122 @@ final class StatusBarController: NSObject {
     }
 
     private func updateStatusButton() {
-        statusItem.button?.title = store.menuPercent.map { " " + String($0) + "%" } ?? " —"
-        statusItem.button?.toolTip = store.language.appTitle
+        repairStatusButtonContractIfNeeded()
+        statusItem.button?.title = store?.menuPercent.map { " " + String($0) + "%" } ?? " —"
+        statusItem.button?.toolTip = store?.language.appTitle ?? "UMA"
         statusItem.button?.setAccessibilityLabel(
-            store.menuPercent.map { store.language.remainingAccessibilityLabel(percent: $0) } ?? store.language.appTitle
+            store?.menuPercent.map {
+                store?.language.remainingAccessibilityLabel(percent: $0) ?? "UMA"
+            } ?? store?.language.appTitle ?? "UMA"
         )
-        assistantController.update(
-            cards: store.assistantPresentationCards.map {
-                DesktopAssistantCard(shared: $0, language: store.language)
+        if let store {
+            assistantController?.update(
+                cards: store.assistantPresentationCards.map {
+                    DesktopAssistantCard(shared: $0, language: store.language)
+                }
+            )
+        }
+    }
+
+    private func installStatusEventMonitor() {
+        guard statusEventMonitor == nil else { return }
+        statusEventMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .leftMouseUp, .rightMouseUp]
+        ) { [weak self] event in
+            guard let self,
+                  event.window === self.statusItem.button?.window else { return event }
+            switch event.type {
+            case .leftMouseDown, .rightMouseDown:
+                self.statusEventBeganAt = ProcessInfo.processInfo.systemUptime
+                self.record(.mouseDownReceived)
+            case .leftMouseUp, .rightMouseUp:
+                self.record(.mouseUpReceived)
+            default:
+                break
             }
-        )
+            return event
+        }
     }
 
     @objc
     private func handleStatusItemAction() {
-        if NSApp.currentEvent?.type == .rightMouseUp {
+        guard !isTornDown else {
+            record(.staleGenerationRejected, reached: false, detail: "tornDown")
+            return
+        }
+        let eventType = NSApp.currentEvent?.type
+        let eventLatencyMilliseconds = statusEventBeganAt.map {
+            Int(max(0, (ProcessInfo.processInfo.systemUptime - $0) * 1_000))
+        } ?? 0
+        statusEventBeganAt = nil
+        record(.actionInvoked)
+        record(
+            .mainActorEntered,
+            detail: Thread.isMainThread ? "main" : "notMain",
+            mainThreadStallMilliseconds: eventLatencyMilliseconds
+        )
+        record(.toggleRequested)
+        if eventType == .rightMouseDown || eventType == .rightMouseUp {
             showContextMenu()
         } else {
-            panelController.toggle()
+            panelController?.toggle()
         }
     }
 
+    private func repairStatusButtonContractIfNeeded() {
+        guard let button = statusItem.button else {
+            record(.statusItemButtonExists, reached: false)
+            return
+        }
+        button.isEnabled = true
+        if button.target !== self { button.target = self }
+        if button.action != #selector(handleStatusItemAction) {
+            button.action = #selector(handleStatusItemAction)
+        }
+    }
+
+    private func record(
+        _ stage: AppShellDiagnosticStage,
+        reached: Bool = true,
+        detail: String? = nil,
+        mainThreadStallMilliseconds: Int = 0
+    ) {
+        let panel = panelController?.diagnosticState
+        diagnostics.record(
+            AppShellDiagnosticReceipt(
+                stage: stage,
+                reached: reached,
+                lifecycleGeneration: lifecycleGeneration.uuidString,
+                statusItemCount: isTornDown ? 0 : 1,
+                panelWindowCount: panelController == nil ? 0 : 1,
+                eventMonitorCount:
+                    (panel?.eventMonitorCount ?? 0) + (statusEventMonitor == nil ? 0 : 1),
+                mainThreadStallMilliseconds: mainThreadStallMilliseconds,
+                activeModalWindow: NSApp.modalWindow != nil,
+                activeSheetWindow: NSApp.windows.contains { $0.attachedSheet != nil },
+                eventMonitorOwners: eventMonitorOwners(panelMonitorCount: panel?.eventMonitorCount ?? 0),
+                applicationIsHidden: NSApp.isHidden,
+                frontmostApplicationBundleIdentifier:
+                    NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+                panelLevel: panel?.level,
+                panelAlpha: panel?.alpha,
+                panelFrame: panel?.frame,
+                panelIgnoresMouseEvents: panel?.ignoresMouseEvents,
+                detail: detail,
+                timestamp: Date()
+            )
+        )
+    }
+
+    private func eventMonitorOwners(panelMonitorCount: Int) -> [String] {
+        var owners: [String] = []
+        if statusEventMonitor != nil { owners.append("statusItem.local") }
+        if panelMonitorCount > 0 { owners.append("usagePanel.bounded") }
+        return owners
+    }
+
     private func showContextMenu() {
+        guard let store, assistantController != nil else { return }
         let menu = NSMenu()
         let refresh = NSMenuItem(
             title: store.language.refreshUsage,
@@ -153,6 +349,7 @@ final class StatusBarController: NSObject {
     }
 
     private func desktopAssistantMenuItem() -> NSMenuItem {
+        guard let assistantController else { return NSMenuItem() }
         let root = NSMenuItem(
             title: assistantText(english: "Desktop Assistant", chinese: "桌面助手"),
             action: nil,
@@ -215,7 +412,7 @@ final class StatusBarController: NSObject {
     }
 
     private func assistantText(english: String, chinese: String) -> String {
-        store.language == .simplifiedChinese ? chinese : english
+        store?.language == .simplifiedChinese ? chinese : english
     }
 
     private func densityTitle(_ density: DesktopAssistantDensity) -> String {
@@ -231,16 +428,18 @@ final class StatusBarController: NSObject {
 
     @objc
     private func toggleDesktopAssistantFromMenu() {
-        assistantController.toggleVisibility()
+        assistantController?.toggleVisibility()
     }
 
     @objc
     private func toggleDesktopAssistantEnabledFromMenu() {
+        guard let assistantController else { return }
         assistantController.setEnabled(!assistantController.isEnabled)
     }
 
     @objc
     private func toggleDesktopAssistantAlwaysOnTopFromMenu() {
+        guard let assistantController else { return }
         assistantController.setAlwaysOnTop(!assistantController.isAlwaysOnTop)
     }
 
@@ -250,12 +449,12 @@ final class StatusBarController: NSObject {
               let density = DesktopAssistantDensity(rawValue: rawValue) else {
             return
         }
-        assistantController.setDensity(density)
+        assistantController?.setDensity(density)
     }
 
     @objc
     private func refreshUsage() {
-        guard store.allowsManualRefresh else { return }
+        guard let store, store.allowsManualRefresh else { return }
         Task { await store.refresh() }
     }
 

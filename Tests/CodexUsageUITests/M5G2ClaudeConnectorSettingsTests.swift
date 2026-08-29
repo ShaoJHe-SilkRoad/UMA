@@ -4,16 +4,20 @@ import Foundation
 import Testing
 @testable import CodexUsageUI
 
-@Suite("M5-BROWSER-G1 Claude connector and Settings")
+@Suite("M5 Local Smart connector and Settings")
 struct M5G2ClaudeConnectorSettingsTests {
     @Test
-    func descriptorLocksBrowserSourceAndPrivacyBoundary() {
+    func descriptorLocksLocalSmartSourceAndPrivacyBoundary() {
         let descriptor = BrowserConnectorFixture(consent: false).connector().descriptor
         #expect(descriptor.id.rawValue == "claude.browserSync")
-        #expect(descriptor.localSourceClass == .browserCompanionUsage)
-        #expect(descriptor.authenticationMethod == .systemBrowserSession)
-        #expect(descriptor.usageReadContract == .currentBrowserCompanionUsageRead)
-        #expect(descriptor.sourceTier == .authorizedReadOnlyRemote)
+        #expect(descriptor.localSourceClass == .admittedStructuredLocal)
+        #expect(descriptor.authenticationMethod == .officialApplicationOwnedSession)
+        #expect(descriptor.usageReadContract == .currentStructuredLocalRead)
+        #expect(descriptor.sourceTier == .officialStructuredHook)
+        #expect(descriptor.officialSource.contains("Local Smart Mode"))
+        #expect(descriptor.capabilities.contains(.localActivity))
+        #expect(!descriptor.capabilities.contains(.automaticRefresh))
+        #expect(!descriptor.capabilities.contains(.sanitizedLastValidRestore))
         #expect(!descriptor.supportsRestore)
         #expect(descriptor.expectedRuntime == .none)
         #expect(descriptor.privacyAllowlist.contains("fiveHourUsedPercentage"))
@@ -34,33 +38,40 @@ struct M5G2ClaudeConnectorSettingsTests {
         await connector.syncNow()
         #expect(await fixture.bridge.startCount == 0)
         #expect(await fixture.bridge.openCount == 0)
-        #expect((await connector.currentSnapshot()).state == .authenticationRequired)
+        let snapshot = await connector.currentSnapshot()
+        #expect(!snapshot.hasValidData)
+        #expect(snapshot.channels.isEmpty)
     }
 
     @Test
-    func applicationStartListensWithoutOpeningBrowser() async {
+    func applicationStartKeepsBrowserListenerDormant() async {
         let fixture = BrowserConnectorFixture(consent: true)
         let connector = fixture.connector()
         await connector.start()
         await connector.start()
+        #expect(await fixture.bridge.startCount == 0)
+        #expect(await fixture.bridge.openCount == 0)
+        #expect(await fixture.bridge.automaticRequests.isEmpty)
+    }
+
+    @Test
+    func explicitAccuracySyncCreatesExactlyOneBoundedUsageRead() async {
+        let fixture = BrowserConnectorFixture(consent: true)
+        let connector = fixture.connector()
+        await connector.accuracySync()
         #expect(await fixture.bridge.startCount == 1)
         #expect(await fixture.bridge.openCount == 0)
-        #expect(await connector.lifecycleState() == .waitingForUsagePage)
-        #expect((await connector.currentSnapshot()).state == .waitingForFirstResponse)
+        #expect(await fixture.bridge.automaticRequests.count == 1)
+        #expect((await connector.diagnostics()).automaticDispatchCount == 1)
+        #expect((await connector.diagnostics()).scheduledCycleCount == 0)
+        #expect(!(await connector.diagnostics()).schedulerActive)
+        let requestID = await fixture.bridge.automaticRequests[0].requestID
+        await fixture.bridge.sendAutomation(requestID: requestID, status: .ownedTabClosed)
+        await connector.disconnect()
     }
 
     @Test
-    func explicitConnectOpensExactUsageRouteOnceAndWaits() async {
-        let fixture = BrowserConnectorFixture(consent: true)
-        let connector = fixture.connector()
-        await connector.connect(openUsagePage: true)
-        #expect(await fixture.bridge.startCount == 1)
-        #expect(await fixture.bridge.openCount == 1)
-        #expect(await connector.lifecycleState() == .waitingForUsagePage)
-    }
-
-    @Test
-    func registryKeepsConsentOwnedListenerAliveUntilFirstToolbarRead() async throws {
+    func registryKeepsBrowserListenerDormantUntilExplicitAccuracySync() async throws {
         let fixture = BrowserConnectorFixture(consent: true)
         let connector = fixture.connector()
         let registry = try AgentConnectorRegistry(connectors: [connector])
@@ -71,10 +82,13 @@ struct M5G2ClaudeConnectorSettingsTests {
             trigger: .applicationLaunch
         )
         #expect(initial.records.first?.admission == .hiddenCurrentReadFailed)
-        #expect(await fixture.bridge.startCount == 1)
+        #expect(await fixture.bridge.startCount == 0)
         #expect(await fixture.bridge.stopCount == 0)
 
+        await connector.accuracySync()
+        #expect(await fixture.bridge.startCount == 1)
         await fixture.bridge.send(browserEnvelope(five: 9, seven: 71))
+        try await registry.refresh(ClaudeCodeUsageConnector.connectorID)
         for _ in 0..<20 {
             if await registry.orderedSnapshots().first?.freshness == .fresh {
                 break
@@ -95,6 +109,7 @@ struct M5G2ClaudeConnectorSettingsTests {
         let registry = try AgentConnectorRegistry(connectors: [connector])
 
         _ = await registry.scanSurfaceAdmissions(trigger: .applicationLaunch)
+        await connector.accuracySync()
         await fixture.bridge.reject()
         for _ in 0..<20 {
             if await registry.surfaceAdmissionSet()?.records.first?.admission
@@ -107,7 +122,9 @@ struct M5G2ClaudeConnectorSettingsTests {
         #expect(await registry.orderedSnapshots().isEmpty)
         #expect(await fixture.bridge.stopCount == 0)
 
+        await connector.accuracySync()
         await fixture.bridge.send(browserEnvelope(five: 9, seven: 71))
+        try await registry.refresh(ClaudeCodeUsageConnector.connectorID)
         for _ in 0..<20 {
             if await registry.orderedSnapshots().first?.freshness == .fresh {
                 break
@@ -120,17 +137,19 @@ struct M5G2ClaudeConnectorSettingsTests {
     }
 
     @Test
-    func acceptedObservationPublishesIndependentAccountWindows() async {
+    func acceptedObservationPublishesIndependentAccountWindows() async throws {
         let fixture = BrowserConnectorFixture(consent: true)
         let connector = fixture.connector()
         await connector.start()
+        await connector.accuracySync()
         await fixture.bridge.send(browserEnvelope(five: 9, seven: 71))
 
         let snapshot = await connector.currentSnapshot()
         #expect(snapshot.state == .ready)
         #expect(snapshot.freshness == .fresh)
         #expect(snapshot.safeFailure == nil)
-        let windows = snapshot.channels[0].rateLimitWindows
+        let channel = try #require(snapshot.channels.first)
+        let windows = channel.rateLimitWindows
         #expect(windows.count == 2)
         #expect(windows.first { $0.kind == .fiveHour }?.normalizedRemainingPercent == 91)
         #expect(windows.first { $0.kind == .sevenDay }?.normalizedRemainingPercent == 29)
@@ -142,44 +161,44 @@ struct M5G2ClaudeConnectorSettingsTests {
     }
 
     @Test
-    func malformedFollowUpHidesQuotaAndFailsClosed() async {
+    func malformedAccuracyFollowUpCannotInvalidateExistingExactTruth() async {
         let fixture = BrowserConnectorFixture(consent: true)
         let connector = fixture.connector()
         await connector.start()
+        await connector.accuracySync()
         await fixture.bridge.send(browserEnvelope(five: 20, seven: 40))
+        await connector.accuracySync()
         await fixture.bridge.reject()
 
         let snapshot = await connector.currentSnapshot()
-        #expect(!snapshot.hasValidData)
-        #expect(snapshot.freshness == .unavailable)
-        #expect(snapshot.safeFailure == .malformedResponse)
+        #expect(snapshot.hasValidData)
+        #expect(snapshot.freshness == .fresh)
+        #expect(snapshot.safeFailure == nil)
         #expect(LocalProviderEligibilityScanner.admission(
             for: snapshot,
             descriptor: connector.descriptor
-        ).admittedSnapshot == nil)
+        ).admittedSnapshot == snapshot)
     }
 
     @Test
-    func retainedSnapshotStalesThenWithdraws() async {
+    func exactSnapshotStalesThenWithdrawsAtProviderReset() async {
         let clock = BrowserTestClock()
         let fixture = BrowserConnectorFixture(consent: true, clock: clock)
         let connector = fixture.connector()
         await connector.start()
+        await connector.accuracySync()
         await fixture.bridge.send(browserEnvelope(five: 20, seven: 40))
 
         clock.advance(ClaudeCodeUsageConnector.freshnessInterval + 1)
         #expect((await connector.currentSnapshot()).freshness == .stale)
-        clock.advance(
-            ClaudeCodeUsageConnector.maximumRetainedAge
-                - ClaudeCodeUsageConnector.freshnessInterval
-        )
+        clock.advance(8 * 24 * 60 * 60)
         let expired = await connector.currentSnapshot()
         #expect(!expired.hasValidData)
-        #expect(expired.state == .failed)
+        #expect(expired.state == .waitingForFirstResponse)
     }
 
     @Test
-    func priorSessionCacheStaysHiddenUntilCurrentUsageObservation() async throws {
+    func legacyBrowserCacheIsIgnoredNeverRewrittenAndClearedOnlyOnDisconnect() async throws {
         let clock = BrowserTestClock()
         let persisted = try ClaudeBrowserMessageDecoder.encode(
             browserEnvelope(five: 20, seven: 40)
@@ -193,40 +212,16 @@ struct M5G2ClaudeConnectorSettingsTests {
         let connector = fixture.connector()
 
         await connector.start()
-        #expect(await connector.hasHiddenPriorSessionCache())
-        let beforeCurrentRead = await connector.currentSnapshot()
-        #expect(!beforeCurrentRead.hasValidData)
-        #expect(
-            LocalProviderEligibilityScanner.admission(
-                for: beforeCurrentRead,
-                descriptor: connector.descriptor
-            ).admittedSnapshot == nil
-        )
+        let beforeLocalTruth = await connector.currentSnapshot()
+        #expect(!beforeLocalTruth.hasValidData)
+        #expect(await cache.read() == persisted)
+        #expect(await cache.writeCount == 0)
+        #expect(await cache.clearCount == 0)
 
-        await fixture.bridge.send(browserEnvelope(five: 19, seven: 39))
-        #expect(!(await connector.hasHiddenPriorSessionCache()))
-        #expect((await connector.currentSnapshot()).freshness == .fresh)
-        #expect(await cache.writeCount == 1)
-
-        await fixture.bridge.reject(.socketUnavailable)
-        let transient = await connector.currentSnapshot()
-        #expect(transient.freshness == .cached)
-        #expect(
-            LocalProviderEligibilityScanner.admission(
-                for: transient,
-                descriptor: connector.descriptor
-            ).admittedSnapshot != nil
-        )
-
-        await fixture.bridge.reject(.invalidContract)
-        let uncertain = await connector.currentSnapshot()
-        #expect(!uncertain.hasValidData)
-        #expect(
-            LocalProviderEligibilityScanner.admission(
-                for: uncertain,
-                descriptor: connector.descriptor
-            ).admittedSnapshot == nil
-        )
+        await connector.syncNow()
+        #expect(await cache.read() == persisted)
+        #expect(await cache.writeCount == 0)
+        #expect(await cache.clearCount == 0)
 
         await connector.disconnect()
         #expect(await cache.clearCount == 1)
@@ -234,7 +229,7 @@ struct M5G2ClaudeConnectorSettingsTests {
     }
 
     @Test
-    func timerRefreshOnlyAgesWhileManualRefreshUsesTheSharedAutomaticGate() async {
+    func timerAndManualRefreshStayLocalWhileAccuracySyncUsesOneShotGate() async {
         let fixture = BrowserConnectorFixture(consent: true)
         let connector = fixture.connector()
         await connector.refresh(trigger: .timer)
@@ -242,7 +237,12 @@ struct M5G2ClaudeConnectorSettingsTests {
         #expect(await fixture.bridge.automaticRequests.isEmpty)
         await connector.refresh(trigger: .manual)
         #expect(await fixture.bridge.openCount == 0)
+        #expect(await fixture.bridge.automaticRequests.isEmpty)
+        await connector.accuracySync()
         #expect(await fixture.bridge.automaticRequests.count == 1)
+        #expect((await connector.diagnostics()).scheduledCycleCount == 0)
+        let requestID = await fixture.bridge.automaticRequests[0].requestID
+        await fixture.bridge.sendAutomation(requestID: requestID, status: .ownedTabClosed)
         await connector.disconnect()
     }
 
@@ -251,24 +251,28 @@ struct M5G2ClaudeConnectorSettingsTests {
         let fixture = BrowserConnectorFixture(consent: true)
         let connector = fixture.connector()
         await connector.start()
+        await connector.accuracySync()
         await fixture.bridge.send(browserEnvelope(five: 20, seven: 40))
         await connector.disconnect()
 
         #expect(!(await fixture.consent.get()))
         #expect(await fixture.bridge.stopCount == 1)
-        #expect((await connector.currentSnapshot()).state == .authenticationRequired)
-        #expect(await connector.lifecycleState() == .disconnected)
+        #expect((await connector.diagnostics()).acceptedObservationCount == 1)
+        #expect(!(await connector.diagnostics()).automaticRefreshInFlight)
+        #expect(!(await connector.diagnostics()).schedulerActive)
     }
 
     @Test @MainActor
-    func settingsTransparencyNamesOnlySystemBrowserContract() {
+    func settingsTransparencyNamesLocalSmartAndOnDemandAccuracyContract() {
         let transparency = ClaudeSourceTransparency()
-        #expect(transparency.login == "System default browser")
+        #expect(transparency.source.contains("Local Smart Mode"))
+        #expect(transparency.source.contains("one-shot Safari exact"))
+        #expect(transparency.login == "Claude Code provider-owned session")
         #expect(!transparency.passwordAccessed)
         #expect(!transparency.apiKeyRequired)
         #expect(!transparency.keychainAccessed)
         #expect(!transparency.cookiesReadOrExported)
-        #expect(transparency.pageData.contains("Normalized quota"))
-        #expect(transparency.storedLocally.contains("sanitized quota cache"))
+        #expect(transparency.pageData.contains("Sanitized rate-limit fields"))
+        #expect(transparency.storedLocally.contains("exact anchors"))
     }
 }

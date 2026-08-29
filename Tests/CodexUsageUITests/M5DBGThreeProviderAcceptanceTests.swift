@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import CodexUsageUI
 
-@Suite("M5-BROWSER-G1 multi-provider acceptance")
+@Suite("M5 Local Smart multi-provider acceptance")
 struct M5DBGThreeProviderAcceptanceTests {
     @Test
     func providerOrderRemainsCodexClaudeWorkBuddy() {
@@ -23,6 +23,7 @@ struct M5DBGThreeProviderAcceptanceTests {
         let fixture = BrowserConnectorFixture(consent: true)
         let connector = fixture.connector()
         await connector.start()
+        await connector.accuracySync()
         await fixture.bridge.send(browserEnvelope(five: 44, seven: 71))
         let snapshot = await connector.currentSnapshot()
         let card = SharedUsagePresentationPolicy.makeCard(
@@ -33,18 +34,20 @@ struct M5DBGThreeProviderAcceptanceTests {
         )
         #expect(card.id == ClaudeCodeUsageConnector.connectorID.rawValue)
         #expect(card.providerName == "Claude Code")
-        #expect(card.sourceDescription?.contains("Browser Sync") == true)
+        #expect(card.sourceDescription?.contains("Local Smart Mode") == true)
         #expect(card.isVisibleInDesktopAssistant)
         #expect(card.windows.map(\.remaining) == [.finite(56), .finite(29)])
         #expect(SharedUsagePresentationPolicy.assistantCards(from: [card]) == [card])
     }
 
     @Test
-    func ambiguousObservationHidesLastValidWithoutFabrication() async {
+    func ambiguousAccuracyObservationRetainsCurrentExactWithoutFabrication() async {
         let fixture = BrowserConnectorFixture(consent: true)
         let connector = fixture.connector()
         await connector.start()
+        await connector.accuracySync()
         await fixture.bridge.send(browserEnvelope(five: 44, seven: 71))
+        await connector.accuracySync()
         await fixture.bridge.reject(.malformedJSON)
         let retained = await connector.currentSnapshot()
         let card = SharedUsagePresentationPolicy.makeCard(
@@ -53,8 +56,8 @@ struct M5DBGThreeProviderAcceptanceTests {
             language: .english,
             now: fixture.clock.now()
         )
-        #expect(card.freshness == .unavailable)
+        #expect(card.freshness == .fresh)
         #expect(!card.isRetainingLastValidValue)
-        #expect(card.windows.isEmpty)
+        #expect(card.windows.map(\.remaining) == [.finite(56), .finite(29)])
     }
 }

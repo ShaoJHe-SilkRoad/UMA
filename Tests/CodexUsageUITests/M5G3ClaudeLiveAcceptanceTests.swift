@@ -4,7 +4,7 @@ import JavaScriptCore
 import Testing
 @testable import CodexUsageUI
 
-@Suite("M5-BROWSER-G1 browser-companion acceptance")
+@Suite("M5 Local Smart one-shot Accuracy acceptance")
 struct M5G3ClaudeLiveAcceptanceTests {
     @Test
     func defaultBrowserContractUsesOnlyExactOfficialUsageRoute() {
@@ -323,7 +323,7 @@ struct M5G3ClaudeLiveAcceptanceTests {
     }
 
     @Test
-    func chromiumKeepsManualActionWhileSafariAutomationOwnsOneInactiveTab() throws {
+    func chromiumKeepsManualActionWhileOneShotAccuracyOwnsOneInactiveTab() throws {
         let root = browserRepositoryRoot()
         let background = try String(
             contentsOf: root.appendingPathComponent(
@@ -334,40 +334,64 @@ struct M5G3ClaudeLiveAcceptanceTests {
         #expect(background.contains("api.action?.onClicked?.addListener((tab)"))
         #expect(background.contains("allowedSenderURL(tab?.url || \"\")"))
         #expect(background.contains("api.scripting.executeScript"))
-        #expect(background.contains("api.tabs.create({ url: extractor.CONTRACT.href, active: false })"))
-        #expect(background.contains("api.tabs.remove(record.tabID)"))
-        #expect(background.contains("await proveOwnedTab(record, tab)"))
+        #expect(background.contains("api.tabs.create({ url: providerURL, active: false })"))
+        #expect(background.contains("providerURLForNonce(read.rawNonce)"))
+        #expect(!background.contains("tabs.query({})"))
+        #expect(!background.contains("api.tabs.query("))
+        #expect(background.contains("api.tabs.remove(read.providerOwnedTabID)"))
+        #expect(background.contains("acceptV2ProviderOwnership"))
         #expect(background.contains("ownedTabOwnershipLost"))
+        #expect(background.contains("api.runtime.sendNativeMessage(config.nativeApplication"))
         #expect(background.contains("api.runtime.connectNative(config.nativeApplication)"))
+        #expect(background.contains("config.browserFamily !== \"safari\""))
+        #expect(!background.contains("nativeReconnectTimer"))
         for forbidden in [
-            "tabs.onUpdated",
             "tabs.onCreated",
-            "tabs.query",
             "webNavigation",
             "setInterval",
         ] {
             #expect(!background.contains(forbidden))
         }
+        #expect(background.contains("api.tabs.onRemoved.addListener(removalListener)"))
+        #expect(background.contains("api.tabs.onReplaced?.addListener?.(replacementListener)"))
+        #expect(!background.contains("api.tabs.get(read.tabID)"))
     }
 
     @Test
-    func healthStatesMapToSafePresentationWithoutQuotaFabrication() async {
-        let matrix: [(ClaudeBrowserCompanionHealth, ClaudeConnectorLifecycleState)] = [
-            (.disabled, .companionDisabled),
-            (.outdated, .companionOutdated),
-            (.unsupportedBrowser, .unsupportedBrowser),
-            (.browserUnavailable, .browserUnavailable),
-            (.nativeHostMissing, .nativeHostMissing),
-            (.nativeHostMismatched, .nativeHostMismatched),
+    func browserHealthOnlyBoundsExplicitAccuracyAndNeverFabricatesLocalTruth() async {
+        let matrix: [ClaudeBrowserCompanionHealth] = [
+            .disabled,
+            .outdated,
+            .unsupportedBrowser,
+            .browserUnavailable,
+            .nativeHostMissing,
+            .nativeHostMismatched,
         ]
-        for (health, expected) in matrix {
+        for health in matrix {
             let fixture = BrowserConnectorFixture(consent: true)
             await fixture.bridge.setHealth(health)
             let connector = fixture.connector()
             await connector.checkCompanion()
-            #expect(await connector.lifecycleState() == expected)
+            await connector.accuracySync()
             #expect(!(await connector.currentSnapshot()).hasValidData)
+            #expect(await fixture.bridge.automaticRequests.isEmpty)
+            #expect(!(await connector.diagnostics()).schedulerActive)
         }
+    }
+
+    @Test
+    func productionHealthAndRepairFailClosedForChromiumDefaults() throws {
+        let production = try String(
+            contentsOf: browserRepositoryRoot().appendingPathComponent(
+                "Sources/CodexUsageUI/Connectors/ClaudeBrowserProductionIntegration.swift"
+            ),
+            encoding: .utf8
+        )
+        #expect(!production.contains("case .chromium"))
+        #expect(production.contains("guard let runtime = ClaudeSafariHostClientAdapter()"))
+        #expect(!production.contains(
+            "return chromiumNativeHostManifestExists()"
+        ))
     }
 
     @Test
@@ -375,13 +399,14 @@ struct M5G3ClaudeLiveAcceptanceTests {
         for family in ClaudeBrowserFamily.allCases {
             let fixture = BrowserConnectorFixture(consent: true)
             let connector = fixture.connector()
-            await connector.start()
+            await connector.accuracySync()
             await fixture.bridge.send(
                 browserEnvelope(five: 25, seven: 50, browser: family)
             )
             let snapshot = await connector.currentSnapshot()
-            #expect(snapshot.channels[0].rateLimitWindows.map(\.normalizedRemainingPercent) == [75, 50])
-            #expect(snapshot.channels[0].coverageNote?.contains("Browser Sync") == true)
+            let channel = try? #require(snapshot.channels.first)
+            #expect(channel?.rateLimitWindows.map(\.normalizedRemainingPercent) == [75, 50])
+            #expect(channel?.coverageNote?.contains("Local Smart") == true)
         }
     }
 
@@ -389,7 +414,7 @@ struct M5G3ClaudeLiveAcceptanceTests {
     func duplicateObservationNonceIsRejectedWithoutReplacingLastValidQuota() async {
         let fixture = BrowserConnectorFixture(consent: true)
         let connector = fixture.connector()
-        await connector.start()
+        await connector.accuracySync()
         let observation = browserEnvelope(five: 25, seven: 50, browser: .safari)
 
         await fixture.bridge.send(observation)
@@ -400,38 +425,52 @@ struct M5G3ClaudeLiveAcceptanceTests {
         #expect(diagnostics.rejectedObservationCount == 1)
         let snapshot = await connector.currentSnapshot()
         #expect(snapshot.hasValidData)
-        #expect(snapshot.channels[0].rateLimitWindows.map(\.normalizedRemainingPercent) == [75, 50])
+        let channel = try? #require(snapshot.channels.first)
+        #expect(channel?.rateLimitWindows.map(\.normalizedRemainingPercent) == [75, 50])
     }
 
     @Test
-    func optionalModelWindowNeverReplacesAccountSevenDayWindow() async {
+    func unsupportedModelWindowIsDiscardedWithoutFabricatingAccountTruth() async {
         let fixture = BrowserConnectorFixture(consent: true)
         let connector = fixture.connector()
-        await connector.start()
+        await connector.accuracySync()
         let envelope = ClaudeBrowserObservationEnvelope(
             browserFamily: .safari,
             observation: ClaudeBrowserObservation(
-                fiveHour: ClaudeBrowserQuotaWindow(usedPercentage: 10),
-                weeklyAllModels: ClaudeBrowserQuotaWindow(usedPercentage: 20),
+                fiveHour: ClaudeBrowserQuotaWindow(
+                    usedPercentage: 10,
+                    resetAt: "2030-03-01T17:00:00Z"
+                ),
+                weeklyAllModels: ClaudeBrowserQuotaWindow(
+                    usedPercentage: 20,
+                    resetAt: "2030-03-08T12:00:00Z"
+                ),
                 modelSpecificWeekly: ClaudeBrowserModelWindow(
                     modelFamily: .sonnet,
-                    window: ClaudeBrowserQuotaWindow(usedPercentage: 30)
+                    window: ClaudeBrowserQuotaWindow(
+                        usedPercentage: 30,
+                        resetAt: "2030-03-08T12:00:00Z"
+                    )
                 ),
                 observedAt: "2030-03-01T12:00:00Z"
             )
         )
         await fixture.bridge.send(envelope)
-        let windows = await connector.currentSnapshot().channels[0].rateLimitWindows
+        let snapshot = await connector.currentSnapshot()
+        let windows = (try? #require(snapshot.channels.first))?.rateLimitWindows ?? []
+        #expect(windows.first { $0.kind == .fiveHour }?.normalizedRemainingPercent == 90)
         #expect(windows.first { $0.kind == .sevenDay }?.normalizedRemainingPercent == 80)
-        #expect(windows.first { $0.kind == .other }?.normalizedRemainingPercent == 70)
-        #expect(windows.first { $0.kind == .other }?.id == "weekly-sonnet")
+        #expect(windows.first { $0.kind == .other } == nil)
+        #expect(windows.count == 2)
+        #expect((await connector.diagnostics()).acceptedObservationCount == 1)
+        #expect((await connector.diagnostics()).rejectedObservationCount == 0)
     }
 
     @Test
     func diagnosticsContainCountsOnly() async {
         let fixture = BrowserConnectorFixture(consent: true)
         let connector = fixture.connector()
-        await connector.start()
+        await connector.accuracySync()
         await fixture.bridge.send(browserEnvelope(five: 20, seven: 40))
         await connector.syncNow()
         let diagnostics = await connector.diagnostics()
@@ -444,7 +483,7 @@ struct M5G3ClaudeLiveAcceptanceTests {
     }
 
     @Test
-    func retiredCredentialRoutesAreAbsentFromActiveSources() throws {
+    func credentialRoutesStayAbsentWhileSanitizedStatusLineTargetsAreActive() throws {
         let root = browserRepositoryRoot()
         let active = [
             "Sources/CodexUsageUI",
@@ -455,7 +494,6 @@ struct M5G3ClaudeLiveAcceptanceTests {
         ]
         let forbidden = [
             "ClaudeQuotaBroker",
-            "ClaudeStatusLine",
             "Claude Code-credentials",
             "/api/oauth/usage",
             "Authorization: Bearer",
@@ -466,6 +504,12 @@ struct M5G3ClaudeLiveAcceptanceTests {
             let text = try sourceTree(root.appendingPathComponent(relative))
             for value in forbidden { #expect(!text.contains(value)) }
         }
+        let package = try String(
+            contentsOf: root.appendingPathComponent("Package.swift"),
+            encoding: .utf8
+        )
+        #expect(package.contains("ClaudeStatusLineCore"))
+        #expect(package.contains("ClaudeStatusLineRelay"))
     }
 }
 

@@ -14,9 +14,167 @@
 **Target application:** `UMA_0.12.app`
 **Target Founder GitHub repository:** `https://github.com/ShaoJHe-SilkRoad/CodexUsageMonitor` — verify live remote before push
 **Cursor/Kimi/new-provider work:** Out of scope
-**Status:** Active planning authority; execution begins only through an exact M5RMX Goal
+**Status:** M5RMX Claude root-repair acceptance and deterministic verification passed; exact Git delivery pending
+**Canonical workspace:** `/Volumes/HE/DEV/UMA/Worktrees/UMA-M5RMX-Claude`
 
 ---
+
+## Current final-closeout authority — 2026-08-29
+
+The accepted runtime is now the split Test architecture: a mutable Safari-free
+UMA app talks over the bounded App Group IPC contract to the separately signed,
+immutable Safari Host and its frozen Companion. The Host/Companion generation
+is locked during this closeout.
+
+One authorized live Accuracy Sync completed through the real provider route.
+The result was validated, committed atomically, read back before publication,
+and followed by proven temporary-tab and ownership-receipt cleanup. The exact
+resetless anchors remain exact for a bounded five-minute TTL; absent reset
+timestamps remain absent and cannot enter calibration. Safari quit and mutable
+UMA relaunch both preserved the committed exact anchor without re-setup.
+
+Mutable-app classification/installer truth, deterministic regression,
+signing-trust stability, and independent product review passed. Provider-read
+budget used: `1/2`; the unused second read is not a sampling or retry allowance.
+Only exact Git delivery remains. No Host/Companion mutation, push,
+notarization, production replacement, or next Goal is permitted.
+
+## Current Founder lifecycle override — Owned Provider Tab V2
+
+The accepted live 2026-08-28 sequence revoked the prior claim that the frozen
+Companion had no known extension-side blocker:
+
+```text
+refreshStarted
+→ receipt save
+→ bootstrap ownership
+→ bootstrap self-navigation
+→ Safari removal semantics
+→ receipt retirement
+→ tabUnavailable
+```
+
+The immutable Safari Host, App Group IPC, Test/production identity isolation,
+native handshake, mutable app shell, Local Smart independence and consent
+separation remain accepted. The failed component is only the bootstrap-to-
+provider ownership handoff.
+
+The current executable design is **Owned Provider Tab V2**:
+
+```text
+durable request intent
+→ direct provider-tab creation
+→ top-frame provider content-script discovery
+→ request/generation/nonce plus trusted sender.tab.id proof
+→ durable provider ownership
+→ exact-route readiness
+→ one bounded extraction
+→ proven-tab cleanup
+```
+
+No security invariant may depend on an internal extension tab retaining its ID
+across navigation to `https://claude.ai`. The active package must not contain
+or invoke the retired `owned-tab-bootstrap.html → location.replace(...)`
+handoff. `tabs.create()` output, a URL marker, an `onUpdated` event, or an
+`onReplaced` event is never ownership by itself. No general tab enumeration is
+permitted, and an unproven tab is never closed.
+
+One new signed Companion generation is permitted only after offline reducer,
+privacy, adversarial, package and independent-examiner gates pass. That later
+Human enablement is a development-defect recovery, not normal product setup.
+No provider read, staging, commit, push or notarization occurs before that
+freeze gate.
+
+## Current Founder forensic override — one final frozen Companion
+
+`M5RMX-CLAUDE-FORENSIC-CLOSE-G1` is the current authority over every
+conflicting current-stage statement below. The installed immutable Safari Host
+build `202608281805` / generation
+`e55245ee-7baf-4791-aadc-f13b52209986` is **not final**. Its pending Companion
+enablement is suspended. No current live Accuracy Sync PASS is accepted.
+
+The current architecture is:
+
+```text
+Mutable UMA Test App
+→ bounded App Group IPC: group.com.silkrd.uma.test.bridge
+→ immutable UMA Safari Host Test App
+→ minimal Safari Companion
+→ exact-route one-shot Accuracy Sync
+```
+
+Only the immutable Host may dispatch to Safari, receive native extension
+callbacks, own request serialization/deadlines, and publish the atomic App
+Group terminal result. Mutable UMA owns Local Smart, product state, consent,
+presentation and explicit request initiation. The Companion owns only
+Safari-privileged site permission, inactive bootstrap/tab lifecycle, exact
+route/DOM sanitization, one canonical native Port and proved-tab cleanup.
+
+Until the forensic timeline, authoritative Safari/API audit, owned-tab and
+native-IPC audits, consent/site state matrix, synthetic/adversarial pipeline,
+privacy review, package/signing review and independent examiner all pass, do
+not enable/install/register/restart Safari, change site permission, perform
+provider work, mint a claimed-final package, stage or commit. The next Human
+Safari action may be requested only after one consolidated final signed frozen
+Host/Companion has been verified offline.
+
+Expected product contract after final acceptance:
+
+```text
+First setup: one Companion enable + one exact claude.ai Allow
+Normal UMA update: zero Safari enablement + zero site-permission action
+Normal UMA relaunch: zero Safari setup
+```
+
+Repeated enablement is a development failure except for a deliberate signed
+Host/Companion security migration. Final live Accuracy Sync, cleanup, Safari
+quit persistence, UMA relaunch, 10/10 mutable-app updates, site-permission
+persistence, final suite, staging and commit remain future gates. Do not treat
+offline test counts as live acceptance.
+
+## Current Founder architecture override — Claude Local Smart Mode
+
+The accepted `M5RMX-CLAUDE-SMART-CLOSE-G1` Local Smart source decision remains
+the data-source authority inside the current forensic Goal. It supersedes the
+plan's persistent-Safari source assumption without overriding the newer live
+freeze, immutable-Host lifecycle, or final-candidate gates above. The current production
+direction is:
+
+```text
+official Claude Code status-line exact quota
+→ immediately sanitized owner-only state
+→ independently calibrated local estimate when exact truth is not current
+→ one-shot Safari Accuracy Sync only when the Human requests it
+→ shared Main Panel and Desktop Assistant presentation
+```
+
+Normative priority is `OFFICIAL EXACT > CALIBRATED ESTIMATE`. Every estimate
+must be visibly labeled. Persistent Safari scheduling, a permanent owned Usage
+tab, and Browser Sync as the mandatory always-on source are retired from the
+default product architecture. The bounded Safari extractor, sanitizer,
+protocol, exact-route checks, signed extension packaging, and diagnostics are
+retained only for explicit one-shot Accuracy Sync.
+
+The local estimator has no fixed plan denominator. It requires at least two
+compatible exact anchors and invalidates on reset, schema, model-family, plan,
+account, or monotonicity discontinuity. Local prompt-bearing records may be
+parsed only long enough to project allowlisted token/model/time metadata; raw
+content is never retained. This section remains current source authority over
+conflicting historical source statements below, subordinate to the forensic
+live freeze and Host lifecycle gate above.
+
+## Current conflict fence
+
+Every lower section that requires recurring Browser Sync, a five-minute Safari scheduler, automatic Safari launch, or persistent owned-tab operation is historical and non-executable. Current Claude truth is one provider with three bounded surfaces: official Claude Code status-line exact data, explicit one-shot Safari Accuracy exact data, and Claude Desktop `plan-usage-history.json` estimate-only data. Claude Desktop has no admitted per-response activity signal. Compatibility symbols with `automatic` names are permitted only when runtime, tests, and governance prove they are inert outside a Human-requested one-shot.
+
+## Historical plan archive boundary — Sections 0 through 15
+
+Every imperative statement in Sections 0 through 15 is retained only as stage
+evidence and is non-executable where it describes Browser Sync as primary,
+recurring/five-minute Safari work, automatic Safari launch, or persistent tab
+ownership. It cannot authorize runtime behavior, tests, packaging, or Human
+actions. Only the current override/conflict fence above and the explicitly
+currentized Section 16 continuation may govern new work.
 
 ## 0. Founder directive and corrected interpretation
 
@@ -1556,6 +1714,9 @@ Outcomes:
 Final notarization occurs in RC after final bytes freeze.
 
 ### 16.4 M5RMX-G2 — complete Claude product block
+
+Current G2 authority is Local Smart completion, not restoration of browser-first behavior. It must preserve exact-local > one-shot-Safari-exact > Desktop/local-estimate > stale > missing, report Claude Desktop activity as unavailable unless a new admitted official event exists, and keep all `automatic*` compatibility surfaces inert outside an explicit Accuracy request.
+
 
 **Model:** GPT-5.6 Sol
 **Effort:** Extra High

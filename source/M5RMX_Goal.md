@@ -14,6 +14,100 @@
 
 ---
 
+## Current continuation — final provider and lifecycle closeout
+
+**Current result:** live product acceptance, affected regression, signing
+trust, and two consecutive full deterministic suite runs passed; exact Git
+delivery remains.
+
+The real, current Test path has passed its sole required provider transaction:
+
+```text
+REQUEST_CREATED → PROVIDER_TAB_OWNED → ROUTE_READY → DATA_READY
+→ EXACT_RESULT_VALIDATED → ANCHOR_TEMP_WRITTEN
+→ ANCHOR_ATOMICALLY_COMMITTED → ANCHOR_READBACK_VALIDATED
+→ UI_PUBLISHED → RESULT_ACKNOWLEDGED → TEMP_TAB_CLEANED
+→ OWNERSHIP_RECEIPT_REMOVED → COMPLETE
+```
+
+Reset is optional provider data. A complete two-window observation with no
+reset is accepted as exact for five minutes, persists atomically, never
+fabricates reset, never becomes an estimate, and never calibrates Local Smart.
+Safari quit and mutable UMA relaunch must not require consent, site permission,
+Companion setup, or connection setup again. The independently accepted
+immutable Host/Companion lifecycle matrix remains locked; closeout changes are
+mutable-app or verification/governance changes only.
+
+## Current continuation — M5RMX Owned Provider Tab V2
+
+The live Safari Accuracy Sync failure established that an extension-internal
+bootstrap tab can be retired while it self-navigates to the provider surface.
+The previous stable-tab-ID assumption is rejected. This continuation repairs
+only that ownership lifecycle and retains the accepted immutable Safari Host,
+native bridge, shell, Local Smart, consent and identity architecture.
+
+The required implementation creates the approved provider tab directly after
+persisting one owner-only request intent. A minimal top-frame content script
+must independently prove the provider document with the current request,
+generation, a one-time opaque nonce and trusted runtime sender metadata. Only
+`sender.tab.id` may become the durable provider-owned tab ID. Extraction is
+forbidden until proof, exact-route readiness, site permission, generation and
+nonterminal request state all agree.
+
+The lifecycle reducer is the sole mutation authority and contains:
+
+```text
+IDLE
+REQUEST_INTENT_PERSISTED
+PROVIDER_CREATION_PENDING
+PROVIDER_DOCUMENT_DISCOVERED
+PROVIDER_OWNERSHIP_PROVEN
+PROVIDER_READY
+EXTRACTING
+RESULT_READY
+RESULT_DELIVERED
+CLEANUP_REQUESTED
+CLEANUP_CONFIRMED
+COMPLETE
+CANCELLED
+EXPIRED
+FAILED
+```
+
+`onRemoved` and `onReplaced` are phase-aware signals, never ownership
+authorities. Background reload uses bounded content-script reconnection and
+the durable receipt; if proof cannot be re-established, the cycle fails closed
+without enumeration, adoption or unknown-tab closure. A single recovery
+Companion may be built only after property/event-matrix tests and independent
+examiner acceptance. No live provider read, staging, commit, push or
+notarization is authorized before that offline freeze gate.
+
+## Current continuation — M5RMX-CLAUDE-SMART-CLOSE-G1
+
+The Founder-authorized current Goal replaces persistent Safari Browser Sync as
+Claude's default source with Local Smart Mode. It retains Safari only as an
+explicit one-shot Accuracy Sync. It authorizes the bounded status-line relay,
+configuration/restore manager, sanitized local-activity projection, exact
+anchor store, independent five-hour/seven-day estimator, source selector,
+Settings/presentation migration, tests, mutable governance, local commit, and
+commit-exact local package. It authorizes no Apple submission, Desktop app
+replacement, remote Git action, credential access, or intentional Claude task.
+
+Current acceptance formula:
+
+```text
+EXACT_LOCAL_STATUSLINE
+> EXACT_SAFARI_ACCURACY
+> ESTIMATED_LOCAL
+> STALE_EXACT
+> MISSING
+```
+
+The estimate must be marked with `≈` and provenance/confidence. No fixed token
+denominator or fabricated reset is allowed. Persistent browser scheduling and
+permanent tab ownership are acceptance failures. Historical Goal sections
+below remain evidence of their stages but do not reactivate the retired source.
+
 ## 0. Governing sequence
 
 ```text
@@ -882,7 +976,13 @@ Stop after SAFARI-G1. Do not begin G2 or submit notarization.
 
 ---
 
-# 4. M5RMX-G2 — Complete Claude Code product block
+# 4. M5RMX-G2 — Complete Claude provider product block
+
+## Current G2 supersession
+
+G2 inherits the consolidated Local Smart source contract and MUST NOT restore recurring Browser Sync. It completes one Claude provider across Main Panel, Settings, and Desktop Assistant using: exact local status-line when the active Claude Code surface supports it; exact Safari data only from a Human-requested one-shot Accuracy Sync; and the strict Desktop plan cache only as `≈` estimate with no fabricated reset or per-response activity claim. G2 must preserve source priority, transactional anchor persistence, ordered browser event ingestion, and owner-only descriptor-bound local reads. Live source requalification, Apple work, another provider, and Desktop credential/session inspection remain out of scope.
+
+
 
 ```text
 MODEL: GPT-5.6 Sol | THINKING EFFORT: Extra High

@@ -75,7 +75,7 @@ struct DesktopAssistantContractTests {
         #expect(card.resetText == "Resets later")
     }
 
-    @Test("Stale presentation never renders a healthy connection ring")
+    @Test("Stale presentation names retained truth instead of reconnecting")
     func staleConnectionPresentation() {
         let shared = SharedUsageCardPresentation(
             id: "codex",
@@ -85,15 +85,17 @@ struct DesktopAssistantContractTests {
             windows: [],
             selectedWindowID: nil,
             remaining: .finite(44),
+            sourceDescription: "Exact provider source",
             severity: .normal,
             isRetainingLastValidValue: true
         )
         let card = DesktopAssistantCard(shared: shared)
 
-        #expect(card.connectionState == .reconnecting)
+        #expect(card.connectionState == .stale)
         #expect(card.isStale)
-        #expect(card.accessibilityLabel.contains("reconnecting"))
-        #expect(card.accessibilityLabel.contains("stale"))
+        #expect(card.detailText?.contains("Stale exact retained") == true)
+        #expect(card.accessibilityLabel.contains("stale value retained"))
+        #expect(!card.accessibilityLabel.contains("reconnecting"))
     }
 
     @Test("Tint midpoint uses the complete capsule width")

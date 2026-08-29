@@ -680,7 +680,7 @@ private struct ClaudeBrowserSettingsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(language == .simplifiedChinese ? "浏览器同步 · 实验性" : "Browser Sync · Experimental")
+            Text(language == .simplifiedChinese ? "Claude 本地智能模式" : "Claude Local Smart Mode")
                 .font(
                     AppTypography.font(
                         10.5,
@@ -690,57 +690,18 @@ private struct ClaudeBrowserSettingsSection: View {
                 )
             Text(
                 language == .simplifiedChinese
-                    ? "通过 Claude 官方使用量页面自动读取套餐配额。登录保留在 Safari 中。无需 API 密钥、钥匙串或 Cookie 访问。"
-                    : "Automatic plan quota from Claude's official Usage page. Login stays in Safari. No API key, Keychain, or Cookie access."
+                    ? "Claude Code 正常使用时由官方状态栏字段自动更新；Claude Desktop 的版本锁定计划缓存仅提供以 ≈ 标记、无重置时间的估算值。Safari 仅在您点击“精确同步”时临时使用。"
+                    : "Updates from Claude Code's official status-line fields during normal use. Claude Desktop's version-pinned plan cache provides only ≈-labeled estimates without reset times. Safari is temporary and on demand through Accuracy Sync."
             )
             .font(AppTypography.font(9, language: language))
             .foregroundStyle(.secondary)
             stateSummary
 
-            if model.consentGranted {
-                SettingsToggleRow(
-                    title: language == .simplifiedChinese ? "自动刷新" : "Auto Refresh",
-                    systemImage: "arrow.clockwise",
-                    language: language,
-                    isOn: Binding(
-                        get: { model.autoRefreshEnabled },
-                        set: { model.setAutoRefreshEnabled($0) }
-                    )
-                )
-                Text(
-                    model.autoRefreshEnabled
-                        ? (language == .simplifiedChinese ? "每 5 分钟" : "Every 5 minutes")
-                        : (language == .simplifiedChinese ? "仅手动" : "Manual only")
-                )
-                .font(AppTypography.font(9, language: language))
-                .foregroundStyle(.secondary)
-
-                SettingsToggleRow(
-                    title: language == .simplifiedChinese
-                        ? "需要时允许 UMA 启动 Safari"
-                        : "Allow UMA to launch Safari when needed",
-                    systemImage: "safari",
-                    language: language,
-                    isOn: Binding(
-                        get: { model.allowSafariLaunch },
-                        set: { model.setAllowSafariLaunch($0) }
-                    )
-                )
-                Text(
-                    language == .simplifiedChinese
-                        ? "默认关闭。关闭时，Safari 不可用会保留已缓存或较早状态。"
-                        : "Off by default. When Off, unavailable Safari leaves only Cached or Stale data."
-                )
-                .font(AppTypography.font(9, language: language))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-
             HStack(spacing: 8) {
                 primaryAction
                 if model.consentGranted, showsSecondaryOpenUsage {
-                    Button(language == .simplifiedChinese ? "打开使用量页面" : "Open Usage Page") {
-                        model.openUsagePage()
+                    Button(language == .simplifiedChinese ? "精确同步" : "Accuracy Sync") {
+                        model.accuracySync()
                     }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier(
@@ -772,8 +733,8 @@ private struct ClaudeBrowserSettingsSection: View {
 
             Text(
                 language == .simplifiedChinese
-                    ? "经您授权后，UMA 浏览器伴侣最多保留一个非活动专用标签页，在各轮之间安全复用；每次读取都会先验证精确的 Claude 使用量路由，并且断开 Claude 时会关闭该标签页。网站访问可在 Safari 设置中撤销。"
-                    : "After you grant access, the UMA Browser Companion keeps at most one inactive dedicated tab and safely reuses it across cycles; every read first verifies the exact Claude Usage route, and Disconnect Claude closes that tab. Website access can be revoked in Safari Settings."
+                    ? "精确同步会创建一个绑定请求的临时非活动标签页，验证精确使用量路由，读取一次净化后的配额并关闭该标签页。不会保留浏览器定时器或长期标签页。"
+                    : "Accuracy Sync creates one request-bound temporary inactive tab, verifies the exact Usage route, returns one sanitized quota snapshot, and closes that tab. No browser scheduler or long-lived tab remains."
             )
             .font(AppTypography.font(9, language: language))
             .foregroundStyle(.secondary)
@@ -782,13 +743,13 @@ private struct ClaudeBrowserSettingsSection: View {
             if model.consentGranted {
                 Button(
                     language == .simplifiedChinese
-                        ? "打开 Safari 访问设置"
-                        : "Open Safari Access Settings",
-                    action: model.openSafariAccessSettings
+                        ? "重试 Safari 网站访问权限"
+                        : "Retry Safari Site Access",
+                    action: model.retrySafariSiteAccess
                 )
                 .buttonStyle(.plain)
                 .foregroundStyle(UsageDesign.blue)
-                .accessibilityIdentifier("claude.browser.open-access-settings")
+                .accessibilityIdentifier("claude.browser.retry-site-access")
             }
 
             Divider().opacity(0.35)
@@ -801,14 +762,17 @@ private struct ClaudeBrowserSettingsSection: View {
                     )
                 )
             VStack(alignment: .leading, spacing: 3) {
-                Text(language == .simplifiedChinese ? "来源：Claude 官方使用量页面 · 浏览器同步 · 实验性" : "Source: Claude official Usage page · Browser Sync · Experimental")
-                Text(language == .simplifiedChinese ? "登录：系统默认浏览器" : "Login: System default browser")
+                Text(language == .simplifiedChinese ? "来源：Claude 官方本地状态栏；版本锁定的桌面端计划缓存估算；按需 Safari 精确同步" : "Sources: Claude official local status line; version-pinned Desktop plan-cache estimate; on-demand Safari Accuracy Sync")
+                Text(language == .simplifiedChinese ? "估算：仅保留当前 5 小时/7 天剩余量与时间戳，以 ≈ 标记且不推测重置时间" : "Desktop estimate: Current five-hour/seven-day remaining values and timestamp only, labeled ≈ with no inferred reset")
+                Text(language == .simplifiedChinese ? "本地活动估算：一次处理一条有界 JSONL 记录；立即丢弃提示、回复与会话内容，仅保留允许的用量计数、模型系列和活动时间戳；结果以 ≈ 标记，不是官方精确配额" : "Local-activity estimate: One bounded JSONL record is processed at a time; prompts, responses, and session content are discarded immediately; only allowlisted usage counts, model family, and activity timestamp are retained; ≈ is not official exact quota")
+                Text(language.claudeEstimateConfidence(model.estimateConfidence))
+                Text(language.claudeLastExact(model.lastExactAt))
                 Text(language == .simplifiedChinese ? "Google / Claude 密码：未访问" : "Google / Claude password: Not accessed")
                 Text(language == .simplifiedChinese ? "API 密钥：不需要" : "API key: Not required")
                 Text(language == .simplifiedChinese ? "钥匙串：未访问" : "Keychain: Not accessed")
                 Text(language == .simplifiedChinese ? "Cookie：保留在浏览器中；UMA 不读取或导出" : "Cookies: Remain inside the browser; not read or exported by UMA")
-                Text(language == .simplifiedChinese ? "页面数据：仅规范化配额百分比与重置时间" : "Page data: Normalized quota percentages and reset times only")
-                Text(language == .simplifiedChinese ? "聊天、项目、身份与账单：未访问" : "Chats, projects, identity, and billing: Not accessed")
+                Text(language == .simplifiedChinese ? "状态栏/页面/缓存数据：仅净化后的配额字段；缓存组织信息与历史立即丢弃" : "Status-line/page/cache data: Sanitized quota fields only; cache organization and history are discarded")
+                Text(language == .simplifiedChinese ? "提示、回复、项目内容、身份与账单：不保留" : "Prompts, responses, project content, identity, and billing: Not retained")
             }
             .font(AppTypography.font(9, language: language))
             .foregroundStyle(.secondary)
@@ -817,14 +781,11 @@ private struct ClaudeBrowserSettingsSection: View {
                 "claude.browser.source-transparency"
             )
         }
-        .onAppear {
-            model.checkCompanion()
-        }
     }
 
     private var showsSecondaryOpenUsage: Bool {
         switch model.state {
-        case .fresh, .cached, .stale:
+        case .waitingForUsagePage, .fresh, .cached, .stale:
             true
         default:
             false
@@ -835,8 +796,8 @@ private struct ClaudeBrowserSettingsSection: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(
                 language == .simplifiedChinese
-                    ? "启用 Claude 浏览器同步？"
-                    : "Enable Claude Browser Sync?"
+                    ? "启用 Claude 本地智能模式？"
+                    : "Enable Claude Local Smart Mode?"
             )
             .font(AppTypography.font(10.5, weight: .semibold, language: language))
 
@@ -891,53 +852,34 @@ private struct ClaudeBrowserSettingsSection: View {
 
     @ViewBuilder
     private var stateSummaryContent: some View {
-        switch model.state {
-        case .disconnected:
-            Text(language.claudeNotConfigured)
-        case .checking:
-            Text(language == .simplifiedChinese ? "正在检查浏览器伴侣…" : "Checking Browser Companion…")
-        case .waitingForUsagePage:
-            Text(language == .simplifiedChinese ? "正在等待第一次自动使用量读取" : "Waiting for the first automatic Usage read")
-        case .websiteAccessRequired:
-            Text(language == .simplifiedChinese ? "需要网站访问权限" : "Website access required")
-        case .signInRequired:
-            Text(language == .simplifiedChinese ? "需要登录" : "Sign in required")
-        case .waitingForSafari:
-            Text(language == .simplifiedChinese ? "正在等待 Safari" : "Waiting for Safari")
-        case let .fresh(updated):
+        VStack(alignment: .leading, spacing: 5) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(language.claudeConnected)
-                Text(language.claudeUpdated(updated))
+                Text(language == .simplifiedChinese ? "本地智能" : "Local Smart")
+                    .font(AppTypography.font(9, weight: .semibold, language: language))
+                Text(language.claudeLocalSmartStatus(
+                    model.localSmartState,
+                    stage: model.localSmartStage
+                ))
             }
-        case let .cached(updated):
             VStack(alignment: .leading, spacing: 2) {
-                Text(language.claudeCached)
-                Text(language.claudeUpdated(updated))
-                Text(language.claudeUpdatesPageDriven)
+                Text(language == .simplifiedChinese ? "浏览器伴侣" : "Companion")
+                    .font(AppTypography.font(9, weight: .semibold, language: language))
+                Text(language.claudeCompanionRuntimeStatus(
+                    runtime: model.productState.companionRuntime,
+                    accuracyState: model.browserAccuracyState
+                ))
             }
-        case let .stale(updated):
             VStack(alignment: .leading, spacing: 2) {
-                Text(language.claudeStale)
-                Text(language.claudeUpdated(updated))
-                Text(language.claudeUpdatesPageDriven)
+                Text(language == .simplifiedChinese ? "浏览器精确同步" : "Browser Accuracy")
+                    .font(AppTypography.font(9, weight: .semibold, language: language))
+                Text(language.claudeBrowserAccuracyStatus(
+                    model.browserAccuracyState,
+                    stage: model.browserAccuracyStage
+                ))
             }
-        case .companionDisabled:
-            Text(language == .simplifiedChinese ? "浏览器伴侣未启用" : "Browser Companion is disabled")
-        case .companionOutdated:
-            Text(language == .simplifiedChinese ? "浏览器伴侣需要更新" : "Browser Companion needs an update")
-        case .unsupportedBrowser:
-            Text(language == .simplifiedChinese ? "默认浏览器暂不受支持" : "The default browser is not supported")
-        case .browserUnavailable:
-            Text(language == .simplifiedChinese ? "默认浏览器不可用" : "The default browser is unavailable")
-        case .nativeHostMissing:
-            Text(language == .simplifiedChinese ? "浏览器伴侣需要修复" : "Browser Companion needs repair")
-        case .nativeHostMismatched:
-            Text(language == .simplifiedChinese ? "浏览器伴侣版本不匹配" : "Browser Companion version mismatch")
-        case .routeChanged:
-            Text(language == .simplifiedChinese ? "Claude 使用量页面已更改；同步已安全停止" : "Claude's Usage page changed; sync stopped safely")
-        case .failed:
-            Text(language.failureStatus)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("claude.source-state-summary")
     }
 
     @ViewBuilder
@@ -952,32 +894,32 @@ private struct ClaudeBrowserSettingsSection: View {
             .accessibilityIdentifier("claude.browser.connect")
         case .fresh, .cached, .stale:
             Button(
-                language == .simplifiedChinese ? "立即同步" : "Sync Now",
+                language == .simplifiedChinese ? "刷新本地数据" : "Refresh Local",
                 action: model.syncNow
             )
             .buttonStyle(.bordered)
             .accessibilityIdentifier("claude.browser.sync-now")
         case .waitingForUsagePage:
             Button(
-                language == .simplifiedChinese ? "立即同步" : "Sync Now",
+                language == .simplifiedChinese ? "刷新本地数据" : "Refresh Local",
                 action: model.syncNow
             )
             .buttonStyle(.bordered)
             .accessibilityIdentifier("claude.browser.sync-now")
         case .websiteAccessRequired:
             Button(
-                language == .simplifiedChinese ? "授予访问权限" : "Grant Access",
-                action: model.grantWebsiteAccess
+                language == .simplifiedChinese ? "请求 Safari 网站访问权限" : "Request Safari Site Access",
+                action: model.requestSafariSiteAccess
             )
             .buttonStyle(.borderedProminent)
-            .accessibilityIdentifier("claude.browser.grant-access")
+            .accessibilityIdentifier("claude.browser.request-site-access")
         case .signInRequired, .waitingForSafari:
             Button(
-                language == .simplifiedChinese ? "打开 Claude 使用量" : "Open Claude Usage",
-                action: model.openUsagePage
+                language == .simplifiedChinese ? "检查浏览器伴侣" : "Check Browser Companion",
+                action: model.verifyCompanion
             )
             .buttonStyle(.bordered)
-            .accessibilityIdentifier("claude.browser.open-usage")
+            .accessibilityIdentifier("claude.browser.check-companion")
         case .companionDisabled, .companionOutdated,
              .nativeHostMissing, .nativeHostMismatched:
             Button(
@@ -986,7 +928,9 @@ private struct ClaudeBrowserSettingsSection: View {
             )
             .buttonStyle(.bordered)
             .accessibilityIdentifier("claude.browser.repair")
-        case .unsupportedBrowser, .browserUnavailable, .routeChanged, .failed:
+        case .extensionNotInstalled, .inventoryRestartRequired, .inventoryLoading,
+             .companionStarting, .protocolMismatch, .companionUnavailable,
+             .unsupportedBrowser, .browserUnavailable, .routeChanged, .failed:
             Button(
                 language == .simplifiedChinese ? "重新检查" : "Check Again",
                 action: model.checkCompanion

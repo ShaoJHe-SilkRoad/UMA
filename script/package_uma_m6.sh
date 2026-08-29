@@ -219,7 +219,7 @@ mkdir -p "$contents/MacOS" "$contents/Helpers" "$contents/Resources" \
 /usr/bin/install -m 644 "$source_root/BrowserExtension/Safari/Native/Info.plist" "$appex_contents/Info.plist"
 /usr/bin/install -m 644 "$source_root/BrowserExtension/Safari/manifest.json" "$appex_contents/Resources/manifest.json"
 /usr/bin/install -m 644 "$source_root/BrowserExtension/Safari/background-loader.js" "$appex_contents/Resources/Safari/background-loader.js"
-for file in background-core.js claude-usage-extractor.js content-script.js; do
+for file in background-core.js claude-usage-extractor.js content-script.js provider-ownership-v2.js owned-provider-tab-v2-reducer.js; do
     /usr/bin/install -m 644 "$source_root/BrowserExtension/Shared/$file" "$appex_contents/Resources/Shared/$file"
     /usr/bin/install -m 644 "$source_root/BrowserExtension/Shared/$file" "$chromium_root/Shared/$file"
 done
@@ -340,6 +340,8 @@ readonly expected_manifest="$(
         "Contents/PlugIns/$SAFARI_EXTENSION.appex/Contents/Resources/Shared/background-core.js" \
         "Contents/PlugIns/$SAFARI_EXTENSION.appex/Contents/Resources/Shared/claude-usage-extractor.js" \
         "Contents/PlugIns/$SAFARI_EXTENSION.appex/Contents/Resources/Shared/content-script.js" \
+        "Contents/PlugIns/$SAFARI_EXTENSION.appex/Contents/Resources/Shared/provider-ownership-v2.js" \
+        "Contents/PlugIns/$SAFARI_EXTENSION.appex/Contents/Resources/Shared/owned-provider-tab-v2-reducer.js" \
         "Contents/PlugIns/$SAFARI_EXTENSION.appex/Contents/Resources/manifest.json" \
         "Contents/PlugIns/$SAFARI_EXTENSION.appex/Contents/_CodeSignature/CodeResources" \
         "Contents/Resources/AppIcon.icns" \
@@ -347,6 +349,8 @@ readonly expected_manifest="$(
         "Contents/Resources/BrowserCompanion/Chromium/Shared/background-core.js" \
         "Contents/Resources/BrowserCompanion/Chromium/Shared/claude-usage-extractor.js" \
         "Contents/Resources/BrowserCompanion/Chromium/Shared/content-script.js" \
+        "Contents/Resources/BrowserCompanion/Chromium/Shared/provider-ownership-v2.js" \
+        "Contents/Resources/BrowserCompanion/Chromium/Shared/owned-provider-tab-v2-reducer.js" \
         "Contents/Resources/BrowserCompanion/Chromium/manifest.json" \
         "Contents/Resources/BrowserCompanion/ChromiumNativeHost/$CHROMIUM_HOST_NAME.json" \
         "Contents/Resources/UMA-M5-BROWSER-Provenance.plist" \

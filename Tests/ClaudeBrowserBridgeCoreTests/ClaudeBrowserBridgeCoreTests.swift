@@ -102,8 +102,9 @@ struct ClaudeBrowserBridgeCoreTests {
         let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
         #expect(Set(object.keys) == [
             "kind", "schemaVersion", "sourceID", "browserFamily",
-            "routeState", "observationID", "observation",
+            "routeState", "requestID", "observationID", "observation",
         ])
+        #expect(UUID(uuidString: try #require(object["requestID"] as? String)) != nil)
         #expect(UUID(uuidString: try #require(object["observationID"] as? String)) != nil)
 
         var invalidID = object
@@ -160,20 +161,59 @@ struct ClaudeBrowserBridgeCoreTests {
     func automaticControlEventContract() throws {
         let requestID = "6e6f5e38-70bf-4b1b-81b0-e0903081f980"
         for status in ClaudeBrowserAutomationStatus.allCases {
+            let carriesRuntimeIdentity: Bool
+            switch status {
+            case .extensionBackgroundReady, .nativeHandlerEntered,
+                 .nativeRequestDecoded, .runtimeGenerationValidated,
+                 .nativeResponseCreated, .nativeResponseSent,
+                 .extensionResponseReceived, .bridgeReady:
+                carriesRuntimeIdentity = true
+            default:
+                carriesRuntimeIdentity = false
+            }
             let source = ClaudeBrowserAutomationEvent(
                 requestID: requestID,
                 status: status,
-                occurredAt: "2026-08-02T12:00:00Z"
+                occurredAt: "2026-08-02T12:00:00Z",
+                companionVersion: carriesRuntimeIdentity
+                    ? ClaudeBrowserBridgeContract.safariExtensionVersion : nil,
+                companionBuild: carriesRuntimeIdentity
+                    ? ClaudeBrowserBridgeContract.safariExtensionBuild : nil,
+                protocolSchemaVersion: carriesRuntimeIdentity
+                    ? ClaudeBrowserBridgeContract.schemaVersion : nil
             )
             let data = try ClaudeBrowserAutomationEventDecoder.encode(source)
             #expect(try ClaudeBrowserAutomationEventDecoder.decode(data) == source)
             let object = try #require(
                 JSONSerialization.jsonObject(with: data) as? [String: Any]
             )
-            #expect(Set(object.keys) == [
+            var expectedKeys: Set<String> = [
                 "kind", "schemaVersion", "sourceID", "browserFamily",
                 "requestID", "status", "occurredAt",
-            ])
+            ]
+            if carriesRuntimeIdentity {
+                expectedKeys.formUnion([
+                    "companionVersion", "companionBuild", "protocolSchemaVersion",
+                    "containingApplicationIdentifier", "extensionIdentifier",
+                    "teamIdentifier", "runtimeGenerationID",
+                ])
+                #expect(object["companionVersion"] as? String
+                    == ClaudeBrowserBridgeContract.safariExtensionVersion)
+                #expect(object["companionBuild"] as? String
+                    == ClaudeBrowserBridgeContract.safariExtensionBuild)
+                #expect(object["protocolSchemaVersion"] as? Int
+                    == ClaudeBrowserBridgeContract.schemaVersion)
+                #expect(object["containingApplicationIdentifier"] as? String
+                    == ClaudeBrowserBridgeContract.safariApplicationIdentifier)
+                #expect(object["extensionIdentifier"] as? String
+                    == ClaudeBrowserBridgeContract.safariExtensionIdentifier)
+                #expect(object["teamIdentifier"] as? String
+                    == ClaudeBrowserBridgeContract.expectedTeamIdentifier)
+                #expect(UUID(uuidString: try #require(
+                    object["runtimeGenerationID"] as? String
+                )) != nil)
+            }
+            #expect(Set(object.keys) == expectedKeys)
         }
 
         let valid = ClaudeBrowserAutomationEvent(
@@ -191,6 +231,43 @@ struct ClaudeBrowserBridgeCoreTests {
             try ClaudeBrowserAutomationEventDecoder.decode(
                 JSONSerialization.data(withJSONObject: object)
             )
+        }
+    }
+
+    @Test("Test runtime identity is isolated and qualification requests contain no provider data")
+    func runtimeIdentityAndQualificationContract() throws {
+        #expect(ClaudeBrowserRuntimeIdentity.production.containingApplicationIdentifier
+            == "com.silkrd.uma")
+        #expect(ClaudeBrowserRuntimeIdentity.production.extensionIdentifier
+            == "com.silkrd.uma.ClaudeBrowserCompanion")
+        #expect(ClaudeBrowserRuntimeIdentity.test.containingApplicationIdentifier
+            == "com.silkrd.uma.test")
+        #expect(ClaudeBrowserRuntimeIdentity.test.extensionIdentifier
+            == "com.silkrd.uma.test.ClaudeBrowserCompanion")
+        #expect(ClaudeBrowserRuntimeIdentity.test.nativeApplicationIdentifier
+            == "com.silkrd.uma.test")
+        #expect(ClaudeBrowserRuntimeIdentity.test.handoffDirectoryRelativePath
+            .contains("/TestChannel/"))
+        #expect(ClaudeBrowserRuntimeIdentity.production != .test)
+
+        let request = ClaudeBrowserRuntimeQualificationRequest(
+            requestID: "6e6f5e38-70bf-4b1b-81b0-e0903081f980",
+            runtimeGenerationID: "3c4f3c8a-6352-4bc7-b982-c5e8662da078"
+        )
+        let encoded = try ClaudeBrowserRuntimeQualificationRequestDecoder.encode(request)
+        #expect(try ClaudeBrowserRuntimeQualificationRequestDecoder.decode(encoded) == request)
+        let object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        #expect(Set(object.keys) == [
+            "kind", "schemaVersion", "sourceID", "browserFamily", "requestID",
+            "runtimeGenerationID",
+        ])
+        for forbidden in [
+            "url", "dom", "html", "quota", "identity", "cookie", "token",
+            "credential", "companionVersion",
+        ] {
+            #expect(object[forbidden] == nil)
         }
     }
 
@@ -437,6 +514,12 @@ struct ClaudeBrowserBridgeCoreTests {
         #expect(endpoint.listenerLockPath == endpoint.directoryPath + "/listener.lock")
         #expect(endpoint.legacySocketPath == endpoint.directoryPath + "/usage.sock")
         #expect(!endpoint.directoryPath.hasPrefix("/tmp/"))
+
+        let testEndpoint = ClaudeBrowserFileHandoffEndpoint.runtime(.test)
+        #expect(testEndpoint.directoryPath.hasSuffix(
+            "/Library/Application Support/CodexUsageMonitor/TestChannel/ClaudeBrowserCompanion"
+        ))
+        #expect(testEndpoint.directoryPath != endpoint.directoryPath)
     }
 
     @Test("Safari uses exact persistent access while Chromium remains manual")
@@ -454,19 +537,31 @@ struct ClaudeBrowserBridgeCoreTests {
         #expect(safari["manifest_version"] as? Int == 2)
         #expect(safari["permissions"] as? [String] == [
             "nativeMessaging",
-            "storage",
             ClaudeBrowserBridgeContract.exactUsageHostPermission,
         ])
         #expect(safari["host_permissions"] == nil)
         let safariBackground = try #require(safari["background"] as? [String: Any])
         #expect(safariBackground["scripts"] as? [String] == [
             "Shared/claude-usage-extractor.js",
+            "Shared/provider-ownership-v2.js",
+            "Shared/owned-provider-tab-v2-reducer.js",
             "Safari/background-loader.js",
             "Shared/background-core.js",
         ])
         #expect(safariBackground["persistent"] as? Bool == true)
         #expect(safariBackground["service_worker"] == nil)
-        #expect(safari["content_scripts"] == nil)
+        let safariContentScripts = try #require(safari["content_scripts"] as? [[String: Any]])
+        #expect(safariContentScripts.count == 1)
+        #expect(safariContentScripts[0]["matches"] as? [String] == [
+            ClaudeBrowserBridgeContract.exactUsageHostPermission,
+        ])
+        #expect(safariContentScripts[0]["run_at"] as? String == "document_start")
+        #expect(safariContentScripts[0]["all_frames"] as? Bool == false)
+        #expect(safariContentScripts[0]["js"] as? [String] == [
+            "Shared/claude-usage-extractor.js",
+            "Shared/provider-ownership-v2.js",
+            "Shared/content-script.js",
+        ])
         #expect(safari["action"] == nil)
 
         let chromiumData = try Data(contentsOf: manifestRoot
@@ -506,13 +601,36 @@ struct ClaudeBrowserBridgeCoreTests {
         #expect(background.contains("api.scripting.executeScript"))
         #expect(background.contains("api.tabs?.executeScript"))
         #expect(background.contains("allowedSenderURL(tab?.url || \"\")"))
-        #expect(!background.contains("tabs.onUpdated"))
-        #expect(!background.contains("tabs.query"))
-        #expect(background.contains("api.tabs.create({ url: extractor.CONTRACT.href, active: false })"))
-        #expect(background.contains("api.tabs.remove(record.tabID)"))
-        #expect(background.contains("await proveOwnedTab(record, tab)"))
+        #expect(!background.contains("api.tabs.get(read.tabID)"))
+        #expect(!background.contains("api.tabs.query("))
+        #expect(background.contains("api.tabs.create({ url: providerURL, active: false })"))
+        #expect(!background.contains("api.tabs.update("))
+        #expect(background.contains("sender?.frameId === 0"))
+        #expect(background.contains("port.sender.tab.id !== read.providerOwnedTabID"))
+        #expect(background.contains("umaClaudeProviderRecoveryChallengeV2"))
+        #expect(background.contains("umaClaudeProviderRecoveryResponseV2"))
+        #expect(background.contains("api.tabs.remove(read.providerOwnedTabID)"))
+        #expect(!background.contains("owned-tab-bootstrap"))
+        #expect(!background.contains("location.replace"))
         #expect(background.contains("ownedTabOwnershipLost"))
+        #expect(background.contains(
+            "api.runtime.sendNativeMessage(config.nativeApplication, payload)"
+        ))
         #expect(background.contains("api.runtime.connectNative(config.nativeApplication)"))
+        #expect(background.contains("port.onMessage.addListener((message) =>"))
+        #expect(background.contains("port.onDisconnect.addListener(() =>"))
+        #expect(background.contains("containingAppPortState"))
+        #expect(background.contains("containingAppPortGeneration"))
+        #expect(background.contains("runtimeQualificationRequest(requestID)"))
+        #expect(background.contains("qualifyRuntime(command.requestID, portGeneration)"))
+        #expect(background.contains("runtimeQualificationAcknowledgement(reply)"))
+        #expect(background.contains("claudeBrowserRuntimeQualificationRequest"))
+        #expect(background.contains("claudeBrowserRuntimeQualificationReply"))
+        #expect(background.contains("claudeBrowserRuntimeQualificationAcknowledgement"))
+        #expect(!background.contains("automationEnvelope(command.requestID, \"bridgeReady\")"))
+        #expect(background.contains("config.browserFamily !== \"safari\""))
+        #expect(!background.contains("nativeReconnectTimer"))
+        #expect(!background.contains("setInterval"))
 
         let content = try String(
             contentsOf: root.appendingPathComponent(
@@ -523,15 +641,20 @@ struct ClaudeBrowserBridgeCoreTests {
         #expect(content.contains("extractor.exactUsageURL(globalThis.location)"))
         #expect(content.contains("result = extractor.extractResult"))
         #expect(content.contains("const readinessTimeoutMilliseconds = 20_000"))
-        #expect(content.contains("const readinessPollMilliseconds = 500"))
-        #expect(content.contains("result.status !== \"usageUnavailable\""))
-        #expect(!content.contains("MutationObserver"))
+        #expect(content.contains("new MutationObserver(scheduleReadinessEvaluation)"))
+        #expect(content.contains("requestAnimationFrame"))
+        #expect(!content.contains("readinessPollMilliseconds"))
+        #expect(content.contains("ROUTE_READINESS_TIMEOUT"))
+        #expect(content.contains("TARGET_DATA_TIMEOUT"))
+        #expect(content.contains("const routeState = extractor.usageRouteState"))
+        #expect(content.contains("if (routeState !== \"exact\")"))
         #expect(content.contains("setTimeout"))
         #expect(!content.contains("setInterval"))
         #expect(content.contains("runtime.onMessage.addListener"))
-        #expect(content.contains("umaClaudeOwnedTabBind"))
-        #expect(content.contains("umaClaudeOwnedTabChallenge"))
-        #expect(content.contains("umaClaudeOwnedTabProof"))
+        #expect(content.contains("umaClaudeProviderDocumentDiscoveredV2"))
+        #expect(content.contains("umaClaudeProviderRecoveryCandidateV2"))
+        #expect(content.contains("umaClaudeProviderRecoveryChallengeV2"))
+        #expect(content.contains("umaClaudeProviderRecoveryResponseV2"))
         #expect(content.contains("umaClaudeExtractUsage"))
 
         let entitlementURL = root.appendingPathComponent(
@@ -573,6 +696,343 @@ struct ClaudeBrowserBridgeCoreTests {
         #expect(manifest["allowed_origins"] as? [String] == [
             ClaudeBrowserBridgeContract.chromiumExtensionOrigin,
         ])
+    }
+
+    @Test("owned-tab receipt is owner-only, content-free, and generation-bound")
+    func ownedTabReceiptLifecycle() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "uma-owned-tab-receipt-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: root.path
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let endpoint = ClaudeBrowserFileHandoffEndpoint(directoryPath: root.path)
+        let requestID = UUID().uuidString.lowercased()
+        let generation = UUID().uuidString.lowercased()
+        let digest = String(repeating: "a", count: 64)
+        let receipt = ClaudeBrowserOwnedTabReceipt(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: digest,
+            createdAt: "2026-08-27T01:02:03Z",
+            expiresAt: "2026-08-27T01:07:03Z",
+            lifecycleState: .requestIntentPersisted,
+            revision: 1
+        )
+
+        try ClaudeBrowserOwnedTabReceiptStore.save(receipt, endpoint: endpoint)
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.load(endpoint: endpoint) == receipt)
+
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.transition(
+            requestID: UUID().uuidString.lowercased(),
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: digest,
+            expectedRevision: 1,
+            expectedState: .requestIntentPersisted,
+            nextState: .providerCreationPending,
+            endpoint: endpoint
+        ) == nil)
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.transition(
+            requestID: requestID,
+            runtimeGenerationID: UUID().uuidString.lowercased(),
+            ownershipNonceDigest: digest,
+            expectedRevision: 1,
+            expectedState: .requestIntentPersisted,
+            nextState: .providerCreationPending,
+            endpoint: endpoint
+        ) == nil)
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.transition(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: String(repeating: "b", count: 64),
+            expectedRevision: 1,
+            expectedState: .requestIntentPersisted,
+            nextState: .providerCreationPending,
+            endpoint: endpoint
+        ) == nil)
+
+        let path = root.appendingPathComponent("owned-tab-receipt.plist")
+        let attributes = try FileManager.default.attributesOfItem(atPath: path.path)
+        #expect(attributes[.posixPermissions] as? Int == 0o600)
+        let data = try Data(contentsOf: path)
+        let object = try #require(
+            PropertyListSerialization.propertyList(from: data, format: nil)
+                as? [String: Any]
+        )
+        #expect(Set(object.keys) == [
+            "schemaVersion", "requestID", "runtimeGenerationID",
+            "ownershipNonceDigest", "createdAt", "expiresAt",
+            "lifecycleState", "revision",
+        ])
+        let semanticText = try #require(String(
+            data: PropertyListSerialization.data(
+                fromPropertyList: object,
+                format: .xml,
+                options: 0
+            ),
+            encoding: .utf8
+        )).lowercased()
+        for forbidden in [
+            "url", "title", "dom", "html", "quota", "identity", "cookie",
+            "credential", "history", "claude", "user",
+        ] {
+            #expect(!semanticText.contains(forbidden))
+        }
+
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.transition(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: digest,
+            expectedRevision: 1,
+            expectedState: .requestIntentPersisted,
+            nextState: .providerCreationPending,
+            endpoint: endpoint
+        )?.revision == 2)
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.bindCandidate(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: digest,
+            expectedRevision: 2,
+            providerCandidateTabID: 47,
+            endpoint: endpoint
+        )?.revision == 3)
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.bindCandidate(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: digest,
+            expectedRevision: 2,
+            providerCandidateTabID: 47,
+            endpoint: endpoint
+        ) == nil)
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.bindCandidate(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: digest,
+            expectedRevision: 3,
+            providerCandidateTabID: 48,
+            endpoint: endpoint
+        ) == nil)
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.bindCandidate(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: digest,
+            expectedRevision: 3,
+            providerCandidateTabID: 47,
+            endpoint: endpoint
+        )?.revision == 3)
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.transition(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: digest,
+            expectedRevision: 3,
+            expectedState: .providerCreationPending,
+            nextState: .providerDocumentDiscovered,
+            endpoint: endpoint
+        )?.revision == 4)
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.transition(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: digest,
+            expectedRevision: 4,
+            expectedState: .providerDocumentDiscovered,
+            nextState: .providerOwnershipProven,
+            providerOwnedTabID: 47,
+            endpoint: endpoint
+        )?.revision == 5)
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.transition(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: digest,
+            expectedRevision: 4,
+            expectedState: .providerOwnershipProven,
+            nextState: .cleanupRequested,
+            endpoint: endpoint
+        ) == nil)
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.transition(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: digest,
+            expectedRevision: 5,
+            expectedState: .providerOwnershipProven,
+            nextState: .cleanupRequested,
+            endpoint: endpoint
+        )?.revision == 6)
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.transition(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: digest,
+            expectedRevision: 6,
+            expectedState: .cleanupRequested,
+            nextState: .cleanupConfirmed,
+            endpoint: endpoint
+        )?.revision == 7)
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.transition(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: digest,
+            expectedRevision: 7,
+            expectedState: .cleanupConfirmed,
+            nextState: .complete,
+            endpoint: endpoint
+        )?.revision == 8)
+
+        #expect(try !ClaudeBrowserOwnedTabReceiptStore.remove(
+            requestID: requestID,
+            runtimeGenerationID: UUID().uuidString.lowercased(),
+            ownershipNonceDigest: digest,
+            expectedRevision: 8,
+            terminalState: .complete,
+            endpoint: endpoint
+        ))
+        #expect(try !ClaudeBrowserOwnedTabReceiptStore.remove(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: String(repeating: "b", count: 64),
+            expectedRevision: 8,
+            terminalState: .complete,
+            endpoint: endpoint
+        ))
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.remove(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: digest,
+            expectedRevision: 8,
+            terminalState: .complete,
+            endpoint: endpoint
+        ))
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.load(endpoint: endpoint) == nil)
+        #expect(try !ClaudeBrowserOwnedTabReceiptStore.remove(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: digest,
+            expectedRevision: 8,
+            terminalState: .complete,
+            endpoint: endpoint
+        ))
+    }
+
+    @Test("owned-tab receipt accepts JavaScript fractional-second timestamps")
+    func ownedTabReceiptAcceptsJavaScriptTimestamp() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "uma-owned-tab-js-time-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: root.path
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let endpoint = ClaudeBrowserFileHandoffEndpoint(directoryPath: root.path)
+        let receipt = ClaudeBrowserOwnedTabReceipt(
+            requestID: UUID().uuidString.lowercased(),
+            runtimeGenerationID: UUID().uuidString.lowercased(),
+            ownershipNonceDigest: String(repeating: "c", count: 64),
+            createdAt: "2026-08-27T01:02:03.456Z",
+            expiresAt: "2026-08-27T01:07:03.456Z",
+            lifecycleState: .requestIntentPersisted,
+            revision: 1
+        )
+
+        #expect(receipt.creationDate != nil)
+        #expect(receipt.isStructurallyValid)
+        try ClaudeBrowserOwnedTabReceiptStore.save(receipt, endpoint: endpoint)
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.load(endpoint: endpoint) == receipt)
+
+        let malformed = ClaudeBrowserOwnedTabReceipt(
+            requestID: receipt.requestID,
+            runtimeGenerationID: receipt.runtimeGenerationID,
+            ownershipNonceDigest: receipt.ownershipNonceDigest,
+            createdAt: "not-a-timestamp",
+            expiresAt: receipt.expiresAt,
+            lifecycleState: .requestIntentPersisted,
+            revision: 1
+        )
+        #expect(malformed.creationDate == nil)
+        #expect(!malformed.isStructurallyValid)
+    }
+
+    @Test("trusted discovery and create-result candidate binding are order independent")
+    func ownedTabCandidateInverseOrdering() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "uma-owned-tab-inverse-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: false
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: root.path
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let endpoint = ClaudeBrowserFileHandoffEndpoint(directoryPath: root.path)
+        let requestID = UUID().uuidString.lowercased()
+        let generation = UUID().uuidString.lowercased()
+        let digest = String(repeating: "d", count: 64)
+        try ClaudeBrowserOwnedTabReceiptStore.save(
+            ClaudeBrowserOwnedTabReceipt(
+                requestID: requestID,
+                runtimeGenerationID: generation,
+                ownershipNonceDigest: digest,
+                createdAt: "2026-08-27T01:02:03Z",
+                expiresAt: "2026-08-27T01:07:03Z",
+                lifecycleState: .requestIntentPersisted,
+                revision: 1
+            ),
+            endpoint: endpoint
+        )
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.transition(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: digest,
+            expectedRevision: 1,
+            expectedState: .requestIntentPersisted,
+            nextState: .providerCreationPending,
+            endpoint: endpoint
+        )?.revision == 2)
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.transition(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: digest,
+            expectedRevision: 2,
+            expectedState: .providerCreationPending,
+            nextState: .providerDocumentDiscovered,
+            providerCandidateTabID: 91,
+            endpoint: endpoint
+        )?.revision == 3)
+        // A late tabs.create resolution may only confirm the already-discovered ID.
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.bindCandidate(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: digest,
+            expectedRevision: 3,
+            providerCandidateTabID: 91,
+            endpoint: endpoint
+        )?.revision == 3)
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.bindCandidate(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: digest,
+            expectedRevision: 3,
+            providerCandidateTabID: 92,
+            endpoint: endpoint
+        ) == nil)
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.transition(
+            requestID: requestID,
+            runtimeGenerationID: generation,
+            ownershipNonceDigest: digest,
+            expectedRevision: 3,
+            expectedState: .providerDocumentDiscovered,
+            nextState: .providerOwnershipProven,
+            providerOwnedTabID: 91,
+            endpoint: endpoint
+        )?.revision == 4)
     }
 }
 

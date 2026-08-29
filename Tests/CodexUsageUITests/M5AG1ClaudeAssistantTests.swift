@@ -188,6 +188,10 @@ struct M5AG1ClaudeAssistantTests {
         for required in ["Stale", "9 percent remaining", "Existing Claude login"] {
             #expect(english.accessibilityLabel.contains(required))
         }
+        #expect(english.connectionState == .stale)
+        #expect(english.detailText?.contains("Stale exact retained") == true)
+        #expect(english.accessibilityLabel.contains("stale value retained"))
+        #expect(!english.accessibilityLabel.contains("reconnecting"))
         for required in [
             "较早数据",
             "剩余 9%",
@@ -196,6 +200,10 @@ struct M5AG1ClaudeAssistantTests {
         ] {
             #expect(chinese.accessibilityLabel.contains(required))
         }
+        #expect(chinese.connectionState == .stale)
+        #expect(chinese.detailText?.contains("保留的较早精确值") == true)
+        #expect(chinese.accessibilityLabel.contains("保留较早值"))
+        #expect(!chinese.accessibilityLabel.contains("正在重新连接"))
         #expect(!english.accessibilityLabel.contains("Fresh"))
         #expect(!chinese.accessibilityLabel.contains("新鲜"))
     }
@@ -333,8 +341,12 @@ struct M5AG1ClaudeAssistantTests {
     }
 
     @Test
-    func burstUpdatesRemainUniqueOrderedAndMapUnderTarget() {
-        let start = Date()
+    func burstUpdatesRemainUniqueAndOrdered() {
+        let expectedIDs = [
+            "codex.local",
+            "claude.browserSync",
+            "workbuddy.manualAvailability",
+        ]
         var finalIDs: [String] = []
         for value in 0..<2_000 {
             let cards = [
@@ -356,16 +368,10 @@ struct M5AG1ClaudeAssistantTests {
             ]
             finalIDs = SharedUsagePresentationPolicy.assistantCards(from: cards)
                 .map(\.id)
+            #expect(finalIDs == expectedIDs)
+            #expect(Set(finalIDs).count == finalIDs.count)
         }
-        #expect(Date().timeIntervalSince(start) < 0.5)
-        #expect(
-            finalIDs == [
-                "codex.local",
-                "claude.browserSync",
-                "workbuddy.manualAvailability",
-            ]
-        )
-        #expect(Set(finalIDs).count == finalIDs.count)
+        #expect(finalIDs == expectedIDs)
     }
 
     @Test

@@ -32,7 +32,7 @@ struct M5RMXB0PlanTests {
     }
 
     @Test
-    func providerTruthAndCompletionLockAdmitOnlyM5RMXG1() throws {
+    func providerTruthAndCurrentCompletionLockRemainBoundedToSmartMode() throws {
         let scope = try record("source/UMA M5RMX Scope Lock.md")
 
         var previous = scope.startIndex
@@ -41,19 +41,21 @@ struct M5RMXB0PlanTests {
             previous = range.upperBound
         }
         #expect(scope.contains("Cursor and Kimi\nare unsupported/hidden"))
-        #expect(scope.contains("sole next task is `M5RMX-G1`"))
-        #expect(scope.contains("starts automatically"))
+        #expect(scope.contains("**Current task:** `M5RMX Claude root-repair final closeout`"))
+        #expect(scope.contains("does not authorize Apple\nsubmission"))
+        #expect(scope.contains("provider ordering"))
     }
 
     @Test
-    func currentClaudeSourceAndRetiredStatusLineAreUnambiguous() throws {
+    func currentSmartSourceAndHistoricalBrowserRecordAreUnambiguous() throws {
         let scope = try record("source/UMA M5RMX Scope Lock.md")
         let retrospective = try record("source/UMA M5RMX Retrospective.md")
 
-        #expect(scope.contains("Claude Browser Sync is current through Safari"))
-        #expect(scope.contains("status-line quota route is\nretired"))
-        #expect(scope.contains("Browser Sync quota source: ACCEPTED CURRENT"))
-        #expect(scope.contains("Status-line quota route: HISTORICAL / RETIRED"))
+        #expect(scope.contains("Current source ownership is Local Smart Mode"))
+        #expect(scope.contains("Persistent five-minute Safari\ntracking"))
+        #expect(scope.contains("are retired"))
+        #expect(scope.contains("one-shot Accuracy Sync"))
+        #expect(scope.contains("The prior Section 3 remains historical baseline"))
         for required in [
             "ClaudeCodeUsageConnector.swift",
             "ClaudeBrowserProductionIntegration.swift",
@@ -75,6 +77,8 @@ struct M5RMXB0PlanTests {
         ] {
             #expect(retrospective.contains(status))
         }
+        #expect(retrospective.contains("Claude Browser Sync"))
+        #expect(retrospective.contains("status-line"))
     }
 
     @Test
@@ -98,6 +102,8 @@ struct M5RMXB0PlanTests {
         }
         #expect(scope.contains("It performs no production/provider/\nApple/Desktop actions."))
         #expect(qa.contains("B0 performed no production/provider/Apple/Desktop actions."))
+        #expect(scope.contains("No raw status-line payload, prompt/session content"))
+        #expect(scope.contains("exact private Founder quota"))
     }
 
     @Test
@@ -120,11 +126,11 @@ struct M5RMXB0PlanTests {
         #expect(scope.contains("requests exactly"))
         for permission in [
             "`nativeMessaging`",
-            "`storage`",
             "`https://claude.ai/new*`",
         ] {
             #expect(scope.contains(permission))
         }
+        #expect(!scope.contains("`storage`"))
         #expect(scope.contains("static content scripts or broad host permissions."))
     }
 

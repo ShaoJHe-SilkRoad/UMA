@@ -2,6 +2,37 @@
 
 Date: 2026-07-28
 
+## M5RMX-CLAUDE-SMART-G1 production configuration contract
+
+The Founder-authorized Local Smart Mode installs one deterministic user-level
+status-line wrapper only after explicit in-product consent. Before mutation it
+records only the exact existing `statusLine` fragment (or its absence), plus
+whole-file SHA-256 and mode metadata for concurrency safety. UMA never persists
+unrelated Claude settings. Unknown keys remain in place and all existing
+status-line options are preserved.
+
+If an existing custom status-line command is present, the one-shot relay may
+invoke that exact preserved command once through a single nonrecursive bridge
+after UMA's immediate projection. The bridge does not capture environment,
+stdout, or stderr and does not log the command or payload. Recursive UMA relay
+commands, unsafe literal secret assignments, managed-hook blockers, nonregular
+files, symlinks, oversized settings, and malformed settings fail closed.
+
+External settings edits never trigger silent overwrite. A hash mismatch yields
+`repairRequired`; explicit Repair may rebase unrelated edits only while the
+exact UMA-owned `statusLine` field is unchanged. Human replacement or mutation
+of `statusLine` fails closed and is never adopted. Disconnect mutates only that
+verified field: it replaces it with the exact prior fragment or removes it when
+previously absent, preserving current unrelated keys. Restore requires both
+the repaired whole-file digest and exact field ownership, then clears sanitized
+state, anchors, and UMA metadata. Drift blocks restore instead of discarding
+Human changes.
+
+This production section supersedes the historical statement that the official
+single `statusLine` object has no preservable implementation path. The accepted
+bridge is deliberately one-shot and nonrecursive; it is not a general hook
+framework.
+
 ## Current M5-SETUP-G1R decision
 
 **GO — CLAUDE STATUS-LINE QUOTA SOURCE PROVEN**

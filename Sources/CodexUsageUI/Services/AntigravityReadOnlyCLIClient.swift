@@ -374,10 +374,13 @@ private final class AntigravityProcessBox: @unchecked Sendable {
             guard let self else { return }
             if stderrBuffer.append(handle.availableData) { terminate() }
         }
+        let termination = AntigravityProcessTermination()
+        process.terminationHandler = { _ in termination.signal() }
 
         do {
             try process.run()
         } catch {
+            process.terminationHandler = nil
             cleanupHandles()
             throw AntigravityCLIClientError.providerUnavailable
         }
@@ -391,9 +394,10 @@ private final class AntigravityProcessBox: @unchecked Sendable {
             try await Task.sleep(for: .seconds(hardTimeout))
             self?.forceTimeout()
         }
-        process.waitUntilExit()
+        await termination.wait()
         timeoutTask.cancel()
         hardTimeoutTask.cancel()
+        process.terminationHandler = nil
         cleanupHandles()
 
         let state = terminalState()
@@ -447,6 +451,35 @@ private final class AntigravityProcessBox: @unchecked Sendable {
         stderrBuffer.appendFinal(try? stderr.readToEnd())
         try? stdout.close()
         try? stderr.close()
+    }
+}
+
+private final class AntigravityProcessTermination: @unchecked Sendable {
+    private let lock = NSLock()
+    private var terminated = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if terminated {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                precondition(self.continuation == nil)
+                self.continuation = continuation
+                lock.unlock()
+            }
+        }
+    }
+
+    func signal() {
+        lock.lock()
+        terminated = true
+        let continuation = self.continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume()
     }
 }
 

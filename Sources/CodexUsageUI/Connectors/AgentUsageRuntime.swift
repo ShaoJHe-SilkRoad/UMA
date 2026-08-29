@@ -1,4 +1,5 @@
 import AppKit
+import ClaudeStatusLineCore
 import Foundation
 
 enum UsageMonitorRuntimeError: Error, Equatable {
@@ -41,7 +42,8 @@ public struct UsageMonitorRuntime {
 
     public static func live(
         workBuddyStoreURL: URL? = nil,
-        snapshotStoreURL: URL? = nil
+        snapshotStoreURL: URL? = nil,
+        startProviders: Bool = true
     ) -> UsageMonitorRuntime {
         let manualStore = workBuddyStoreURL.map {
             WorkBuddyManualAvailabilityStore(fileURL: $0)
@@ -53,6 +55,31 @@ public struct UsageMonitorRuntime {
         let claudeConsent = ClaudeBrowserConsentStore()
         let claudeCache = ClaudeBrowserSanitizedCacheStore()
         let claudeIntegration = ClaudeBrowserProductionIntegration.make()
+        let claudeSurfaceDetector = ClaudeLocalSurfaceDetector()
+        let claudePaths = ClaudeStatusLineConfigurationPaths()
+        let claudeRelay = Bundle.main.bundleURL
+            .appendingPathComponent("Contents", isDirectory: true)
+            .appendingPathComponent("Helpers", isDirectory: true)
+            .appendingPathComponent("ClaudeStatusLineRelay")
+        let relayCommand = [
+            claudeRelay.path,
+            "--state",
+            claudePaths.stateURL.path,
+            "--prior-status-line",
+            claudePaths.backupURL.path,
+        ].map(Self.shellQuote).joined(separator: " ")
+        let claudeLocalActivityReader: (any ClaudeLocalActivityReading)? =
+            claudeSurfaceDetector.statusLineCapableSurfaceInstalled
+                ? ClaudeLocalActivityReader()
+                : nil
+        let claudeDesktopPlanUsageReader: (any ClaudeDesktopPlanUsageReading)? =
+            claudeSurfaceDetector.claudeDesktopInstalled
+                ? ClaudeDesktopPlanUsageReader()
+                : nil
+        let claudeConfiguration = ClaudeStatusLineConfigurationManager(
+            paths: claudePaths,
+            relayCommand: relayCommand
+        )
         let claudeConnector = ClaudeCodeUsageConnector.production(
             integration: claudeIntegration,
             hasConsent: { @MainActor in claudeConsent.consentGranted },
@@ -62,12 +89,13 @@ public struct UsageMonitorRuntime {
             readCache: { await claudeCache.load() },
             writeCache: { data in try? await claudeCache.save(data) },
             clearCache: { try? await claudeCache.clear() },
-            autoRefreshEnabled: { @MainActor in
-                claudeConsent.autoRefreshEnabled
-            },
-            allowSafariLaunch: { @MainActor in
-                claudeConsent.allowSafariLaunch
-            }
+            statusStateURL: claudePaths.stateURL,
+            localActivityReader: claudeLocalActivityReader,
+            desktopPlanUsageReader: claudeDesktopPlanUsageReader,
+            desktopActivityContract: claudeSurfaceDetector.claudeDesktopInstalled
+                ? .estimateOnlyNoActivitySignal
+                : .notApplicable,
+            anchorStore: ClaudeSmartAnchorStore()
         )
         let workBuddyConnector = WorkBuddyAvailabilityConnector(source: manualSource)
         let accountWebSync = WorkBuddyAccountWebSessionController()
@@ -106,6 +134,11 @@ public struct UsageMonitorRuntime {
         let claudeSettings = ClaudeBrowserSettingsModel(
             connector: claudeConnector,
             consentStore: claudeConsent,
+            // Claude Desktop's hosted agent uses an isolated per-session
+            // configuration root. Only a detected terminal/IDE surface may be
+            // configured through the supported user-level statusLine scope.
+            configurationManager: claudeSurfaceDetector
+                .statusLineCapableSurfaceInstalled ? claudeConfiguration : nil,
             refreshAdmissions: { @MainActor in
                 let descriptors = await registry.orderedDescriptors()
                 let excluded = agentSettings.disabledConnectorIDs(
@@ -197,25 +230,26 @@ public struct UsageMonitorRuntime {
             from: antigravityConnector,
             map: Self.antigravityObservation
         )
-        Task {
-            let shouldStartClaude = claudeConsent.consentGranted
-            // Browser Sync is not a passive local-availability source, but a
-            // previously consented session still owns a local listener and
-            // automatic scheduler. Start it before awaiting any passive source
-            // so a slow provider cannot delay the listener or first cycle.
-            if shouldStartClaude {
-                await claudeConnector.start()
+        if startProviders {
+            Task {
+                let shouldStartClaude = claudeConsent.consentGranted
+                // Local Smart Mode owns one local file monitor and no recurring
+                // browser scheduler. Start it before passive admission so the next
+                // official Claude Code status-line write is observed immediately.
+                if shouldStartClaude {
+                    await claudeConnector.start()
+                }
+                await registry.startPassiveConnectors()
+                guard shouldStartClaude else { return }
+                let descriptors = await registry.orderedDescriptors()
+                let excluded = agentSettings.disabledConnectorIDs(
+                    from: descriptors.map(\.id)
+                )
+                _ = await registry.scanSurfaceAdmissions(
+                    trigger: .applicationLaunch,
+                    excludedProviderIDs: excluded
+                )
             }
-            await registry.startPassiveConnectors()
-            guard shouldStartClaude else { return }
-            let descriptors = await registry.orderedDescriptors()
-            let excluded = agentSettings.disabledConnectorIDs(
-                from: descriptors.map(\.id)
-            )
-            _ = await registry.scanSurfaceAdmissions(
-                trigger: .applicationLaunch,
-                excludedProviderIDs: excluded
-            )
         }
         let settings = WorkBuddySettingsModel(source: manualSource)
         let login = WorkBuddyLoginCoordinator()
@@ -227,6 +261,10 @@ public struct UsageMonitorRuntime {
             workBuddyLogin: login,
             workBuddyAccountWebSync: accountWebSync
         )
+    }
+
+    private nonisolated static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
     }
 
     nonisolated static func antigravityObservation(
@@ -273,7 +311,8 @@ public struct UsageMonitorRuntime {
     /// while allowing only WorkBuddy's manual record to use a task-owned path.
     public static func live(
         bundleIdentifier: String?,
-        environment: [String: String]
+        environment: [String: String],
+        startProviders: Bool = true
     ) throws -> UsageMonitorRuntime {
         let configuration = try storeConfiguration(
             bundleIdentifier: bundleIdentifier,
@@ -289,7 +328,8 @@ public struct UsageMonitorRuntime {
         )
         return live(
             workBuddyStoreURL: configuration.workBuddyStoreURL,
-            snapshotStoreURL: configuration.snapshotStoreURL
+            snapshotStoreURL: configuration.snapshotStoreURL,
+            startProviders: startProviders
         )
     }
 

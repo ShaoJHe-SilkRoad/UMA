@@ -4,7 +4,7 @@ import Foundation
 import Testing
 @testable import CodexUsageUI
 
-@Suite("M5-BROWSER-G1 sanitized Claude snapshots")
+@Suite("M5 Local Smart sanitized Claude snapshots")
 struct M5DBGN1ClaudeSnapshotTests {
     @Test
     func strictEnvelopeKeepsOnlyAllowlistedQuotaFields() throws {
@@ -52,15 +52,18 @@ struct M5DBGN1ClaudeSnapshotTests {
     }
 
     @Test
-    func usedPercentageConvertsToRemainingExactlyOnce() async {
+    func usedPercentageConvertsToRemainingExactlyOnce() async throws {
         let fixture = BrowserConnectorFixture(consent: true)
         let connector = fixture.connector()
         await connector.start()
+        await connector.accuracySync()
         await fixture.bridge.send(browserEnvelope(five: 37.5, seven: 100))
 
-        let windows = await connector.currentSnapshot().channels[0].rateLimitWindows
-        #expect(windows.first { $0.kind == .fiveHour }?.usedPercent == 37.5)
-        #expect(windows.first { $0.kind == .fiveHour }?.remainingPercent == nil)
+        let snapshot = await connector.currentSnapshot()
+        let channel = try #require(snapshot.channels.first)
+        let windows = channel.rateLimitWindows
+        #expect(windows.first { $0.kind == .fiveHour }?.usedPercent == nil)
+        #expect(windows.first { $0.kind == .fiveHour }?.remainingPercent == 62.5)
         #expect(windows.first { $0.kind == .fiveHour }?.normalizedRemainingPercent == 62.5)
         #expect(windows.first { $0.kind == .sevenDay }?.normalizedRemainingPercent == 0)
     }
@@ -137,8 +140,18 @@ func browserEnvelope(
     ClaudeBrowserObservationEnvelope(
         browserFamily: browser,
         observation: ClaudeBrowserObservation(
-            fiveHour: five.map { ClaudeBrowserQuotaWindow(usedPercentage: $0) },
-            weeklyAllModels: seven.map { ClaudeBrowserQuotaWindow(usedPercentage: $0) },
+            fiveHour: five.map {
+                ClaudeBrowserQuotaWindow(
+                    usedPercentage: $0,
+                    resetAt: "2030-03-01T17:00:00Z"
+                )
+            },
+            weeklyAllModels: seven.map {
+                ClaudeBrowserQuotaWindow(
+                    usedPercentage: $0,
+                    resetAt: "2030-03-08T12:00:00Z"
+                )
+            },
             observedAt: observedAt
         )
     )
@@ -160,8 +173,11 @@ actor BrowserTestBridge {
     private(set) var startCount = 0
     private(set) var stopCount = 0
     private(set) var automaticRequests: [(requestID: String, allowSafariLaunch: Bool)] = []
+    private var automaticRequestWaiters: [CheckedContinuation<Void, Never>] = []
     private(set) var closedRequestIDs: [String] = []
     private var automaticDispatchResult: ClaudeBrowserAutomaticDispatchResult = .dispatched
+    private var verificationResult: ClaudeBrowserCompanionVerification = .verified
+    private(set) var verificationCount = 0
 
     func start(
         _ handler: @escaping ClaudeBrowserProductionIntegration.MessageHandler
@@ -183,15 +199,45 @@ actor BrowserTestBridge {
     func setAutomaticDispatchResult(_ result: ClaudeBrowserAutomaticDispatchResult) {
         automaticDispatchResult = result
     }
+    func setVerificationResult(_ result: ClaudeBrowserCompanionVerification) {
+        verificationResult = result
+    }
+    func verifyHandshake() -> ClaudeBrowserCompanionVerification {
+        verificationCount += 1
+        return verificationResult
+    }
     func requestAutomaticRefresh(
         requestID: String,
         allowSafariLaunch: Bool
     ) -> ClaudeBrowserAutomaticDispatchResult {
         automaticRequests.append((requestID, allowSafariLaunch))
+        let waiters = automaticRequestWaiters
+        automaticRequestWaiters.removeAll()
+        waiters.forEach { $0.resume() }
         return automaticDispatchResult
+    }
+    func waitForAutomaticRequest() async {
+        if !automaticRequests.isEmpty { return }
+        await withCheckedContinuation { continuation in
+            automaticRequestWaiters.append(continuation)
+        }
     }
     func closeOwnedTab(requestID: String) { closedRequestIDs.append(requestID) }
     func send(_ envelope: ClaudeBrowserObservationEnvelope) async {
+        let requestID = automaticRequests.last?.requestID ?? envelope.requestID
+        let requestBound = ClaudeBrowserObservationEnvelope(
+            browserFamily: envelope.browserFamily,
+            observation: envelope.observation,
+            kind: envelope.kind,
+            schemaVersion: envelope.schemaVersion,
+            sourceID: envelope.sourceID,
+            routeState: envelope.routeState,
+            requestID: requestID,
+            observationID: envelope.observationID
+        )
+        await handler?(.observation(.success(requestBound)))
+    }
+    func sendUnbound(_ envelope: ClaudeBrowserObservationEnvelope) async {
         await handler?(.observation(.success(envelope)))
     }
     func reject(_ error: ClaudeBrowserBridgeError = .malformedJSON) async {
@@ -205,7 +251,16 @@ actor BrowserTestBridge {
         await handler?(.automation(ClaudeBrowserAutomationEvent(
             requestID: requestID,
             status: status,
-            occurredAt: occurredAt
+            occurredAt: occurredAt,
+            companionVersion: status == .bridgeReady
+                ? ClaudeBrowserBridgeContract.safariExtensionVersion
+                : nil,
+            companionBuild: status == .bridgeReady
+                ? ClaudeBrowserBridgeContract.safariExtensionBuild
+                : nil,
+            protocolSchemaVersion: status == .bridgeReady
+                ? ClaudeBrowserBridgeContract.schemaVersion
+                : nil
         )))
     }
 }
@@ -269,6 +324,7 @@ struct BrowserConnectorFixture {
     }
 
     func connector(
+        anchorStore: (any ClaudeSmartAnchorStoring)? = nil,
         sleep: @escaping ClaudeCodeUsageConnector.Sleeper = { interval in
             try await Task.sleep(for: .seconds(interval))
         }
@@ -278,6 +334,8 @@ struct BrowserConnectorFixture {
         let autoRefresh = autoRefresh
         let allowSafariLaunch = allowSafariLaunch
         let cache = cache
+        let effectiveAnchorStore: any ClaudeSmartAnchorStoring =
+            anchorStore ?? BrowserTestAnchorStore()
         return ClaudeCodeUsageConnector(
             integration: ClaudeBrowserProductionIntegration(
                 startListening: { handler in await bridge.start(handler) },
@@ -285,6 +343,7 @@ struct BrowserConnectorFixture {
                 checkHealth: { await bridge.currentHealth() },
                 openUsagePage: { await bridge.open() },
                 repairCompanion: { await bridge.repair() },
+                verifyHandshake: { await bridge.verifyHandshake() },
                 requestAutomaticRefresh: { requestID, allowLaunch in
                     await bridge.requestAutomaticRefresh(
                         requestID: requestID,
@@ -303,8 +362,23 @@ struct BrowserConnectorFixture {
             now: clock.now,
             autoRefreshEnabled: { await autoRefresh.get() },
             allowSafariLaunch: { await allowSafariLaunch.get() },
-            sleep: sleep
+            sleep: sleep,
+            anchorStore: effectiveAnchorStore
         )
+    }
+}
+
+actor BrowserTestAnchorStore: ClaudeSmartAnchorStoring {
+    private var anchors: [ClaudeSmartWindowAnchor] = []
+
+    func load() -> [ClaudeSmartWindowAnchor] { anchors }
+
+    func save(_ anchors: [ClaudeSmartWindowAnchor]) {
+        self.anchors = anchors
+    }
+
+    func clear() {
+        anchors.removeAll()
     }
 }
 

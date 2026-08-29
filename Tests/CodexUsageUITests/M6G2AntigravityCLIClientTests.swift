@@ -1,9 +1,15 @@
 import Foundation
+import Darwin
 import Testing
 @testable import CodexUsageUI
 
 @Suite("M6-G2 bounded Antigravity CLI client")
 struct M6G2AntigravityCLIClientTests {
+    private enum TestHarnessError: Error {
+        case processStartReceiptMissing
+        case processCancellationReceiptMissing
+    }
+
     private let executable = URL(
         fileURLWithPath: AntigravityReadOnlyCLIClient.executablePath
     )
@@ -203,26 +209,126 @@ struct M6G2AntigravityCLIClientTests {
     }
 
     @Test
-    func productionRunnerCancellationTerminatesOwnedChild() async {
+    func productionRunnerCancellationTerminatesOwnedChild() async throws {
         let runner = FoundationAntigravityProcessRunner()
-        let clock = ContinuousClock()
-        let startedAt = clock.now
-        let task = Task {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "uma-antigravity-cancellation-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let startedReceipt = root.appendingPathComponent("started.pid")
+        let cancellationReceipt = root.appendingPathComponent("cancelled.receipt")
+        let task = Task.detached(priority: .high) {
             try await runner.run(
                 invocation(
-                    executable: "/bin/sleep",
-                    arguments: ["5"],
-                    cwd: FileManager.default.temporaryDirectory,
+                    executable: "/bin/sh",
+                    arguments: [
+                        "-c",
+                        #"started="$1"; cancelled="$2"; on_term() { printf 'terminated' > "$cancelled.tmp"; /bin/mv "$cancelled.tmp" "$cancelled"; exit 0; }; trap on_term TERM INT; printf '%d' $$ > "$started.tmp"; /bin/mv "$started.tmp" "$started"; while :; do :; done"#,
+                        "uma-antigravity-cancellation",
+                        startedReceipt.path,
+                        cancellationReceipt.path,
+                    ],
+                    cwd: root,
                     timeout: 10
                 )
             )
         }
-        await Task.yield()
+        let childPID: pid_t
+        do {
+            childPID = try await waitForStartedProcessPID(at: startedReceipt)
+        } catch {
+            task.cancel()
+            _ = try? await task.value
+            throw error
+        }
+        #expect(processExists(childPID))
         task.cancel()
         await #expect(throws: AntigravityCLIClientError.cancelled) {
             try await task.value
         }
-        #expect(startedAt.duration(to: clock.now) < .seconds(2))
+        let cancellation = try await waitForReceipt(
+            at: cancellationReceipt,
+            missing: .processCancellationReceiptMissing
+        )
+        #expect(cancellation == "terminated")
+
+        let followUp = try await runner.run(
+            invocation(executable: "/usr/bin/true", cwd: root)
+        )
+        #expect(followUp.terminationStatus == 0)
+    }
+
+    private func waitForStartedProcessPID(at url: URL) async throws -> pid_t {
+        let contents = try await waitForReceipt(
+            at: url,
+            missing: .processStartReceiptMissing
+        )
+        guard let pid = pid_t(contents), pid > 0 else {
+            throw TestHarnessError.processStartReceiptMissing
+        }
+        return pid
+    }
+
+    private func waitForReceipt(
+        at url: URL,
+        missing: TestHarnessError
+    ) async throws -> String {
+        if let receipt = receiptContents(at: url) { return receipt }
+
+        let directory = url.deletingLastPathComponent()
+        let descriptor = Darwin.open(directory.path, O_EVTONLY)
+        guard descriptor >= 0 else { throw missing }
+
+        var continuation: AsyncStream<Void>.Continuation!
+        let events = AsyncStream<Void>(bufferingPolicy: .bufferingNewest(1)) {
+            continuation = $0
+        }
+        let changes = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor,
+            eventMask: [.write, .extend, .attrib, .rename],
+            queue: DispatchQueue.global(qos: .userInitiated)
+        )
+        let deadline = DispatchSource.makeTimerSource(
+            queue: DispatchQueue.global(qos: .userInitiated)
+        )
+        changes.setEventHandler { continuation.yield(()) }
+        changes.setCancelHandler { Darwin.close(descriptor) }
+        deadline.setEventHandler { continuation.finish() }
+        deadline.schedule(deadline: .now() + 10)
+        changes.resume()
+        deadline.resume()
+        // Covers creation between the initial read and source activation.
+        continuation.yield(())
+        defer {
+            deadline.cancel()
+            changes.cancel()
+        }
+
+        return try await withTaskCancellationHandler {
+            for await _ in events {
+                try Task.checkCancellation()
+                if let receipt = receiptContents(at: url) { return receipt }
+            }
+            throw missing
+        } onCancel: {
+            continuation.finish()
+        }
+    }
+
+    private func receiptContents(at url: URL) -> String? {
+        guard let contents = try? String(contentsOf: url, encoding: .utf8) else {
+            return nil
+        }
+        let trimmed = contents.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func processExists(_ pid: pid_t) -> Bool {
+        errno = 0
+        if Darwin.kill(pid, 0) == 0 { return true }
+        return errno == EPERM
     }
 
     private func makeClient(

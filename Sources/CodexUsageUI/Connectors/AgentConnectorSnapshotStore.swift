@@ -10,6 +10,8 @@ actor AgentConnectorSnapshotStore {
     struct PersistedWindow: Codable, Equatable {
         let kind: AgentRateLimitWindow.Kind
         let usedPercent: Double?
+        let remainingPercent: Double?
+        let isEstimated: Bool?
         let isUnlimited: Bool
         let resetsAt: Date?
     }
@@ -150,7 +152,14 @@ actor AgentConnectorSnapshotStore {
                   Self.isSafeLabel(channel.sourceVersion, maximumLength: 32),
                   channel.accountMetrics?.planLabel.map({ Self.isSafeLabel($0, maximumLength: 24) }) ?? true else { throw StoreError.rejected }
             let windows = channel.rateLimitWindows.map {
-                PersistedWindow(kind: $0.kind, usedPercent: $0.usedPercent, isUnlimited: $0.isUnlimited, resetsAt: $0.resetsAt)
+                PersistedWindow(
+                    kind: $0.kind,
+                    usedPercent: $0.usedPercent,
+                    remainingPercent: $0.remainingPercent,
+                    isEstimated: $0.isEstimated,
+                    isUnlimited: $0.isUnlimited,
+                    resetsAt: $0.resetsAt
+                )
             }
             // Coverage notes and provider IDs are display/transport details,
             // so they deliberately have no persisted field.
@@ -203,7 +212,15 @@ actor AgentConnectorSnapshotStore {
                 capturedAt: $0.capturedAt,
                 coverageNote: nil,
                 rateLimitWindows: $0.windows.map {
-                    AgentRateLimitWindow(id: $0.kind.rawValue, kind: $0.kind, usedPercent: $0.usedPercent, isUnlimited: $0.isUnlimited, resetsAt: $0.resetsAt)
+                    AgentRateLimitWindow(
+                        id: $0.kind.rawValue,
+                        kind: $0.kind,
+                        usedPercent: $0.usedPercent,
+                        remainingPercent: $0.remainingPercent,
+                        isEstimated: $0.isEstimated ?? false,
+                        isUnlimited: $0.isUnlimited,
+                        resetsAt: $0.resetsAt
+                    )
                 },
                 accountMetrics: $0.account,
                 localActivityMetrics: $0.local.map {
@@ -250,6 +267,8 @@ actor AgentConnectorSnapshotStore {
                     && channel.windows.count <= maximumWindowsPerChannel
                     && channel.windows.allSatisfy { window in
                         (window.usedPercent.map { $0.isFinite && (0...100).contains($0) } ?? true)
+                            && (window.remainingPercent.map { $0.isFinite && (0...100).contains($0) } ?? true)
+                            && !(window.usedPercent != nil && window.remainingPercent != nil)
                     }
                     && (channel.account?.planLabel.map { isSafeLabel($0, maximumLength: 24) } ?? true)
                     && (channel.account?.availableResets.map { $0 >= 0 } ?? true)

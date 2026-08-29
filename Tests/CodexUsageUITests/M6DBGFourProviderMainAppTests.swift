@@ -243,7 +243,7 @@ struct M6DBGFourProviderMainAppTests {
         }
     }
 
-    @Test @MainActor
+    @Test(.timeLimit(.minutes(1))) @MainActor
     func fiftyPanelAndThirtySettingsCyclesDoNotAccumulateState() async throws {
         let all = try M6DBGFixture.allSnapshots()
         var cards: [SharedUsageCardPresentation] = []
@@ -596,11 +596,13 @@ private enum M6DBGWait {
     static func until(
         _ predicate: @escaping @Sendable () async -> Bool
     ) async {
-        for _ in 0..<2_000 {
-            if await predicate() { return }
+        while !(await predicate()) {
+            if Task.isCancelled {
+                Issue.record("M6DBG observable condition was cancelled")
+                return
+            }
             await Task.yield()
         }
-        Issue.record("M6DBG condition was not reached")
     }
 }
 

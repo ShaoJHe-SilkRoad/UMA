@@ -14,19 +14,61 @@ public struct ClaudeBrowserFileHandoffEndpoint: Equatable, Sendable {
     }
 
     public static func production(uid: uid_t = getuid()) -> Self {
+        runtime(.production, uid: uid)
+    }
+
+    public static func runtime(
+        _ identity: ClaudeBrowserRuntimeIdentity,
+        uid: uid_t = getuid()
+    ) -> Self {
         let home: String
         if let record = getpwuid(uid), let path = record.pointee.pw_dir {
             home = String(cString: path)
         } else {
             home = FileManager.default.homeDirectoryForCurrentUser.path
         }
-        return Self(directoryPath: home + "/" + privateDirectoryRelativePath)
+        return Self(
+            directoryPath: home + "/" + identity.handoffDirectoryRelativePath
+        )
+    }
+
+    /// Native Safari-extension output is delivered to the immutable Host's
+    /// App Group inbox. The mutable UMA application never listens here and is
+    /// therefore not a surrogate Safari containing application.
+    public static func safariHostAppGroup(containerDirectoryPath: String) -> Self {
+        Self(
+            directoryPath: containerDirectoryPath
+                + "/ClaudeSafariHost/NativeInbox"
+        )
+    }
+
+    /// Durable owned-tab receipts are Host-owned lifecycle evidence and are
+    /// intentionally separated from both native output and UMA responses.
+    public static func safariHostOwnedTab(containerDirectoryPath: String) -> Self {
+        Self(
+            directoryPath: containerDirectoryPath
+                + "/ClaudeSafariHost/OwnedTab"
+        )
     }
 
     public var pendingPath: String { directoryPath + "/observation.pending" }
     public var temporaryPath: String { directoryPath + "/observation.pending.tmp" }
     public var listenerLockPath: String { directoryPath + "/listener.lock" }
     public var legacySocketPath: String { directoryPath + "/usage.sock" }
+}
+
+public enum ClaudeBrowserAutomationRejectionReason: Equatable, Sendable {
+    case protocolMismatch
+}
+
+public struct ClaudeBrowserAutomationRejection: Equatable, Sendable {
+    public let requestID: String
+    public let reason: ClaudeBrowserAutomationRejectionReason
+
+    public init(requestID: String, reason: ClaudeBrowserAutomationRejectionReason) {
+        self.requestID = requestID
+        self.reason = reason
+    }
 }
 
 public enum ClaudeBrowserFileHandoffWriter {
@@ -40,6 +82,7 @@ public enum ClaudeBrowserFileHandoffWriter {
     ) throws {
         guard (try? ClaudeBrowserMessageDecoder.decode(payload)) != nil
             || (try? ClaudeBrowserAutomationEventDecoder.decode(payload)) != nil
+            || (try? ClaudeBrowserTerminalPacketDecoder.decode(payload)) != nil
         else {
             throw ClaudeBrowserBridgeError.invalidContract
         }
@@ -125,11 +168,15 @@ private func waitForPendingSlot(_ path: String, uid: uid_t) throws {
 public final class ClaudeBrowserFileHandoffServer: @unchecked Sendable {
     public typealias ObservationHandler = @Sendable (ClaudeBrowserObservationEnvelope) -> Void
     public typealias AutomationHandler = @Sendable (ClaudeBrowserAutomationEvent) -> Void
+    public typealias AutomationRejectionHandler = @Sendable (ClaudeBrowserAutomationRejection) -> Void
+    public typealias TerminalHandler = @Sendable (ClaudeBrowserTerminalPacket) -> Void
 
     private let endpoint: ClaudeBrowserFileHandoffEndpoint
     private let uid: uid_t
     private let handler: ObservationHandler
     private let automationHandler: AutomationHandler?
+    private let automationRejectionHandler: AutomationRejectionHandler?
+    private let terminalHandler: TerminalHandler?
     private let queue = DispatchQueue(label: "com.silkrd.uma.claude-browser.file-handoff")
     private let stateLock = NSLock()
     private var source: DispatchSourceFileSystemObject?
@@ -145,18 +192,24 @@ public final class ClaudeBrowserFileHandoffServer: @unchecked Sendable {
         self.uid = uid
         self.handler = handler
         automationHandler = nil
+        automationRejectionHandler = nil
+        terminalHandler = nil
     }
 
     public init(
         endpoint: ClaudeBrowserFileHandoffEndpoint = .production(),
         uid: uid_t = getuid(),
         observationHandler: @escaping ObservationHandler,
-        automationHandler: @escaping AutomationHandler
+        automationHandler: @escaping AutomationHandler,
+        automationRejectionHandler: AutomationRejectionHandler? = nil,
+        terminalHandler: TerminalHandler? = nil
     ) {
         self.endpoint = endpoint
         self.uid = uid
         handler = observationHandler
         self.automationHandler = automationHandler
+        self.automationRejectionHandler = automationRejectionHandler
+        self.terminalHandler = terminalHandler
     }
 
     deinit { stop() }
@@ -175,7 +228,6 @@ public final class ClaudeBrowserFileHandoffServer: @unchecked Sendable {
                 }
                 throw ClaudeBrowserBridgeError.socketUnsafe
             }
-            try removeOwnedRegularFileIfPresent(endpoint.pendingPath, uid: uid)
             try removeOwnedRegularFileIfPresent(endpoint.temporaryPath, uid: uid)
             try removeOwnedSocketIfPresent(endpoint.legacySocketPath, uid: uid)
         } catch {
@@ -206,6 +258,10 @@ public final class ClaudeBrowserFileHandoffServer: @unchecked Sendable {
         source = nextSource
         running = true
         nextSource.resume()
+        // A native reply may land after the listener lock is acquired but
+        // before the directory source is resumed. Drain once explicitly so a
+        // cold-start packet is consumed instead of being deleted or stranded.
+        queue.async { [weak self] in self?.consumePendingObservation() }
     }
 
     public func stop() {
@@ -243,7 +299,30 @@ public final class ClaudeBrowserFileHandoffServer: @unchecked Sendable {
             handler(envelope)
         } else if let event = try? ClaudeBrowserAutomationEventDecoder.decode(payload) {
             automationHandler?(event)
+        } else if let terminal = try? ClaudeBrowserTerminalPacketDecoder.decode(payload) {
+            terminalHandler?(terminal)
+        } else if let rejection = Self.protocolMismatchRejection(payload) {
+            automationRejectionHandler?(rejection)
         }
+    }
+
+    static func protocolMismatchRejection(
+        _ payload: Data
+    ) -> ClaudeBrowserAutomationRejection? {
+        guard let object = try? JSONSerialization.jsonObject(with: payload),
+              let dictionary = object as? [String: Any],
+              dictionary["kind"] as? String
+                == ClaudeBrowserBridgeContract.automationMessageKind,
+              dictionary["status"] as? String
+                == ClaudeBrowserAutomationStatus.bridgeReady.rawValue,
+              let requestID = dictionary["requestID"] as? String,
+              UUID(uuidString: requestID) != nil,
+              (try? ClaudeBrowserAutomationEventDecoder.decode(payload)) == nil
+        else { return nil }
+        return ClaudeBrowserAutomationRejection(
+            requestID: requestID,
+            reason: .protocolMismatch
+        )
     }
 
     private func readAndRemovePendingPayload() throws -> Data {

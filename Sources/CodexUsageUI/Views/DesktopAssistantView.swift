@@ -69,6 +69,7 @@ public enum DesktopAssistantContentContract {
 public enum DesktopAssistantConnectionState: String, Equatable, Sendable {
     case connected
     case reconnecting
+    case stale
     case disconnected
     case unavailable
     case failed
@@ -76,19 +77,26 @@ public enum DesktopAssistantConnectionState: String, Equatable, Sendable {
 
 public enum DesktopAssistantUsageValue: Equatable, Sendable {
     case finite(Int)
+    case estimated(Int)
     case credits(String)
     case unlimited
     case unavailable
 
     public var finitePercent: Int? {
-        guard case .finite(let value) = self else { return nil }
-        return min(100, max(0, value))
+        switch self {
+        case let .finite(value), let .estimated(value):
+            return min(100, max(0, value))
+        default:
+            return nil
+        }
     }
 
     public var displayText: String {
         switch self {
         case .finite(let value):
             "\(min(100, max(0, value)))%"
+        case .estimated(let value):
+            "≈\(min(100, max(0, value)))%"
         case .credits(let value):
             value
         case .unlimited:
@@ -222,23 +230,29 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         language: AppLanguage = .english,
         now: Date = Date()
     ) {
-        let connectionState: DesktopAssistantConnectionState = switch card.connectionStatus {
-        case .connected:
-            .connected
-        case .transitional:
-            .reconnecting
-        case .authenticationRequired, .disconnected:
-            .disconnected
-        case .stale:
-            .reconnecting
-        case .unavailable:
-            .unavailable
-        case .failed:
-            .failed
+        let connectionState: DesktopAssistantConnectionState = if card.freshness == .stale {
+            .stale
+        } else {
+            switch card.connectionStatus {
+            case .connected:
+                .connected
+            case .transitional:
+                .reconnecting
+            case .authenticationRequired, .disconnected:
+                .disconnected
+            case .stale:
+                .stale
+            case .unavailable:
+                .unavailable
+            case .failed:
+                .failed
+            }
         }
         let percentageUsageValue: DesktopAssistantUsageValue = switch card.remaining {
         case .finite:
-            .finite(card.remaining.displayPercent ?? 0)
+            card.isEstimated == true
+                ? .estimated(card.remaining.displayPercent ?? 0)
+                : .finite(card.remaining.displayPercent ?? 0)
         case .unlimited:
             .unlimited
         case .unavailable:
@@ -404,11 +418,13 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         let status: String = switch (language, connectionState) {
         case (.english, .connected): "connected"
         case (.english, .reconnecting): "reconnecting"
+        case (.english, .stale): "stale value retained"
         case (.english, .disconnected): "disconnected"
         case (.english, .unavailable): "unavailable"
         case (.english, .failed): "failed"
         case (.simplifiedChinese, .connected): "已连接"
         case (.simplifiedChinese, .reconnecting): "正在重新连接"
+        case (.simplifiedChinese, .stale): "保留较早值"
         case (.simplifiedChinese, .disconnected): "已断开"
         case (.simplifiedChinese, .unavailable): "不可用"
         case (.simplifiedChinese, .failed): "连接失败"
@@ -416,12 +432,16 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         let usage: String = switch (language, usageValue) {
         case let (.english, .finite(value)):
             "\(min(100, max(0, value))) percent remaining"
+        case let (.english, .estimated(value)):
+            "approximately \(min(100, max(0, value))) percent remaining"
         case let (.english, .credits(value)):
             "\(value) Credits remaining"
         case (.english, .unlimited): "unlimited"
         case (.english, .unavailable): "usage unavailable"
         case let (.simplifiedChinese, .finite(value)):
             "剩余 \(min(100, max(0, value)))%"
+        case let (.simplifiedChinese, .estimated(value)):
+            "预计剩余 \(min(100, max(0, value)))%"
         case let (.simplifiedChinese, .credits(value)):
             "剩余 \(value) Credits"
         case (.simplifiedChinese, .unlimited): "无限额度"
@@ -473,6 +493,7 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         isStale: Bool
     ) -> DesktopAssistantFreshnessState {
         if connectionState == .failed { return .failed }
+        if connectionState == .stale { return .stale }
         if isStale { return .stale }
         if connectionState == .reconnecting,
            usageValue == .unavailable {
@@ -493,6 +514,7 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         isRetainingLastValidValue: Bool
     ) -> DesktopAssistantFreshnessState {
         if connectionState == .failed { return .failed }
+        if connectionState == .stale { return .stale }
         if freshness == .cached { return .cached }
         if freshness == .stale || isRetainingLastValidValue { return .stale }
         if connectionState == .reconnecting,
@@ -554,7 +576,9 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
             (card.selectedWindow?.resetText).map {
                 compactResetText($0, language: language)
             },
-            localizedFreshness(freshnessState, language: language),
+            freshnessState == .stale && card.isEstimated != true
+                ? localizedRetainedExactFreshness(language: language)
+                : localizedFreshness(freshnessState, language: language),
         ].compactMap { value in
             guard let value, !value.isEmpty else { return nil }
             return value
@@ -597,11 +621,13 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         let status: String = switch (language, connectionState) {
         case (.english, .connected): "connected"
         case (.english, .reconnecting): "reconnecting"
+        case (.english, .stale): "stale value retained"
         case (.english, .disconnected): "disconnected"
         case (.english, .unavailable): "unavailable"
         case (.english, .failed): "failed"
         case (.simplifiedChinese, .connected): "已连接"
         case (.simplifiedChinese, .reconnecting): "正在重新连接"
+        case (.simplifiedChinese, .stale): "保留较早值"
         case (.simplifiedChinese, .disconnected): "已断开"
         case (.simplifiedChinese, .unavailable): "不可用"
         case (.simplifiedChinese, .failed): "连接失败"
@@ -618,6 +644,15 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
             return "\(providerName)，\(status)，\(availability.accessibilityText)\(provenance)\(stale)。"
         }
         return "\(providerName), \(status), \(availability.accessibilityText)\(provenance)\(stale)."
+    }
+
+    private static func localizedRetainedExactFreshness(
+        language: AppLanguage
+    ) -> String {
+        switch language {
+        case .english: "Stale exact retained"
+        case .simplifiedChinese: "保留的较早精确值"
+        }
     }
 }
 
@@ -919,6 +954,8 @@ private struct DesktopAssistantCardView: View {
         case .connected:
             .green
         case .reconnecting:
+            .orange
+        case .stale:
             .orange
         case .disconnected, .unavailable:
             .secondary

@@ -10,6 +10,7 @@ struct UsagePeriod: Identifiable, Codable, Sendable {
     /// A special provider-granted five-hour credit window. The bar remains
     /// visible, but the numeric status must not imply an ordinary quota.
     var isUnlimited = false
+    var isEstimated: Bool? = nil
     let resetText: String
 }
 
@@ -177,10 +178,8 @@ extension UsageSnapshot {
             let remainingPercent: Int
             if window.isUnlimited {
                 remainingPercent = 100
-            } else if let used = window.usedPercent,
-                      used.isFinite,
-                      (0...100).contains(used) {
-                remainingPercent = Int((100 - used).rounded())
+            } else if let normalized = window.normalizedRemainingPercent {
+                remainingPercent = Int(normalized.rounded())
             } else {
                 return nil
             }
@@ -190,6 +189,7 @@ extension UsageSnapshot {
                 remainingPercent: remainingPercent,
                 isFiveHour: window.kind == .fiveHour,
                 isUnlimited: window.isUnlimited,
+                isEstimated: window.isEstimated == true,
                 resetText: language.resetDescription(for: window.resetsAt, now: now)
             )
         }

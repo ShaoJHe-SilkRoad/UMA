@@ -239,7 +239,7 @@ struct M2WADBGLocalLiveAdmissionTests {
         await store.stopAllConnectors()
     }
 
-    @Test @MainActor
+    @Test(.timeLimit(.minutes(1))) @MainActor
     func overlappingDifferentTriggersCoalesceUnderOneRefreshOwner() async throws {
         let connector = try TestAdmissionConnector(
             id: "codex.local",
@@ -267,7 +267,16 @@ struct M2WADBGLocalLiveAdmissionTests {
 
         let manual = Task { await store.refresh() }
         try await waitUntil { await connector.probeCount == 1 }
-        let checkAgain = Task { await store.checkLocalSessionAgain() }
+        let checkAgainStarted = AsyncStream<Void>.makeStream()
+        var checkAgainIterator = checkAgainStarted.stream.makeAsyncIterator()
+        let checkAgain = Task { @MainActor in
+            // Yield is synchronous. The task then enters checkLocalSessionAgain
+            // without another suspension and blocks on the already-active scan.
+            checkAgainStarted.continuation.yield(())
+            await store.checkLocalSessionAgain()
+        }
+        _ = await checkAgainIterator.next()
+        checkAgainStarted.continuation.finish()
         await connector.releaseProbe()
         await manual.value
         await checkAgain.value
@@ -721,14 +730,12 @@ struct M2WADBGLocalLiveAdmissionTests {
     }
 
     private func waitUntil(
-        attempts: Int = 200,
         condition: @escaping @Sendable () async -> Bool
     ) async throws {
-        for _ in 0..<attempts {
-            if await condition() { return }
-            try await Task.sleep(for: .milliseconds(5))
+        while !(await condition()) {
+            try Task.checkCancellation()
+            await Task.yield()
         }
-        Issue.record("Timed out waiting for deterministic R3 state.")
     }
 }
 

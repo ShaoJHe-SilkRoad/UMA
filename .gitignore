@@ -4,3 +4,5 @@ work/
 .DS_Store
 outputs/CodexUsageMonitor.app/
 outputs/* 2.*
+xcuserdata/
+*.xcuserstate

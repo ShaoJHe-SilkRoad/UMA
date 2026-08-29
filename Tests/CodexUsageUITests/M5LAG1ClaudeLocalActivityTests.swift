@@ -71,16 +71,18 @@ struct M5LAG1ClaudeLocalActivityTests {
         "cache_creation":{"ephemeral_5m_input_tokens":400,"ephemeral_1h_input_tokens":300}}}}
         """
         let record = try #require(ClaudeLocalActivityReader.record(fromLine: line))
-        #expect(record.requestID == "req-1")
-        #expect(record.model == "claude-opus-5")
+        #expect(record.modelFamily == .opus)
         #expect(record.counts.inputTokens == 100)
         #expect(record.counts.outputTokens == 200)
         #expect(record.counts.cacheReadTokens == 300)
         #expect(record.counts.fiveMinuteCacheWriteTokens == 400)
         #expect(record.counts.oneHourCacheWriteTokens == 300)
         // The record type has no field that could carry content, a path, or a
-        // branch name, so the surrounding keys are structurally undecodable.
+        // branch name. Raw request and model strings are also projected away.
         #expect(record.counts.totalTokens == 1300)
+        let labels = Set(Mirror(reflecting: record).children.compactMap(\.label))
+        #expect(!labels.contains("requestID"))
+        #expect(!labels.contains("model"))
     }
 
     @Test
@@ -124,6 +126,98 @@ struct M5LAG1ClaudeLocalActivityTests {
         #expect(record.counts.cacheReadTokens == 0)
     }
 
+    @Test
+    func streamingReaderFailsClosedForOversizedLineAndFile() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("uma-claude-local-stream-bounds-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let oversizedLine = root.appendingPathComponent("line.jsonl")
+        try Data(repeating: 0x20, count: ClaudeLocalActivityReader.Bounds.maximumBytesPerLine + 1)
+            .write(to: oversizedLine)
+        #expect(!ClaudeLocalActivityReader.streamRecords(inFileAt: oversizedLine) { _ in true })
+
+        let oversizedFile = root.appendingPathComponent("file.jsonl")
+        FileManager.default.createFile(atPath: oversizedFile.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: oversizedFile)
+        try handle.truncate(atOffset: UInt64(ClaudeLocalActivityReader.Bounds.maximumBytesPerFile + 1))
+        try handle.close()
+        #expect(!ClaudeLocalActivityReader.streamRecords(inFileAt: oversizedFile) { _ in true })
+    }
+
+    @Test
+    func streamingProjectionRetainsNoPromptResponseOrPathField() throws {
+        let root = try makeFixture(lines: [
+            #"{"requestId":"safe-id","timestamp":"2027-01-15T10:00:00Z","cwd":"/private/path","prompt":"private prompt","message":{"model":"claude-sonnet-5","content":[{"text":"private response"}],"usage":{"input_tokens":5,"output_tokens":7}}}"#,
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("project/session.jsonl")
+        var projected: [ClaudeLocalUsageRecord] = []
+        #expect(ClaudeLocalActivityReader.streamRecords(inFileAt: file) {
+            projected.append($0)
+            return true
+        })
+        let record = try #require(projected.first)
+        #expect(record.counts.totalTokens == 12)
+        let labels = Mirror(reflecting: record).children.compactMap(\.label)
+        #expect(!labels.contains("requestID"))
+        #expect(!labels.contains("model"))
+        #expect(!labels.contains("prompt"))
+        #expect(!labels.contains("response"))
+        #expect(!labels.contains("path"))
+    }
+
+    @Test
+    func symlinkedRootAndSessionFileFailClosed() throws {
+        let realRoot = try makeFixture(lines: [
+            usageLine(
+                requestID: "outside",
+                model: "claude-opus-5",
+                input: 100,
+                output: 0,
+                daysAgo: 0
+            ),
+        ])
+        let sandbox = FileManager.default.temporaryDirectory
+            .appendingPathComponent("uma-claude-local-symlink-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: sandbox)
+            try? FileManager.default.removeItem(at: realRoot)
+        }
+        try FileManager.default.createDirectory(at: sandbox, withIntermediateDirectories: true)
+
+        let linkedRoot = sandbox.appendingPathComponent("linked-root")
+        try FileManager.default.createSymbolicLink(
+            at: linkedRoot,
+            withDestinationURL: realRoot
+        )
+        let rootSnapshot = ClaudeLocalActivityReader(
+            rootDirectory: linkedRoot,
+            calendar: utcCalendar
+        ).read(now: now)
+        #expect(rootSnapshot.availability == .unavailable)
+
+        let safeRoot = sandbox.appendingPathComponent("safe-root")
+        let safeProject = safeRoot.appendingPathComponent("project")
+        try FileManager.default.createDirectory(
+            at: safeProject,
+            withIntermediateDirectories: true
+        )
+        let source = realRoot.appendingPathComponent("project/session.jsonl")
+        let linkedFile = safeProject.appendingPathComponent("session.jsonl")
+        try FileManager.default.createSymbolicLink(
+            at: linkedFile,
+            withDestinationURL: source
+        )
+        let fileSnapshot = ClaudeLocalActivityReader(
+            rootDirectory: safeRoot,
+            calendar: utcCalendar
+        ).read(now: now)
+        #expect(fileSnapshot.availability == .unavailable)
+        #expect(!ClaudeLocalActivityReader.streamRecords(inFileAt: linkedFile) { _ in true })
+    }
+
     // MARK: - Seven-day window
 
     @Test
@@ -138,6 +232,26 @@ struct M5LAG1ClaudeLocalActivityTests {
         #expect(keys.contains(ClaudeLocalActivityReader.usageDay(for: sixDaysAgo, calendar: calendar)))
         let sevenDaysAgo = calendar.date(byAdding: .day, value: -7, to: now)!
         #expect(!keys.contains(ClaudeLocalActivityReader.usageDay(for: sevenDaysAgo, calendar: calendar)))
+    }
+
+
+    @Test
+    func dedupeProjectionIgnoresProviderOwnedIdentifiers() throws {
+        let first = #"{"requestId":"private-a","timestamp":"2027-01-15T10:00:00Z","message":{"id":"message-a","model":"claude-sonnet-5","usage":{"input_tokens":5,"output_tokens":7}}}"#
+        let second = #"{"requestId":"private-b","timestamp":"2027-01-15T10:00:00Z","message":{"id":"message-b","model":"claude-sonnet-5","usage":{"input_tokens":5,"output_tokens":7}}}"#
+        let firstRecord = try #require(ClaudeLocalActivityReader.record(fromLine: first))
+        let secondRecord = try #require(ClaudeLocalActivityReader.record(fromLine: second))
+        #expect(firstRecord.dedupeDigest == secondRecord.dedupeDigest)
+        #expect(firstRecord.dedupeConfidence == .conservativeStructural)
+
+        let source = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/CodexUsageUI/Services/ClaudeLocalActivityReader.swift"))
+        #expect(!source.contains("root[\"requestId\"]"))
+        #expect(!source.contains("message[\"id\"]"))
+        #expect(!source.contains("stableProviderIdentifier"))
     }
 
     // MARK: - Aggregation
@@ -232,10 +346,14 @@ struct M5LAG1ClaudeLocalActivityTests {
                 output: 0,
                 daysAgo: 4 - index
             )
+            let file = dir.appendingPathComponent("session.jsonl")
             try line.write(
-                to: dir.appendingPathComponent("session.jsonl"),
+                to: file,
                 atomically: true,
                 encoding: .utf8
+            )
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600], ofItemAtPath: file.path
             )
         }
 
@@ -251,7 +369,7 @@ struct M5LAG1ClaudeLocalActivityTests {
     // MARK: - Connector contract
 
     @Test
-    func browserConnectorDefersLocalActivityWithoutLosingQuotaCapabilities() {
+    func localSmartConnectorUsesSanitizedActivityWithoutSafariAutomation() {
         let descriptor = ClaudeCodeUsageConnector.production().descriptor
         for required in [
             AgentConnectorCapability.connect,
@@ -259,17 +377,18 @@ struct M5LAG1ClaudeLocalActivityTests {
             .refresh,
             .disconnect,
             .rateLimits,
-            .sanitizedLastValidRestore,
-            .automaticRefresh,
+            .localActivity,
+            .passiveLocalAvailability,
         ] {
             #expect(descriptor.capabilities.contains(required))
         }
-        #expect(!descriptor.capabilities.contains(.localActivity))
+        #expect(!descriptor.capabilities.contains(.automaticRefresh))
         #expect(!descriptor.capabilities.contains(.hiddenFromDesktopAssistant))
-        #expect(descriptor.supportedScopes == [.account])
-        #expect(!descriptor.privacyAllowlist.contains("localActivityTokenCounts"))
-        #expect(!descriptor.privacyAllowlist.contains("localActivityModelIdentifier"))
-        #expect(!descriptor.privacyAllowlist.contains("localActivityTimestamp"))
+        #expect(descriptor.supportedScopes == [.account, .session])
+        #expect(descriptor.privacyAllowlist.contains("localActivityTotalTokens"))
+        #expect(descriptor.privacyAllowlist.contains("localActivityModelFamilyKey"))
+        #expect(!descriptor.privacyAllowlist.contains("prompt"))
+        #expect(!descriptor.privacyAllowlist.contains("response"))
     }
 
     @Test
@@ -285,8 +404,8 @@ struct M5LAG1ClaudeLocalActivityTests {
             .read(now: now)
         let metrics = try #require(snapshot.apiEquivalentCost)
         #expect(metrics.observedTokens > 0)
-        // The reader itself has no window type to produce, and Browser Sync
-        // does not integrate this deferred source into its account channel.
+        // The reader itself has no window type to produce. Local Smart Mode
+        // may use its sanitized delta only after exact anchors calibrate it.
         #expect(ClaudeCodeUsageConnector.production().descriptor.supportedScopes.contains(.account))
     }
 
@@ -303,10 +422,14 @@ struct M5LAG1ClaudeLocalActivityTests {
             .appendingPathComponent("uma-claude-local-\(UUID().uuidString)")
         let projectDirectory = root.appendingPathComponent("project")
         try FileManager.default.createDirectory(at: projectDirectory, withIntermediateDirectories: true)
+        let file = projectDirectory.appendingPathComponent("session.jsonl")
         try lines.joined(separator: "\n").write(
-            to: projectDirectory.appendingPathComponent("session.jsonl"),
+            to: file,
             atomically: true,
             encoding: .utf8
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: file.path
         )
         return root
     }

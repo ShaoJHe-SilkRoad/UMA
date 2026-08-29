@@ -4,43 +4,47 @@ import Foundation
 import Testing
 @testable import CodexUsageUI
 
-@Suite("M5ADBG-G1 Browser Sync closure")
+@Suite("M5ADBG-G1 Local Smart and one-shot Accuracy closure")
 struct M5ADBGG1BrowserSyncClosureTests {
     @Test
-    func exactFreshnessBoundariesBecomeStaleThenExpire() async {
+    func exactSmartFreshnessBecomesStaleThenExpiresAtProviderReset() async {
         let clock = BrowserTestClock()
         let fixture = BrowserConnectorFixture(consent: true, clock: clock)
         let connector = fixture.connector()
         await connector.start()
+        await connector.accuracySync()
         await fixture.bridge.send(browserEnvelope(five: 20, seven: 40))
 
         clock.advance(ClaudeCodeUsageConnector.freshnessInterval)
+        let boundary = await connector.currentSnapshot()
+        #expect(boundary.freshness == .fresh)
+        #expect(boundary.hasValidData)
+
+        clock.advance(1)
         let stale = await connector.currentSnapshot()
         #expect(stale.freshness == .stale)
         #expect(stale.hasValidData)
 
-        clock.advance(
-            ClaudeCodeUsageConnector.maximumRetainedAge
-                - ClaudeCodeUsageConnector.freshnessInterval
-        )
+        clock.advance(8 * 24 * 60 * 60)
         let expired = await connector.currentSnapshot()
         #expect(!expired.hasValidData)
         #expect(expired.freshness == .unavailable)
-        #expect(await connector.lifecycleState() == .failed)
+        #expect(await connector.lifecycleState() == .waitingForUsagePage)
     }
 
     @Test
-    func healthProbeWithdrawsUnsafeStatesButRetainsBrowserClosedSnapshot() async {
+    func browserCompanionHealthCannotWithdrawValidatedLocalSmartState() async {
         let transient = BrowserConnectorFixture(consent: true)
         let transientConnector = transient.connector()
         await transientConnector.start()
+        await transientConnector.accuracySync()
         await transient.bridge.send(browserEnvelope(five: 20, seven: 40))
         await transient.bridge.setHealth(.browserUnavailable)
         _ = await transientConnector.probe()
-        #expect((await transientConnector.currentSnapshot()).freshness == .cached)
+        #expect((await transientConnector.currentSnapshot()).freshness == .fresh)
         #expect((await transientConnector.currentSnapshot()).hasValidData)
 
-        for unsafeHealth in [
+        for irrelevantBrowserHealth in [
             ClaudeBrowserCompanionHealth.disabled,
             .outdated,
             .nativeHostMissing,
@@ -49,27 +53,31 @@ struct M5ADBGG1BrowserSyncClosureTests {
             let fixture = BrowserConnectorFixture(consent: true)
             let connector = fixture.connector()
             await connector.start()
+            await connector.accuracySync()
             await fixture.bridge.send(browserEnvelope(five: 20, seven: 40))
-            await fixture.bridge.setHealth(unsafeHealth)
+            await fixture.bridge.setHealth(irrelevantBrowserHealth)
             _ = await connector.probe()
-            #expect(!(await connector.currentSnapshot()).hasValidData)
+            #expect((await connector.currentSnapshot()).hasValidData)
+            #expect(!(await connector.diagnostics()).schedulerActive)
         }
     }
 
     @Test
-    func listenerStartFailureCanRecoverOnTheNextExplicitAction() async {
+    func localStartCannotCreateAListenerOrAcceptUnsolicitedAccuracyData() async {
         let fixture = BrowserConnectorFixture(consent: true)
         let connector = fixture.connector()
         await fixture.bridge.setStartError(.socketUnavailable)
         await connector.start()
-        #expect((await connector.diagnostics()).listenerStartCount == 1)
+        #expect((await connector.diagnostics()).listenerStartCount == 0)
         #expect(!(await connector.currentSnapshot()).hasValidData)
 
         await fixture.bridge.setStartError(nil)
         await connector.start()
-        #expect((await connector.diagnostics()).listenerStartCount == 2)
+        #expect((await connector.diagnostics()).listenerStartCount == 0)
         await fixture.bridge.send(browserEnvelope(five: 20, seven: 40))
-        #expect((await connector.currentSnapshot()).freshness == .fresh)
+        #expect((await connector.diagnostics()).acceptedObservationCount == 0)
+        #expect((await connector.diagnostics()).rejectedObservationCount == 0)
+        #expect(!(await connector.currentSnapshot()).hasValidData)
     }
 
     @Test
@@ -78,12 +86,14 @@ struct M5ADBGG1BrowserSyncClosureTests {
         let connector = fixture.connector()
         await connector.start()
         for index in 0..<20 {
+            await connector.accuracySync()
             await fixture.bridge.send(browserEnvelope(
                 five: Double(index),
                 seven: Double(index + 20)
             ))
         }
         for _ in 0..<10 {
+            await connector.accuracySync()
             await fixture.bridge.reject(.invalidContract)
         }
 
@@ -91,7 +101,8 @@ struct M5ADBGG1BrowserSyncClosureTests {
         #expect(diagnostics.acceptedObservationCount == 20)
         #expect(diagnostics.rejectedObservationCount == 10)
         #expect(diagnostics.listenerStartCount == 1)
-        #expect(!(await connector.currentSnapshot()).hasValidData)
+        #expect((await connector.currentSnapshot()).hasValidData)
+        #expect(!(await connector.diagnostics()).schedulerActive)
     }
 
     @Test
@@ -100,13 +111,16 @@ struct M5ADBGG1BrowserSyncClosureTests {
         let connector = fixture.connector()
         for _ in 0..<10 {
             await fixture.consent.set(true)
-            await connector.connect(openUsagePage: true)
+            await connector.accuracySync()
             await connector.disconnect()
         }
         #expect(await fixture.bridge.startCount == 10)
         #expect(await fixture.bridge.stopCount == 10)
-        #expect(await fixture.bridge.openCount == 10)
-        #expect(await connector.lifecycleState() == .disconnected)
+        #expect(await fixture.bridge.openCount == 0)
+        #expect(await fixture.bridge.automaticRequests.count == 10)
+        #expect((await connector.diagnostics()).scheduledCycleCount == 0)
+        #expect(!(await connector.diagnostics()).automaticRefreshInFlight)
+        #expect(!(await connector.diagnostics()).schedulerActive)
     }
 
     @Test
@@ -145,7 +159,7 @@ struct M5ADBGG1BrowserSyncClosureTests {
     }
 
     @Test @MainActor
-    func settingsErrorClearsAfterAValidObservation() async throws {
+    func settingsKeepsLocalExactTruthWhenOneShotAccuracyFailsThenRecovers() async throws {
         let suite = "uma-m5adbg-settings-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -159,27 +173,26 @@ struct M5ADBGG1BrowserSyncClosureTests {
         )
 
         await connector.start()
+        await connector.accuracySync()
+        await fixture.bridge.send(browserEnvelope(five: 19, seven: 39))
+        #expect(await waitForFresh(model))
+        await connector.accuracySync()
         await fixture.bridge.reject(.invalidContract)
-        for _ in 0..<40 where model.safeError != .routeChanged {
-            await Task.yield()
-        }
-        #expect(model.safeError == .routeChanged)
-
-        await fixture.bridge.send(browserEnvelope(five: 20, seven: 40))
-        for _ in 0..<40 {
-            if model.safeError == nil, case .fresh = model.state { break }
-            await Task.yield()
-        }
+        #expect(await waitForFresh(model))
         #expect(model.safeError == nil)
-        if case .fresh = model.state {
-            // Expected recovery state.
-        } else {
-            Issue.record("Settings did not recover to Fresh")
-        }
+
+        await connector.accuracySync()
+        await fixture.bridge.send(browserEnvelope(
+            five: 20,
+            seven: 40,
+            observedAt: "2030-03-01T12:00:01Z"
+        ))
+        #expect(await waitForFresh(model))
+        #expect(model.safeError == nil)
     }
 
     @Test @MainActor
-    func consentConfirmationPersistsAndStartsOneExplicitBrowserRead() async throws {
+    func consentConfirmationPersistsAndStartsLocalSmartWithoutBrowserRead() async throws {
         let suite = "uma-m5adbg-consent-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -192,14 +205,17 @@ struct M5ADBGG1BrowserSyncClosureTests {
         )
 
         model.connectWithConsent()
-        for _ in 0..<80 where await fixture.bridge.openCount == 0 {
+        for _ in 0..<80 where !model.consentGranted {
             await Task.yield()
         }
 
         #expect(consentStore.consentGranted)
         #expect(model.consentGranted)
-        #expect(await fixture.bridge.startCount == 1)
-        #expect(await fixture.bridge.openCount == 1)
+        #expect(await fixture.bridge.startCount == 0)
+        #expect((await connector.diagnostics()).listenerStartCount == 0)
+        #expect(await fixture.bridge.openCount == 0)
+        #expect(await fixture.bridge.automaticRequests.isEmpty)
+        #expect(!(await connector.diagnostics()).schedulerActive)
         #expect(await connector.lifecycleState() == .waitingForUsagePage)
     }
 
@@ -226,26 +242,35 @@ struct M5ADBGG1BrowserSyncClosureTests {
     }
 
     @Test
-    func actionAndErrorCopyIsLocalizedForAutomaticBrowserSync() {
+    func actionAndErrorCopyIsLocalizedForLocalSmartAndAccuracySync() {
         #expect(AppLanguage.english.claudeBrowserActionStatus(.refreshing) == "Refreshing…")
         #expect(AppLanguage.simplifiedChinese.claudeBrowserActionStatus(.refreshing) == "正在刷新…")
         #expect(
             AppLanguage.english.claudeBrowserError(.routeChanged)
-                == "Claude's Usage page changed. Browser Sync stopped safely."
+                == "Claude's Usage page changed. Accuracy Sync stopped safely."
         )
-        #expect(AppLanguage.simplifiedChinese.claudeBrowserError(.timedOut) == "Claude 浏览器同步已超时。")
+        #expect(AppLanguage.simplifiedChinese.claudeBrowserError(.timedOut) == "Claude 精确同步已超时。")
         for action in [
             ClaudeSettingsAction.checking,
             .connecting,
             .refreshing,
-            .openingUsage,
+            .checkingCompanion,
             .repairing,
-            .grantingAccess,
-            .openingAccessSettings,
+            .requestingSiteAccess,
+            .retryingSiteAccess,
             .disconnecting,
         ] {
             #expect(!AppLanguage.english.claudeBrowserActionStatus(action).isEmpty)
             #expect(!AppLanguage.simplifiedChinese.claudeBrowserActionStatus(action).isEmpty)
         }
+    }
+
+    @MainActor
+    private func waitForFresh(_ model: ClaudeBrowserSettingsModel) async -> Bool {
+        for _ in 0..<100 {
+            if case .fresh = model.state { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return false
     }
 }

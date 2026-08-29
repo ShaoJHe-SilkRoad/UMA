@@ -1,0 +1,304 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 71;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		B10000000000000000000001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* main.swift */; };
+		B10000000000000000000002 /* ProvisioningExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000005 /* ProvisioningExtension.swift */; };
+		B10000000000000000000003 /* ClaudeBrowserCompanion.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = B20000000000000000000007 /* ClaudeBrowserCompanion.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B30000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B40000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B50000000000000000000002;
+			remoteInfo = ClaudeBrowserCompanion;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		B60000000000000000000001 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				B10000000000000000000003 /* ClaudeBrowserCompanion.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		B20000000000000000000001 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		B20000000000000000000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B20000000000000000000003 /* UMASafariHost.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = UMASafariHost.entitlements; sourceTree = "<group>"; };
+		B20000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B20000000000000000000005 /* ProvisioningExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProvisioningExtension.swift; sourceTree = "<group>"; };
+		B20000000000000000000006 /* ClaudeBrowserCompanion.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ClaudeBrowserCompanion.entitlements; sourceTree = "<group>"; };
+		B20000000000000000000007 /* ClaudeBrowserCompanion.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ClaudeBrowserCompanion.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B20000000000000000000008 /* UMA Safari Bridge Test.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "UMA Safari Bridge Test.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		B70000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B70000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		B80000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				B80000000000000000000002 /* SafariHost/App */,
+				B80000000000000000000003 /* SafariHost/Extension */,
+				B80000000000000000000004 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		B80000000000000000000002 /* SafariHost/App */ = {
+			isa = PBXGroup;
+			children = (
+				B20000000000000000000001 /* main.swift */,
+				B20000000000000000000002 /* Info.plist */,
+				B20000000000000000000003 /* UMASafariHost.entitlements */,
+			);
+			path = SafariHost/App;
+			sourceTree = "<group>";
+		};
+		B80000000000000000000003 /* SafariHost/Extension */ = {
+			isa = PBXGroup;
+			children = (
+				B20000000000000000000005 /* ProvisioningExtension.swift */,
+				B20000000000000000000004 /* Info.plist */,
+				B20000000000000000000006 /* ClaudeBrowserCompanion.entitlements */,
+			);
+			path = SafariHost/Extension;
+			sourceTree = "<group>";
+		};
+		B80000000000000000000004 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B20000000000000000000008 /* UMA Safari Bridge Test.app */,
+				B20000000000000000000007 /* ClaudeBrowserCompanion.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		B50000000000000000000001 /* UMASafariBridgeHost */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B90000000000000000000001 /* Build configuration list for PBXNativeTarget "UMASafariBridgeHost" */;
+			buildPhases = (
+				BA00000000000000000000001 /* Sources */,
+				B70000000000000000000001 /* Frameworks */,
+				B60000000000000000000001 /* Embed App Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				BB00000000000000000000001 /* PBXTargetDependency */,
+			);
+			name = UMASafariBridgeHost;
+			productName = "UMA Safari Bridge Test";
+			productReference = B20000000000000000000008 /* UMA Safari Bridge Test.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B50000000000000000000002 /* ClaudeBrowserCompanion */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B90000000000000000000002 /* Build configuration list for PBXNativeTarget "ClaudeBrowserCompanion" */;
+			buildPhases = (
+				BA00000000000000000000002 /* Sources */,
+				B70000000000000000000002 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ClaudeBrowserCompanion;
+			productName = ClaudeBrowserCompanion;
+			productReference = B20000000000000000000007 /* ClaudeBrowserCompanion.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B40000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2700;
+				LastUpgradeCheck = 2700;
+				TargetAttributes = {
+					B50000000000000000000001 = {
+						CreatedOnToolsVersion = 27.0;
+						ProvisioningStyle = Manual;
+						SystemCapabilities = {
+							com.apple.ApplicationGroups = {
+								enabled = 1;
+							};
+						};
+					};
+					B50000000000000000000002 = {
+						CreatedOnToolsVersion = 27.0;
+						ProvisioningStyle = Manual;
+						SystemCapabilities = {
+							com.apple.ApplicationGroups = {
+								enabled = 1;
+							};
+						};
+					};
+				};
+			};
+			buildConfigurationList = B90000000000000000000003 /* Build configuration list for PBXProject "UMASafariHostSigning" */;
+			compatibilityVersion = "Xcode 16.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = B80000000000000000000001;
+			productRefGroup = B80000000000000000000004 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B50000000000000000000001 /* UMASafariBridgeHost */,
+				B50000000000000000000002 /* ClaudeBrowserCompanion */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		BA00000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10000000000000000000001 /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BA00000000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10000000000000000000002 /* ProvisioningExtension.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		BB00000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B50000000000000000000002 /* ClaudeBrowserCompanion */;
+			targetProxy = B30000000000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		BC00000000000000000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = SafariHost/App/UMASafariHost.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Manual;
+				DEVELOPMENT_TEAM = C6TUZVJ6SJ;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				INFOPLIST_FILE = SafariHost/App/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.silkrd.uma.test.safarihost;
+				PRODUCT_NAME = "UMA Safari Bridge Test";
+				PROVISIONING_PROFILE_SPECIFIER = "UMA Safari Host Test Development v2";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		BC00000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = SafariHost/Extension/ClaudeBrowserCompanion.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Manual;
+				DEVELOPMENT_TEAM = C6TUZVJ6SJ;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				INFOPLIST_FILE = SafariHost/Extension/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.silkrd.uma.test.safarihost.ClaudeBrowserCompanion;
+				PRODUCT_MODULE_NAME = ClaudeBrowserCompanion;
+				PRODUCT_NAME = ClaudeBrowserCompanion;
+				PROVISIONING_PROFILE_SPECIFIER = "UMA Claude Companion Test Development v2";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		BC00000000000000000000003 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		B90000000000000000000001 /* Build configuration list for PBXNativeTarget "UMASafariBridgeHost" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BC00000000000000000000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B90000000000000000000002 /* Build configuration list for PBXNativeTarget "ClaudeBrowserCompanion" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BC00000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B90000000000000000000003 /* Build configuration list for PBXProject "UMASafariHostSigning" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BC00000000000000000000003 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = B40000000000000000000001 /* Project object */;
+}

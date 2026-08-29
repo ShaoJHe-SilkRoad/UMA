@@ -6,11 +6,51 @@
 
 **Program:** UMA M5RMX — Claude completion and 0.12 delivery
 
-**Current task:** `M5RMX-B0`
+**Current task:** `M5RMX Claude root-repair final closeout`
 
-**Status:** Active
+**Status:** live acceptance and final deterministic verification passed; exact Git delivery pending
 
-**Sole next task after accepted B0 PASS:** `M5RMX-G1`
+**Canonical workspace:** `/Volumes/HE/DEV/UMA/Worktrees/UMA-M5RMX-Claude`
+
+## Current Smart Mode scope supersession
+
+Final-closeout authority is narrower than the historical editable set below.
+The immutable Safari Host and Companion are accepted and locked. Current edits
+may correct only mutable UMA failure classification, truthful Settings copy,
+explicit diagnostic launch policy, APP_ONLY metadata validation, affected
+tests, and these current truth records. No Host/Companion migration, provider
+retry, Safari permission change, push, notarization, release replacement,
+M5RMX-G2, or new provider is authorized.
+
+This active Founder Goal authorizes exact Claude-local runtime, relay/config,
+anchor/estimator/selector, one-shot Accuracy Sync, Settings/presentation,
+focused tests, current mutable governance, package-helper, exact staging, one
+local commit, and one commit-exact local package. It does not authorize Apple
+submission, Safari live registration outside the later Human gate, Desktop app
+replacement, provider tasks, credentials, other providers, or remote Git.
+
+Current source ownership is Local Smart Mode. Persistent five-minute Safari
+tracking, permanent owned Usage tabs, and Browser Sync as the always-on source
+are retired. The prior Section 3 remains historical baseline where it conflicts
+with this section. Codex, WorkBuddy, Antigravity, accepted Assistant dragging /
+single-border code, provider ordering, and Maximum Decrement for other
+providers are protected.
+
+New editable paths for this Goal are:
+
+```text
+Sources/ClaudeStatusLineCore/**
+Sources/ClaudeStatusLineRelay/**
+Sources/CodexUsageUI/Services/ClaudeSmartUsageEngine.swift
+exact Claude connector/runtime/settings/presentation files
+BrowserExtension/Shared/background-core.js for one-shot ownership only
+exact Claude Smart tests and current mutable M5/M5RMX records
+script/package_uma_m5_g2.sh for the relay/package contract
+```
+
+No raw status-line payload, prompt/session content, credential, raw DOM/HTML,
+or exact private Founder quota may enter Git, package provenance, logs, or QA
+records.
 
 ## 1. Exact lineage
 
@@ -60,44 +100,47 @@ Protected mechanisms:
 
 ## 3. Current Claude truth
 
-Claude Browser Sync is current through Safari and the status-line quota route is
-retired. Chromium resources are packaged for a manual companion, but no current
-live Chromium Browser Sync acceptance exists; Chromium is unverified and is not
-the accepted current Claude source owner.
+Claude Local Smart Mode is the current source owner. Its production hierarchy
+is deterministic:
+
+```text
+EXACT_LOCAL_STATUSLINE
+> EXACT_SAFARI_ACCURACY
+> ESTIMATED_LOCAL
+> STALE_EXACT
+> MISSING
+```
 
 Current accepted ownership:
 
-- Safari Browser Companion reads only the official Claude Usage surface;
-- the browser layer validates the exact route before bounded semantic DOM
-  inspection;
-- only versioned, normalized quota observations cross the browser/native
-  boundary;
-- `ClaudeBrowserNativeHost` and the file-handoff bridge validate and deliver the
-  bounded packet;
-- `ClaudeCodeUsageConnector` owns one completion-relative five-minute
-  scheduler, one in-flight read, current-session admission, freshness, and
-  coalescing;
-- the extension owns at most one inactive Usage tab and never adopts or closes
-  a user-owned tab;
-- `ClaudeBrowserSanitizedCacheStore` stores only validated sanitized data using
-  owner-only filesystem rules;
-- Main Panel and Desktop Assistant consume shared presentation truth;
-- local Claude activity and API-equivalent cost are a separate this-Mac estimate
-  channel and never account quota;
-- Package.swift has no status-line target, active production source has no
-  status-line runtime, and packaging rejects `ClaudeStatusLine` residue.
+- the one-shot status-line relay immediately projects only documented
+  five-hour and seven-day used percentages and matching resets;
+- owner-only sanitized state and exact anchors contain no prompt, response,
+  project path, session identity, credential, or raw callback payload;
+- bounded local activity calibrates independent window estimates only after
+  compatible exact anchors and never assumes a fixed plan denominator;
+- exact truth outranks estimates; estimates are explicitly marked with `≈` and
+  fail closed across reset, schema, model, or continuity changes;
+- `ClaudeCodeUsageConnector` owns source selection and local lifecycle but no
+  recurring Safari timer or background quota poll;
+- Safari authentication and bounded extraction are retained solely for an
+  explicit one-shot Accuracy Sync, with at most one request-owned inactive tab;
+- browser ownership uncertainty never adopts, navigates, or closes a user tab;
+- Main Panel and Desktop Assistant consume the same shared normalized truth;
+- Disconnect clears UMA-owned Smart state and restores the exact prior Human
+  statusLine fragment without changing provider authentication.
 
 Accepted current statuses:
 
 ```text
-Browser Sync quota source: ACCEPTED CURRENT
-Provider-controlled Safari authentication: ACCEPTED CURRENT
-Five-hour and weekly/7-day account windows: ACCEPTED CURRENT
-Completion-relative five-minute automatic refresh: ACCEPTED CURRENT
+Local Smart Mode source: ACCEPTED IMPLEMENTATION CANDIDATE
+Exact local status-line lane: ACCEPTED THROUGH BOUNDED SANITIZER
+Five-hour and weekly/7-day windows: ACCEPTED WHEN EXACT OR VALIDLY CALIBRATED
+Safari Browser Sync: RETAINED ONE-SHOT ACCURACY ONLY
+Recurring Safari automatic refresh: RETIRED
 Main Panel / Desktop Assistant shared truth: ACCEPTED CURRENT
-Local activity and API-equivalent cost: ACCEPTED CURRENT, SEPARATE ESTIMATE
-Status-line quota route: HISTORICAL / RETIRED
-Final 0.12 extension distribution and notarized delivery: UNPROVEN / FUTURE
+Local calibrated estimates: ACCEPTED WHEN LABELED AND CONTINUITY-VALID
+Final physical Local Smart acceptance: PENDING
 ```
 
 ## 4. Privacy and credential boundary
@@ -177,9 +220,8 @@ The current Safari extension identity is
 `com.silkrd.uma.claude_browser`. The containing app identity is
 `com.silkrd.uma`.
 
-The production Safari manifest is version `1.3.0` (build `8`), uses Manifest V2
-persistent background scripts, and requests exactly `nativeMessaging`,
-`storage`, and `https://claude.ai/new*`. Because a URL fragment cannot be
+The current development Safari manifest is version `1.4.0` (build `10`), uses Manifest V2
+persistent background scripts, and requests exactly `nativeMessaging` and `https://claude.ai/new*`. Because a URL fragment cannot be
 expressed in static host permissions, production code must revalidate the exact
 `https://claude.ai/new#settings/usage` route before every DOM query. There are no
 static content scripts or broad host permissions.
@@ -198,6 +240,17 @@ commit-exact, reports marketing version `0.12`, requires an explicit Developer
 ID Application identity, signs the native host then appex then containing app
 with Hardened Runtime and secure timestamps, verifies Team ID `C6TUZVJ6SJ`, and
 refuses both ad-hoc signing and notarization submission.
+
+The UMA `0.13.0` single-active development baseline uses the dedicated
+`m5rmx-smart-0.13-preflight` phase. It requires an explicit deterministic
+12-digit build, strict/deep nested signature verification, and a new
+non-colliding `/Volumes/HE/DEV/UMA/Packages/uma-0.13-dev-<source>-<build>/UMA_0.13.0.app`
+destination. Only this temporary development phase may use truthfully recorded
+ad-hoc signing while Human-gated Safari unsigned-extension mode is enabled;
+historical, final, and signed phases still require Developer ID. The phase
+refuses notarization and any existing output. UMA `0.12` is legacy/archived and
+must not be registered or launched for active testing; UMA `0.11` remains the
+protected rollback.
 
 ## 7. Apple parallel record — no B0 action
 

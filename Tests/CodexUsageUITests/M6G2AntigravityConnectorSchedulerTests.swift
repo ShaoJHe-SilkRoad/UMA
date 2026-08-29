@@ -280,7 +280,7 @@ struct M6G2AntigravityConnectorSchedulerTests {
         await connector.stop()
     }
 
-    @Test @MainActor
+    @Test(.timeLimit(.minutes(1))) @MainActor
     func settingsObserverTerminatesWithOwningModel() async {
         let connector = makeConnector(reader: { quota() })
         var model: AntigravitySettingsModel? = AntigravitySettingsModel(
@@ -334,11 +334,13 @@ struct M6G2AntigravityConnectorSchedulerTests {
     private func waitUntil(
         _ predicate: @escaping @Sendable () async -> Bool
     ) async {
-        for _ in 0..<1_000 {
-            if await predicate() { return }
+        while !(await predicate()) {
+            if Task.isCancelled {
+                Issue.record("Antigravity observable condition was cancelled")
+                return
+            }
             await Task.yield()
         }
-        Issue.record("Condition was not reached")
     }
 
     private func nextReady(

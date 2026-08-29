@@ -196,9 +196,8 @@ public struct UsagePanelView: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            ZStack(alignment: .topTrailing) {
-                if isShowingSettings {
-                    UsageSettingsCard(
+            if isShowingSettings {
+                UsageSettingsCard(
                         showUsageSummary: $storedShowUsageSummary,
                         showRecentTasks: $storedShowRecentTasks,
                         showAPICost: $storedShowAPICost,
@@ -238,16 +237,15 @@ public struct UsagePanelView: View {
                             isShowingSettings = false
                             settingsDestination = nil
                         }
-                    )
-                    .padding(.top, UsageSettingsSizing.panelTopOffset)
-                    .padding(.trailing, 16)
-                    .transition(
-                        usesReduceMotion
-                            ? .opacity
-                            : .move(edge: .top).combined(with: .opacity)
-                    )
-                    .zIndex(10)
-                }
+                )
+                .padding(.top, UsageSettingsSizing.panelTopOffset)
+                .padding(.trailing, 16)
+                .transition(
+                    usesReduceMotion
+                        ? .opacity
+                        : .move(edge: .top).combined(with: .opacity)
+                )
+                .zIndex(10)
             }
         }
         .animation(
@@ -636,7 +634,7 @@ private struct LocalLiveProviderCard: View {
            availability.displayUnit == .credits {
             return availability.compactText
         }
-        return card.remaining.displayText
+        return card.remainingDisplayText
     }
 
     private func exactValue(_ value: Decimal) -> String {
@@ -797,7 +795,8 @@ private struct LocalLiveProviderCard: View {
             if isClaudeCode {
                 detailRow(
                     language == .english ? "Source" : "来源",
-                    value: language.claudeBrowserSourceLabel
+                    value: card.sourceDescription
+                        ?? language.claudeBrowserSourceLabel
                 )
                 detailRow(
                     language == .english ? "State" : "状态",
@@ -811,11 +810,20 @@ private struct LocalLiveProviderCard: View {
             ForEach(card.windows) { window in
                 detailRow(
                     window.accessibilityLabel,
-                    value: window.remaining.displayText
+                    value: window.isEstimated == true
+                        ? "≈\(window.remaining.displayText)"
+                        : window.remaining.displayText
+                )
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(
+                    Text(
+                        "\(window.accessibilityLabel), "
+                            + (window.remainingAccessibilityText ?? window.remaining.displayText)
+                    )
                 )
             }
             if card.windows.isEmpty {
-                detailRow(connectionLabel, value: card.remaining.displayText)
+                detailRow(connectionLabel, value: card.remainingDisplayText)
             }
             if isClaudeCode {
                 Text(language.claudeUpdatesPageDriven)
@@ -1221,7 +1229,9 @@ private struct QuotaRow: View {
                         )
                     )
                 Spacer()
-                Text(period.isUnlimited ? "♾️" : "\(period.remainingPercent)%")
+                Text(period.isUnlimited
+                    ? "♾️"
+                    : "\(period.isEstimated == true ? "≈" : "")\(period.remainingPercent)%")
                     .font(
                         AppTypography.numericFont(
                             isPrimary

@@ -62,6 +62,7 @@ enum AgentSourceTier: String, Codable, CaseIterable, Sendable {
     case officialLocalService = "A"
     case officialStructuredHook = "B"
     case officialCLIOrMetadata = "C"
+    case authorizedLocalEstimate = "E"
     case authorizedReadOnlyRemote = "R"
     case manualUserConfirmed = "M"
     case unsupported = "U"
@@ -276,7 +277,8 @@ struct AgentConnectorDescriptor: Codable, Sendable, Equatable {
         for sourceTier: AgentSourceTier
     ) -> ProviderLocalSourceClass {
         switch sourceTier {
-        case .officialLocalService, .officialStructuredHook, .officialCLIOrMetadata:
+        case .officialLocalService, .officialStructuredHook, .officialCLIOrMetadata,
+                .authorizedLocalEstimate:
             .admittedStructuredLocal
         case .manualUserConfirmed:
             .manualOnly
@@ -309,6 +311,9 @@ struct AgentRateLimitWindow: Codable, Sendable, Equatable, Identifiable {
     /// cache. Live providers continue to publish `usedPercent`; exactly one of
     /// these percentage fields may be populated.
     let remainingPercent: Double?
+    /// Per-window truth marker. Mixed exact/estimated snapshots must not make
+    /// an exact window inherit another window's estimated provenance.
+    let isEstimated: Bool?
     let isUnlimited: Bool
     let resetsAt: Date?
 
@@ -318,6 +323,7 @@ struct AgentRateLimitWindow: Codable, Sendable, Equatable, Identifiable {
         displayLabel: String? = nil,
         usedPercent: Double?,
         remainingPercent: Double? = nil,
+        isEstimated: Bool = false,
         isUnlimited: Bool,
         resetsAt: Date?
     ) {
@@ -326,6 +332,7 @@ struct AgentRateLimitWindow: Codable, Sendable, Equatable, Identifiable {
         self.displayLabel = displayLabel
         self.usedPercent = usedPercent
         self.remainingPercent = remainingPercent
+        self.isEstimated = isEstimated
         self.isUnlimited = isUnlimited
         self.resetsAt = resetsAt
     }
@@ -381,6 +388,9 @@ struct AgentUsageChannel: Codable, Sendable, Equatable, Identifiable {
     let freshness: AgentConnectorFreshness
     let capturedAt: Date?
     let coverageNote: String?
+    /// Sanitized source transparency for Smart/estimated providers.
+    let sourceConfidence: String?
+    let lastExactAt: Date?
     let rateLimitWindows: [AgentRateLimitWindow]
     let accountMetrics: AgentAccountMetrics?
     let localActivityMetrics: AgentLocalActivityMetrics?
@@ -405,6 +415,8 @@ struct AgentUsageChannel: Codable, Sendable, Equatable, Identifiable {
         freshness: AgentConnectorFreshness,
         capturedAt: Date?,
         coverageNote: String?,
+        sourceConfidence: String? = nil,
+        lastExactAt: Date? = nil,
         rateLimitWindows: [AgentRateLimitWindow],
         accountMetrics: AgentAccountMetrics?,
         localActivityMetrics: AgentLocalActivityMetrics?,
@@ -420,6 +432,8 @@ struct AgentUsageChannel: Codable, Sendable, Equatable, Identifiable {
         self.freshness = freshness
         self.capturedAt = capturedAt
         self.coverageNote = coverageNote
+        self.sourceConfidence = sourceConfidence
+        self.lastExactAt = lastExactAt
         self.rateLimitWindows = rateLimitWindows
         self.accountMetrics = accountMetrics
         self.localActivityMetrics = localActivityMetrics

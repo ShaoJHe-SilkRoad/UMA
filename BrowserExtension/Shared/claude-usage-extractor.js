@@ -20,6 +20,14 @@
     maximumCandidateCount: 64,
   });
 
+  const FAILURE_REASONS = Object.freeze({
+    routeNotReady: "ROUTE_NOT_READY",
+    providerStructureUnsupported: "PROVIDER_STRUCTURE_UNSUPPORTED",
+    providerSessionUnavailable: "PROVIDER_SESSION_UNAVAILABLE",
+    targetDataNotReady: "TARGET_DATA_NOT_READY",
+    extractionValidationFailed: "EXTRACTION_VALIDATION_FAILED",
+  });
+
   const CARD_SELECTORS = Object.freeze({
     fiveHour: [
       '[data-testid="usage-current-session"]',
@@ -48,6 +56,15 @@
     return locationLike.pathname === CONTRACT.path &&
       !locationLike.search &&
       locationLike.hash === CONTRACT.hash;
+  }
+
+  function usageRouteState(locationLike) {
+    if (exactUsageURL(locationLike)) return "exact";
+    if (locationLike?.protocol === "https:"
+        && locationLike.origin === CONTRACT.origin
+        && locationLike.pathname === CONTRACT.path
+        && !locationLike.search) return "providerRoutePending";
+    return "rejected";
   }
 
   function boundedOwnText(element, maximum) {
@@ -245,24 +262,42 @@
   function extractResult(documentLike, locationLike, now) {
     // The URL gate must run before the first DOM query. Persistent host access
     // covers /new*, but UMA is allowed to inspect only the exact Usage hash.
-    if (!exactUsageURL(locationLike)) return { status: "routeRejected" };
+    if (!exactUsageURL(locationLike)) {
+      return { status: "routeRejected", reasonCode: FAILURE_REASONS.routeNotReady };
+    }
     // On the exact route, authentication uncertainty is classified using only
     // narrow form landmarks. No Usage labels or other page content are read.
-    if (hasLoginForm(documentLike)) return { status: "signInRequired" };
+    if (hasLoginForm(documentLike)) {
+      return { status: "signInRequired", reasonCode: FAILURE_REASONS.providerSessionUnavailable };
+    }
 
     const observation = extract(documentLike, locationLike, now);
     if (observation) return { status: "success", observation };
 
     // The SPA can navigate while extraction is running. Recheck the route and
     // login guard before reporting a content-free failure classification.
-    if (!exactUsageURL(locationLike)) return { status: "routeRejected" };
-    if (hasLoginForm(documentLike)) return { status: "signInRequired" };
-    return { status: "usageUnavailable" };
+    if (!exactUsageURL(locationLike)) {
+      return { status: "routeRejected", reasonCode: FAILURE_REASONS.routeNotReady };
+    }
+    if (hasLoginForm(documentLike)) {
+      return { status: "signInRequired", reasonCode: FAILURE_REASONS.providerSessionUnavailable };
+    }
+    const hasRecognizedCard = Boolean(
+      uniqueCard(documentLike, "fiveHour") || uniqueCard(documentLike, "weeklyAllModels")
+    );
+    return {
+      status: "usageUnavailable",
+      reasonCode: hasRecognizedCard
+        ? FAILURE_REASONS.providerStructureUnsupported
+        : FAILURE_REASONS.targetDataNotReady,
+    };
   }
 
   root.UMAClaudeUsageExtractor = Object.freeze({
     CONTRACT,
+    FAILURE_REASONS,
     exactUsageURL,
+    usageRouteState,
     finitePercentage,
     normalizedTimestamp,
     validateObservation,

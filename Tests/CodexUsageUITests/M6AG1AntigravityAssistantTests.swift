@@ -126,7 +126,7 @@ struct M6AG1AntigravityAssistantTests {
         )] = [
             (.connected, .fresh, .finite(58), false, .fresh, .connected),
             (.connected, .cached, .finite(58), true, .cached, .connected),
-            (.stale, .stale, .finite(58), true, .stale, .reconnecting),
+            (.stale, .stale, .finite(58), true, .stale, .stale),
             (.transitional, .unavailable, .unavailable, false, .waiting, .reconnecting),
             (.failed, .unavailable, .unavailable, false, .failed, .failed),
             (.unavailable, .unavailable, .unavailable, false, .unavailable, .unavailable),

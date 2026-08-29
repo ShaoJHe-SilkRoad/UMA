@@ -116,6 +116,8 @@ public struct SharedUsageWindowPresentation: Codable, Equatable, Identifiable, S
     public let compactLabel: String
     public let accessibilityLabel: String
     public let remaining: SharedRemainingValue
+    public let isEstimated: Bool?
+    public let remainingAccessibilityText: String?
     public let resetsAt: Date?
     public let resetText: String
 
@@ -125,6 +127,8 @@ public struct SharedUsageWindowPresentation: Codable, Equatable, Identifiable, S
         compactLabel: String,
         accessibilityLabel: String,
         remaining: SharedRemainingValue,
+        isEstimated: Bool = false,
+        remainingAccessibilityText: String? = nil,
         resetsAt: Date?,
         resetText: String
     ) {
@@ -133,6 +137,8 @@ public struct SharedUsageWindowPresentation: Codable, Equatable, Identifiable, S
         self.compactLabel = compactLabel
         self.accessibilityLabel = accessibilityLabel
         self.remaining = remaining
+        self.isEstimated = isEstimated
+        self.remainingAccessibilityText = remainingAccessibilityText
         self.resetsAt = resetsAt
         self.resetText = resetText
     }
@@ -232,6 +238,7 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
     public let windows: [SharedUsageWindowPresentation]
     public let selectedWindowID: String?
     public let remaining: SharedRemainingValue
+    public let isEstimated: Bool?
     public let availability: SharedAvailabilityPresentation?
     public let accountCreditBreakdown: SharedAccountCreditBreakdown?
     public let availabilityLifecycle: SharedAvailabilityLifecycle?
@@ -250,6 +257,7 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
         windows: [SharedUsageWindowPresentation],
         selectedWindowID: String?,
         remaining: SharedRemainingValue,
+        isEstimated: Bool = false,
         availability: SharedAvailabilityPresentation? = nil,
         accountCreditBreakdown: SharedAccountCreditBreakdown? = nil,
         availabilityLifecycle: SharedAvailabilityLifecycle? = nil,
@@ -267,6 +275,7 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
         self.windows = windows
         self.selectedWindowID = selectedWindowID
         self.remaining = remaining
+        self.isEstimated = isEstimated
         self.availability = availability
         self.accountCreditBreakdown = accountCreditBreakdown
         self.availabilityLifecycle = availabilityLifecycle
@@ -286,6 +295,12 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
         selectedWindow?.compactLabel
     }
 
+    public var remainingDisplayText: String {
+        isEstimated == true && remaining.finitePercent != nil
+            ? "≈\(remaining.displayText)"
+            : remaining.displayText
+    }
+
     public var tooltipText: String {
         if let availability {
             if availability.sourceState == .authenticatedAccountWeb {
@@ -296,12 +311,16 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
             return availability.accessibilityText
         }
         let window = selectedWindow?.accessibilityLabel ?? "usage window unavailable"
-        let value: String
-        switch remaining {
-        case .finite: value = "\(remaining.displayPercent ?? 0) percent remaining"
-        case .unlimited: value = "unlimited"
-        case .unavailable: value = "usage unavailable"
-        }
+        let value = selectedWindow?.remainingAccessibilityText ?? {
+            switch remaining {
+            case .finite:
+                return isEstimated == true
+                    ? "approximately \(remaining.displayPercent ?? 0) percent remaining"
+                    : "\(remaining.displayPercent ?? 0) percent remaining"
+            case .unlimited: return "unlimited"
+            case .unavailable: return "usage unavailable"
+            }
+        }()
         let sourceState = switch freshness {
         case .fresh: ""
         case .cached: "cached, "
@@ -509,7 +528,9 @@ public enum SharedUsagePresentationPolicy {
            (snapshot.state == .ready || snapshot.state == .stale),
            [.cached, .stale].contains(snapshot.freshness),
            let account = snapshot.channels.first(where: { $0.id == .account }),
-           account.provenance == .providerReported,
+           (account.provenance == .providerReported
+               || (snapshot.id == ClaudeCodeUsageConnector.connectorID
+                   && account.provenance == .locallyEstimated)),
            account.freshness == snapshot.freshness,
            !account.rateLimitWindows.isEmpty,
            account.rateLimitWindows.allSatisfy({
@@ -522,7 +543,9 @@ public enum SharedUsagePresentationPolicy {
               snapshot.safeFailure == nil,
               let account = snapshot.channels.first(where: { $0.id == .account }),
               account.sourceTier != .manualUserConfirmed,
-              account.provenance == .providerReported,
+              (account.provenance == .providerReported
+                  || (snapshot.id == ClaudeCodeUsageConnector.connectorID
+                      && account.provenance == .locallyEstimated)),
               account.freshness == .fresh,
               account.safeFailure == nil
         else { return false }
@@ -652,6 +675,7 @@ public enum SharedUsagePresentationPolicy {
             windows: windows,
             selectedWindowID: selectedID,
             remaining: remaining,
+            isEstimated: windows.first(where: { $0.id == selectedID })?.isEstimated == true,
             availability: availability,
             accountCreditBreakdown: accountChannel?.accountCreditSnapshot.map {
                 SharedAccountCreditBreakdown(
@@ -667,9 +691,14 @@ public enum SharedUsagePresentationPolicy {
                 ? language.workBuddyAccountWebSource
                 : snapshot.id == GoogleAntigravityUsageConnector.connectorID
                     ? language.antigravitySourceLabel
-                    : snapshot.capabilities.contains(.sanitizedLastValidRestore)
-                        ? accountChannel?.coverageNote
-                        : nil,
+                    : snapshot.id == ClaudeCodeUsageConnector.connectorID
+                        ? (accountChannel?.sourceTier == .authorizedLocalEstimate
+                            ? (accountChannel?.coverageNote
+                                ?? language.claudeBrowserSourceLabel)
+                            : language.claudeBrowserSourceLabel)
+                        : snapshot.capabilities.contains(.sanitizedLastValidRestore)
+                            ? accountChannel?.coverageNote
+                            : nil,
             isVisibleInDesktopAssistant: !snapshot.capabilities.contains(
                 .hiddenFromDesktopAssistant
             ),
@@ -677,6 +706,27 @@ public enum SharedUsagePresentationPolicy {
             isRetainingLastValidValue: retained || sourceIsRetained,
             capturedAt: snapshot.capturedAt
         )
+    }
+
+    private static func remainingAccessibilityText(
+        _ remaining: SharedRemainingValue,
+        isEstimated: Bool,
+        language: AppLanguage
+    ) -> String {
+        switch (language, remaining) {
+        case let (.english, .finite(value)):
+            let rounded = Int(value.rounded())
+            return isEstimated
+                ? "approximately \(rounded) percent remaining"
+                : "\(rounded) percent remaining"
+        case (.english, .unlimited): return "unlimited"
+        case (.english, .unavailable): return "usage unavailable"
+        case let (.simplifiedChinese, .finite(value)):
+            let rounded = Int(value.rounded())
+            return isEstimated ? "预计剩余 \(rounded)%" : "剩余 \(rounded)%"
+        case (.simplifiedChinese, .unlimited): return "无限额度"
+        case (.simplifiedChinese, .unavailable): return "额度不可用"
+        }
     }
 
     private static func makeWindow(
@@ -719,6 +769,12 @@ public enum SharedUsagePresentationPolicy {
             compactLabel: labels.compact,
             accessibilityLabel: labels.accessibility,
             remaining: remaining,
+            isEstimated: window.isEstimated == true,
+            remainingAccessibilityText: remainingAccessibilityText(
+                remaining,
+                isEstimated: window.isEstimated == true,
+                language: language
+            ),
             resetsAt: window.resetsAt,
             resetText: language.resetDescription(for: window.resetsAt, now: now)
         )

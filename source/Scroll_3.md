@@ -100,7 +100,7 @@ Current Founder instruction
 Consequences:
 
 1. Scroll 2.1 is historical. It selected Claude status-line support as current, Antigravity as future, and Kiro/Kimi/Junie before Cursor. Those sequencing assumptions are superseded.
-2. Current live evidence establishes Claude Browser Sync, not the retired Claude status-line route, as the accepted Claude quota source.
+2. Current live evidence establishes official Claude Code `statusLine` quota fields as the primary exact source on supported surfaces, the version-pinned Claude Desktop plan cache as estimate-only, and Safari as explicit one-shot Accuracy Sync only. Persistent Browser Sync and five-minute Safari polling are retired.
 3. Current live evidence establishes Antigravity official read-only CLI `/usage`, not a status-line relay, as the accepted Antigravity source.
 4. M7's accepted source decision establishes Cursor as unsupported under current policy. A technically workable browser extractor is not sufficient when the displayed quantity does not reliably predict enforceable usage.
 5. Current official Kimi documentation and live installed behavior will outrank the research snapshot in this Scroll.
@@ -263,16 +263,20 @@ CodeBuddy remains part of the same Buddy AI ecosystem. It must not receive a sec
 ### 4.3 M5 Claude Code
 
 ```text
-Claude Browser Sync quota source                DONE
-Automatic five-minute provider-page read        DONE
-Separate local activity/cost estimate           DONE
-Retired status-line route removed               DONE
-Main-panel and Assistant parity                 DONE
-Current runtime support                         SUPPORTED
+Official Claude Code statusLine exact source    PRIMARY ON SUPPORTED SURFACES
+Claude Desktop plan-cache estimate              ESTIMATED ONLY
+One-shot Safari Accuracy Sync                   IMPLEMENTED / FINAL ACCEPTANCE OPEN
+Persistent Browser Sync / five-minute polling   RETIRED
+Separate bounded local activity metadata        CLAUDE CODE ONLY
+Main-panel and Assistant parity                 IMPLEMENTED / FINAL ACCEPTANCE OPEN
+Current runtime support                         SUPPORTED / SMART-CLOSE ACTIVE
 Developer ID/notarization distribution work     NOT PROVEN
 ```
 
-Claude account quota comes from Browser Sync. Claude local activity is an estimate channel and never substitutes for account quota.
+Claude quota truth uses current exact statusLine fields when supported, then a
+Human-requested one-shot Safari Accuracy observation, then explicitly marked
+Desktop/local estimates. The Desktop cache never becomes exact or a response
+event, and ordinary refresh never starts Safari.
 
 ### 4.4 M6 Google Antigravity
 
@@ -413,7 +417,7 @@ No:
 | Priority | Provider | Native unit | Accepted/candidate source | Current decision | Direction |
 |---:|---|---|---|---|---|
 | 1 | Codex | Remaining percentages; token/cost details | Local app-server + approved local logs | Supported | Preserve |
-| 2 | Claude Code | Remaining quota percentages; separate activity estimate | Browser Sync + local activity reader | Supported | Preserve |
+| 2 | Claude Code | Remaining quota percentages; separate Claude Code activity metadata | Official `statusLine` exact + Desktop estimate-only + one-shot Safari Accuracy | Supported; Smart Close active | Consolidate without recurring Safari |
 | 3 | WorkBuddy | Exact Credits | Provider-controlled account web | Supported | Preserve |
 | 4 | Google Antigravity | Remaining percentages | Official read-only `agy /usage` | Supported | Preserve |
 | 5 | **Kimi ecosystem** | Shared membership remaining percentage (account/cycle dependent) + Kimi Code limits; optional native Extra Usage detail | Official Kimi Code `/usage`; official Kimi account/console fallback | **Conditional GO to source admission** | **M8 NEXT** |
@@ -490,7 +494,7 @@ UMA011    Multi-provider architecture and final DBG            DONE
 GIT011    Founder main integration                             DONE
 
 M4        Manus investigation                                  CLOSED / NO-GO
-M5        Claude Code support                                  CLOSED / SUPPORTED
+M5RMX     Claude Local Smart source consolidation              ACTIVE / SUPPORTED
 M6        Google Antigravity support                           CLOSED / SUPPORTED
 M7        Cursor source admission                              CLOSED / NO-GO
 

@@ -1,26 +1,26 @@
+import ClaudeBrowserBridgeProtocol
+import ClaudeStatusLineCore
 import Foundation
 import Testing
-import ClaudeBrowserBridgeProtocol
+@testable import CodexUsageUI
 
-@Suite("M5RMX-G1 Claude source and privacy contract")
+@Suite("M5RMX Claude Local Smart source and privacy contract")
 struct M5RMXG1ClaudeSourceContractTests {
     @Test
-    func sourceDecisionPreservesBrowserSyncAndRejectsUnprovenPromotion() throws {
+    func currentDecisionSupersedesBrowserFirstHistoricalRecords() throws {
         let dossier = try record("source/UMA M5RMX Claude Source Dossier.md")
         let decision = try record("source/UMA M5RMX Claude Source Decision.md")
+        let scope = try record("source/UMA M5RMX Scope Lock.md")
 
-        for candidate in [
-            "Official Claude local service or IPC",
-            "Official hook, event, or status interface",
-            "Official read-only CLI or provider-owned local metadata",
-            "Safari Browser Sync",
-        ] {
-            #expect(dossier.contains(candidate))
-        }
-        #expect(decision.contains("PASS — CURRENT SAFARI BROWSER SYNC PRESERVED"))
-        #expect(decision.contains("No official superior source candidate currently passes"))
-        #expect(decision.contains("`HISTORICAL / RETIRED`"))
-        #expect(dossier.contains("STATUS-LINE ROUTE: HISTORICAL / RETIRED"))
+        #expect(decision.contains("LIVE SOURCE ACCEPTED — FINAL VERIFICATION PASS; EXACT GIT DELIVERY PENDING"))
+        #expect(decision.contains("The immutable Host/Companion is accepted and locked"))
+        #expect(decision.contains("EXACT_LOCAL_STATUSLINE"))
+        #expect(decision.contains("> EXACT_SAFARI_ACCURACY"))
+        #expect(decision.contains("> ESTIMATED_LOCAL"))
+        #expect(dossier.contains("Current source owner — Founder override"))
+        #expect(scope.contains("Current Smart Mode scope supersession"))
+        #expect(scope.contains("Current source ownership is Local Smart Mode"))
+        #expect(scope.contains("The prior Section 3 remains historical baseline where it conflicts"))
     }
 
     @Test
@@ -43,23 +43,44 @@ struct M5RMXG1ClaudeSourceContractTests {
     }
 
     @Test
-    func bridgePacketRemainsClosedVersionedAndBounded() throws {
-        #expect(ClaudeBrowserBridgeContract.messageKind == "claudeUsageObservation")
-        #expect(ClaudeBrowserBridgeContract.sourceID == "claude-browser-usage")
-        #expect(ClaudeBrowserBridgeContract.schemaVersion == 2)
-        #expect(ClaudeBrowserBridgeContract.extractorSchemaVersion == 2)
-        #expect(ClaudeBrowserBridgeContract.maximumMessageBytes == 4_096)
-        #expect(
-            ClaudeBrowserBridgeContract.officialUsageURL.absoluteString
-                == "https://claude.ai/new#settings/usage"
-        )
+    func founderAuthorizedLocalSanitizationIsCurrentAndBrowserPersistenceIsRetired() throws {
+        let privacy = try record("source/UMA M5RMX Claude Privacy Contract.md")
 
-        let decoder = try source(
-            "Sources/ClaudeBrowserNativeHostCore/ClaudeBrowserMessageDecoder.swift"
-        )
-        #expect(decoder.contains("requireExactKeys"))
-        #expect(decoder.contains("throw ClaudeBrowserBridgeError.unexpectedField"))
-        #expect(decoder.contains("throw ClaudeBrowserBridgeError.noAccountWindow"))
+        for required in [
+            "parse one bounded Claude JSONL\nrecord at a time in memory",
+            "allowlisted usage/token\ncounts, bounded model-family classification, and activity timestamp",
+            "Local Activity is an input to calibrated estimation only",
+            "explicit one-shot Accuracy Sync",
+            "There is no background\nscheduler",
+            "restores the exact preserved prior Claude status-line configuration",
+            "bounded pre-UMA\nrelay sanitizer",
+        ] {
+            #expect(privacy.contains(required))
+        }
+        for stale in [
+            "persistent background owner",
+            "completion-relative automatic refresh",
+            "CLAUDE LOCAL ACTIVITY — DEFERRED TO M5RMX-G2 PRIVACY REQUALIFICATION",
+            "The retired route must remain inactive",
+            "Disconnect cancels the Claude scheduler",
+        ] {
+            #expect(!privacy.contains(stale))
+        }
+    }
+
+    @Test
+    func statusLinePacketIsClosedVersionedAndBounded() throws {
+        #expect(ClaudeStatusLinePacket.currentSchemaVersion == 1)
+        #expect(ClaudeStatusLineProjection.maximumInputBytes == 64 * 1_024)
+        #expect(ClaudeStatusLinePacket.maximumEncodedBytes == 4 * 1_024)
+
+        let raw = Data(#"{"session_id":"private","cwd":"/private/work","rate_limits":{"five_hour":{"used_percentage":25,"resets_at":1898600400},"seven_day":{"used_percentage":40,"resets_at":1899198000}}}"#.utf8)
+        let encoded = try ClaudeStatusLineProjection.decode(raw).encoded()
+        let text = String(decoding: encoded, as: UTF8.self)
+        #expect(!text.contains("session_id"))
+        #expect(!text.contains("cwd"))
+        #expect(!text.contains("private"))
+        #expect(try ClaudeStatusLinePacket.decodePacket(encoded).fiveHour?.usedPercentage == 25)
     }
 
     @Test
@@ -72,9 +93,18 @@ struct M5RMXG1ClaudeSourceContractTests {
         )
         let permissions = try #require(manifest["permissions"] as? [String])
         #expect(Set(permissions) == Set([
-            "nativeMessaging", "storage", "https://claude.ai/new*",
+            "nativeMessaging", "https://claude.ai/new*",
         ]))
-        #expect(manifest["content_scripts"] == nil)
+        let contentScripts = try #require(manifest["content_scripts"] as? [[String: Any]])
+        #expect(contentScripts.count == 1)
+        #expect(contentScripts[0]["matches"] as? [String] == ["https://claude.ai/new*"])
+        #expect(contentScripts[0]["js"] as? [String] == [
+            "Shared/claude-usage-extractor.js",
+            "Shared/provider-ownership-v2.js",
+            "Shared/content-script.js",
+        ])
+        #expect(contentScripts[0]["run_at"] as? String == "document_start")
+        #expect(contentScripts[0]["all_frames"] as? Bool == false)
         let background = try #require(manifest["background"] as? [String: Any])
         #expect(background["persistent"] as? Bool == true)
 
@@ -82,7 +112,10 @@ struct M5RMXG1ClaudeSourceContractTests {
         let resultStart = try #require(extractor.range(of: "function extractResult"))
         let resultBody = String(extractor[resultStart.lowerBound...])
         let routeGate = try #require(resultBody.range(
-            of: "if (!exactUsageURL(locationLike)) return { status: \"routeRejected\" };"
+            of: "if (!exactUsageURL(locationLike)) {"
+        ))
+        #expect(resultBody.contains(
+            "status: \"routeRejected\", reasonCode: FAILURE_REASONS.routeNotReady"
         ))
         let firstDOMQuery = try #require(resultBody.range(of: "hasLoginForm(documentLike)"))
         #expect(routeGate.lowerBound < firstDOMQuery.lowerBound)
@@ -102,19 +135,17 @@ struct M5RMXG1ClaudeSourceContractTests {
     }
 
     @Test
-    func currentPersistentSafariContractSupersedesToolbarOnlyHistory() throws {
+    func oneShotAccuracyContractSupersedesPersistentSafariHistory() throws {
         let dossier = try record("source/UMA M5RMX Claude Source Dossier.md")
         let privacy = try record("source/UMA M5RMX Claude Privacy Contract.md")
         let combined = dossier + privacy
 
-        #expect(combined.contains("supersedes historical activeTab/toolbar-only"))
-        #expect(combined.contains("persistent exact host scope"))
-        #expect(combined.contains("https://claude.ai/new*"))
-        #expect(combined.contains("one extension-owned inactive Usage tab"))
-        #expect(combined.contains("completion-relative automatic refresh"))
-        #expect(combined.contains("unknown routes are rejected before\nDOM inspection"))
-        #expect(combined.contains("unrelated leaf text transiently"))
-        #expect(combined.contains("does not serialize, retain, or forward"))
+        #expect(combined.contains("explicit one-shot Accuracy Sync"))
+        #expect(combined.contains("inactive extension-owned exact Usage tab"))
+        #expect(combined.contains("no background scheduler"))
+        #expect(combined.contains("automatic retry, catch-up burst, or permanent owned tab"))
+        #expect(combined.contains("exact Usage route"))
+        #expect(combined.contains("raw DOM/HTML"))
     }
 
     @Test
@@ -151,7 +182,7 @@ struct M5RMXG1ClaudeSourceContractTests {
     }
 
     @Test
-    func officialStatusLineFieldsRemainRetiredAndCoverageBounded() throws {
+    func officialStatusLineFieldsAreAdmittedOnlyThroughImmediateProjection() throws {
         let dossier = try record("source/UMA M5RMX Claude Source Dossier.md")
         let privacy = try record("source/UMA M5RMX Claude Privacy Contract.md")
         let combined = dossier + privacy
@@ -164,33 +195,36 @@ struct M5RMXG1ClaudeSourceContractTests {
         ] {
             #expect(dossier.contains(field))
         }
-        #expect(combined.contains("only\nafter the first API response"))
-        #expect(combined.contains("timer rerun is not proven"))
+        #expect(combined.contains("after a first API response"))
         #expect(combined.contains("raw status-line stdin"))
-        #expect(combined.contains("sensitive session and workspace\ncontext"))
-        #expect(dossier.contains("Pro and Max"))
-        #expect(dossier.contains("Team, Enterprise, and\nunknown account modes are not qualified"))
+        #expect(combined.contains("session/workspace fields"))
+        #expect(combined.contains("immediate allowlist projection"))
+        #expect(dossier.contains("Pro/Max"))
+        #expect(dossier.contains("Missing exact callbacks therefore do not become\nzero"))
     }
 
     @Test
-    func currentLocalSignatureFailuresBlockOnlyLocalPromotion() throws {
-        let dossier = try record("source/UMA M5RMX Claude Source Dossier.md")
-        let decision = try record("source/UMA M5RMX Claude Source Decision.md")
-        let combined = dossier + decision
-
-        #expect(combined.contains("$HOME/.local/bin/claude"))
-        #expect(combined.contains("$HOME/.local/share/claude/versions/2.1.220"))
-        #expect(combined.contains("/Applications/Claude.app"))
-        #expect(combined.contains("invalid signature (code or signature have been modified)"))
-        #expect(combined.contains("In architecture: arm64"))
-        #expect(dossier.contains("They do not weaken Safari Browser Sync"))
-        #expect(decision.contains("This does not change the accepted Safari Browser Sync decision"))
+    func connectorDescriptorDeclaresSmartTruthAndContentExclusions() {
+        let descriptor = ClaudeCodeUsageConnector.production().descriptor
+        #expect(descriptor.sourceVersion == "smart-1")
+        #expect(descriptor.sourceTier == .officialStructuredHook)
+        #expect(descriptor.localSourceClass == .admittedStructuredLocal)
+        #expect(descriptor.capabilities.contains(.localActivity))
+        #expect(!descriptor.capabilities.contains(.automaticRefresh))
+        #expect(descriptor.supportedScopes == [.account, .session])
+        for forbidden in [
+            "credentials", "tokens", "cookies", "prompt", "response",
+            "transcript", "project", "sourceCode", "rawHTML", "rawDOM", "rawJSON",
+        ] {
+            #expect(descriptor.unsupportedFields.contains(forbidden))
+        }
     }
 
     @Test
-    func retiredCredentialAndStatusLineRoutesRemainNonProduction() throws {
+    func rejectedCredentialRoutesStayAbsentWhileSmartTargetsArePresent() throws {
         let package = try source("Package.swift")
-        #expect(!package.contains("ClaudeStatusLineCore"))
+        #expect(package.contains("ClaudeStatusLineCore"))
+        #expect(package.contains("ClaudeStatusLineRelay"))
         #expect(!package.contains("ClaudeQuotaBroker"))
 
         let sourceRoots = [
@@ -210,27 +244,29 @@ struct M5RMXG1ClaudeSourceContractTests {
             "Claude Code-credentials",
             "/api/oauth/usage",
             "ClaudeQuotaBroker",
+            "ANTHROPIC_API_KEY",
         ] {
             #expect(!production.contains(forbidden))
         }
     }
 
     @Test
-    func deliveryRecordLocksNonOperationAndNextGoal() throws {
+    func smartLedgerLocksNonOperationAndEveryOpenAcceptanceGate() throws {
         let decision = try record("source/UMA M5RMX Claude Source Decision.md")
         let ledger = try record("source/UMA M5RMX QA Issue Ledger.md")
 
         for statement in [
-            "Sanitized authenticated Claude Usage observations: 0",
             "Claude prompts/tasks: 0",
             "Intentional provider spend: 0",
-            "Production runtime/extension changes: 0",
-            "sole next task is `M5RMX-SAFARI-G1`",
+            "Apple actions in this Goal must remain zero",
+            "No issue above is CLOSED",
+            "IMPLEMENTED / OPEN",
         ] {
             #expect((decision + ledger).contains(statement))
         }
-        #expect(ledger.contains("M5RMXG1-001"))
-        #expect(ledger.contains("M5RMXG1-009"))
+        for issue in 1...12 {
+            #expect(ledger.contains(String(format: "SMART-%02d", issue)))
+        }
     }
 
     private func record(_ relativePath: String) throws -> String {

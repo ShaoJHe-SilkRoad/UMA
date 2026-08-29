@@ -66,6 +66,62 @@ struct M1AG2ConnectorCoreTests {
     }
 
     @Test
+    func persistedRemainingWindowsPreserveEstimateTruthAcrossRelaunch() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let url = directory.appendingPathComponent("connector-snapshots.json")
+        let store = AgentConnectorSnapshotStore(url: url)
+        let capturedAt = Date(timeIntervalSince1970: 1_784_332_800)
+        let snapshot = AgentUsageSnapshot(
+            id: AgentConnectorID(rawValue: "claude.local-smart")!,
+            providerName: "Claude",
+            state: .ready,
+            capturedAt: capturedAt,
+            lastSuccessfulAt: capturedAt,
+            freshness: .fresh,
+            channels: [
+                AgentUsageChannel(
+                    id: .account,
+                    sourceTier: .authorizedLocalEstimate,
+                    sourceVersion: "smart-v1",
+                    scopes: [.account],
+                    provenance: .locallyEstimated,
+                    freshness: .fresh,
+                    capturedAt: capturedAt,
+                    coverageNote: nil,
+                    rateLimitWindows: [
+                        .init(
+                            id: "fiveHour", kind: .fiveHour, usedPercent: nil,
+                            remainingPercent: 73, isEstimated: false,
+                            isUnlimited: false, resetsAt: capturedAt.addingTimeInterval(3_600)
+                        ),
+                        .init(
+                            id: "sevenDay", kind: .sevenDay, usedPercent: nil,
+                            remainingPercent: 62, isEstimated: true,
+                            isUnlimited: false, resetsAt: nil
+                        ),
+                    ],
+                    accountMetrics: nil,
+                    localActivityMetrics: nil,
+                    safeFailure: nil
+                ),
+            ],
+            capabilities: [.connect, .refresh, .disconnect],
+            safeFailure: nil
+        )
+
+        try await store.save([snapshot])
+        let serialized = try String(decoding: Data(contentsOf: url), as: UTF8.self)
+        let restored = try #require(await store.load().first)
+        let windows = try #require(restored.channels.first?.rateLimitWindows)
+
+        #expect(serialized.contains("\"remainingPercent\""))
+        #expect(serialized.contains("\"isEstimated\""))
+        #expect(windows.map(\.usedPercent) == [nil, nil])
+        #expect(windows.map(\.remainingPercent) == [73, 62])
+        #expect(windows.map(\.isEstimated) == [false, true])
+    }
+
+    @Test
     func persistencePreservesUnknownProviderEntriesForLaterRestore() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let store = AgentConnectorSnapshotStore(url: directory.appendingPathComponent("connector-snapshots.json"))

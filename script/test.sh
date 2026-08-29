@@ -1,20 +1,12 @@
 #!/usr/bin/env bash
-# Runs the Swift test suite with the toolchain overrides this checkout requires.
+# Runs the Swift test suite with one coherent Xcode compiler/SDK/runtime.
 #
-# Command Line Tools 27.0 moved three things that a bare `swift test` still
-# expects to resolve on its own:
-#
-#   * the default SDK selection no longer resolves the SwiftUI macro plugin, so
-#     the SDK is pinned to the same version script/package_uma_m5_g2.sh uses;
-#   * libTestingMacros.dylib moved into a plugins subdirectory the build system
-#     does not search, so it is loaded explicitly;
-#   * Testing.framework and lib_TestingInterop.dylib are no longer on any
-#     default runtime search path, and SIP strips DYLD_FRAMEWORK_PATH from the
-#     SwiftPM test helper, so both are added as link-time rpaths instead.
-#
-# The three moved components are located by search rather than by hardcoded
-# path, so a later toolchain move fails with a specific message instead of an
-# unrelated compiler or dyld error.
+# Command Line Tools currently exposes a Swift 6.4 driver while the historical
+# test helper pinned a macOS 26.5 SDK and loaded test support from the CLT tree.
+# That mixed installation is not a supported compiler environment. The Apple
+# Development test/package path already requires Xcode beta 27, so tests use
+# that same developer directory, macOS SDK, Swift Testing macro plug-in,
+# framework, and interop library as one atomic toolchain selection.
 #
 # Any argument is forwarded to `swift test`, for example:
 #
@@ -22,48 +14,50 @@
 set -euo pipefail
 
 readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-readonly CLT="/Library/Developer/CommandLineTools"
-readonly SDK="$CLT/SDKs/MacOSX26.5.sdk"
+readonly DEVELOPER_DIR_REQUIRED="/Applications/Xcode-beta.app/Contents/Developer"
+readonly TOOLCHAIN="$DEVELOPER_DIR_REQUIRED/Toolchains/XcodeDefault.xctoolchain"
+readonly SDK="$DEVELOPER_DIR_REQUIRED/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk"
+readonly PLATFORM_DEVELOPER="$DEVELOPER_DIR_REQUIRED/Platforms/MacOSX.platform/Developer"
 
 fail() {
     printf '%s\n' "$@" >&2
     exit 1
 }
 
-[[ -d "$CLT" ]] || fail \
-    "Missing Command Line Tools at $CLT."
+[[ -d "$DEVELOPER_DIR_REQUIRED" ]] || fail \
+    "Missing required Xcode developer directory: $DEVELOPER_DIR_REQUIRED"
 
 [[ -d "$SDK" ]] || fail \
     "Missing pinned SDK: $SDK" \
-    "The pinned SDK must stay in step with script/package_uma_m5_g2.sh." \
-    "Update both together; do not let them drift."
+    "The deterministic test toolchain must remain coherent with the Apple Development package path."
 
 readonly testing_macros="$(
-    /usr/bin/find "$CLT/usr/lib/swift/host/plugins" \
+    /usr/bin/find "$TOOLCHAIN/usr/lib/swift/host/plugins" \
         -name libTestingMacros.dylib -print -quit 2>/dev/null || true
 )"
 [[ -n "$testing_macros" ]] || fail \
-    "Could not find libTestingMacros.dylib under $CLT/usr/lib/swift/host/plugins." \
+    "Could not find libTestingMacros.dylib under the selected Xcode toolchain." \
     "Swift Testing macros cannot expand without it and every @Test fails to compile."
 
 readonly testing_framework="$(
-    /usr/bin/find "$CLT" -maxdepth 5 -type d \
+    /usr/bin/find "$PLATFORM_DEVELOPER" -maxdepth 5 -type d \
         -name Testing.framework -print -quit 2>/dev/null || true
 )"
 [[ -n "$testing_framework" ]] || fail \
-    "Could not find Testing.framework under $CLT." \
+    "Could not find Testing.framework under the selected Xcode macOS platform." \
     "Test bundles cannot link or load without it."
 readonly framework_dir="$(dirname "$testing_framework")"
 
 readonly testing_interop="$(
-    /usr/bin/find "$CLT" -maxdepth 6 \
+    /usr/bin/find "$PLATFORM_DEVELOPER" -maxdepth 6 \
         -name lib_TestingInterop.dylib -print -quit 2>/dev/null || true
 )"
 [[ -n "$testing_interop" ]] || fail \
-    "Could not find lib_TestingInterop.dylib under $CLT." \
+    "Could not find lib_TestingInterop.dylib under the selected Xcode macOS platform." \
     "Testing.framework links it through @rpath and will fail to load."
 readonly interop_dir="$(dirname "$testing_interop")"
 
+export DEVELOPER_DIR="$DEVELOPER_DIR_REQUIRED"
 export SDKROOT="$SDK"
 exec /usr/bin/xcrun swift test \
     --package-path "$REPO_ROOT" \

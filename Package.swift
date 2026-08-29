@@ -9,10 +9,21 @@ let package = Package(
     ],
     products: [
         .executable(name: "CodexUsageMonitor", targets: ["CodexUsageMonitor"]),
+        .executable(name: "ClaudeStatusLineRelay", targets: ["ClaudeStatusLineRelay"]),
         .executable(name: "ClaudeBrowserNativeHost", targets: ["ClaudeBrowserNativeHost"]),
+        .executable(name: "UMASafariBridgeHost", targets: ["UMASafariBridgeHost"]),
         .executable(name: "PreviewRendererTool", targets: ["PreviewRendererTool"])
     ],
     targets: [
+        .target(
+            name: "ClaudeStatusLineCore",
+            path: "Sources/ClaudeStatusLineCore"
+        ),
+        .executableTarget(
+            name: "ClaudeStatusLineRelay",
+            dependencies: ["ClaudeStatusLineCore"],
+            path: "Sources/ClaudeStatusLineRelay"
+        ),
         .target(
             name: "ClaudeBrowserBridgeProtocol",
             path: "Sources/ClaudeBrowserBridgeProtocol"
@@ -21,6 +32,20 @@ let package = Package(
             name: "ClaudeBrowserNativeHostCore",
             dependencies: ["ClaudeBrowserBridgeProtocol"],
             path: "Sources/ClaudeBrowserNativeHostCore"
+        ),
+        .target(
+            name: "ClaudeSafariHostIPC",
+            dependencies: ["ClaudeBrowserBridgeProtocol"],
+            path: "Sources/ClaudeSafariHostIPC"
+        ),
+        .executableTarget(
+            name: "UMASafariBridgeHost",
+            dependencies: [
+                "ClaudeBrowserBridgeProtocol",
+                "ClaudeBrowserNativeHostCore",
+                "ClaudeSafariHostIPC",
+            ],
+            path: "Sources/UMASafariBridgeHost"
         ),
         .executableTarget(
             name: "ClaudeBrowserNativeHost",
@@ -33,8 +58,10 @@ let package = Package(
         .target(
             name: "CodexUsageUI",
             dependencies: [
+                "ClaudeStatusLineCore",
                 "ClaudeBrowserBridgeProtocol",
                 "ClaudeBrowserNativeHostCore",
+                "ClaudeSafariHostIPC",
             ],
             path: "Sources/CodexUsageUI"
         ),
@@ -51,6 +78,7 @@ let package = Package(
         .testTarget(
             name: "CodexUsageUITests",
             dependencies: [
+                "ClaudeStatusLineCore",
                 "ClaudeBrowserBridgeProtocol",
                 "ClaudeBrowserNativeHostCore",
                 "CodexUsageUI",
@@ -63,6 +91,7 @@ let package = Package(
             dependencies: [
                 "ClaudeBrowserBridgeProtocol",
                 "ClaudeBrowserNativeHostCore",
+                "ClaudeSafariHostIPC",
             ],
             path: "Tests/ClaudeBrowserBridgeCoreTests"
         )

@@ -1,410 +1,455 @@
-import AppKit
 import ClaudeBrowserBridgeProtocol
-import ClaudeBrowserNativeHostCore
+import ClaudeSafariHostIPC
 import Foundation
-import OSLog
-import SafariServices
 
-private actor ClaudeBrowserBridgeReadinessGate {
-    private var expectedRequestIDs: Set<String> = []
-    private var readyRequestIDs: Set<String> = []
-    private var waiters: [String: CheckedContinuation<Bool, Never>] = [:]
-
-    func prepare(_ requestID: String) {
-        cancel(requestID)
-        expectedRequestIDs.insert(requestID)
-    }
-
-    func signal(_ requestID: String) {
-        guard expectedRequestIDs.remove(requestID) != nil else { return }
-        if let continuation = waiters.removeValue(forKey: requestID) {
-            continuation.resume(returning: true)
-        } else {
-            readyRequestIDs.insert(requestID)
-        }
-    }
-
-    func wait(for requestID: String, timeout: TimeInterval) async -> Bool {
-        if readyRequestIDs.remove(requestID) != nil { return true }
-        guard expectedRequestIDs.contains(requestID) else { return false }
-        return await withCheckedContinuation { continuation in
-            waiters[requestID] = continuation
-            Task {
-                try? await Task.sleep(for: .seconds(timeout))
-                self.expire(requestID)
-            }
-        }
-    }
-
-    func cancel(_ requestID: String) {
-        expectedRequestIDs.remove(requestID)
-        readyRequestIDs.remove(requestID)
-        waiters.removeValue(forKey: requestID)?.resume(returning: false)
-    }
-
-    func cancelAll() {
-        expectedRequestIDs.removeAll()
-        readyRequestIDs.removeAll()
-        let active = waiters.values
-        waiters.removeAll()
-        for continuation in active {
-            continuation.resume(returning: false)
-        }
-    }
-
-    private func expire(_ requestID: String) {
-        cancel(requestID)
-    }
+enum ClaudeBrowserCompanionVerification: Equatable, Sendable {
+    case verified
+    case disabled
+    case companionStarting
+    case protocolMismatch
+    case browserUnavailable
+    case unavailable
 }
 
-private final class ClaudeBrowserBridgeRuntime: @unchecked Sendable {
-    private let lock = NSLock()
-    private let readinessGate = ClaudeBrowserBridgeReadinessGate()
-    private var server: ClaudeBrowserFileHandoffServer?
+/// Diagnostic only. Mutable UMA never uses Safari inventory as an authority;
+/// the immutable Host proves actual Companion reachability.
+enum ClaudeSafariExtensionAdvisoryState: Equatable, Sendable {
+    case enabled
+    case disabled
+    case unknown
+    case stateError
 
-    func start(handler: @escaping ClaudeBrowserProductionIntegration.MessageHandler) {
-        lock.lock()
-        defer { lock.unlock() }
-        guard server == nil else { return }
-        let readinessGate = readinessGate
-        let candidate = ClaudeBrowserFileHandoffServer(
-            observationHandler: { envelope in
-                Task { await handler(.observation(.success(envelope))) }
-            },
-            automationHandler: { event in
-                Task {
-                    if event.status == .bridgeReady {
-                        await readinessGate.signal(event.requestID)
-                    }
-                    await handler(.automation(event))
-                }
-            }
+    var permitsDirectHandshake: Bool { true }
+}
+
+/// Signed Host metadata mirrored into an app-only UMA package. Mutable UMA has
+/// no embedded extension and therefore never qualifies one from its own bundle.
+struct ClaudeBrowserRuntimeContext: Equatable, Sendable {
+    let identity: ClaudeBrowserRuntimeIdentity
+    let canonicalAppPath: String
+    let appVersion: String
+    let appBuild: String
+    let extensionVersion: String
+    let extensionBuild: String
+    let teamIdentifier: String
+    let runtimeGenerationID: String
+
+    static func current(bundle: Bundle = .main) -> Self? {
+        guard bundle.bundleIdentifier == ClaudeBrowserBridgeContract.safariTestApplicationIdentifier,
+              let generation = bundle.object(
+                forInfoDictionaryKey: "UMASafariHostRuntimeGenerationID"
+              ) as? String,
+              UUID(uuidString: generation) != nil,
+              bundle.object(forInfoDictionaryKey: "UMASafariHostBundleIdentifier") as? String
+                == ClaudeSafariHostIPCContract.hostApplicationIdentifier,
+              bundle.object(forInfoDictionaryKey: "UMASafariHostExtensionBundleIdentifier") as? String
+                == ClaudeSafariHostIPCContract.hostExtensionIdentifier
+        else { return nil }
+        return Self(
+            identity: .testSafariHost,
+            canonicalAppPath: bundle.bundleURL.resolvingSymlinksInPath().path,
+            appVersion: bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0",
+            appBuild: bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0",
+            extensionVersion: bundle.object(forInfoDictionaryKey: "UMASafariHostExtensionVersion") as? String ?? "0",
+            extensionBuild: bundle.object(forInfoDictionaryKey: "UMASafariHostExtensionBuild") as? String ?? "0",
+            teamIdentifier: ClaudeBrowserBridgeContract.expectedTeamIdentifier,
+            runtimeGenerationID: generation.lowercased()
         )
-        do {
-            try candidate.start()
-            server = candidate
-        } catch let error as ClaudeBrowserBridgeError {
-            Task { await handler(.observation(.failure(error))) }
-        } catch {
-            Task { await handler(.observation(.failure(.socketUnavailable))) }
-        }
     }
 
-    func stop() async {
-        let active = lock.withLock {
-            let active = server
-            server = nil
-            return active
-        }
-        active?.stop()
-        await readinessGate.cancelAll()
+    /// Historical helper retained for already-authored regression fixtures.
+    /// It is not used to qualify the immutable Host.
+    static func extensionAppMetadataMatches(
+        packagingMode: String,
+        appVersion: String,
+        appBuild: String,
+        extensionAppVersion: String,
+        extensionAppBuild: String,
+        extensionBuild: String
+    ) -> Bool {
+        guard extensionAppVersion == appVersion else { return false }
+        return packagingMode == "APP_ONLY"
+            ? extensionAppBuild == extensionBuild
+            : extensionAppBuild == appBuild
     }
 
-    func prepareBridgeReady(_ requestID: String) async {
-        await readinessGate.prepare(requestID)
-    }
-
-    func waitForBridgeReady(_ requestID: String, timeout: TimeInterval) async -> Bool {
-        await readinessGate.wait(for: requestID, timeout: timeout)
-    }
-
-    func cancelBridgeReady(_ requestID: String) async {
-        await readinessGate.cancel(requestID)
+    func matches(_ event: ClaudeBrowserAutomationEvent) -> Bool {
+        event.status == .bridgeReady
+            && event.protocolSchemaVersion == ClaudeBrowserBridgeContract.schemaVersion
+            && event.containingApplicationIdentifier == identity.containingApplicationIdentifier
+            && event.extensionIdentifier == identity.extensionIdentifier
+            && event.companionVersion == extensionVersion
+            && event.companionBuild == extensionBuild
+            && event.teamIdentifier == teamIdentifier
+            && event.runtimeGenerationID?.lowercased() == runtimeGenerationID
     }
 }
 
-private final class ClaudeBrowserDispatchCompletion: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<Bool, Never>?
-
-    init(_ continuation: CheckedContinuation<Bool, Never>) {
-        self.continuation = continuation
+/// Historical, content-free inventory evidence may still be decoded during
+/// migration, but it cannot decide current Host readiness.
+struct ClaudeSafariInventoryReceipt: Equatable, Sendable {
+    enum LifecycleState: String, Sendable {
+        case safariRestartRequired = "SAFARI_EXTENSION_UPDATE_PENDING_RESTART"
+        case inventoryCurrent = "SAFARI_EXTENSION_CURRENT"
     }
 
-    func resume(_ delivered: Bool) {
-        lock.lock()
-        let pending = continuation
-        continuation = nil
-        lock.unlock()
-        pending?.resume(returning: delivered)
+    let canonicalAppPath: String
+    let appBundleIdentifier: String
+    let appVersion: String
+    let appBuild: String
+    let extensionBundleIdentifier: String
+    let extensionVersion: String
+    let extensionBuild: String
+    let teamIdentifier: String
+    let runtimeGenerationID: String
+    let lifecycleState: LifecycleState
+    let handshakeVerified: Bool
+    let updatedAt: String
+}
+
+final class ClaudeBrowserOrderedConsumer: @unchecked Sendable {
+    typealias Processor = @Sendable (ClaudeBrowserInboundEvent) async -> Void
+
+    private let lock = NSLock()
+    private let processor: Processor
+    private var pending: [ClaudeBrowserInboundEvent] = []
+    private var isDraining = false
+
+    init(processor: @escaping Processor) { self.processor = processor }
+
+    func submit(_ event: ClaudeBrowserInboundEvent) {
+        let shouldStart = lock.withLock {
+            pending.append(event)
+            guard !isDraining else { return false }
+            isDraining = true
+            return true
+        }
+        guard shouldStart else { return }
+        Task { await drain() }
+    }
+
+    private func drain() async {
+        while let event = next() { await processor(event) }
+    }
+
+    private func next() -> ClaudeBrowserInboundEvent? {
+        lock.withLock {
+            guard !pending.isEmpty else {
+                isDraining = false
+                return nil
+            }
+            return pending.removeFirst()
+        }
     }
 }
 
 extension ClaudeBrowserProductionIntegration {
-    private static let logger = Logger(
-        subsystem: "com.silkrd.uma",
-        category: "ClaudeAutomaticRefresh"
-    )
-    private static let safariExtensionIdentifier =
-        ClaudeBrowserBridgeContract.safariExtensionIdentifier
-    private static let safariWakeMessageName = "umaClaudeWakeBridge"
-    private static let safariWorkerSettleTimeout: TimeInterval = 5
-
     static func make() -> Self {
-        let runtime = ClaudeBrowserBridgeRuntime()
+        guard let runtime = ClaudeSafariHostClientAdapter() else {
+            return .unavailable()
+        }
+        let health: @Sendable () async -> ClaudeBrowserCompanionHealth = {
+            switch await runtime.verify() {
+            case .verified: .ready
+            case .disabled: .disabled
+            case .companionStarting: .companionStarting
+            case .protocolMismatch: .protocolMismatch
+            case .browserUnavailable: .browserUnavailable
+            case .unavailable: .companionUnavailable
+            }
+        }
         return Self(
-            startListening: { handler in runtime.start(handler: handler) },
+            startListening: { handler in _ = await runtime.start(handler) },
             stopListening: { await runtime.stop() },
-            checkHealth: { await currentHealth() },
-            openUsagePage: { await openOfficialUsagePage() },
-            repairCompanion: { await repairCurrentCompanion() },
+            checkHealth: { await health() },
+            openUsagePage: { await runtime.verify() == .verified },
+            repairCompanion: { await health() },
+            verifyHandshake: { await runtime.verify() },
             requestAutomaticRefresh: { requestID, allowSafariLaunch in
-                await dispatchAutomaticRefresh(
-                    requestID: requestID,
-                    allowSafariLaunch: allowSafariLaunch,
-                    runtime: runtime
-                )
+                await runtime.submit(requestID: requestID, oneShot: allowSafariLaunch)
             },
-            closeOwnedUsageTab: { requestID in
-                await dispatchCloseOwnedTab(requestID: requestID)
-            }
+            closeOwnedUsageTab: { requestID in await runtime.close(requestID) }
         )
     }
 
-    private static func currentHealth() async -> ClaudeBrowserCompanionHealth {
-        guard let browser = await defaultBrowserIdentity() else {
-            return .browserUnavailable
-        }
-        switch browser {
-        case .safari:
-            return await safariExtensionHealth()
-        case .chromium:
-            return chromiumNativeHostManifestExists() ? .ready : .nativeHostMissing
-        case .unsupported:
-            return .unsupportedBrowser
-        }
-    }
-
-    @MainActor
-    private static func defaultBrowserIdentity() -> DefaultBrowserIdentity? {
-        guard let applicationURL = NSWorkspace.shared.urlForApplication(
-            toOpen: ClaudeBrowserBridgeContract.officialUsageURL
-        ),
-              let identifier = Bundle(url: applicationURL)?.bundleIdentifier
+    static func decodeInventoryReceipt(_ data: Data) -> ClaudeSafariInventoryReceipt? {
+        guard data.count <= 8_192,
+              let value = try? PropertyListSerialization.propertyList(from: data, format: nil),
+              let dictionary = value as? [String: Any],
+              Set(dictionary.keys) == [
+                "schemaVersion", "canonicalAppPath", "appBundleIdentifier", "appVersion",
+                "appBuild", "extensionBundleIdentifier", "extensionVersion", "extensionBuild",
+                "teamIdentifier", "runtimeGenerationID", "lifecycleState",
+                "handshakeVerified", "updatedAt",
+              ],
+              dictionary["schemaVersion"] as? Int == 2,
+              let canonicalAppPath = dictionary["canonicalAppPath"] as? String,
+              let appBundleIdentifier = dictionary["appBundleIdentifier"] as? String,
+              let appVersion = dictionary["appVersion"] as? String,
+              let appBuild = dictionary["appBuild"] as? String,
+              let extensionBundleIdentifier = dictionary["extensionBundleIdentifier"] as? String,
+              let extensionVersion = dictionary["extensionVersion"] as? String,
+              let extensionBuild = dictionary["extensionBuild"] as? String,
+              let teamIdentifier = dictionary["teamIdentifier"] as? String,
+              let runtimeGenerationID = dictionary["runtimeGenerationID"] as? String,
+              UUID(uuidString: runtimeGenerationID) != nil,
+              let lifecycleRaw = dictionary["lifecycleState"] as? String,
+              let lifecycleState = ClaudeSafariInventoryReceipt.LifecycleState(rawValue: lifecycleRaw),
+              let handshakeVerified = dictionary["handshakeVerified"] as? Bool,
+              let updatedAt = dictionary["updatedAt"] as? String,
+              ISO8601DateFormatter().date(from: updatedAt) != nil
         else { return nil }
-        if identifier == "com.apple.Safari" {
-            return .safari
-        }
-        if [
-            "com.google.Chrome",
-            "com.google.Chrome.canary",
-            "org.chromium.Chromium",
-            "com.microsoft.edgemac",
-            "com.brave.Browser",
-        ].contains(identifier) {
-            return .chromium
-        }
-        return .unsupported
-    }
-
-    private static func safariExtensionHealth() async -> ClaudeBrowserCompanionHealth {
-        let embeddedHealth = embeddedSafariExtensionHealth
-        guard embeddedHealth == .ready else { return embeddedHealth }
-        guard let state = try? await SFSafariExtensionManager.stateOfSafariExtension(
-            withIdentifier: safariExtensionIdentifier
-        ) else { return .nativeHostMissing }
-        return state.isEnabled ? .ready : .disabled
-    }
-
-    /// The signed containing app is the source of truth for extension identity
-    /// and version. Safari activation alone is insufficient because an older
-    /// registered companion can otherwise look healthy after an app upgrade.
-    private static var embeddedSafariExtensionHealth: ClaudeBrowserCompanionHealth {
-        guard let plugins = Bundle.main.builtInPlugInsURL,
-              let bundle = Bundle(
-                url: plugins.appendingPathComponent(
-                    "ClaudeBrowserCompanion.appex",
-                    isDirectory: true
-                )
-              )
-        else { return .nativeHostMissing }
-        guard bundle.bundleIdentifier == ClaudeBrowserBridgeContract.safariExtensionIdentifier,
-              let extensionDictionary = bundle.object(
-                forInfoDictionaryKey: "NSExtension"
-              ) as? [String: Any],
-              extensionDictionary["NSExtensionPointIdentifier"] as? String
-                == "com.apple.Safari.web-extension"
-        else { return .nativeHostMismatched }
-        guard bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-                == ClaudeBrowserBridgeContract.safariExtensionVersion,
-              bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-                == ClaudeBrowserBridgeContract.safariExtensionBuild
-        else { return .outdated }
-        return .ready
-    }
-
-    private static func openOfficialUsagePage() async -> Bool {
-        await MainActor.run {
-            NSWorkspace.shared.open(ClaudeBrowserBridgeContract.officialUsageURL)
-        }
-    }
-
-    private static func dispatchAutomaticRefresh(
-        requestID: String,
-        allowSafariLaunch: Bool,
-        runtime: ClaudeBrowserBridgeRuntime
-    ) async -> ClaudeBrowserAutomaticDispatchResult {
-        guard await defaultBrowserIdentity() == .safari else {
-            return .unsupportedBrowser
-        }
-        guard await ensureSafariRunning(allowLaunch: allowSafariLaunch) else {
-            return .browserUnavailable
-        }
-        guard await safariExtensionHealth() == .ready else {
-            return .companionUnavailable
-        }
-        // Safari may terminate the Manifest V3 worker between five-minute
-        // cycles. The single content-free wake can start the worker before its
-        // runtime listener is installed, so its acknowledgement is advisory.
-        // Give that one wake a bounded settle window, then send exactly one
-        // work-bearing refresh command. There is no wake or refresh retry.
-        await runtime.prepareBridgeReady(requestID)
-        let wakeDelivered = await dispatchSafariMessage(
-            name: safariWakeMessageName,
-            userInfo: ["command": safariWakeMessageName, "requestID": requestID]
+        return .init(
+            canonicalAppPath: canonicalAppPath,
+            appBundleIdentifier: appBundleIdentifier,
+            appVersion: appVersion,
+            appBuild: appBuild,
+            extensionBundleIdentifier: extensionBundleIdentifier,
+            extensionVersion: extensionVersion,
+            extensionBuild: extensionBuild,
+            teamIdentifier: teamIdentifier,
+            runtimeGenerationID: runtimeGenerationID.lowercased(),
+            lifecycleState: lifecycleState,
+            handshakeVerified: handshakeVerified,
+            updatedAt: updatedAt
         )
-        guard wakeDelivered else {
-            await runtime.cancelBridgeReady(requestID)
-            return .companionUnavailable
-        }
-        _ = await runtime.waitForBridgeReady(
-            requestID,
-            timeout: safariWorkerSettleTimeout
-        )
-
-        let delivered = await dispatchSafariMessage(
-            name: ClaudeBrowserBridgeContract.automaticRefreshMessageName,
-            userInfo: [
-                "command": ClaudeBrowserBridgeContract.automaticRefreshMessageName,
-                "requestID": requestID,
-            ]
-        )
-        return delivered ? .dispatched : .companionUnavailable
-    }
-
-    private static func ensureSafariRunning(allowLaunch: Bool) async -> Bool {
-        if await MainActor.run(body: { safariIsRunning }) { return true }
-        guard allowLaunch, await launchSafariWithoutActivation() else { return false }
-
-        // Launch Services can complete before Safari is visible in the running
-        // application registry. Wait a bounded interval without activating it.
-        for _ in 0..<20 {
-            if await MainActor.run(body: { safariIsRunning }) { return true }
-            try? await Task.sleep(for: .milliseconds(250))
-        }
-        return false
-    }
-
-    @MainActor
-    private static func launchSafariWithoutActivation() async -> Bool {
-        guard let safariURL = NSWorkspace.shared.urlForApplication(
-            withBundleIdentifier: "com.apple.Safari"
-        ) else { return false }
-
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = false
-        configuration.addsToRecentItems = false
-        configuration.createsNewApplicationInstance = false
-        return await withCheckedContinuation { continuation in
-            NSWorkspace.shared.openApplication(
-                at: safariURL,
-                configuration: configuration
-            ) { application, error in
-                continuation.resume(returning: application != nil && error == nil)
-            }
-        }
-    }
-
-    private static func dispatchCloseOwnedTab(requestID: String) async {
-        let isRunning = await MainActor.run { safariIsRunning }
-        guard isRunning,
-              await safariExtensionHealth() == .ready
-        else { return }
-        _ = await dispatchSafariMessage(
-            name: ClaudeBrowserBridgeContract.closeOwnedTabMessageName,
-            userInfo: [
-                "command": ClaudeBrowserBridgeContract.closeOwnedTabMessageName,
-                "requestID": requestID,
-            ]
-        )
-    }
-
-    private static func dispatchSafariMessage(
-        name: String,
-        userInfo: [String: Any]
-    ) async -> Bool {
-        await withCheckedContinuation { continuation in
-            let completion = ClaudeBrowserDispatchCompletion(continuation)
-            SFSafariApplication.dispatchMessage(
-                withName: name,
-                toExtensionWithIdentifier: safariExtensionIdentifier,
-                userInfo: userInfo
-            ) { error in
-                if let error = error as NSError? {
-                    logger.error(
-                        "Safari companion dispatch failed for \(name, privacy: .public): \(error.domain, privacy: .public)/\(error.code, privacy: .public)"
-                    )
-                } else {
-                    logger.notice(
-                        "Safari companion dispatch accepted for \(name, privacy: .public)"
-                    )
-                }
-                completion.resume(error == nil)
-            }
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2) {
-                completion.resume(false)
-            }
-        }
-    }
-
-    @MainActor
-    private static var safariIsRunning: Bool {
-        !NSRunningApplication.runningApplications(
-            withBundleIdentifier: "com.apple.Safari"
-        ).isEmpty
-    }
-
-    private static func repairCurrentCompanion() async -> ClaudeBrowserCompanionHealth {
-        guard let browser = await defaultBrowserIdentity() else {
-            return .browserUnavailable
-        }
-        switch browser {
-        case .safari:
-            try? await SFSafariApplication.showPreferencesForExtension(
-                withIdentifier: safariExtensionIdentifier
-            )
-            return await safariExtensionHealth()
-        case .chromium:
-            return chromiumNativeHostManifestExists() ? .ready : .nativeHostMissing
-        case .unsupported:
-            return .unsupportedBrowser
-        }
-    }
-
-    private static func chromiumNativeHostManifestExists() -> Bool {
-        let name = ClaudeBrowserBridgeContract.chromiumNativeHostName + ".json"
-        let roots = [
-            "Google/Chrome/NativeMessagingHosts",
-            "Chromium/NativeMessagingHosts",
-            "Microsoft Edge/NativeMessagingHosts",
-            "BraveSoftware/Brave-Browser/NativeMessagingHosts",
-        ]
-        guard let support = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first else { return false }
-        return roots.contains {
-            FileManager.default.fileExists(
-                atPath: support.appendingPathComponent($0, isDirectory: true)
-                    .appendingPathComponent(name)
-                    .path
-            )
-        }
     }
 }
 
-private enum DefaultBrowserIdentity: Equatable, Sendable {
-    case safari
-    case chromium
-    case unsupported
+/// Content-free qualification of Host identity, Companion, native bridge, and
+/// protocol generation. It deliberately constructs no Claude connector or consent store
+/// and cannot open, read, or inspect a provider page.
+public enum ClaudeBrowserCompanionMachineVerifier {
+    public static let launchArgument = "--verify-claude-companion-handshake"
+    public static let diagnosticLaunchArgument = "--diagnose-claude-companion-pipeline"
+    public static let allowSafariLaunchArgument = "--allow-safari-launch"
+
+    public static func recognizesLaunchArgument(_ argument: String) -> Bool {
+        argument == launchArgument || argument == diagnosticLaunchArgument
+    }
+
+    public static func run(allowSafariLaunch: Bool = false) async -> Bool {
+        guard let runtime = ClaudeSafariHostClientAdapter() else { return false }
+        let result = await runtime.diagnose(allowSafariLaunch: allowSafariLaunch).verification
+        await runtime.stop()
+        return result == .verified
+    }
+
+    public static func runDiagnostic(
+        allowSafariLaunch: Bool = false
+    ) async -> ClaudeBrowserCompanionDiagnosticResult {
+        guard let runtime = ClaudeSafariHostClientAdapter() else {
+            return ClaudeBrowserCompanionDiagnosticResult(
+                verification: .unavailable,
+                firstFailureReason: .clientRuntimeContextUnavailable,
+                context: .current()
+            )
+        }
+        let trace = await runtime.diagnose(allowSafariLaunch: allowSafariLaunch)
+        await runtime.stop()
+        return ClaudeBrowserCompanionDiagnosticResult(
+            trace: trace,
+            context: .current()
+        )
+    }
+
+    static func run(
+        using integration: ClaudeBrowserProductionIntegration
+    ) async -> ClaudeBrowserCompanionVerification {
+        await integration.startListening { _ in }
+        let result = await integration.verifyHandshake()
+        await integration.stopListening()
+        return result
+    }
+}
+
+/// The complete stdout contract for the content-free Companion diagnostic.
+/// It intentionally contains no provider, browser-page, account, or payload
+/// field. Distinct exit codes make every non-verified state machine-readable
+/// even when stdout capture is unavailable.
+public struct ClaudeBrowserCompanionDiagnosticResult: Codable, Equatable, Sendable {
+    public enum Status: String, Codable, Equatable, Sendable {
+        case verified
+        case disabled
+        case starting
+        case protocolMismatch
+        case unavailable
+    }
+
+    public enum Stage: String, Codable, Equatable, Sendable {
+        case testAppRunning
+        case testRuntimeIdentityVerified
+        case listenerReady
+        case requestCreated
+        case wakeDispatchStarted
+        case requestSubmitted
+        case hostRequestAccepted
+        case wakeDispatchAccepted
+        case extensionBackgroundAlive
+        case nativePortOpenRequested
+        case nativePortOpened
+        case extensionBackgroundAcknowledged
+        case nativeQualificationDispatched
+        case nativeHandlerEntered
+        case nativeRequestDecoded
+        case runtimeGenerationValidated
+        case nativeResponseCreated
+        case nativeResponseSent
+        case extensionResponseReceived
+        case nativeQualificationReceived
+        case companionVerified
+        case containingAppCallbackReceived
+        case callbackValidated
+    }
+
+    public enum FirstFailureReason: String, Codable, Equatable, Sendable {
+        case clientRuntimeContextUnavailable
+        case responseListenerUnavailable
+        case hostApplicationUnavailable
+        case requestSubmissionFailed
+        case invalidHostTerminalResponse
+        case clientTransactionDeadlineExceeded
+        case listenerStopped
+        case invalidRequest
+        case duplicateRequest
+        case requestInFlight
+        case cancellationTargetUnavailable
+        case runtimeGenerationMismatch
+        case safariUnavailable
+        case extensionUnavailable
+        case dispatchRejected
+        case dispatchCompletionUnavailable
+        case nativeResponseUnavailable
+        case protocolMismatch
+        case extensionBackgroundNotAcknowledged
+        case providerOperationTimedOut
+        case observationMissing
+        case duplicateNativeResponse
+        case unexpectedNativeResponse
+        case timedOut
+        case cancelled
+    }
+
+    public let schemaVersion: Int
+    public let status: Status
+    public let requestID: String?
+    public let runtimeGenerationID: String?
+    public let hostRuntimeGenerationID: String?
+    public let occurredAt: String
+    public let reachedStages: [Stage]
+    public let firstFailureReason: FirstFailureReason?
+    public let clientApplicationIdentifier: String?
+    public let clientVersion: String?
+    public let clientBuild: String?
+    public let hostApplicationIdentifier: String?
+    public let extensionIdentifier: String?
+    public let teamIdentifier: String?
+    public let hostVersion: String?
+    public let hostBuild: String?
+    public let expectedExtensionVersion: String?
+    public let expectedExtensionBuild: String?
+    public let bridgeProtocolVersion: Int?
+
+    init(verification: ClaudeBrowserCompanionVerification) {
+        self.init(
+            verification: verification,
+            firstFailureReason: nil,
+            context: nil
+        )
+    }
+
+    init(
+        verification: ClaudeBrowserCompanionVerification,
+        firstFailureReason: FirstFailureReason?,
+        context: ClaudeBrowserRuntimeContext?
+    ) {
+        schemaVersion = 2
+        status = Self.status(for: verification)
+        requestID = nil
+        runtimeGenerationID = context?.runtimeGenerationID
+        hostRuntimeGenerationID = nil
+        occurredAt = ISO8601DateFormatter().string(from: Date())
+        reachedStages = []
+        self.firstFailureReason = firstFailureReason
+        clientApplicationIdentifier = context.map { _ in
+            ClaudeBrowserBridgeContract.safariTestApplicationIdentifier
+        }
+        clientVersion = context?.appVersion
+        clientBuild = context?.appBuild
+        hostApplicationIdentifier = context.map { _ in
+            ClaudeSafariHostIPCContract.hostApplicationIdentifier
+        }
+        extensionIdentifier = context.map { _ in
+            ClaudeSafariHostIPCContract.hostExtensionIdentifier
+        }
+        teamIdentifier = context?.teamIdentifier
+        hostVersion = nil
+        hostBuild = nil
+        expectedExtensionVersion = context?.extensionVersion
+        expectedExtensionBuild = context?.extensionBuild
+        bridgeProtocolVersion = context.map { _ in
+            ClaudeBrowserBridgeContract.schemaVersion
+        }
+    }
+
+    init(
+        trace: ClaudeSafariHostVerificationTrace,
+        context: ClaudeBrowserRuntimeContext?
+    ) {
+        schemaVersion = 2
+        status = Self.status(for: trace.verification)
+        requestID = trace.requestID
+        runtimeGenerationID = trace.runtimeGenerationID
+        hostRuntimeGenerationID = trace.runtimeDescriptor?.runtimeGenerationID
+        occurredAt = trace.occurredAt
+        reachedStages = trace.reachedStages
+        firstFailureReason = trace.firstFailureReason
+        clientApplicationIdentifier = context.map { _ in
+            ClaudeBrowserBridgeContract.safariTestApplicationIdentifier
+        }
+        clientVersion = context?.appVersion
+        clientBuild = context?.appBuild
+        hostApplicationIdentifier = trace.runtimeDescriptor?.hostApplicationIdentifier
+            ?? context.map { _ in ClaudeSafariHostIPCContract.hostApplicationIdentifier }
+        extensionIdentifier = trace.runtimeDescriptor?.extensionIdentifier
+            ?? context.map { _ in ClaudeSafariHostIPCContract.hostExtensionIdentifier }
+        teamIdentifier = trace.runtimeDescriptor?.teamIdentifier ?? context?.teamIdentifier
+        hostVersion = trace.runtimeDescriptor?.hostVersion
+        hostBuild = trace.runtimeDescriptor?.hostBuild
+        expectedExtensionVersion = context?.extensionVersion
+        expectedExtensionBuild = context?.extensionBuild
+        bridgeProtocolVersion = trace.runtimeDescriptor?.bridgeProtocolVersion
+            ?? context.map { _ in ClaudeBrowserBridgeContract.schemaVersion }
+    }
+
+    private static func status(
+        for verification: ClaudeBrowserCompanionVerification
+    ) -> Status {
+        switch verification {
+        case .verified: .verified
+        case .disabled: .disabled
+        case .companionStarting: .starting
+        case .protocolMismatch: .protocolMismatch
+        case .browserUnavailable: .unavailable
+        case .unavailable: .unavailable
+        }
+    }
+
+    public var processExitCode: Int32 {
+        switch status {
+        case .verified: 0
+        case .disabled: 2
+        case .starting: 3
+        case .protocolMismatch: 4
+        case .unavailable: 5
+        }
+    }
+
+    public func encodedJSONLine() throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        var data = try encoder.encode(self)
+        data.append(0x0A)
+        return data
+    }
 }
