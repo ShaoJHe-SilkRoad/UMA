@@ -12,7 +12,7 @@ struct M5RMXG1ClaudeSourceContractTests {
         let decision = try record("source/UMA M5RMX Claude Source Decision.md")
         let scope = try record("source/UMA M5RMX Scope Lock.md")
 
-        #expect(decision.contains("LIVE SOURCE ACCEPTED — FINAL VERIFICATION PASS; EXACT GIT DELIVERY PENDING"))
+        #expect(decision.contains("M5RMX CLAUDE ROOT REPAIR — FUNDAMENTAL PASS"))
         #expect(decision.contains("The immutable Host/Companion is accepted and locked"))
         #expect(decision.contains("EXACT_LOCAL_STATUSLINE"))
         #expect(decision.contains("> EXACT_SAFARI_ACCURACY"))

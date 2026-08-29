@@ -8,7 +8,7 @@
 
 **Current task:** `M5RMX Claude root-repair final closeout`
 
-**Status:** live acceptance and final deterministic verification passed; exact Git delivery pending
+**Status:** FUNDAMENTAL PASS; Completion Lock active
 
 **Canonical workspace:** `/Volumes/HE/DEV/UMA/Worktrees/UMA-M5RMX-Claude`
 

@@ -14,7 +14,7 @@
 **Target application:** `UMA_0.12.app`
 **Target Founder GitHub repository:** `https://github.com/ShaoJHe-SilkRoad/CodexUsageMonitor` — verify live remote before push
 **Cursor/Kimi/new-provider work:** Out of scope
-**Status:** M5RMX Claude root-repair acceptance and deterministic verification passed; exact Git delivery pending
+**Status:** M5RMX Claude root repair — FUNDAMENTAL PASS; Completion Lock active
 **Canonical workspace:** `/Volumes/HE/DEV/UMA/Worktrees/UMA-M5RMX-Claude`
 
 ---
@@ -36,8 +36,9 @@ UMA relaunch both preserved the committed exact anchor without re-setup.
 Mutable-app classification/installer truth, deterministic regression,
 signing-trust stability, and independent product review passed. Provider-read
 budget used: `1/2`; the unused second read is not a sampling or retry allowance.
-Only exact Git delivery remains. No Host/Companion mutation, push,
-notarization, production replacement, or next Goal is permitted.
+Exact Git delivery completed after independent staged-index review. No
+Host/Companion mutation, push, notarization, production replacement, or next
+Goal is permitted.
 
 ## Current Founder lifecycle override — Owned Provider Tab V2
 

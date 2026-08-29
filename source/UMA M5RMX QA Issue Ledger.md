@@ -28,6 +28,11 @@ trust `10/10 PASS` each. The historical `CSSMERR_TP_NOT_TRUSTED` result is
 closed as a restricted execution-context trust failure, not artifact
 corruption; the unchanged artifacts now verify deterministically.
 
+Independent staged-index review passed. The retired, untracked bootstrap HTML
+and JavaScript artifacts were excluded from Git and removed under exact Founder
+authorization. Final worktree and index cleanliness are mandatory Completion
+Lock evidence.
+
 ## 1. Scope and baseline
 
 ```text

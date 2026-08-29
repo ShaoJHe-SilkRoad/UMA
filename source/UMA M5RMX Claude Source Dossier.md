@@ -6,7 +6,7 @@
 
 **Goal:** M5RMX Claude root-repair final closeout
 
-**Status:** live Test source and deterministic closeout admitted; exact Git delivery pending
+**Status:** live Test source and deterministic closeout admitted; Completion Lock active
 
 ## Current admitted runtime evidence
 
