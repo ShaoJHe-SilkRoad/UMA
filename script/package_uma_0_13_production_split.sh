@@ -95,9 +95,9 @@ verify_signed_component() {
   printf '%s\n' "$signing" | grep -Fq 'Authority=Developer ID Application:'
   printf '%s\n' "$signing" | grep -Fq 'Timestamp='
   codesign -d --entitlements :- "$p" > "$entitlements" 2>/dev/null
-  [[ "$(plutil -extract com.apple.application-identifier raw "$entitlements")" == "$TEAM.$id" \
-    && "$(plutil -extract com.apple.developer.team-identifier raw "$entitlements")" == "$TEAM" \
-    && "$(plutil -extract com.apple.security.application-groups.0 raw "$entitlements")" == "$APP_GROUP" ]] \
+  [[ "$(plist "$entitlements" 'com.apple.application-identifier')" == "$TEAM.$id" \
+    && "$(plist "$entitlements" 'com.apple.developer.team-identifier')" == "$TEAM" \
+    && "$(plist "$entitlements" 'com.apple.security.application-groups:0')" == "$APP_GROUP" ]] \
     || { echo PRODUCTION_EFFECTIVE_ENTITLEMENTS_MISMATCH >&2; exit 1; }
   ! plutil -extract com.apple.security.get-task-allow raw "$entitlements" >/dev/null 2>&1 \
     || { echo PRODUCTION_GET_TASK_ALLOW_FORBIDDEN >&2; exit 1; }

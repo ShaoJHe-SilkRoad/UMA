@@ -60,9 +60,11 @@ struct M5RMXProductionSplitPackagingTests {
             #expect(value["com.apple.security.application-groups"] as? [String] == ["group.com.silkrd.uma.bridge"])
             #expect(value["com.apple.security.get-task-allow"] == nil)
         }
-        for value in ["PRODUCTION_SIGNED_IDENTITY_MISMATCH", "PRODUCTION_EFFECTIVE_ENTITLEMENTS_MISMATCH", "com.apple.application-identifier", "com.apple.developer.team-identifier", "com.apple.security.application-groups.0"] {
+        for value in ["PRODUCTION_SIGNED_IDENTITY_MISMATCH", "PRODUCTION_EFFECTIVE_ENTITLEMENTS_MISMATCH", "com.apple.application-identifier", "com.apple.developer.team-identifier", "com.apple.security.application-groups:0"] {
             #expect(package.contains(value))
         }
+        #expect(package.contains("plist \"$entitlements\" 'com.apple.application-identifier'"))
+        #expect(!package.contains("plutil -extract com.apple.application-identifier raw \"$entitlements\""))
     }
 
     @Test("bundle templates encode one split production authority")
