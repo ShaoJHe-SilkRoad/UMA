@@ -10,12 +10,21 @@ public enum ClaudeSafariHostIPCContract {
     /// Historical aliases retained for Test-channel fixtures. Runtime code
     /// must select an exact `ClaudeSafariHostRuntimeProfile` from signed bundle
     /// metadata rather than assuming these values.
+#if UMA_PRODUCTION_RELEASE
+    public static let appGroupIdentifier =
+        ClaudeBrowserBridgeContract.safariHostProductionAppGroupIdentifier
+    public static let hostApplicationIdentifier =
+        ClaudeBrowserBridgeContract.safariHostProductionApplicationIdentifier
+    public static let hostExtensionIdentifier =
+        ClaudeBrowserBridgeContract.safariHostProductionExtensionIdentifier
+#else
     public static let appGroupIdentifier =
         ClaudeBrowserBridgeContract.safariHostTestAppGroupIdentifier
     public static let hostApplicationIdentifier =
         ClaudeBrowserBridgeContract.safariHostTestApplicationIdentifier
     public static let hostExtensionIdentifier =
         ClaudeBrowserBridgeContract.safariHostTestExtensionIdentifier
+#endif
     public static let maximumMessageBytes = 8_192
     public static let maximumQueuedMessages = 16
     public static let maximumMessageAge: TimeInterval = 120
@@ -616,7 +625,7 @@ private final class ClaudeSafariHostMailboxWatcher<Value: Decodable & Sendable>:
     private let directoryPath: String
     private let validation: @Sendable (Value) -> Bool
     private let handler: @Sendable (Value) -> Void
-    private let queue = DispatchQueue(label: "com.silkrd.uma.test.safarihost.ipc")
+    private let queue = DispatchQueue(label: "com.silkrd.uma.safarihost.ipc")
     private let lock = NSLock()
     private var source: DispatchSourceFileSystemObject?
     private var running = false

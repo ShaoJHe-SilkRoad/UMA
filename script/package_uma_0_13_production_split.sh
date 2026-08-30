@@ -48,7 +48,7 @@ tree="$(git -C "$ROOT" rev-parse "$commit^{tree}")"; generation="$(uuidgen | tr 
 export DEVELOPER_DIR="$DEVELOPER_DIR_REQUIRED" SDKROOT="$SDK_REQUIRED"
 swift_env=(/usr/bin/env HOME="$scratch/home" TMPDIR="$scratch/tmp" CLANG_MODULE_CACHE_PATH="$scratch/cache/clang" SWIFTPM_MODULECACHE_OVERRIDE="$scratch/cache/swiftpm")
 swift="$scratch/swift"; pushd "$src" >/dev/null
-swift_options=(--disable-sandbox --disable-keychain --disable-netrc --manifest-cache local --cache-path "$scratch/cache/swiftpm" --config-path "$scratch/config" --security-path "$scratch/security" --sdk "$SDK_REQUIRED" -Xswiftc -sdk -Xswiftc "$SDK_REQUIRED" --scratch-path "$swift")
+swift_options=(--disable-sandbox --disable-keychain --disable-netrc --manifest-cache local --cache-path "$scratch/cache/swiftpm" --config-path "$scratch/config" --security-path "$scratch/security" --sdk "$SDK_REQUIRED" -Xswiftc -sdk -Xswiftc "$SDK_REQUIRED" -Xswiftc -D -Xswiftc UMA_PRODUCTION_RELEASE --scratch-path "$swift")
 for product in CodexUsageMonitor ClaudeStatusLineRelay UMASafariBridgeHost; do "${swift_env[@]}" /usr/bin/xcrun swift build "${swift_options[@]}" -c release --product "$product"; done
 bin="$("${swift_env[@]}" /usr/bin/xcrun swift build "${swift_options[@]}" -c release --show-bin-path)"; popd >/dev/null
 app="$scratch/UMA_0.13.0.app"; host="$scratch/UMA Safari Bridge.app"; appex="$host/Contents/PlugIns/ClaudeBrowserCompanion.appex"
@@ -57,7 +57,7 @@ install -m 755 "$bin/CodexUsageMonitor" "$app/Contents/MacOS/CodexUsageMonitor";
 install -m 755 "$bin/UMASafariBridgeHost" "$host/Contents/MacOS/UMASafariBridgeHost"; install -m 644 "$src/Assets/AppIcon.icns" "$app/Contents/Resources/AppIcon.icns"
 cp "$src/ProductionSigning/MutableApp/Info.plist" "$app/Contents/Info.plist"; cp "$src/ProductionSigning/SafariHost/App/Info.plist" "$host/Contents/Info.plist"; cp "$src/ProductionSigning/SafariHost/Extension/Info.plist" "$appex/Contents/Info.plist"
 cp "$mutable_profile" "$app/Contents/embedded.provisionprofile"; cp "$host_profile" "$host/Contents/embedded.provisionprofile"; cp "$extension_profile" "$appex/Contents/embedded.provisionprofile"
-"${swift_env[@]}" /usr/bin/xcrun swiftc -sdk "$SDK_REQUIRED" -target arm64-apple-macosx14.0 -application-extension -Xlinker -application_extension -O -parse-as-library -module-name ClaudeBrowserCompanion -I "$bin" "$handler" "$bin/ClaudeBrowserBridgeProtocol.o" "$bin/ClaudeBrowserNativeHostCore.o" -framework Foundation -framework SafariServices -Xlinker -e -Xlinker _NSExtensionMain -o "$appex/Contents/MacOS/ClaudeBrowserCompanion"
+"${swift_env[@]}" /usr/bin/xcrun swiftc -sdk "$SDK_REQUIRED" -target arm64-apple-macosx14.0 -application-extension -Xlinker -application_extension -O -parse-as-library -D UMA_PRODUCTION_RELEASE -module-name ClaudeBrowserCompanion -I "$bin" "$handler" "$bin/ClaudeBrowserBridgeProtocol.o" "$bin/ClaudeBrowserNativeHostCore.o" -framework Foundation -framework SafariServices -Xlinker -e -Xlinker _NSExtensionMain -o "$appex/Contents/MacOS/ClaudeBrowserCompanion"
 for f in background-core.js claude-usage-extractor.js content-script.js provider-ownership-v2.js owned-provider-tab-v2-reducer.js; do install -m 644 "$src/BrowserExtension/Shared/$f" "$appex/Contents/Resources/Shared/$f"; done
 cp "$src/BrowserExtension/Safari/manifest.json" "$appex/Contents/Resources/manifest.json"; /usr/bin/ruby -rjson -e 'p=ARGV[0]; j=JSON.parse(File.binread(p)); j["version"]="0.13.0"; File.binwrite(p,JSON.pretty_generate(j)+"\n")' "$appex/Contents/Resources/manifest.json"
 /usr/bin/ruby -rjson -e 'j=JSON.parse(File.binread(ARGV[0])); s=Array(j["content_scripts"]); ok=Array(j["permissions"]).sort == ["https://claude.ai/new*","nativeMessaging"].sort && s.length == 1 && Array(s[0]["matches"]) == ["https://claude.ai/new*"] && s[0]["all_frames"] == false; abort "PRODUCTION_MANIFEST_PERMISSION_MISMATCH" unless ok' "$appex/Contents/Resources/manifest.json"
@@ -86,6 +86,10 @@ sign(){ codesign --force --options runtime --timestamp --sign "$REQUIRED_IDENTIT
 sign --identifier "$APP_ID.ClaudeStatusLineRelay" "$app/Contents/Helpers/ClaudeStatusLineRelay"; sign --identifier "$APP_ID" --entitlements "$src/ProductionSigning/MutableApp/UMA.entitlements" "$app"
 sign --identifier "$EXTENSION_ID" --entitlements "$src/ProductionSigning/SafariHost/Extension/ClaudeBrowserCompanion.entitlements" "$appex"; sign --identifier "$HOST_ID" --entitlements "$src/ProductionSigning/SafariHost/App/UMA-Safari-Bridge.entitlements" "$host"
 codesign --verify --deep --strict --verbose=4 "$app"; codesign --verify --deep --strict --verbose=4 "$host"
+if /usr/bin/grep -aERq 'com\.silkrd\.uma\.test|group\.com\.silkrd\.uma\.test\.bridge' "$app" "$host"; then
+  echo PRODUCTION_TEST_IDENTITY_PRESENT >&2
+  exit 1
+fi
 verify_signed_component() {
   local p="$1" id="$2" entitlements="$3" signing
   signing="$(codesign -d --verbose=4 "$p" 2>&1)"

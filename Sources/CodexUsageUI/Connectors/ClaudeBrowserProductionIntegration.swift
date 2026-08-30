@@ -2,6 +2,27 @@ import ClaudeBrowserBridgeProtocol
 import ClaudeSafariHostIPC
 import Foundation
 
+#if UMA_PRODUCTION_RELEASE
+private let claudeSafariHostDefaultAppGroupIdentifier =
+    ClaudeBrowserBridgeContract.safariHostProductionAppGroupIdentifier
+#else
+private let claudeSafariHostDefaultAppGroupIdentifier =
+    ClaudeBrowserBridgeContract.safariHostTestAppGroupIdentifier
+#endif
+
+private func claudeClientApplicationIdentifier(
+    for context: ClaudeBrowserRuntimeContext?
+) -> String? {
+    guard let context else { return nil }
+#if UMA_PRODUCTION_RELEASE
+    return ClaudeBrowserBridgeContract.safariApplicationIdentifier
+#else
+    return context.identity.channel == .productionSafariHost
+        ? ClaudeBrowserBridgeContract.safariApplicationIdentifier
+        : ClaudeBrowserBridgeContract.safariTestApplicationIdentifier
+#endif
+}
+
 enum ClaudeBrowserCompanionVerification: Equatable, Sendable {
     case verified
     case disabled
@@ -44,8 +65,7 @@ struct ClaudeBrowserRuntimeContext: Equatable, Sendable {
         extensionBuild: String,
         teamIdentifier: String,
         runtimeGenerationID: String,
-        appGroupIdentifier: String =
-            ClaudeBrowserBridgeContract.safariHostTestAppGroupIdentifier
+        appGroupIdentifier: String = claudeSafariHostDefaultAppGroupIdentifier
     ) {
         self.identity = identity
         self.canonicalAppPath = canonicalAppPath
@@ -399,11 +419,7 @@ public struct ClaudeBrowserCompanionDiagnosticResult: Codable, Equatable, Sendab
         occurredAt = ISO8601DateFormatter().string(from: Date())
         reachedStages = []
         self.firstFailureReason = firstFailureReason
-        clientApplicationIdentifier = context.map {
-            $0.identity.channel == .productionSafariHost
-                ? ClaudeBrowserBridgeContract.safariApplicationIdentifier
-                : ClaudeBrowserBridgeContract.safariTestApplicationIdentifier
-        }
+        clientApplicationIdentifier = claudeClientApplicationIdentifier(for: context)
         clientVersion = context?.appVersion
         clientBuild = context?.appBuild
         hostApplicationIdentifier = context?.identity.containingApplicationIdentifier
@@ -430,11 +446,7 @@ public struct ClaudeBrowserCompanionDiagnosticResult: Codable, Equatable, Sendab
         occurredAt = trace.occurredAt
         reachedStages = trace.reachedStages
         firstFailureReason = trace.firstFailureReason
-        clientApplicationIdentifier = context.map {
-            $0.identity.channel == .productionSafariHost
-                ? ClaudeBrowserBridgeContract.safariApplicationIdentifier
-                : ClaudeBrowserBridgeContract.safariTestApplicationIdentifier
-        }
+        clientApplicationIdentifier = claudeClientApplicationIdentifier(for: context)
         clientVersion = context?.appVersion
         clientBuild = context?.appBuild
         hostApplicationIdentifier = trace.runtimeDescriptor?.hostApplicationIdentifier

@@ -22,6 +22,7 @@ public enum ClaudeBrowserBridgeContract {
     public static let safariApplicationIdentifier = "com.silkrd.uma"
     public static let safariExtensionIdentifier =
         "com.silkrd.uma.ClaudeBrowserCompanion"
+#if !UMA_PRODUCTION_RELEASE
     public static let safariTestApplicationIdentifier = "com.silkrd.uma.test"
     public static let safariTestExtensionIdentifier =
         "com.silkrd.uma.test.ClaudeBrowserCompanion"
@@ -31,6 +32,7 @@ public enum ClaudeBrowserBridgeContract {
         "com.silkrd.uma.test.safarihost.ClaudeBrowserCompanion"
     public static let safariHostTestAppGroupIdentifier =
         "group.com.silkrd.uma.test.bridge"
+#endif
     public static let safariHostProductionApplicationIdentifier =
         "com.silkrd.uma.safarihost"
     public static let safariHostProductionExtensionIdentifier =
@@ -107,6 +109,7 @@ public struct ClaudeBrowserRuntimeIdentity: Codable, Equatable, Sendable {
             "Library/Application Support/CodexUsageMonitor/ClaudeBrowserCompanion"
     )
 
+#if !UMA_PRODUCTION_RELEASE
     public static let test = Self(
         channel: .test,
         containingApplicationIdentifier:
@@ -135,6 +138,7 @@ public struct ClaudeBrowserRuntimeIdentity: Codable, Equatable, Sendable {
                 + ClaudeBrowserBridgeContract.safariHostTestAppGroupIdentifier
                 + "/ClaudeSafariHost/NativeInbox"
     )
+#endif
 
     /// The immutable Developer ID Safari containing Host used by release UMA.
     /// The mutable product keeps `com.silkrd.uma`; the established production
@@ -160,8 +164,10 @@ public struct ClaudeBrowserRuntimeIdentity: Codable, Equatable, Sendable {
         switch containingApplicationIdentifier {
         case production.containingApplicationIdentifier: production
         case productionSafariHost.containingApplicationIdentifier: productionSafariHost
+#if !UMA_PRODUCTION_RELEASE
         case test.containingApplicationIdentifier: test
         case testSafariHost.containingApplicationIdentifier: testSafariHost
+#endif
         default: nil
         }
     }
@@ -173,8 +179,10 @@ public struct ClaudeBrowserRuntimeIdentity: Codable, Equatable, Sendable {
         // retired combined runtime and the immutable production Host. Callers
         // that qualify a signed package must match both containing and
         // extension identifiers; extension-only matching remains historical.
+#if !UMA_PRODUCTION_RELEASE
         case test.extensionIdentifier: test
         case testSafariHost.extensionIdentifier: testSafariHost
+#endif
         default: nil
         }
     }
@@ -197,6 +205,7 @@ public struct ClaudeSafariHostRuntimeProfile: Equatable, Sendable {
             ClaudeBrowserBridgeContract.safariHostProductionAppGroupIdentifier
     )
 
+#if !UMA_PRODUCTION_RELEASE
     public static let test = Self(
         mutableApplicationIdentifier:
             ClaudeBrowserBridgeContract.safariTestApplicationIdentifier,
@@ -204,13 +213,16 @@ public struct ClaudeSafariHostRuntimeProfile: Equatable, Sendable {
         appGroupIdentifier:
             ClaudeBrowserBridgeContract.safariHostTestAppGroupIdentifier
     )
+#endif
 
     public static func matchingMutableApplicationIdentifier(
         _ identifier: String?
     ) -> Self? {
         switch identifier {
         case production.mutableApplicationIdentifier: production
+#if !UMA_PRODUCTION_RELEASE
         case test.mutableApplicationIdentifier: test
+#endif
         default: nil
         }
     }
@@ -220,7 +232,9 @@ public struct ClaudeSafariHostRuntimeProfile: Equatable, Sendable {
     ) -> Self? {
         switch identifier {
         case production.identity.containingApplicationIdentifier: production
+#if !UMA_PRODUCTION_RELEASE
         case test.identity.containingApplicationIdentifier: test
+#endif
         default: nil
         }
     }
@@ -230,7 +244,9 @@ public struct ClaudeSafariHostRuntimeProfile: Equatable, Sendable {
     ) -> Self? {
         switch channel {
         case .productionSafariHost: production
+#if !UMA_PRODUCTION_RELEASE
         case .testSafariHost: test
+#endif
         default: nil
         }
     }

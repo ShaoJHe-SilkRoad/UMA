@@ -21,6 +21,10 @@ struct M5RMXProductionSplitPackagingTests {
         let package = try source("script/package_uma_0_13_production_split.sh")
         for value in ["com.silkrd.uma", "com.silkrd.uma.safarihost", "com.silkrd.uma.ClaudeBrowserCompanion", "group.com.silkrd.uma.bridge", "C6TUZVJ6SJ", "0.13.0", "production-safari-host"] { #expect(package.contains(value)) }
         #expect(!package.contains("com.silkrd.uma.test")); #expect(!package.contains("Apple Development:"))
+        let protocolSource = try source("Sources/ClaudeBrowserBridgeProtocol/ClaudeBrowserBridgeProtocol.swift")
+        #expect(protocolSource.contains("#if !UMA_PRODUCTION_RELEASE"))
+        let connector = try source("Sources/CodexUsageUI/Connectors/ClaudeBrowserProductionIntegration.swift")
+        #expect(connector.contains("#if UMA_PRODUCTION_RELEASE"))
     }
 
     @Test("mutable product is Safari-free and Host signs child first")
@@ -32,6 +36,9 @@ struct M5RMXProductionSplitPackagingTests {
         #expect(extensionSign.lowerBound < hostSign.lowerBound)
         #expect(package.contains("--options runtime --timestamp")); #expect(package.contains("codesign --verify --deep --strict"))
         #expect(package.contains("PRODUCTION_GET_TASK_ALLOW_FORBIDDEN")); #expect(package.contains("PRODUCTION_EFFECTIVE_ENTITLEMENTS_MISMATCH"))
+        #expect(package.contains("UMA_PRODUCTION_RELEASE"))
+        #expect(package.contains("PRODUCTION_TEST_IDENTITY_PRESENT"))
+        #expect(package.contains("grep -aERq"))
     }
 
     @Test("release fails closed before build when prerequisites are absent")

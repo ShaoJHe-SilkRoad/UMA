@@ -160,13 +160,14 @@ struct M5RMXConsentHandshakeDecouplingTests {
         )
 
         #expect(integration.contains(
-            "clientApplicationIdentifier = context.map {\n"
-                + "            $0.identity.channel == .productionSafariHost"
+            "clientApplicationIdentifier = claudeClientApplicationIdentifier(for: context)"
         ))
         #expect(integration.contains(
-            "? ClaudeBrowserBridgeContract.safariApplicationIdentifier\n"
-                + "                : ClaudeBrowserBridgeContract.safariTestApplicationIdentifier"
+            "return context.identity.channel == .productionSafariHost\n"
+                + "        ? ClaudeBrowserBridgeContract.safariApplicationIdentifier\n"
+                + "        : ClaudeBrowserBridgeContract.safariTestApplicationIdentifier"
         ))
+        #expect(integration.contains("#if UMA_PRODUCTION_RELEASE"))
         #expect(integration.contains(
             "hostApplicationIdentifier = trace.runtimeDescriptor?.hostApplicationIdentifier"
         ))

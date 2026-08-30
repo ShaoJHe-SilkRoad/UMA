@@ -402,11 +402,15 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             else { return nil }
             profile = .production
         case .testSafariHost:
+#if UMA_PRODUCTION_RELEASE
+            return nil
+#else
             guard runtime.identity == .testSafariHost,
                   runtime.appGroupIdentifier
                     == ClaudeBrowserBridgeContract.safariHostTestAppGroupIdentifier
             else { return nil }
             profile = .test
+#endif
         case .production, .test:
             return nil
         }
