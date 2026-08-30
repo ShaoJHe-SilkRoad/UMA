@@ -27,7 +27,7 @@ readonly expected="$DELIVERY_ROOT/uma-0.13-production-${commit:0:12}-$build"
 [[ -d "$DEVELOPER_DIR_REQUIRED" && -d "$SDK_REQUIRED" ]] || { echo COHERENT_XCODE_TOOLCHAIN_UNAVAILABLE >&2; exit 1; }
 for p in "$mutable_profile" "$host_profile" "$extension_profile"; do [[ -f "$p" && ! -L "$p" ]] || { echo PRODUCTION_PROFILE_MISSING >&2; exit 1; }; done
 scratch="$(mktemp -d /private/tmp/uma-production-package.XXXXXX)"; trap 'rm -rf -- "$scratch"' EXIT HUP INT TERM
-src="$scratch/source"; mkdir "$src" "$scratch/home" "$scratch/tmp" "$scratch/cache/clang" "$scratch/cache/swiftpm" "$scratch/config" "$scratch/security"; git -C "$ROOT" archive "$commit" | tar -x -C "$src"
+src="$scratch/source"; mkdir -p "$src" "$scratch/home" "$scratch/tmp" "$scratch/cache/clang" "$scratch/cache/swiftpm" "$scratch/config" "$scratch/security"; git -C "$ROOT" archive "$commit" | tar -x -C "$src"
 handler="$src/BrowserExtension/Safari/Native/SafariWebExtensionHandler.swift"
 /usr/bin/grep -Fq 'productionSafariHost' "$handler" && /usr/bin/grep -Fq 'safariHostProductionAppGroupIdentifier' "$handler" || { echo PRODUCTION_HANDLER_QUALIFICATION_ABSENT >&2; exit 1; }
 plist() { /usr/libexec/PlistBuddy -c "Print :$2" "$1"; }

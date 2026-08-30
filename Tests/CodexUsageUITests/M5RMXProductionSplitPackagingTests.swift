@@ -39,6 +39,7 @@ struct M5RMXProductionSplitPackagingTests {
         let package = try source("script/package_uma_0_13_production_split.sh")
         for reason in ["SOURCE_NOT_COMMIT_EXACT", "DEVELOPER_ID_IDENTITY_UNAVAILABLE", "COHERENT_XCODE_TOOLCHAIN_UNAVAILABLE", "PRODUCTION_PROFILE_MISSING", "PRODUCTION_PROFILE_MISMATCH", "PRODUCTION_HANDLER_QUALIFICATION_ABSENT"] { #expect(package.contains(reason)) }
         for contract in ["/Applications/Xcode-beta.app/Contents/Developer", "MacOSX27.0.sdk", "SWIFTPM_MODULECACHE_OVERRIDE", "--disable-keychain", "--manifest-cache"] { #expect(package.contains(contract)) }
+        #expect(package.contains("mkdir -p \"$src\""))
         #expect(package.range(of: "PRODUCTION_HANDLER_QUALIFICATION_ABSENT")!.lowerBound < package.range(of: "xcrun swift build")!.lowerBound)
     }
 
