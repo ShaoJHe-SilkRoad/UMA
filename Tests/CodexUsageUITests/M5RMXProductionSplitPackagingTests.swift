@@ -80,6 +80,8 @@ struct M5RMXProductionSplitPackagingTests {
     func backgroundLoaderContract() throws {
         let package = try source("script/package_uma_0_13_production_split.sh")
         for value in ["supportsAutomaticRefresh: true", "supportsManualAction: false", "umaClaudeWakeBridge", "umaClaudeAutomaticRefresh", "umaClaudeCloseOwnedUsageTab"] { #expect(package.contains(value)) }
+        #expect(package.contains("for loader_contract in"))
+        #expect(!package.contains("for expected in"))
         #expect(package.contains("PRODUCTION_MANIFEST_PERMISSION_MISMATCH"))
     }
 

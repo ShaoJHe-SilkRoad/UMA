@@ -75,7 +75,7 @@ globalThis.UMA_BROWSER_CONFIG = Object.freeze({
   teamIdentifier: "$TEAM", runtimeGenerationID: "$generation"
 });
 EOF
-for expected in 'supportsAutomaticRefresh: true' 'supportsManualAction: false' 'wakeMessageName: "umaClaudeWakeBridge"' 'automaticRefreshMessageName: "umaClaudeAutomaticRefresh"' 'closeOwnedTabMessageName: "umaClaudeCloseOwnedUsageTab"'; do /usr/bin/grep -Fq "$expected" "$appex/Contents/Resources/Safari/background-loader.js"; done
+for loader_contract in 'supportsAutomaticRefresh: true' 'supportsManualAction: false' 'wakeMessageName: "umaClaudeWakeBridge"' 'automaticRefreshMessageName: "umaClaudeAutomaticRefresh"' 'closeOwnedTabMessageName: "umaClaudeCloseOwnedUsageTab"'; do /usr/bin/grep -Fq "$loader_contract" "$appex/Contents/Resources/Safari/background-loader.js"; done
 setv(){ plutil -replace "$2" -string "$3" "$1" 2>/dev/null || plutil -insert "$2" -string "$3" "$1"; }
 setv "$app/Contents/Info.plist" CFBundleVersion "$build"; setv "$app/Contents/Info.plist" UMARuntimeGenerationID "$generation"; setv "$app/Contents/Info.plist" UMASafariHostRuntimeGenerationID "$generation"
 for p in "$host/Contents/Info.plist" "$appex/Contents/Info.plist"; do setv "$p" CFBundleVersion "$build"; setv "$p" UMARuntimeChannel production-safari-host; setv "$p" UMAContainingApplicationIdentifier "$HOST_ID"; setv "$p" UMAExtensionBundleIdentifier "$EXTENSION_ID"; setv "$p" UMATeamIdentifier "$TEAM"; setv "$p" UMARuntimeGenerationID "$generation"; setv "$p" UMAAppVersion "$VERSION"; setv "$p" UMAAppBuild "$build"; setv "$p" UMAExtensionVersion "$VERSION"; setv "$p" UMAExtensionBuild "$build"; setv "$p" UMAAppGroupIdentifier "$APP_GROUP"; done
