@@ -11,12 +11,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isDisconnectingForTermination = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy(.regular)
         NSApp.unhide(nil)
+        shellCoordinator.start(presentMainWindow: !shellDiagnosticRequested)
         // The status item exists before provider composition begins. A failed
         // or slow provider construction can never own the macOS shell.
         Task { @MainActor [weak self] in
-            await Task.yield()
             guard let self else { return }
             do {
                 let runtime = try UsageMonitorRuntime.live(
@@ -27,17 +27,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.runtime = runtime
                 self.shellCoordinator.attach(runtime: runtime)
                 if self.shellDiagnosticRequested {
-                    let result = await self.shellCoordinator.runMachineDiagnostic(toggleCount: 50)
-                    if let data = try? JSONEncoder().encode(result),
-                       let json = String(data: data, encoding: .utf8) {
-                        print(json)
-                    }
-                    NSApp.terminate(nil)
+                    await self.finishShellDiagnostic(runtimeAttached: true)
                 }
             } catch {
                 self.shellCoordinator.recordRuntimeAttachmentFailure()
+                if self.shellDiagnosticRequested {
+                    await self.finishShellDiagnostic(runtimeAttached: false)
+                }
             }
         }
+    }
+
+    private func finishShellDiagnostic(runtimeAttached: Bool) async {
+        let result = await shellCoordinator.runMachineDiagnostic(
+            toggleCount: 50,
+            runtimeAttached: runtimeAttached
+        )
+        if var data = try? JSONEncoder().encode(result) {
+            data.append(0x0A)
+            FileHandle.standardOutput.write(data)
+            try? FileHandle.standardOutput.synchronize()
+        }
+        NSApp.terminate(nil)
     }
 
     func applicationShouldHandleReopen(
@@ -45,7 +56,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hasVisibleWindows flag: Bool
     ) -> Bool {
         sender.unhide(nil)
+        shellCoordinator.showMainWindow()
         return true
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -120,7 +136,7 @@ enum CodexUsageMonitorApp {
         }
         let delegate = AppDelegate()
         application.delegate = delegate
-        application.setActivationPolicy(.accessory)
+        application.setActivationPolicy(.regular)
         withExtendedLifetime(delegate) {
             application.run()
         }

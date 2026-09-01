@@ -334,9 +334,9 @@ struct M2WG3WorkBuddyMainPanelTests {
             ),
             encoding: .utf8
         )
-        let statusBar = try String(
+        let shell = try String(
             contentsOf: repository.appendingPathComponent(
-                "Sources/CodexUsageMonitor/App/StatusBarController.swift"
+                "Sources/CodexUsageMonitor/App/AppShellCoordinator.swift"
             ),
             encoding: .utf8
         )
@@ -353,8 +353,8 @@ struct M2WG3WorkBuddyMainPanelTests {
         #expect(panel.contains("ScrollView(.vertical)"))
         #expect(settings.contains("enum UsageSettingsDestination"))
         #expect(settings.contains("expandOnAppear"))
-        #expect(statusBar.contains("store.assistantPresentationCards"))
-        #expect(!statusBar.contains("cards: store.presentationCards"))
+        #expect(shell.contains("store.assistantPresentationCards"))
+        #expect(!shell.contains("cards: store.presentationCards"))
         #expect(card.contains("workBuddyUpdateCredits"))
         #expect(card.contains("workBuddyConfirmUnchanged"))
         #expect(card.contains(".layoutPriority(2)"))

@@ -168,7 +168,8 @@ struct M5RMXProductShellIsolationTests {
     func shellFirstStartupCannotBeOwnedByProviders() throws {
         let app = try source("Sources/CodexUsageMonitor/App/CodexUsageMonitorApp.swift")
         #expect(app.contains("private let shellCoordinator = AppShellCoordinator()"))
-        #expect(app.contains("await Task.yield()"))
+        #expect(app.contains("shellCoordinator.start(presentMainWindow:"))
+        #expect(!app.contains("await Task.yield()"))
         #expect(app.contains("NSApp.unhide(nil)"))
         #expect(app.contains("shellCoordinator.attach(runtime: runtime)"))
         #expect(app.contains("applicationShouldHandleReopen"))
@@ -179,8 +180,11 @@ struct M5RMXProductShellIsolationTests {
             status.slice(from: "init(", through: "func attach(runtime:")
         )
         #expect(initializer.contains("TransparentUsagePanelController("))
-        #expect(initializer.contains("DesktopAssistantPanelController("))
+        #expect(!initializer.contains("DesktopAssistantPanelController("))
         #expect(!initializer.contains("UsageMonitorRuntime"))
+
+        let shell = try source("Sources/CodexUsageMonitor/App/AppShellCoordinator.swift")
+        #expect(shell.contains("assistantController = DesktopAssistantPanelController("))
     }
 
     @Test("Physical click diagnostics are content-free and lifecycle-scoped")
@@ -207,7 +211,8 @@ struct M5RMXProductShellIsolationTests {
         #expect(app.contains("--diagnose-app-shell"))
         #expect(app.contains("guard !shellDiagnosticRequested else { return .terminateNow }"))
         #expect(app.contains("startProviders: !self.shellDiagnosticRequested"))
-        #expect(app.contains("runMachineDiagnostic(toggleCount: 50)"))
+        #expect(app.contains("runMachineDiagnostic("))
+        #expect(app.contains("toggleCount: 50"))
         #expect(status.contains("button.performClick(nil)"))
         #expect(status.contains("state.isEffectivelyOpen && state.isResponsive"))
         #expect(runtime.contains("if startProviders"))

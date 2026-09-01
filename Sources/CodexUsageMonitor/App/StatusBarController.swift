@@ -5,13 +5,11 @@ import Combine
 @MainActor
 final class StatusBarController: NSObject {
     private var store: UsageStore?
-    private var workBuddyLogin: WorkBuddyLoginCoordinator?
-    private var workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
     private let lifecycleGeneration: UUID
     private let diagnostics: AppShellDiagnosticRecorder
     private let statusItem: NSStatusItem
     private var panelController: TransparentUsagePanelController?
-    private var assistantController: DesktopAssistantPanelController?
+    private weak var assistantController: DesktopAssistantPanelController?
     private var storeObserver: AnyCancellable?
     private var statusUpdateScheduled = false
     private var isTornDown = false
@@ -38,11 +36,6 @@ final class StatusBarController: NSObject {
         panelController?.setDiagnosticEventHandler { [weak self] stage, reached, detail in
             self?.record(stage, reached: reached, detail: detail)
         }
-        assistantController = DesktopAssistantPanelController(
-            onSelectProvider: { [weak self] providerID in
-                self?.panelController?.show(expandingProviderID: providerID)
-            }
-        )
         updateStatusButton()
         installStatusEventMonitor()
     }
@@ -50,8 +43,6 @@ final class StatusBarController: NSObject {
     func attach(runtime: UsageMonitorRuntime) {
         guard store == nil, !isTornDown else { return }
         store = runtime.store
-        workBuddyLogin = runtime.workBuddyLogin
-        workBuddyAccountWebSync = runtime.workBuddyAccountWebSync
         panelController?.attachContent(
             store: runtime.store,
             claudeSettings: runtime.claudeSettings,
@@ -89,7 +80,6 @@ final class StatusBarController: NSObject {
         var completed = 0
         for index in 0..<toggleCount {
             button.performClick(nil)
-            await Task.yield()
             guard let state = panelController?.diagnosticState else {
                 return machineDiagnosticResult(
                     requested: toggleCount,
@@ -143,9 +133,6 @@ final class StatusBarController: NSObject {
         guard !isTornDown else { return }
         isTornDown = true
         panelController?.tearDown()
-        workBuddyLogin?.tearDown()
-        workBuddyAccountWebSync?.tearDown()
-        assistantController?.tearDown()
         storeObserver?.cancel()
         if let statusEventMonitor { NSEvent.removeMonitor(statusEventMonitor) }
         statusEventMonitor = nil
@@ -159,6 +146,23 @@ final class StatusBarController: NSObject {
         record(.statusItemEnabled, reached: statusItem.button?.isEnabled == true)
         record(.targetPresent, reached: statusItem.button?.target === self)
         record(.actionPresent, reached: statusItem.button?.action == #selector(handleStatusItemAction))
+    }
+
+    func bindAssistant(_ assistantController: DesktopAssistantPanelController) {
+        self.assistantController = assistantController
+    }
+
+    func showQuickPanel(expandingProviderID providerID: String? = nil) {
+        guard !isTornDown else { return }
+        if let providerID {
+            panelController?.show(expandingProviderID: providerID)
+        } else {
+            panelController?.present()
+        }
+    }
+
+    var isActiveForDiagnostic: Bool {
+        !isTornDown && statusItem.button != nil && panelController != nil
     }
 
     func setDesktopAssistantEnabled(_ isEnabled: Bool) {
@@ -216,13 +220,6 @@ final class StatusBarController: NSObject {
                 store?.language.remainingAccessibilityLabel(percent: $0) ?? "UMA"
             } ?? store?.language.appTitle ?? "UMA"
         )
-        if let store {
-            assistantController?.update(
-                cards: store.assistantPresentationCards.map {
-                    DesktopAssistantCard(shared: $0, language: store.language)
-                }
-            )
-        }
     }
 
     private func installStatusEventMonitor() {

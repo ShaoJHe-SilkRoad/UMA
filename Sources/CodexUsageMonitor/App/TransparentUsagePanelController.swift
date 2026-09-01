@@ -116,6 +116,10 @@ final class TransparentUsagePanelController {
         isEffectivelyOpen ? close() : show()
     }
 
+    func present() {
+        show()
+    }
+
     func setDiagnosticEventHandler(
         _ handler: @escaping (AppShellDiagnosticStage, Bool, String?) -> Void
     ) {

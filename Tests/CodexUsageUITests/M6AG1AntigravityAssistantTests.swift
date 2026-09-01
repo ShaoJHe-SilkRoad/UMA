@@ -365,7 +365,7 @@ struct M6AG1AntigravityAssistantTests {
         let controller = try source(
             "Sources/CodexUsageMonitor/App/DesktopAssistantPanelController.swift"
         )
-        let status = try source("Sources/CodexUsageMonitor/App/StatusBarController.swift")
+        let shell = try source("Sources/CodexUsageMonitor/App/AppShellCoordinator.swift")
         let combined = assistant + controller
         for forbidden in [
             "GoogleAntigravityUsageConnector",
@@ -382,7 +382,7 @@ struct M6AG1AntigravityAssistantTests {
         ] {
             #expect(!combined.contains(forbidden))
         }
-        #expect(status.contains("store.assistantPresentationCards.map"))
+        #expect(shell.contains("store.assistantPresentationCards.map"))
         #expect(controller.contains("self.cards = cards"))
         #expect(controller.contains("onSelectProvider?(providerID)"))
         #expect(controller.contains("positionSaveTask"))

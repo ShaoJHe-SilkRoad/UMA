@@ -1,5 +1,6 @@
 import AppKit
 import CodexUsageUI
+import Combine
 
 enum AppShellDiagnosticStage: String, Codable, Sendable {
     case shellCreated
@@ -60,6 +61,28 @@ struct AppShellMachineDiagnosticResult: Codable, Sendable {
     let firstFailure: String?
 }
 
+struct NativeShellLifecycleDiagnosticResult: Codable, Sendable {
+    let activationPolicyRegular: Bool
+    let mainWindowSingleton: Bool
+    let settingsWindowSingleton: Bool
+    let mainWindowReopened: Bool
+    let windowClosePreservedShell: Bool
+    let statusItemSurvivedWindowClose: Bool
+    let assistantSurvivedWindowClose: Bool
+    let sharedRuntimeStore: Bool
+    let nativeCommandRoutesPresent: Bool
+    let threadOSRuntimeActivityCount: Int
+    let passed: Bool
+}
+
+struct UMA014M1MachineDiagnosticResult: Codable, Sendable {
+    let nativeShell: NativeShellLifecycleDiagnosticResult
+    let quickPanel: AppShellMachineDiagnosticResult
+    let runtimeAttached: Bool
+    let passed: Bool
+    let firstFailure: String?
+}
+
 /// Content-free shell receipts make one physical menu-bar click diagnosable
 /// without coupling the shell to any provider or browser subsystem.
 final class AppShellDiagnosticRecorder: @unchecked Sendable {
@@ -111,6 +134,13 @@ final class AppShellCoordinator {
     let lifecycleGeneration = UUID()
     private let diagnostics: AppShellDiagnosticRecorder
     private let statusBarController: StatusBarController
+    private let mainWindowController: MainWindowController
+    private let settingsWindowController: SettingsWindowController
+    private let assistantController: DesktopAssistantPanelController
+    private var commandRouter: ApplicationMenuController!
+    private var runtime: UsageMonitorRuntime?
+    private var assistantStoreObserver: AnyCancellable?
+    private var hasStarted = false
     private var isTornDown = false
 
     init(
@@ -118,31 +148,185 @@ final class AppShellCoordinator {
     ) {
         precondition(Self.activeCoordinator == nil, "Only one AppShellCoordinator may be active")
         self.diagnostics = diagnostics
-        statusBarController = StatusBarController(
+        let statusBarController = StatusBarController(
             lifecycleGeneration: lifecycleGeneration,
             diagnostics: diagnostics
         )
+        let assistantController = DesktopAssistantPanelController(
+            onSelectProvider: { [weak statusBarController] providerID in
+                statusBarController?.showQuickPanel(expandingProviderID: providerID)
+            }
+        )
+        self.statusBarController = statusBarController
+        self.assistantController = assistantController
+        mainWindowController = MainWindowController()
+        settingsWindowController = SettingsWindowController()
         Self.activeCoordinator = self
+        statusBarController.bindAssistant(assistantController)
+        commandRouter = ApplicationMenuController(coordinator: self)
         statusBarController.recordShellCreated()
     }
 
+    func start(presentMainWindow: Bool) {
+        guard !hasStarted, !isTornDown else { return }
+        hasStarted = true
+        commandRouter.installMainMenu()
+        if presentMainWindow { showMainWindow() }
+    }
+
     func attach(runtime: UsageMonitorRuntime) {
-        guard !isTornDown else { return }
+        guard self.runtime == nil, !isTornDown else { return }
+        self.runtime = runtime
         statusBarController.attach(runtime: runtime)
+        mainWindowController.attach(store: runtime.store)
+        settingsWindowController.attach(store: runtime.store)
+        observeAssistantCards(in: runtime.store)
+        updateAssistant(using: runtime.store)
     }
 
     func recordRuntimeAttachmentFailure() {
         statusBarController.recordRuntimeAttachmentFailure()
     }
 
-    func runMachineDiagnostic(toggleCount: Int) async -> AppShellMachineDiagnosticResult {
-        await statusBarController.runMachineDiagnostic(toggleCount: toggleCount)
+    func runMachineDiagnostic(
+        toggleCount: Int,
+        runtimeAttached: Bool = true
+    ) async -> UMA014M1MachineDiagnosticResult {
+        let nativeShell = runNativeLifecycleDiagnostic()
+        let quickPanel = await statusBarController.runMachineDiagnostic(toggleCount: toggleCount)
+        return UMA014M1MachineDiagnosticResult(
+            nativeShell: nativeShell,
+            quickPanel: quickPanel,
+            runtimeAttached: runtimeAttached,
+            passed: runtimeAttached
+                && nativeShell.activationPolicyRegular
+                && nativeShell.passed
+                && quickPanel.passed,
+            firstFailure: runtimeAttached ? nil : "RUNTIME_COMPOSITION_FAILED"
+        )
+    }
+
+    func runNativeLifecycleDiagnostic() -> NativeShellLifecycleDiagnosticResult {
+        let coordinatorIdentity = ObjectIdentifier(self)
+        let statusIdentity = ObjectIdentifier(statusBarController)
+        let assistantIdentity = ObjectIdentifier(assistantController)
+        let runtimeStoreIdentity = runtime.map { ObjectIdentifier($0.store) }
+
+        showMainWindow()
+        let mainWindowIdentity = mainWindowController.windowIdentityForTesting
+        showMainWindow()
+        let mainWindowSingleton = mainWindowController.windowIdentityForTesting == mainWindowIdentity
+
+        showSettingsWindow()
+        let settingsWindowIdentity = settingsWindowController.windowIdentityForTesting
+        showSettingsWindow()
+        let settingsWindowSingleton =
+            settingsWindowController.windowIdentityForTesting == settingsWindowIdentity
+
+        mainWindowController.closeCanonicalWindow()
+        settingsWindowController.closeCanonicalWindow()
+        let windowClosePreservedShell =
+            !isTornDown && ObjectIdentifier(self) == coordinatorIdentity
+        let statusItemSurvivedWindowClose =
+            ObjectIdentifier(statusBarController) == statusIdentity
+                && statusBarController.isActiveForDiagnostic
+        let assistantSurvivedWindowClose =
+            ObjectIdentifier(assistantController) == assistantIdentity
+
+        showMainWindow()
+        let mainWindowReopened =
+            mainWindowController.windowIdentityForTesting == mainWindowIdentity
+                && mainWindowController.isVisibleForTesting
+        mainWindowController.closeCanonicalWindow()
+
+        let sharedRuntimeStore = runtimeStoreIdentity != nil
+            && mainWindowController.attachedStoreIdentityForTesting == runtimeStoreIdentity
+            && settingsWindowController.attachedStoreIdentityForTesting == runtimeStoreIdentity
+        let menu = commandRouter.diagnosticState
+        let passed = mainWindowSingleton
+            && settingsWindowSingleton
+            && mainWindowReopened
+            && windowClosePreservedShell
+            && statusItemSurvivedWindowClose
+            && assistantSurvivedWindowClose
+            && (runtime == nil || sharedRuntimeStore)
+            && menu.requiredRoutesPresent
+            && menu.threadOSRuntimeActivityCount == 0
+
+        return NativeShellLifecycleDiagnosticResult(
+            activationPolicyRegular: NSApp.activationPolicy() == .regular,
+            mainWindowSingleton: mainWindowSingleton,
+            settingsWindowSingleton: settingsWindowSingleton,
+            mainWindowReopened: mainWindowReopened,
+            windowClosePreservedShell: windowClosePreservedShell,
+            statusItemSurvivedWindowClose: statusItemSurvivedWindowClose,
+            assistantSurvivedWindowClose: assistantSurvivedWindowClose,
+            sharedRuntimeStore: sharedRuntimeStore,
+            nativeCommandRoutesPresent: menu.requiredRoutesPresent,
+            threadOSRuntimeActivityCount: menu.threadOSRuntimeActivityCount,
+            passed: passed
+        )
+    }
+
+    func showMainWindow() {
+        guard !isTornDown else { return }
+        mainWindowController.showCanonicalWindow()
+    }
+
+    func showSettingsWindow() {
+        guard !isTornDown else { return }
+        settingsWindowController.showCanonicalWindow()
+    }
+
+    func showQuickPanel() {
+        guard !isTornDown else { return }
+        statusBarController.showQuickPanel()
+    }
+
+    func refreshAll() async {
+        guard let store = runtime?.store, store.allowsManualRefresh else { return }
+        await store.refresh()
+    }
+
+    func toggleDesktopAssistant() {
+        guard !isTornDown else { return }
+        assistantController.toggleVisibility()
+    }
+
+    var canRefreshAll: Bool {
+        runtime?.store.allowsManualRefresh == true
+    }
+
+    var assistantIsEnabled: Bool { assistantController.isEnabled }
+
+    private func observeAssistantCards(in store: UsageStore) {
+        assistantStoreObserver = store.objectWillChange.sink { [weak self, weak store] _ in
+            DispatchQueue.main.async {
+                guard let self, let store else { return }
+                self.updateAssistant(using: store)
+            }
+        }
+    }
+
+    private func updateAssistant(using store: UsageStore) {
+        assistantController.update(
+            cards: store.assistantPresentationCards.map {
+                DesktopAssistantCard(shared: $0, language: store.language)
+            }
+        )
     }
 
     func tearDown() {
         guard !isTornDown else { return }
         isTornDown = true
+        assistantStoreObserver?.cancel()
+        runtime?.workBuddyLogin.tearDown()
+        runtime?.workBuddyAccountWebSync.tearDown()
+        mainWindowController.tearDown()
+        settingsWindowController.tearDown()
+        assistantController.tearDown()
         statusBarController.tearDown()
+        commandRouter.tearDown()
         if Self.activeCoordinator === self {
             Self.activeCoordinator = nil
         }

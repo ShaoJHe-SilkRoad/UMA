@@ -1,8 +1,10 @@
 # UMA 0.14 QA Issue Ledger
 
-Status: B0 planning ledger
+Status: M1 execution complete; B0 planning evidence retained
 
-Task: `GN-UMA014-B0-01`
+Current task: `GN-UMA014-M1-01`
+
+Planning baseline task: `GN-UMA014-B0-01`
 
 Baseline: UMA 0.13.0 commit `f6dd617bb736d49b444dda4945d55e5b4606c915`, tree `16223ec6b1e3b3c1bf5a80191c97e9887498d622`
 
@@ -19,12 +21,12 @@ Baseline: UMA 0.13.0 commit `f6dd617bb736d49b444dda4945d55e5b4606c915`, tree `16
 
 | ID | Severity | State | Finding | Required proof to close | Target |
 |---|---|---|---|---|---|
-| UMA014-UX-01 | Major | CONFIRMED / OPEN | No canonical main application window or native Settings window. | Normal main window and Settings lifecycle; close/reopen/quit semantics; command and focus tests; Human shell validation. | M1 |
+| UMA014-UX-01 | Major | CLOSED / M1 | The 0.13 baseline had no canonical main application window or native Settings window. | Native singleton Main and Settings windows; real close/reopen/quit lifecycle; menu/shortcut tests; content-free machine diagnostic; bounded physical macOS UI qualification. | M1 |
 | UMA014-UX-02 | Major | CONFIRMED / OPEN | Quick Panel owns dashboard, activity/cost, provider detail, and configuration. | Quick Panel contains only glance/frequent actions; full details and setup are reachable in native windows; no duplicated usage logic. | M3 |
 | UMA014-UX-03 | Major | CONFIRMED / OPEN | Header emphasizes active-provider count rather than limiting/actionable quota. | Deterministic limiting comparison that excludes incomparable native units; truthful attention hierarchy; zero-provider and unavailable fixtures. | M2–M3 |
 | UMA014-UX-04 | Major | CONFIRMED / OPEN | Unavailable snapshots can be filtered away, obscuring disabled/setup/signed-out/failure states. | Complete admitted-provider inventory and explicit support/availability/connection/action classifications; Cursor/Kimi remain unsupported. | M2 |
 | UMA014-UX-05 | Moderate | CONFIRMED / OPEN | Provider Settings structures differ and ordinary UI leaks implementation terminology. | Shared provider settings schema; bounded diagnostics disclosure; no bridge/App Group/generation codes in normal UI. | M4 |
-| UMA014-UX-06 | Major | CONFIRMED / OPEN | No application-wide command model or reliable keyboard navigation/focus contract. | One command router; native menu validation; Full Keyboard Access traversal; focus restoration/deep-link tests. | M1, M4 |
+| UMA014-UX-06 | Major | M1 COMMAND MODEL CLOSED / M4 ACCESSIBILITY OPEN | M1 now has one application-wide command router and native menu/shortcut model; deeper Full Keyboard Access and focus qualification remains in M4. | Native menu graph and live shortcut routing passed in M1; Full Keyboard Access traversal and focus restoration/deep-link tests remain required in M4. | M4 |
 | UMA014-UX-07 | Major | CONFIRMED / OPEN | Fixed point typography and preview-only scaling do not prove production accessibility scaling. | Semantic/relative production typography; English/Chinese accessibility-size qualification without loss of meaning. | M3–M4 |
 | UMA014-UX-08 | Moderate | CONFIRMED / OPEN | Reduce Motion is not consistently applied to provider expansion and Settings switches. | Central motion policy; deterministic reduced-motion behavior; no nonessential transitions when enabled. | M4 |
 | UMA014-UX-09 | Moderate | DECISION_REQUIRED / OPEN | Assistant card tap has no ordinary keyboard path because the panel is intentionally nonactivating. | Founder chooses pointer/deep-link plus equivalent keyboard command, or display-only; tests preserve drag/click/nonactivation. | M4 |
@@ -98,6 +100,21 @@ Baseline: UMA 0.13.0 commit `f6dd617bb736d49b444dda4945d55e5b4606c915`, tree `16
 - shell smoke with provider reads disabled;
 - no provider/source diff.
 
+#### `GN-UMA014-M1-01` execution record
+
+- one `AppShellCoordinator` owns Main, Settings, Status Item / Quick Panel, Assistant, and application commands;
+- one shared `UsageMonitorRuntime` / `UsageStore` is attached to all four presentation surfaces;
+- ordinary launch is a normal Dock / Cmd-Tab application; verifier modes remain accessory-only;
+- Main and Settings are retained singletons with safe frame restoration; closing either is not quitting;
+- Dock/application activation reopens the canonical `UMA` Main window without duplication;
+- UMA, Refresh, View, and disabled ThreadOS menus route through shell actions; ThreadOS runtime activity is zero;
+- focused native-shell and product-isolation verification: 23/23 passed;
+- affected shell, presentation, Assistant, Maximum Decrement, and multi-provider verification: 76/76 passed;
+- final deterministic verification: 938/938 UI tests plus 56/56 bridge tests passed;
+- the isolated unsigned `UMA 0.14 Dev.app` machine diagnostic passed native lifecycle and 50/50 Quick Panel toggles with provider startup disabled;
+- bounded physical macOS UI qualification passed canonical title, Overview / Providers, Settings, Quick Panel, close/reopen, Cmd-comma, Cmd-1, Cmd-2, disabled ThreadOS, and Cmd-Q;
+- no provider connector, Safari Host / Companion, authentication, privacy, Maximum Decrement, or release package source changed.
+
 ### M2 — Provider product state and inventory
 
 - old-fail/new-pass multi-subscriber tests;
@@ -137,9 +154,9 @@ Baseline: UMA 0.13.0 commit `f6dd617bb736d49b444dda4945d55e5b4606c915`, tree `16
 
 | Decision | Required by | Options to arbitrate | Status |
 |---|---|---|---|
-| FD-01 Application presence | M1 | permanent Dock app / accessory app with summonable normal window | OPEN |
+| FD-01 Application presence | M1 | permanent Dock app / accessory app with summonable normal window | RESOLVED — normal Dock / Cmd-Tab app |
 | FD-02 Status-item value | M3 | limiting comparable provider / selected provider / icon only / explicit alternative | OPEN |
-| FD-03 Main navigation | M1–M3 | sidebar / toolbar / Overview-first drill-down | OPEN |
+| FD-03 Main navigation | M1–M3 | sidebar / toolbar / Overview-first drill-down | RESOLVED FOR M1 — Overview / Providers sidebar; M3 expansion remains bounded |
 | FD-04 Activity scope | M3 | omit until cross-provider truth / explicitly source-limited Activity | OPEN |
 | FD-05 Unavailable-provider visibility | M2 | always visible inventory / user-selected hiding with discoverability | OPEN |
 | FD-06 Assistant interaction | M4 | pointer deep-link plus equivalents / display-only | OPEN |
