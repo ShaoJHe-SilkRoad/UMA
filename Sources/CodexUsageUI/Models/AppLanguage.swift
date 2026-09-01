@@ -27,13 +27,27 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
         defaults: UserDefaults = .standard,
         preferredLanguages: [String] = Locale.preferredLanguages
     ) -> AppLanguage {
-        if let rawValue = defaults.string(forKey: storageKey),
+        resolveAndPersist(
+            preferences: ApplicationPreferences(userDefaults: defaults),
+            preferredLanguages: preferredLanguages
+        )
+    }
+
+    @MainActor
+    public static func resolveAndPersist(
+        preferences: ApplicationPreferences,
+        preferredLanguages: [String] = Locale.preferredLanguages
+    ) -> AppLanguage {
+        if let rawValue = preferences.value(for: UMAApplicationPreferenceKeys.language),
            let savedLanguage = AppLanguage(rawValue: rawValue) {
             return savedLanguage
         }
 
         let matchedLanguage = systemMatch(preferredLanguages: preferredLanguages)
-        defaults.set(matchedLanguage.rawValue, forKey: storageKey)
+        preferences.set(
+            matchedLanguage.rawValue,
+            for: UMAApplicationPreferenceKeys.language
+        )
         return matchedLanguage
     }
 

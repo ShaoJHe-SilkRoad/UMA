@@ -54,7 +54,8 @@ struct M2WDBGR1RepairTests {
             ),
             encoding: .utf8
         )
-        #expect(runtimeSource.contains("consentDefaults: .standard"))
+        #expect(runtimeSource.contains("consentDefaults: preferenceDefaults"))
+        #expect(runtimeSource.contains("preferenceDefaults: UserDefaults = .standard"))
     }
 
     @Test

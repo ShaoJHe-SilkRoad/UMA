@@ -76,11 +76,21 @@ public struct DesktopAssistantPreferences: Equatable, Sendable {
 
     @MainActor
     public static func load(from defaults: UserDefaults = .standard) -> Self {
-        let enabled = defaults.object(forKey: Keys.isEnabled) as? Bool ?? true
-        let alwaysOnTop = defaults.object(forKey: Keys.isAlwaysOnTop) as? Bool ?? true
-        let density = defaults.string(forKey: Keys.density)
-            .flatMap(DesktopAssistantDensity.init(rawValue:)) ?? .automatic
-        let position = defaults.data(forKey: Keys.position)
+        load(from: ApplicationPreferences(userDefaults: defaults))
+    }
+
+    @MainActor
+    public static func load(from preferences: ApplicationPreferences) -> Self {
+        let enabled = preferences.value(for: UMAApplicationPreferenceKeys.assistantEnabled)
+        let alwaysOnTop = preferences.value(
+            for: UMAApplicationPreferenceKeys.assistantAlwaysOnTop
+        )
+        let densityRawValue = preferences.value(
+            for: UMAApplicationPreferenceKeys.assistantDensity
+        )
+        let density = DesktopAssistantDensity(rawValue: densityRawValue)
+            ?? .automatic
+        let position = preferences.value(for: UMAApplicationPreferenceKeys.assistantPosition)
             .flatMap { try? JSONDecoder().decode(DesktopAssistantPosition.self, from: $0) }
         return Self(
             isEnabled: enabled,
@@ -92,13 +102,21 @@ public struct DesktopAssistantPreferences: Equatable, Sendable {
 
     @MainActor
     public func save(to defaults: UserDefaults = .standard) {
-        defaults.set(isEnabled, forKey: Keys.isEnabled)
-        defaults.set(isAlwaysOnTop, forKey: Keys.isAlwaysOnTop)
-        defaults.set(density.rawValue, forKey: Keys.density)
+        save(to: ApplicationPreferences(userDefaults: defaults))
+    }
+
+    @MainActor
+    public func save(to preferences: ApplicationPreferences) {
+        preferences.set(isEnabled, for: UMAApplicationPreferenceKeys.assistantEnabled)
+        preferences.set(
+            isAlwaysOnTop,
+            for: UMAApplicationPreferenceKeys.assistantAlwaysOnTop
+        )
+        preferences.set(density.rawValue, for: UMAApplicationPreferenceKeys.assistantDensity)
         if let position, let data = try? JSONEncoder().encode(position) {
-            defaults.set(data, forKey: Keys.position)
+            preferences.set(data, for: UMAApplicationPreferenceKeys.assistantPosition)
         } else {
-            defaults.removeObject(forKey: Keys.position)
+            preferences.remove(UMAApplicationPreferenceKeys.assistantPosition)
         }
     }
 }

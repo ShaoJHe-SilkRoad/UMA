@@ -185,13 +185,20 @@ struct M2WDBGMainAppDebugTests {
                 allowedRoot: root
             )
         }
+        let preferenceSuiteName =
+            "com.silkrd.uma.m2wdbg.preferences.\(UUID().uuidString)"
+        let preferenceDefaults = try #require(
+            UserDefaults(suiteName: preferenceSuiteName)
+        )
         _ = try UsageMonitorRuntime.live(
             bundleIdentifier: bundleIdentifier,
             environment: [
                 "UMA_M2WDBG_MANUAL_STORE": manual,
                 "UMA_M2WDBG_SNAPSHOT_STORE": snapshots
             ],
-            allowedRoot: root
+            allowedRoot: root,
+            startProviders: false,
+            preferenceDefaults: preferenceDefaults
         )
     }
 

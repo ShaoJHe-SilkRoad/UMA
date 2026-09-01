@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>SchemaVersion</key>
+  <integer>1</integer>
+  <key>Development</key>
+  <dict>
+    <key>ApplicationName</key>
+    <string>UMA 0.14 Dev</string>
+    <key>BundleIdentifier</key>
+    <string>com.silkrd.uma.dev.uma014</string>
+    <key>DefaultBuildNumber</key>
+    <string>1</string>
+    <key>MarketingVersion</key>
+    <string>0.14.0</string>
+    <key>PackageStem</key>
+    <string>uma-0.14-m1-dev</string>
+  </dict>
+  <key>FrozenProduction</key>
+  <dict>
+    <key>MarketingVersion</key>
+    <string>0.13.0</string>
+    <key>SourceCommit</key>
+    <string>f6dd617bb736d49b444dda4945d55e5b4606c915</string>
+  </dict>
+  <key>SafariCompatibility</key>
+  <dict>
+    <key>CompanionMarketingVersion</key>
+    <string>1.4.0</string>
+    <key>HostMarketingVersion</key>
+    <string>0.13.0</string>
+    <key>ProtocolVersion</key>
+    <string>2</string>
+  </dict>
+</dict>
+</plist>

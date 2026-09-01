@@ -171,8 +171,28 @@ struct UMA014M1NativeShellTests {
     @Test("Dedicated 0.14 Dev package is unsigned, Dock eligible, and isolated")
     func devPackageContract() throws {
         let script = try source("script/package_uma014_m1_dev.sh")
-        #expect(script.contains("UMA 0.14 Dev.app"))
-        #expect(script.contains("com.silkrd.uma.dev.uma014"))
+        let authorityData = try Data(
+            contentsOf: repositoryRoot().appendingPathComponent(
+                "Configuration/UMAProductVersion.plist"
+            )
+        )
+        let authority = try #require(
+            PropertyListSerialization.propertyList(
+                from: authorityData,
+                format: nil
+            ) as? [String: Any]
+        )
+        let development = try #require(authority["Development"] as? [String: Any])
+
+        #expect(script.contains("Development.ApplicationName"))
+        #expect(script.contains("Development.BundleIdentifier"))
+        #expect(
+            development["ApplicationName"] as? String == "UMA 0.14 Dev"
+        )
+        #expect(
+            development["BundleIdentifier"] as? String
+                == "com.silkrd.uma.dev.uma014"
+        )
         #expect(!script.contains("LSUIElement"))
         #expect(!script.contains("codesign"))
         #expect(!script.contains("/Users/juliushe/Desktop/UMA_0.13.0.app"))

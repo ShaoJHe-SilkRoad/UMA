@@ -30,6 +30,7 @@ public final class UsageStore: ObservableObject {
     private let previewDisplaysFixtureData: Bool
     private let allowsLaunchScan: Bool
     private let consentDefaults: UserDefaults?
+    private let preferences: ApplicationPreferences?
     private var registrySubscription: Task<Void, Never>?
     private var registryStreamSubscription: AgentConnectorRegistrySubscription?
     private var agentSettingsSubscription: AnyCancellable?
@@ -45,7 +46,8 @@ public final class UsageStore: ObservableObject {
             language: language,
             registry: AgentUsageRuntime.makeCodexRegistry(),
             primaryConnectorID: CodexUsageConnector.connectorID,
-            consentDefaults: .standard
+            consentDefaults: .standard,
+            preferences: .production
         )
     }
 
@@ -60,7 +62,8 @@ public final class UsageStore: ObservableObject {
             language: language,
             registry: previewOnly ? nil : AgentUsageRuntime.makeCodexRegistry(),
             primaryConnectorID: previewOnly ? nil : CodexUsageConnector.connectorID,
-            consentDefaults: previewOnly ? nil : .standard
+            consentDefaults: previewOnly ? nil : .standard,
+            preferences: previewOnly ? nil : .production
         )
     }
 
@@ -115,6 +118,7 @@ public final class UsageStore: ObservableObject {
         registry: AgentConnectorRegistry?,
         primaryConnectorID: AgentConnectorID?,
         consentDefaults: UserDefaults? = nil,
+        preferences: ApplicationPreferences? = nil,
         agentSettings: AgentSettingsCoordinator? = nil,
         previewScenario: CodexPreviewScenario = .ready,
         previewPresentationCards: [SharedUsageCardPresentation] = [],
@@ -124,7 +128,16 @@ public final class UsageStore: ObservableObject {
     ) {
         _ = visibleRefreshInterval
         _ = backgroundRefreshInterval
-        let selectedLanguage = language ?? AppLanguage.resolveAndPersist()
+        // Internal/test construction with nil persistence remains ephemeral;
+        // it must never silently escape into the production standard domain.
+        let effectivePreferences = preferences
+            ?? consentDefaults.map(ApplicationPreferences.init(userDefaults:))
+            ?? (previewOnly ? nil : ApplicationPreferences.inMemory())
+        let selectedLanguage = language
+            ?? effectivePreferences.map {
+                AppLanguage.resolveAndPersist(preferences: $0)
+            }
+            ?? AppLanguage.systemMatch()
         self.registry = registry
         self.primaryConnectorID = primaryConnectorID
         self.previewOnly = previewOnly
@@ -132,13 +145,15 @@ public final class UsageStore: ObservableObject {
             previewOnly && previewScenario.displaysFixtureData
         self.allowsLaunchScan = autoRefresh
         self.consentDefaults = consentDefaults
+        self.preferences = effectivePreferences
         self.agentSettings = previewOnly
             ? agentSettings
             : (
                 agentSettings
                     ?? AgentSettingsCoordinator(
                         store: AgentPreferenceStore(
-                            defaults: consentDefaults ?? .standard
+                            preferences: effectivePreferences
+                                ?? ApplicationPreferences.inMemory()
                         )
                     )
             )
@@ -352,9 +367,9 @@ public final class UsageStore: ObservableObject {
     public func setLanguage(_ newLanguage: AppLanguage) {
         guard newLanguage != language else { return }
         language = newLanguage
-        UserDefaults.standard.set(
+        preferences?.set(
             newLanguage.rawValue,
-            forKey: AppLanguage.storageKey
+            for: UMAApplicationPreferenceKeys.language
         )
         rebuildPresentation()
     }

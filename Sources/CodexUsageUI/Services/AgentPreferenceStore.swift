@@ -23,15 +23,19 @@ final class AgentPreferenceStore {
         let schemaVersion: Int
     }
 
-    private let defaults: UserDefaults
+    private let preferences: ApplicationPreferences
     private(set) var writeCount = 0
     private(set) var loadResult: AgentPreferenceLoadResult
     private var cachedEnvelope: AgentPreferencesEnvelope?
     private var blocksWritesForUnreadableRecord = false
 
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-        let result = Self.read(from: defaults)
+    convenience init(defaults: UserDefaults = .standard) {
+        self.init(preferences: ApplicationPreferences(userDefaults: defaults))
+    }
+
+    init(preferences: ApplicationPreferences) {
+        self.preferences = preferences
+        let result = Self.read(from: preferences)
         loadResult = result
         switch result {
         case let .loaded(envelope):
@@ -76,7 +80,7 @@ final class AgentPreferenceStore {
         else {
             return false
         }
-        defaults.set(data, forKey: Self.key)
+        preferences.set(data, for: UMAApplicationPreferenceKeys.agentPreferences)
         cachedEnvelope = normalized
         loadResult = .loaded(normalized)
         writeCount += 1
@@ -84,15 +88,15 @@ final class AgentPreferenceStore {
     }
 
     private func migratedLegacyEnvelope() -> AgentPreferencesEnvelope {
-        let summary = defaults.object(
-            forKey: LegacyKeys.showUsageSummary
-        ) as? Bool
-        let tasks = defaults.object(
-            forKey: LegacyKeys.showRecentTasks
-        ) as? Bool
-        let cost = defaults.object(
-            forKey: LegacyKeys.showAPICost
-        ) as? Bool
+        let summary = preferences.value(
+            for: UMAApplicationPreferenceKeys.legacyShowUsageSummary
+        )
+        let tasks = preferences.value(
+            for: UMAApplicationPreferenceKeys.legacyShowRecentTasks
+        )
+        let cost = preferences.value(
+            for: UMAApplicationPreferenceKeys.legacyShowAPICost
+        )
         guard summary != nil || tasks != nil || cost != nil else {
             return AgentPreferencesEnvelope()
         }
@@ -119,9 +123,11 @@ final class AgentPreferenceStore {
     }
 
     private static func read(
-        from defaults: UserDefaults
+        from preferences: ApplicationPreferences
     ) -> AgentPreferenceLoadResult {
-        guard let data = defaults.data(forKey: key) else { return .missing }
+        guard let data = preferences.value(
+            for: UMAApplicationPreferenceKeys.agentPreferences
+        ) else { return .missing }
         guard data.count <= maximumRecordBytes,
               let header = try? decoder.decode(SchemaHeader.self, from: data)
         else {

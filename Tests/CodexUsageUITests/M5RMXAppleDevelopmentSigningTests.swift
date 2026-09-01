@@ -212,7 +212,10 @@ struct M5RMXAppleDevelopmentSigningTests {
 
     @Test
     func launchServicesClassifierRecognizesCurrentTestArtifactNameAndProtectsReleasePaths() throws {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        // The classifier is intentionally HOME-relative. Tests use an isolated
+        // HOME, so derive the fixture from the same injected process boundary
+        // instead of resolving the signed-in user's real home directory.
+        let home = try #require(ProcessInfo.processInfo.environment["HOME"])
 
         #expect(try classifyLaunchServicesPath(
             "\(home)/Applications/UMA_0.13.0-Test.app"

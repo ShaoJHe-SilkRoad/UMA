@@ -88,9 +88,13 @@ public final class WorkBuddyLoginCoordinator: ObservableObject {
     }
 
     public convenience init() {
+        self.init(defaults: .standard)
+    }
+
+    convenience init(defaults: UserDefaults) {
         self.init(
             applicationAccess: WorkBuddyApplicationAccess(),
-            persistence: WorkBuddyLoginPersistenceStore()
+            persistence: WorkBuddyLoginPersistenceStore(defaults: defaults)
         )
     }
 

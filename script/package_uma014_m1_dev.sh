@@ -2,14 +2,25 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VERSION_READER="$ROOT_DIR/script/read_uma_product_version.sh"
+MARKETING_VERSION="$($VERSION_READER Development.MarketingVersion)"
+DEFAULT_BUILD_NUMBER="$($VERSION_READER Development.DefaultBuildNumber)"
+APP_NAME="$($VERSION_READER Development.ApplicationName)"
+BUNDLE_IDENTIFIER="$($VERSION_READER Development.BundleIdentifier)"
+PACKAGE_STEM="$($VERSION_READER Development.PackageStem)"
+BUILD_NUMBER="${UMA014_M1_BUILD_NUMBER:-$DEFAULT_BUILD_NUMBER}"
+[[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] || {
+  printf '%s\n' "UMA014_BUILD_NUMBER_INVALID" >&2
+  exit 2
+}
 DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer}"
 export DEVELOPER_DIR
 SWIFT_BIN="$(/usr/bin/xcrun --find swift)"
 SDKROOT="$(/usr/bin/xcrun --sdk macosx --show-sdk-path)"
 export SDKROOT
 BUILD_ROOT="${UMA014_M1_BUILD_ROOT:-/private/tmp/uma014-m1-swift-build}"
-PACKAGE_ROOT="${UMA014_M1_PACKAGE_ROOT:-/Volumes/HE/DEV/UMA/Packages/uma-0.14-m1-dev-$(date -u +%Y%m%d%H%M%S)}"
-APP_BUNDLE="$PACKAGE_ROOT/UMA 0.14 Dev.app"
+PACKAGE_ROOT="${UMA014_M1_PACKAGE_ROOT:-/Volumes/HE/DEV/UMA/Packages/$PACKAGE_STEM-$(date -u +%Y%m%d%H%M%S)}"
+APP_BUNDLE="$PACKAGE_ROOT/$APP_NAME.app"
 CONTENTS="$APP_BUNDLE/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
@@ -35,12 +46,12 @@ fi
 
 /usr/bin/plutil -create xml1 "$INFO_PLIST"
 /usr/bin/plutil -insert CFBundleExecutable -string "$EXECUTABLE" "$INFO_PLIST"
-/usr/bin/plutil -insert CFBundleIdentifier -string "com.silkrd.uma.dev.uma014" "$INFO_PLIST"
-/usr/bin/plutil -insert CFBundleName -string "UMA 0.14 Dev" "$INFO_PLIST"
-/usr/bin/plutil -insert CFBundleDisplayName -string "UMA 0.14 Dev" "$INFO_PLIST"
+/usr/bin/plutil -insert CFBundleIdentifier -string "$BUNDLE_IDENTIFIER" "$INFO_PLIST"
+/usr/bin/plutil -insert CFBundleName -string "$APP_NAME" "$INFO_PLIST"
+/usr/bin/plutil -insert CFBundleDisplayName -string "$APP_NAME" "$INFO_PLIST"
 /usr/bin/plutil -insert CFBundlePackageType -string "APPL" "$INFO_PLIST"
-/usr/bin/plutil -insert CFBundleShortVersionString -string "0.14.0" "$INFO_PLIST"
-/usr/bin/plutil -insert CFBundleVersion -string "${UMA014_M1_BUILD_NUMBER:-1}" "$INFO_PLIST"
+/usr/bin/plutil -insert CFBundleShortVersionString -string "$MARKETING_VERSION" "$INFO_PLIST"
+/usr/bin/plutil -insert CFBundleVersion -string "$BUILD_NUMBER" "$INFO_PLIST"
 /usr/bin/plutil -insert LSMinimumSystemVersion -string "14.0" "$INFO_PLIST"
 /usr/bin/plutil -insert NSPrincipalClass -string "NSApplication" "$INFO_PLIST"
 if [[ -f "$RESOURCES/AppIcon.icns" ]]; then

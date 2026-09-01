@@ -33,6 +33,7 @@ enum AgentUsageRuntime {
 
 @MainActor
 public struct UsageMonitorRuntime {
+    public let preferences: ApplicationPreferences
     public let store: UsageStore
     public let claudeSettings: ClaudeBrowserSettingsModel
     public let antigravitySettings: AntigravitySettingsModel
@@ -43,8 +44,10 @@ public struct UsageMonitorRuntime {
     public static func live(
         workBuddyStoreURL: URL? = nil,
         snapshotStoreURL: URL? = nil,
-        startProviders: Bool = true
+        startProviders: Bool = true,
+        preferenceDefaults: UserDefaults = .standard
     ) -> UsageMonitorRuntime {
+        let preferences = ApplicationPreferences(userDefaults: preferenceDefaults)
         let manualStore = workBuddyStoreURL.map {
             WorkBuddyManualAvailabilityStore(fileURL: $0)
         } ?? WorkBuddyManualAvailabilityStore()
@@ -52,7 +55,7 @@ public struct UsageMonitorRuntime {
         let snapshotStore = snapshotStoreURL.map {
             AgentConnectorSnapshotStore(url: $0)
         } ?? AgentConnectorSnapshotStore()
-        let claudeConsent = ClaudeBrowserConsentStore()
+        let claudeConsent = ClaudeBrowserConsentStore(defaults: preferenceDefaults)
         let claudeCache = ClaudeBrowserSanitizedCacheStore()
         let claudeIntegration = ClaudeBrowserProductionIntegration.make()
         let claudeSurfaceDetector = ClaudeLocalSurfaceDetector()
@@ -98,7 +101,9 @@ public struct UsageMonitorRuntime {
             anchorStore: ClaudeSmartAnchorStore()
         )
         let workBuddyConnector = WorkBuddyAvailabilityConnector(source: manualSource)
-        let accountWebSync = WorkBuddyAccountWebSessionController()
+        let accountWebSync = WorkBuddyAccountWebSessionController(
+            defaults: preferenceDefaults
+        )
         let accountWebConnector = WorkBuddyAccountWebCreditsConnector(
             hasConsent: { @MainActor in
                 accountWebSync.consentGranted
@@ -113,8 +118,12 @@ public struct UsageMonitorRuntime {
                 await accountWebSync.disconnectAndClearOwnedWebsiteData()
             }
         )
-        let agentSettings = AgentSettingsCoordinator()
-        let antigravityRefresh = AntigravityAutoRefreshPreference()
+        let agentSettings = AgentSettingsCoordinator(
+            store: AgentPreferenceStore(preferences: preferences)
+        )
+        let antigravityRefresh = AntigravityAutoRefreshPreference(
+            preferences: preferences
+        )
         let antigravityClient = AntigravityReadOnlyCLIClient()
         let antigravityConnector = GoogleAntigravityUsageConnector(
             client: antigravityClient,
@@ -166,7 +175,8 @@ public struct UsageMonitorRuntime {
         let usageStore = UsageStore(
             registry: registry,
             primaryConnectorID: CodexUsageConnector.connectorID,
-            consentDefaults: .standard,
+            consentDefaults: preferenceDefaults,
+            preferences: preferences,
             agentSettings: agentSettings
         )
         let refreshAntigravityAdmissions:
@@ -252,8 +262,9 @@ public struct UsageMonitorRuntime {
             }
         }
         let settings = WorkBuddySettingsModel(source: manualSource)
-        let login = WorkBuddyLoginCoordinator()
+        let login = WorkBuddyLoginCoordinator(defaults: preferenceDefaults)
         return UsageMonitorRuntime(
+            preferences: preferences,
             store: usageStore,
             claudeSettings: claudeSettings,
             antigravitySettings: antigravitySettings,
@@ -312,7 +323,8 @@ public struct UsageMonitorRuntime {
     public static func live(
         bundleIdentifier: String?,
         environment: [String: String],
-        startProviders: Bool = true
+        startProviders: Bool = true,
+        preferenceDefaults: UserDefaults = .standard
     ) throws -> UsageMonitorRuntime {
         let configuration = try storeConfiguration(
             bundleIdentifier: bundleIdentifier,
@@ -329,7 +341,8 @@ public struct UsageMonitorRuntime {
         return live(
             workBuddyStoreURL: configuration.workBuddyStoreURL,
             snapshotStoreURL: configuration.snapshotStoreURL,
-            startProviders: startProviders
+            startProviders: startProviders,
+            preferenceDefaults: preferenceDefaults
         )
     }
 
@@ -387,7 +400,9 @@ public struct UsageMonitorRuntime {
     static func live(
         bundleIdentifier: String?,
         environment: [String: String],
-        allowedRoot: URL
+        allowedRoot: URL,
+        startProviders: Bool = true,
+        preferenceDefaults: UserDefaults = .standard
     ) throws -> UsageMonitorRuntime {
         let configuration = try storeConfiguration(
             bundleIdentifier: bundleIdentifier,
@@ -397,7 +412,9 @@ public struct UsageMonitorRuntime {
         )
         return live(
             workBuddyStoreURL: configuration.workBuddyStoreURL,
-            snapshotStoreURL: configuration.snapshotStoreURL
+            snapshotStoreURL: configuration.snapshotStoreURL,
+            startProviders: startProviders,
+            preferenceDefaults: preferenceDefaults
         )
     }
 
@@ -505,18 +522,14 @@ public struct UsageMonitorRuntime {
 
 @MainActor
 private final class AntigravityAutoRefreshPreference {
-    private static let key = "antigravity.autoRefreshEnabled"
-    private let defaults: UserDefaults
+    private let preferences: ApplicationPreferences
 
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-        if defaults.object(forKey: Self.key) == nil {
-            defaults.set(true, forKey: Self.key)
-        }
+    init(preferences: ApplicationPreferences = .production) {
+        self.preferences = preferences
     }
 
     var isEnabled: Bool {
-        get { defaults.bool(forKey: Self.key) }
-        set { defaults.set(newValue, forKey: Self.key) }
+        get { preferences.value(for: UMAApplicationPreferenceKeys.antigravityAutoRefresh) }
+        set { preferences.set(newValue, for: UMAApplicationPreferenceKeys.antigravityAutoRefresh) }
     }
 }
