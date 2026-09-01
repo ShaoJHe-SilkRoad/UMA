@@ -150,7 +150,7 @@ public struct UsagePanelView: View {
     }
 
     private var visibleProviderIDs: [String] {
-        store.presentationCards.map(\.id)
+        store.overviewPresentationCards.map(\.id)
     }
 
     private var areAllProvidersExpanded: Bool {
@@ -302,13 +302,13 @@ public struct UsagePanelView: View {
                 settingsDestination: $settingsDestination
             )
 
-            if !store.presentationCards.isEmpty {
+            if !store.overviewPresentationCards.isEmpty {
                 ProviderExpansionToolbar(
                     language: store.language,
                     allExpanded: areAllProvidersExpanded,
                     setAllExpanded: setAllProvidersExpanded
                 )
-                ForEach(store.presentationCards) { card in
+                ForEach(store.overviewPresentationCards) { card in
                     LocalLiveProviderCard(
                         card: card,
                         language: store.language,
@@ -1060,7 +1060,9 @@ private struct MonitorHeaderView: View {
 
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(store.presentationCards.isEmpty ? Color.secondary : UsageDesign.green)
+                        .fill(store.productInventory.activeAgentCount == 0
+                            ? Color.secondary
+                            : UsageDesign.green)
                         .frame(width: 8, height: 8)
                     Text(monitorStatus)
                         .font(AppTypography.font(13, language: store.language))
@@ -1119,7 +1121,7 @@ private struct MonitorHeaderView: View {
     }
 
     private var monitorStatus: String {
-        let count = store.presentationCards.count
+        let count = store.productInventory.activeAgentCount
         return switch (store.language, count) {
         case (.english, 0): "No active Agents"
         case (.english, 1): "1 active Agent"

@@ -11,7 +11,6 @@ final class StatusBarController: NSObject {
     private var panelController: TransparentUsagePanelController?
     private weak var assistantController: DesktopAssistantPanelController?
     private var storeObserver: AnyCancellable?
-    private var statusUpdateScheduled = false
     private var isTornDown = false
     private var statusEventMonitor: Any?
     private var statusEventBeganAt: TimeInterval?
@@ -198,17 +197,11 @@ final class StatusBarController: NSObject {
     }
 
     private func observeUsageChanges() {
-        storeObserver = store?.objectWillChange.sink { [weak self] _ in
-            DispatchQueue.main.async {
-                guard let self, !self.statusUpdateScheduled else { return }
-                self.statusUpdateScheduled = true
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.statusUpdateScheduled = false
-                    self.updateStatusButton()
-                }
-            }
-        }
+        guard let store else { return }
+        storeObserver = Publishers.CombineLatest(
+            store.$productInventory,
+            store.$language
+        ).sink { [weak self] _, _ in self?.updateStatusButton() }
     }
 
     private func updateStatusButton() {

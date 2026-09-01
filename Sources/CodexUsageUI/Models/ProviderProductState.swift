@@ -1,0 +1,763 @@
+import Foundation
+
+/// Stable product identities. They are never account, session, or transport IDs.
+public enum ProviderProductID: String, CaseIterable, Identifiable, Sendable {
+    case codex
+    case claude
+    case workBuddy
+    case antigravity
+
+    public var id: String { rawValue }
+    public var displayName: String {
+        switch self {
+        case .codex: "Codex"
+        case .claude: "Claude"
+        case .workBuddy: "WorkBuddy"
+        case .antigravity: "Google Antigravity"
+        }
+    }
+}
+
+public enum ProviderProductPrecision: Equatable, Sendable {
+    case exact, estimated, unavailable
+}
+
+public enum ProviderProductFreshness: Equatable, Sendable {
+    case fresh, cached, stale, unavailable
+}
+
+public enum ProviderProductAvailability: Equatable, Sendable {
+    case available, setupRequired, disabled, unavailable, unsupported
+}
+
+public enum ProviderProductConnection: Equatable, Sendable {
+    case connected, transitional, authenticationRequired, disconnected, unavailable, failed
+}
+
+public enum ProviderProductHealth: Equatable, Sendable {
+    case healthy, degraded, needsAttention, error
+}
+
+public enum ProviderProductAction: Int, CaseIterable, Equatable, Sendable {
+    case authenticate, configure, enableMonitoring, accuracySync, retry, refresh, openSettings
+}
+
+/// A closed, content-free classification. Connector source strings cannot enter
+/// the product model.
+public enum ProviderProductSourceSummary: Equatable, Sendable {
+    case officialLocal
+    case localSmartExact
+    case localSmartEstimate
+    case accuracySync
+    case combinedSanitized
+    case authenticatedAccountWeb
+    case officialCLI
+    case unavailable
+}
+
+/// Closed failure taxonomy; paths, payloads, process arguments, and protocol
+/// receipts are deliberately not representable.
+public enum ProviderProductDiagnosticReason: Equatable, Sendable {
+    case authorizationRequired
+    case setupRequired
+    case sourceUnavailable
+    case timedOut
+    case unsupported
+    case invalidData
+    case processUnavailable
+    case staleData
+    case unknown
+}
+
+public enum ProviderProductQuotaValue: Equatable, Sendable {
+    case remainingPercent(Double)
+    case remainingCredits(Decimal, unit: CreditUnit)
+    case unlimited
+    case unavailable
+
+    public var remainingPercent: Double? {
+        guard case let .remainingPercent(value) = self else { return nil }
+        return value
+    }
+
+    public var displayText: String {
+        switch self {
+        case let .remainingPercent(value): "\(Int(value.rounded()))%"
+        case let .remainingCredits(value, _): CreditFormatter.compact(value)
+        case .unlimited: "∞"
+        case .unavailable: "—"
+        }
+    }
+}
+
+public enum ProviderProductComparisonIneligibility: Equatable, Sendable {
+    case missing, stale, nativeUnit, unlimited, invalid
+}
+
+public enum ProviderProductQuotaComparison: Equatable, Sendable {
+    case eligibleRemainingPercent(Double)
+    case ineligible(ProviderProductComparisonIneligibility)
+
+    public var eligibleRemainingPercent: Double? {
+        guard case let .eligibleRemainingPercent(value) = self else { return nil }
+        return value
+    }
+}
+
+public enum ProviderProductQuotaKind: Hashable, Sendable {
+    case fiveHour, sevenDay, other, credits
+}
+
+public struct ProviderProductQuotaState: Equatable, Identifiable, Sendable {
+    public let id: String
+    public let kind: ProviderProductQuotaKind
+    public let compactLabel: String
+    public let value: ProviderProductQuotaValue
+    public let precision: ProviderProductPrecision
+    public let freshness: ProviderProductFreshness
+    public let comparison: ProviderProductQuotaComparison
+    public let resetsAt: Date?
+
+    init(
+        id: String,
+        kind: ProviderProductQuotaKind,
+        compactLabel: String,
+        value: ProviderProductQuotaValue,
+        precision: ProviderProductPrecision,
+        freshness: ProviderProductFreshness,
+        comparison: ProviderProductQuotaComparison,
+        resetsAt: Date?
+    ) {
+        self.id = id
+        self.kind = kind
+        self.compactLabel = compactLabel
+        self.value = value
+        self.precision = precision
+        self.freshness = freshness
+        self.comparison = comparison
+        self.resetsAt = resetsAt
+    }
+
+    public var displayText: String {
+        precision == .estimated && value.remainingPercent != nil
+            ? "≈\(value.displayText)"
+            : value.displayText
+    }
+}
+
+public struct ProviderProductInventoryDisposition: Equatable, Sendable {
+    public let overview: Bool
+    public let providers: Bool
+    public let assistant: Bool
+
+    init(overview: Bool, providers: Bool = true, assistant: Bool) {
+        self.overview = overview
+        self.providers = providers
+        self.assistant = assistant
+    }
+}
+
+public struct ProviderProductState: Equatable, Identifiable, Sendable {
+    public let id: ProviderProductID
+    public let displayName: String
+    public let planLabel: String?
+    public let quotas: [ProviderProductQuotaState]
+    public let primaryQuotaID: String?
+    public let precision: ProviderProductPrecision
+    public let freshness: ProviderProductFreshness
+    public let availability: ProviderProductAvailability
+    public let connection: ProviderProductConnection
+    public let health: ProviderProductHealth
+    public let requiredAction: ProviderProductAction?
+    public let actions: [ProviderProductAction]
+    public let sourceSummary: ProviderProductSourceSummary
+    public let diagnosticReason: ProviderProductDiagnosticReason?
+    public let inventory: ProviderProductInventoryDisposition
+    public let isActive: Bool
+    public let capturedAt: Date?
+
+    init(
+        id: ProviderProductID,
+        planLabel: String? = nil,
+        quotas: [ProviderProductQuotaState] = [],
+        primaryQuotaID: String? = nil,
+        precision: ProviderProductPrecision = .unavailable,
+        freshness: ProviderProductFreshness = .unavailable,
+        availability: ProviderProductAvailability,
+        connection: ProviderProductConnection,
+        health: ProviderProductHealth,
+        requiredAction: ProviderProductAction? = nil,
+        actions: [ProviderProductAction] = [],
+        sourceSummary: ProviderProductSourceSummary = .unavailable,
+        diagnosticReason: ProviderProductDiagnosticReason? = nil,
+        inventory: ProviderProductInventoryDisposition,
+        isActive: Bool,
+        capturedAt: Date? = nil
+    ) {
+        self.id = id
+        self.displayName = id.displayName
+        self.planLabel = planLabel
+        self.quotas = quotas
+        self.primaryQuotaID = primaryQuotaID
+        self.precision = precision
+        self.freshness = freshness
+        self.availability = availability
+        self.connection = connection
+        self.health = health
+        self.requiredAction = requiredAction
+        self.actions = actions.sorted { $0.rawValue < $1.rawValue }
+        self.sourceSummary = sourceSummary
+        self.diagnosticReason = diagnosticReason
+        self.inventory = inventory
+        self.isActive = isActive
+        self.capturedAt = capturedAt
+    }
+
+    public var primaryQuota: ProviderProductQuotaState? {
+        guard let primaryQuotaID else { return nil }
+        return quotas.first { $0.id == primaryQuotaID }
+    }
+
+    public var primaryDisplayText: String { primaryQuota?.displayText ?? "—" }
+    public var primaryAction: ProviderProductAction? { requiredAction ?? actions.first }
+}
+
+public enum ProviderProductLimitingFactor: Equatable, Sendable {
+    case quota(provider: ProviderProductID, quotaID: String, remainingPercent: Double)
+}
+
+public enum ProviderProductAttentionPriority: Equatable, Sendable {
+    case actionRequired(provider: ProviderProductID, action: ProviderProductAction)
+}
+
+public struct ProviderProductInventory: Equatable, Sendable {
+    public let providers: [ProviderProductState]
+    public let publicationRevision: UInt64
+    public let activeAgentCount: Int
+    public let limitingFactor: ProviderProductLimitingFactor?
+    public let attentionPriority: ProviderProductAttentionPriority?
+
+    init(
+        providers: [ProviderProductState],
+        publicationRevision: UInt64 = 0,
+        activeAgentCount: Int? = nil
+    ) {
+        self.providers = providers.sorted { Self.order($0.id) < Self.order($1.id) }
+        self.publicationRevision = publicationRevision
+        self.activeAgentCount = max(0, activeAgentCount ?? providers.filter(\.isActive).count)
+        self.limitingFactor = Self.selectLimitingFactor(from: self.providers)
+        self.attentionPriority = Self.selectAttentionPriority(from: self.providers)
+    }
+
+    public var overviewProviders: [ProviderProductState] {
+        providers.filter(\.inventory.overview)
+    }
+
+    public var assistantProviders: [ProviderProductState] {
+        providers.filter(\.inventory.assistant)
+    }
+
+    public var usesAutomaticMinimalistMode: Bool { activeAgentCount > 4 }
+
+    public func provider(_ id: ProviderProductID) -> ProviderProductState? {
+        providers.first { $0.id == id }
+    }
+
+    private static func order(_ id: ProviderProductID) -> Int {
+        switch id {
+        case .codex: 0
+        case .claude: 1
+        case .workBuddy: 2
+        case .antigravity: 3
+        }
+    }
+
+    private static func selectLimitingFactor(
+        from providers: [ProviderProductState]
+    ) -> ProviderProductLimitingFactor? {
+        providers.flatMap { provider in
+            provider.quotas.compactMap { quota -> (ProviderProductID, String, Double)? in
+                guard let value = quota.comparison.eligibleRemainingPercent else { return nil }
+                return (provider.id, quota.id, value)
+            }
+        }
+        .sorted {
+            if $0.2 != $1.2 { return $0.2 < $1.2 }
+            let lhsOrder = order($0.0), rhsOrder = order($1.0)
+            return lhsOrder == rhsOrder ? $0.1 < $1.1 : lhsOrder < rhsOrder
+        }
+        .first
+        .map { .quota(provider: $0.0, quotaID: $0.1, remainingPercent: $0.2) }
+    }
+
+    private static func selectAttentionPriority(
+        from providers: [ProviderProductState]
+    ) -> ProviderProductAttentionPriority? {
+        for provider in providers {
+            if provider.health == .error || provider.health == .needsAttention,
+               let action = provider.requiredAction {
+                return .actionRequired(provider: provider.id, action: action)
+            }
+        }
+        return nil
+    }
+}
+
+struct ProviderProductReduction: Equatable, Sendable {
+    let inventory: ProviderProductInventory
+    let presentationCards: [SharedUsageCardPresentation]
+}
+
+/// Strict adapter from sanitized connector snapshots into product truth. It
+/// never retains the source snapshot, channel, descriptor, or arbitrary text.
+enum ProviderProductStatePolicy {
+    private struct CatalogEntry {
+        let productID: ProviderProductID
+        let connectorID: AgentConnectorID
+    }
+
+    private static let catalog = [
+        CatalogEntry(productID: .codex, connectorID: CodexUsageConnector.connectorID),
+        CatalogEntry(productID: .claude, connectorID: ClaudeCodeUsageConnector.connectorID),
+        CatalogEntry(
+            productID: .workBuddy,
+            connectorID: WorkBuddyAccountWebCreditsConnector.connectorID
+        ),
+        CatalogEntry(
+            productID: .antigravity,
+            connectorID: GoogleAntigravityUsageConnector.connectorID
+        ),
+    ]
+
+    static var catalogConnectorIDs: [AgentConnectorID] {
+        catalog.map(\.connectorID)
+    }
+
+    static func connectorID(for productID: ProviderProductID) -> AgentConnectorID? {
+        catalog.first { $0.productID == productID }?.connectorID
+    }
+
+    static func productID(forRawConnectorID rawValue: String) -> ProviderProductID? {
+        guard let connectorID = AgentConnectorID(rawValue: rawValue) else { return nil }
+        return productID(for: connectorID)
+    }
+
+    static func previewInventory(
+        cards: [SharedUsageCardPresentation],
+        language: AppLanguage
+    ) -> ProviderProductInventory {
+        _ = language
+        let cardsByID = Dictionary(uniqueKeysWithValues: cards.map { ($0.id, $0) })
+        return ProviderProductInventory(providers: catalog.map { entry in
+            guard let card = cardsByID[entry.connectorID.rawValue] else {
+                return ProviderProductState(
+                    id: entry.productID,
+                    availability: .unavailable,
+                    connection: .unavailable,
+                    health: .degraded,
+                    actions: [.openSettings],
+                    inventory: .init(overview: false, assistant: false),
+                    isActive: false
+                )
+            }
+            let quotas = makeQuotas(card: card, freshness: .fresh)
+            let primaryQuotaID = primaryQuotaID(card: card, quotas: quotas)
+            return ProviderProductState(
+                id: entry.productID,
+                planLabel: nil,
+                quotas: quotas,
+                primaryQuotaID: primaryQuotaID,
+                precision: quotas.first { $0.id == primaryQuotaID }?.precision ?? .unavailable,
+                freshness: .fresh,
+                availability: .available,
+                connection: .connected,
+                health: .healthy,
+                actions: entry.productID == .claude ? [.refresh, .accuracySync] : [.refresh],
+                sourceSummary: .unavailable,
+                inventory: .init(
+                    overview: true,
+                    assistant: card.isVisibleInDesktopAssistant
+                ),
+                isActive: true,
+                capturedAt: card.capturedAt
+            )
+        })
+    }
+
+    static func reduce(
+        snapshots: [AgentUsageSnapshot],
+        admissions: [ProviderSurfaceAdmissionRecord],
+        monitoringEnabledIDs: Set<AgentConnectorID>,
+        configuredOrDetectedIDs: Set<AgentConnectorID> = [],
+        previousCards: [SharedUsageCardPresentation],
+        language: AppLanguage,
+        publicationRevision: UInt64 = 0,
+        activeAgentCount: Int? = nil,
+        now: Date = Date()
+    ) -> ProviderProductReduction {
+        let admittedByID = Dictionary(uniqueKeysWithValues: admissions.map { ($0.id, $0) })
+        let snapshotByID = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.id, $0) })
+        let cards = SharedUsagePresentationPolicy.makeCards(
+            snapshots: snapshots.filter { monitoringEnabledIDs.contains($0.id) },
+            previousCards: previousCards,
+            language: language,
+            now: now
+        )
+        let cardsByID = Dictionary(uniqueKeysWithValues: cards.map { ($0.id, $0) })
+        let states = catalog.map { entry in
+            makeState(
+                entry: entry,
+                snapshot: snapshotByID[entry.connectorID],
+                admission: admittedByID[entry.connectorID]?.admission,
+                monitoringEnabled: monitoringEnabledIDs.contains(entry.connectorID),
+                configuredOrDetected: configuredOrDetectedIDs.contains(entry.connectorID),
+                card: cardsByID[entry.connectorID.rawValue]
+            )
+        }
+        return ProviderProductReduction(
+            inventory: ProviderProductInventory(
+                providers: states,
+                publicationRevision: publicationRevision,
+                activeAgentCount: activeAgentCount
+            ),
+            presentationCards: cards
+        )
+    }
+
+    static func productID(for connectorID: AgentConnectorID) -> ProviderProductID? {
+        catalog.first { $0.connectorID == connectorID }?.productID
+    }
+
+    private static func makeState(
+        entry: CatalogEntry,
+        snapshot: AgentUsageSnapshot?,
+        admission: ProviderSurfaceAdmission?,
+        monitoringEnabled: Bool,
+        configuredOrDetected: Bool,
+        card: SharedUsageCardPresentation?
+    ) -> ProviderProductState {
+        let availability = availability(
+            snapshot: snapshot,
+            admission: admission,
+            monitoringEnabled: monitoringEnabled
+        )
+        let connection = connection(snapshot?.state, availability: availability)
+        let freshness = freshness(snapshot?.freshness)
+        let health = health(
+            snapshot: snapshot,
+            availability: availability,
+            freshness: freshness
+        )
+        let actions = actions(
+            productID: entry.productID,
+            availability: availability,
+            health: health
+        )
+        let quotas = makeQuotas(card: card, freshness: freshness)
+        let primaryQuotaID = primaryQuotaID(card: card, quotas: quotas)
+        let precision = quotas.first { $0.id == primaryQuotaID }?.precision ?? .unavailable
+        let isActive = monitoringEnabled && [
+            ProviderProductConnection.connected,
+            .transitional,
+        ].contains(connection)
+        let actionRequired = health == .error || health == .needsAttention
+        let overview = monitoringEnabled && (
+            isActive || snapshot != nil || admission != nil
+                || configuredOrDetected || actionRequired || !quotas.isEmpty
+        )
+
+        return ProviderProductState(
+            id: entry.productID,
+            planLabel: nil,
+            quotas: quotas,
+            primaryQuotaID: primaryQuotaID,
+            precision: precision,
+            freshness: freshness,
+            availability: availability,
+            connection: connection,
+            health: health,
+            requiredAction: requiredAction(
+                availability: availability,
+                health: health
+            ),
+            actions: actions,
+            sourceSummary: sourceSummary(productID: entry.productID, snapshot: snapshot),
+            diagnosticReason: diagnosticReason(
+                snapshot: snapshot,
+                admission: admission,
+                availability: availability
+            ),
+            inventory: ProviderProductInventoryDisposition(
+                overview: overview,
+                assistant: isActive && availability != .unsupported
+            ),
+            isActive: isActive,
+            capturedAt: snapshot?.capturedAt
+        )
+    }
+
+    private static func makeQuotas(
+        card: SharedUsageCardPresentation?,
+        freshness: ProviderProductFreshness
+    ) -> [ProviderProductQuotaState] {
+        guard let card else { return [] }
+        var counts: [ProviderProductQuotaKind: Int] = [:]
+        var quotas = card.windows.map { window -> ProviderProductQuotaState in
+            let kind: ProviderProductQuotaKind = switch window.kind {
+            case .fiveHour: .fiveHour
+            case .sevenDay: .sevenDay
+            case .other: .other
+            }
+            let index = counts[kind, default: 0]
+            counts[kind] = index + 1
+            let value = quotaValue(window.remaining)
+            let precision: ProviderProductPrecision = window.isEstimated == true
+                ? .estimated
+                : value == .unavailable ? .unavailable : .exact
+            return ProviderProductQuotaState(
+                id: "\(stableName(kind))-\(index)",
+                kind: kind,
+                compactLabel: compactLabel(kind),
+                value: value,
+                precision: precision,
+                freshness: freshness,
+                comparison: comparison(value, freshness: freshness),
+                resetsAt: window.resetsAt
+            )
+        }
+
+        if quotas.isEmpty, let availability = card.availability {
+            let value: ProviderProductQuotaValue = switch availability.value {
+            case let .percentage(percentage): .remainingPercent(percentage.value)
+            case let .credits(balance): .remainingCredits(balance.remaining, unit: balance.unit)
+            case .unlimited: .unlimited
+            case .unavailable, .invalid: .unavailable
+            }
+            let creditComparison: ProviderProductQuotaComparison
+            if freshness == .stale || freshness == .unavailable {
+                creditComparison = .ineligible(.stale)
+            } else if case .remainingCredits = value {
+                creditComparison = availability.normalizedRemainingFraction.map {
+                    .eligibleRemainingPercent($0 * 100)
+                } ?? .ineligible(.nativeUnit)
+            } else {
+                creditComparison = comparison(value, freshness: freshness)
+            }
+            quotas = [
+                ProviderProductQuotaState(
+                    id: "credits-0",
+                    kind: .credits,
+                    compactLabel: "Credits",
+                    value: value,
+                    precision: value == .unavailable ? .unavailable : .exact,
+                    freshness: freshness,
+                    comparison: creditComparison,
+                    resetsAt: availability.nextExpiryAt
+                )
+            ]
+        }
+        return quotas
+    }
+
+    private static func primaryQuotaID(
+        card: SharedUsageCardPresentation?,
+        quotas: [ProviderProductQuotaState]
+    ) -> String? {
+        guard !quotas.isEmpty else { return nil }
+        guard let selectedID = card?.selectedWindowID,
+              let selected = card?.windows.first(where: { $0.id == selectedID })
+        else { return quotas.first?.id }
+        let kind: ProviderProductQuotaKind = switch selected.kind {
+        case .fiveHour: .fiveHour
+        case .sevenDay: .sevenDay
+        case .other: .other
+        }
+        let siblings = card?.windows.filter { $0.kind == selected.kind } ?? []
+        return "\(stableName(kind))-\(siblings.firstIndex { $0.id == selected.id } ?? 0)"
+    }
+
+    private static func stableName(_ kind: ProviderProductQuotaKind) -> String {
+        return switch kind {
+        case .fiveHour: "five-hour"
+        case .sevenDay: "seven-day"
+        case .other: "other"
+        case .credits: "credits"
+        }
+    }
+
+    private static func compactLabel(_ kind: ProviderProductQuotaKind) -> String {
+        return switch kind {
+        case .fiveHour: "5H"
+        case .sevenDay: "7D"
+        case .credits: "Credits"
+        case .other: "Other"
+        }
+    }
+
+    private static func quotaValue(_ value: SharedRemainingValue) -> ProviderProductQuotaValue {
+        switch value {
+        case let .finite(percent) where percent.isFinite && (0...100).contains(percent):
+            .remainingPercent(percent)
+        case .unlimited: .unlimited
+        case .finite, .unavailable: .unavailable
+        }
+    }
+
+    private static func comparison(
+        _ value: ProviderProductQuotaValue,
+        freshness: ProviderProductFreshness
+    ) -> ProviderProductQuotaComparison {
+        if freshness == .stale || freshness == .unavailable { return .ineligible(.stale) }
+        switch value {
+        case let .remainingPercent(percent) where percent.isFinite && (0...100).contains(percent):
+            return .eligibleRemainingPercent(percent)
+        case .remainingCredits: return .ineligible(.nativeUnit)
+        case .unlimited: return .ineligible(.unlimited)
+        case .remainingPercent, .unavailable: return .ineligible(.invalid)
+        }
+    }
+
+    private static func availability(
+        snapshot: AgentUsageSnapshot?,
+        admission: ProviderSurfaceAdmission?,
+        monitoringEnabled: Bool
+    ) -> ProviderProductAvailability {
+        guard monitoringEnabled else { return .disabled }
+        switch admission {
+        case .hiddenNotAuthenticated: return .setupRequired
+        case .hiddenUnsupported: return .unsupported
+        case .hiddenNotRunning, .hiddenNoAdmittedLocalSource, .hiddenCurrentReadFailed:
+            return .unavailable
+        case .admitted: return .available
+        case nil: break
+        }
+        return switch snapshot?.state {
+        case .ready, .stale: .available
+        case .authenticationRequired: .setupRequired
+        case .unsupported: .unsupported
+        case .inactive, .waitingForFirstResponse, .failed, nil: .unavailable
+        }
+    }
+
+    private static func connection(
+        _ state: AgentConnectorState?,
+        availability: ProviderProductAvailability
+    ) -> ProviderProductConnection {
+        if availability == .disabled { return .disconnected }
+        if availability == .setupRequired { return .authenticationRequired }
+        return switch state {
+        case .ready, .stale: .connected
+        case .waitingForFirstResponse: .transitional
+        case .authenticationRequired: .authenticationRequired
+        case .inactive: .disconnected
+        case .unsupported, nil: .unavailable
+        case .failed: .failed
+        }
+    }
+
+    private static func freshness(_ value: AgentConnectorFreshness?) -> ProviderProductFreshness {
+        switch value {
+        case .fresh: .fresh
+        case .cached: .cached
+        case .stale: .stale
+        case .unavailable, nil: .unavailable
+        }
+    }
+
+    private static func health(
+        snapshot: AgentUsageSnapshot?,
+        availability: ProviderProductAvailability,
+        freshness: ProviderProductFreshness
+    ) -> ProviderProductHealth {
+        if snapshot?.state == .failed { return .error }
+        if availability == .setupRequired { return .needsAttention }
+        if availability == .unsupported || availability == .disabled { return .degraded }
+        if freshness == .stale || freshness == .cached || availability == .unavailable {
+            return .degraded
+        }
+        return snapshot?.state == .ready ? .healthy : .degraded
+    }
+
+    private static func actions(
+        productID: ProviderProductID,
+        availability: ProviderProductAvailability,
+        health: ProviderProductHealth
+    ) -> [ProviderProductAction] {
+        switch availability {
+        case .setupRequired: return [.authenticate, .openSettings]
+        case .disabled: return [.enableMonitoring]
+        case .unsupported: return []
+        case .unavailable: return [.retry, .openSettings]
+        case .available:
+            var result: [ProviderProductAction] = [.refresh]
+            if productID == .claude { result.append(.accuracySync) }
+            if health == .error { result.append(.retry) }
+            return result
+        }
+    }
+
+    private static func requiredAction(
+        availability: ProviderProductAvailability,
+        health: ProviderProductHealth
+    ) -> ProviderProductAction? {
+        switch availability {
+        case .setupRequired: return .authenticate
+        case .disabled: return nil
+        case .unavailable where health == .error: return .retry
+        case .available where health == .error: return .retry
+        case .available, .unavailable, .unsupported: return nil
+        }
+    }
+
+    private static func sourceSummary(
+        productID: ProviderProductID,
+        snapshot: AgentUsageSnapshot?
+    ) -> ProviderProductSourceSummary {
+        guard let account = snapshot?.channels.first(where: { $0.id == .account }) else {
+            return .unavailable
+        }
+        switch productID {
+        case .codex: return .officialLocal
+        case .workBuddy: return .authenticatedAccountWeb
+        case .antigravity: return .officialCLI
+        case .claude:
+            switch account.sourceVersion {
+            case "smart-1-local-exact": return .localSmartExact
+            case "smart-1-desktop-estimate", "smart-1-local-estimate":
+                return .localSmartEstimate
+            case "smart-1-safari-exact": return .accuracySync
+            case "smart-1-mixed", "smart-1-stale": return .combinedSanitized
+            default:
+                return account.provenance == .locallyEstimated
+                    ? .localSmartEstimate
+                    : .combinedSanitized
+            }
+        }
+    }
+
+    private static func diagnosticReason(
+        snapshot: AgentUsageSnapshot?,
+        admission: ProviderSurfaceAdmission?,
+        availability: ProviderProductAvailability
+    ) -> ProviderProductDiagnosticReason? {
+        if availability == .disabled { return nil }
+        switch admission {
+        case .hiddenNotAuthenticated: return .setupRequired
+        case .hiddenNotRunning: return .processUnavailable
+        case .hiddenNoAdmittedLocalSource, .hiddenCurrentReadFailed: return .sourceUnavailable
+        case .hiddenUnsupported: return .unsupported
+        case .admitted, nil: break
+        }
+        switch snapshot?.safeFailure {
+        case .authorizationRequired: return .authorizationRequired
+        case .unavailable: return .sourceUnavailable
+        case .timedOut: return .timedOut
+        case .unsupported: return .unsupported
+        case .malformedResponse: return .invalidData
+        case .processExited: return .processUnavailable
+        case .unknown: return .unknown
+        case nil: return snapshot?.freshness == .stale ? .staleData : nil
+        }
+    }
+
+}

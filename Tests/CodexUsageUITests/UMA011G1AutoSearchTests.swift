@@ -286,7 +286,11 @@ struct UMA011G1AutoSearchTests {
         settings.setMonitoringEnabled(false, for: connector.id)
 
         #expect(store.presentationCards.isEmpty)
-        #expect(store.providerSnapshots.isEmpty)
+        #expect(store.overviewPresentationCards.isEmpty)
+        #expect(store.providerSnapshots.count == 1)
+        #expect(store.productInventory.provider(.codex)?.availability == .disabled)
+        #expect(store.productInventory.provider(.codex)?.isActive == false)
+        #expect(store.productInventory.overviewProviders.isEmpty)
         #expect(store.providerLoginOptions.isEmpty)
         #expect(settings.activeProviderIDs.isEmpty)
         #expect(settings.setupRequiredProviderIDs.isEmpty)

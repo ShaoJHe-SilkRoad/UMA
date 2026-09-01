@@ -546,7 +546,7 @@ struct M2WG2WorkBuddyManualSourceTests {
             encoding: .utf8
         )
         #expect(panel.contains("MonitorHeaderView"))
-        #expect(panel.contains("ForEach(store.presentationCards)"))
+        #expect(panel.contains("ForEach(store.overviewPresentationCards)"))
         #expect(panel.contains(".accessibilityLabel(agentSettingsLabel)"))
     }
 

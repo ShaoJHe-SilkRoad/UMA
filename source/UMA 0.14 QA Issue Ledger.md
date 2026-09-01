@@ -1,8 +1,8 @@
 # UMA 0.14 QA Issue Ledger
 
-Status: M1 execution complete; B0 planning evidence retained
+Status: M2 execution in verification; M1 and B0 evidence retained
 
-Current task: `GN-UMA014-M1-01`
+Current task: `GN-UMA014-M2-01`
 
 Planning baseline task: `GN-UMA014-B0-01`
 
@@ -23,8 +23,8 @@ Baseline: UMA 0.13.0 commit `f6dd617bb736d49b444dda4945d55e5b4606c915`, tree `16
 |---|---|---|---|---|---|
 | UMA014-UX-01 | Major | CLOSED / M1 | The 0.13 baseline had no canonical main application window or native Settings window. | Native singleton Main and Settings windows; real close/reopen/quit lifecycle; menu/shortcut tests; content-free machine diagnostic; bounded physical macOS UI qualification. | M1 |
 | UMA014-UX-02 | Major | CONFIRMED / OPEN | Quick Panel owns dashboard, activity/cost, provider detail, and configuration. | Quick Panel contains only glance/frequent actions; full details and setup are reachable in native windows; no duplicated usage logic. | M3 |
-| UMA014-UX-03 | Major | CONFIRMED / OPEN | Header emphasizes active-provider count rather than limiting/actionable quota. | Deterministic limiting comparison that excludes incomparable native units; truthful attention hierarchy; zero-provider and unavailable fixtures. | M2–M3 |
-| UMA014-UX-04 | Major | CONFIRMED / OPEN | Unavailable snapshots can be filtered away, obscuring disabled/setup/signed-out/failure states. | Complete admitted-provider inventory and explicit support/availability/connection/action classifications; Cursor/Kimi remain unsupported. | M2 |
+| UMA014-UX-03 | Major | M2 MODEL CLOSED / M3 UI OPEN | Header emphasizes active-provider count rather than limiting/actionable quota. | M2 now publishes separate comparable limiting quota and action-attention priority; M3 must render the accepted hierarchy. | M2–M3 |
+| UMA014-UX-04 | Major | CLOSED / M2 | Unavailable snapshots could be filtered away, obscuring disabled/setup/signed-out/failure states. | Complete four-provider inventory, deterministic Overview eligibility, and explicit support/availability/connection/action classifications; Cursor/Kimi remain unsupported. | M2 |
 | UMA014-UX-05 | Moderate | CONFIRMED / OPEN | Provider Settings structures differ and ordinary UI leaks implementation terminology. | Shared provider settings schema; bounded diagnostics disclosure; no bridge/App Group/generation codes in normal UI. | M4 |
 | UMA014-UX-06 | Major | M1 COMMAND MODEL CLOSED / M4 ACCESSIBILITY OPEN | M1 now has one application-wide command router and native menu/shortcut model; deeper Full Keyboard Access and focus qualification remains in M4. | Native menu graph and live shortcut routing passed in M1; Full Keyboard Access traversal and focus restoration/deep-link tests remain required in M4. | M4 |
 | UMA014-UX-07 | Major | CONFIRMED / OPEN | Fixed point typography and preview-only scaling do not prove production accessibility scaling. | Semantic/relative production typography; English/Chinese accessibility-size qualification without loss of meaning. | M3–M4 |
@@ -35,7 +35,7 @@ Baseline: UMA 0.13.0 commit `f6dd617bb736d49b444dda4945d55e5b4606c915`, tree `16
 
 | ID | Severity | State | Finding | Required proof to close | Target |
 |---|---|---|---|---|---|
-| UMA014-TD-01 | Critical | CONFIRMED / OPEN | Claude connector stores one stream continuation; later UI subscribers can displace earlier consumers. | Multi-subscriber tests with Registry, Settings, main window, cancellation, duplicate delivery, and deterministic termination. | M2 |
+| UMA014-TD-01 | Critical | CLOSED / M2 | Registry publication stored one stream continuation; later consumers could displace earlier consumers. | UUID-owned coherent publication streams, immediate replay, exact detach, and deterministic simultaneous-subscriber tests. | M2 |
 | UMA014-TD-02 | Major | CONFIRMED / OPEN | Smart-anchor load rejection collapses to an empty store without content-free reason. | Typed load outcomes for absent, unsafe, corrupt, incompatible, rewrite failed, repaired, and accepted; privacy scan. | M2 |
 | UMA014-TD-03 | Major | CONFIRMED / OPEN | `UsageStore.setLanguage` bypasses injected defaults and can mutate process preferences in tests. | Injected preference authority; old-fail/new-pass pollution test; clean defaults before/after parallel suites. | M5 |
 | UMA014-TD-04 | Major | CONFIRMED / OPEN | Fixed `Task.yield`/sleep synchronization appears throughout affected tests. | Replace affected waits with observable-state/task-start handshakes; individual, parallel, and load stability without larger sleeps. | M2–M5 |
@@ -122,6 +122,19 @@ Baseline: UMA 0.13.0 commit `f6dd617bb736d49b444dda4945d55e5b4606c915`, tree `16
 - exact/estimated/missing-not-zero parity;
 - typed anchor diagnostic tests;
 - privacy allowlist audit.
+
+#### `GN-UMA014-M2-01` implementation record
+
+- one coherent registry envelope publishes snapshots and their matching admission records under one revision;
+- independent UUID-owned subscribers receive immediate replay and exact detach without stealing updates;
+- one `UsageStore` subscription reduces each revision into one `ProviderProductInventory`;
+- the inventory contains exactly Codex, Claude, WorkBuddy, and Google Antigravity; Cursor/Kimi remain unsupported;
+- precision, freshness, availability, connection, health, required action, and available actions are orthogonal typed state;
+- exact, estimated, missing, unlimited, native-credit, stale, and invalid values remain distinct;
+- Maximum Decrement remains owned by the accepted shared presentation policy;
+- comparable limiting quota and action-attention priority are separate results;
+- Main, Quick Panel, Desktop Assistant, status item, and future Settings share the product inventory boundary;
+- acquisition, authentication, Safari, estimator, provider quota math, persistence, signing, and release source remain unchanged.
 
 ### M3 — Main window and Quick Panel
 

@@ -111,7 +111,7 @@ struct UMA011G1ProviderCardTests {
         )
 
         #expect(panelContent.contains("MonitorHeaderView"))
-        #expect(panelContent.contains("ForEach(store.presentationCards)"))
+        #expect(panelContent.contains("ForEach(store.overviewPresentationCards)"))
         #expect(
             panelContent.occurrenceCount(
                 of: "LocalLiveProviderCard("

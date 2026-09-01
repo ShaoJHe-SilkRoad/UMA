@@ -11,6 +11,7 @@ public final class UsageStore: ObservableObject {
     @Published private(set) var snapshot: UsageSnapshot
     @Published private(set) var providerSnapshots: [AgentUsageSnapshot] = []
     @Published public private(set) var presentationCards: [SharedUsageCardPresentation] = []
+    @Published public private(set) var productInventory: ProviderProductInventory
     @Published private(set) var providerLoginOptions: [ProviderLoginOption] = []
     @Published private(set) var isRefreshing = false
     @Published public private(set) var lastError: String?
@@ -30,9 +31,12 @@ public final class UsageStore: ObservableObject {
     private let allowsLaunchScan: Bool
     private let consentDefaults: UserDefaults?
     private var registrySubscription: Task<Void, Never>?
+    private var registryStreamSubscription: AgentConnectorRegistrySubscription?
     private var agentSettingsSubscription: AnyCancellable?
     private var activeScanTask: Task<UsageEligibilityScanOutcome?, Never>?
     private var activeScanGeneration: UInt64 = 0
+    private var currentAdmissionRecords: [ProviderSurfaceAdmissionRecord] = []
+    private var currentRegistryRevision: UInt64 = 0
 
     public convenience init(autoRefresh: Bool = true, language: AppLanguage? = nil) {
         self.init(
@@ -140,6 +144,10 @@ public final class UsageStore: ObservableObject {
             )
         self.language = selectedLanguage
         self.presentationCards = previewPresentationCards
+        self.productInventory = ProviderProductStatePolicy.previewInventory(
+            cards: previewPresentationCards,
+            language: selectedLanguage
+        )
         self.providerLoginOptions = previewLoginOptions
         self.snapshot = previewOnly && previewScenario.displaysFixtureData
             ? .preview(language: selectedLanguage)
@@ -162,11 +170,9 @@ public final class UsageStore: ObservableObject {
     }
 
     public var menuPercent: Int? {
-        if let primaryID = primaryConnectorID?.rawValue,
-           let primaryCard = presentationCards.first(where: {
-               $0.id == primaryID
-           }) {
-            return primaryCard.remaining.displayPercent
+        if let remaining = productInventory.provider(.codex)?
+            .primaryQuota?.value.remainingPercent {
+            return Int(remaining.rounded())
         }
         return previewOnly
             ? snapshot.periods.first(where: { !$0.isUnlimited })?.remainingPercent
@@ -174,7 +180,21 @@ public final class UsageStore: ObservableObject {
     }
 
     public var assistantPresentationCards: [SharedUsageCardPresentation] {
-        SharedUsagePresentationPolicy.assistantCards(from: presentationCards)
+        let assistantIDs = Set(productInventory.assistantProviders.map(\.id))
+        return presentationCards.filter {
+            ProviderProductStatePolicy.productID(
+                forRawConnectorID: $0.id
+            ).map(assistantIDs.contains) == true
+        }
+    }
+
+    public var overviewPresentationCards: [SharedUsageCardPresentation] {
+        let overviewIDs = Set(productInventory.overviewProviders.map(\.id))
+        return presentationCards.filter {
+            ProviderProductStatePolicy.productID(
+                forRawConnectorID: $0.id
+            ).map(overviewIDs.contains) == true
+        }
     }
 
     public var statusText: String {
@@ -316,6 +336,10 @@ public final class UsageStore: ObservableObject {
         activeScanTask?.cancel()
         activeScanTask = nil
         registrySubscription?.cancel()
+        if let registryStreamSubscription {
+            await registry.detach(registryStreamSubscription)
+            self.registryStreamSubscription = nil
+        }
         await registry.stopAll()
         receive([], loginOptions: [])
     }
@@ -338,7 +362,11 @@ public final class UsageStore: ObservableObject {
     private func beginRegistryObservation() {
         guard let registry else { return }
         registrySubscription = Task { [weak self] in
-            let stream = await registry.snapshots()
+            let subscription = await registry.subscribe()
+            defer {
+                Task { await registry.detach(subscription) }
+            }
+            self?.registryStreamSubscription = subscription
             await registry.restorePersistedSnapshots()
             if self?.allowsLaunchScan == true,
                self?.agentSettings?.shouldAutoSearchAtLaunch == true {
@@ -346,22 +374,11 @@ public final class UsageStore: ObservableObject {
                     trigger: .applicationLaunch
                 )
             }
-            for await snapshots in stream {
+            for await publication in subscription.updates {
                 guard !Task.isCancelled else { return }
-                guard let admissionSet = await registry.surfaceAdmissionSet(),
-                      snapshots == admissionSet.admittedSnapshots
-                else { continue }
-                self?.receive(
-                    snapshots,
-                    loginOptions: admissionSet.loginOptions,
-                    setupRequiredProviderIDs:
-                        admissionSet.records.compactMap {
-                            $0.admission == .hiddenNotAuthenticated
-                                ? $0.id
-                                : nil
-                        }
-                )
+                self?.receive(publication)
             }
+            self?.registryStreamSubscription = nil
         }
     }
 
@@ -374,30 +391,8 @@ public final class UsageStore: ObservableObject {
     }
 
     private func applyMonitoringPreferences() {
-        guard let agentSettings else { return }
-        let visibleSnapshots = providerSnapshots.filter {
-            agentSettings.isMonitoringEnabled(for: $0.id)
-        }
-        let visibleLoginOptions = providerLoginOptions.filter {
-            agentSettings.isMonitoringEnabled(for: $0.id)
-        }
-        let visibleSetupRequiredProviderIDs =
-            agentSettings.setupRequiredProviderIDs.filter {
-                agentSettings.isMonitoringEnabled(for: $0)
-            }
-        guard visibleSnapshots != providerSnapshots
-                || visibleLoginOptions != providerLoginOptions
-                || visibleSetupRequiredProviderIDs
-                    != agentSettings.setupRequiredProviderIDs
-        else {
-            return
-        }
-        receive(
-            visibleSnapshots,
-            loginOptions: visibleLoginOptions,
-            setupRequiredProviderIDs:
-                Array(visibleSetupRequiredProviderIDs)
-        )
+        guard agentSettings != nil else { return }
+        rebuildPresentation()
     }
 
     private func performEligibilityScan(
@@ -432,16 +427,7 @@ public final class UsageStore: ObservableObject {
                 trigger: trigger,
                 excludedProviderIDs: excluded
             )
-            self.receive(
-                result.admittedSnapshots,
-                loginOptions: result.loginOptions,
-                setupRequiredProviderIDs:
-                    result.records.compactMap {
-                        $0.admission == .hiddenNotAuthenticated
-                            ? $0.id
-                            : nil
-                    }
-            )
+            self.receive(await registry.latestPublication())
             let outcome = UsageEligibilityScanOutcome(
                 safelyDetectedProviderIDs:
                     result.safelyDetectedProviderIDs.filter {
@@ -472,30 +458,69 @@ public final class UsageStore: ObservableObject {
         setupRequiredProviderIDs: [AgentConnectorID] = []
     ) {
         guard !previewOnly else { return }
-        let visibleSnapshots = snapshots.filter {
+        providerSnapshots = snapshots
+        currentAdmissionRecords = []
+        providerLoginOptions = loginOptions.filter {
             agentSettings?.isMonitoringEnabled(for: $0.id) ?? true
         }
-        let visibleLoginOptions = loginOptions.filter {
+        _ = setupRequiredProviderIDs
+        rebuildPresentation()
+    }
+
+    private func receive(_ publication: AgentConnectorRegistryPublication) {
+        guard !previewOnly else { return }
+        guard publication.revision >= currentRegistryRevision else { return }
+        if publication.revision == currentRegistryRevision,
+           publication.snapshots == providerSnapshots,
+           publication.admissionSet?.records == currentAdmissionRecords {
+            return
+        }
+        currentRegistryRevision = publication.revision
+        // Restored connector snapshots are internal recovery evidence until a
+        // completed admission scan establishes the matching surface contract.
+        providerSnapshots = publication.admissionSet == nil
+            ? []
+            : publication.snapshots
+        currentAdmissionRecords = publication.admissionSet?.records ?? []
+        providerLoginOptions = (publication.admissionSet?.loginOptions ?? []).filter {
             agentSettings?.isMonitoringEnabled(for: $0.id) ?? true
         }
-        let visibleSetupRequiredProviderIDs =
-            setupRequiredProviderIDs.filter {
-                agentSettings?.isMonitoringEnabled(for: $0) ?? true
-            }
-        providerSnapshots = visibleSnapshots
-        providerLoginOptions = visibleLoginOptions
-        agentSettings?.setProviderRuntimeState(
-            activeConnectorIDs: visibleSnapshots.map(\.id),
-            setupRequiredConnectorIDs: visibleSetupRequiredProviderIDs
-        )
         rebuildPresentation()
     }
 
     private func rebuildPresentation() {
-        presentationCards = SharedUsagePresentationPolicy.makeCards(
+        let monitoringEnabledIDs = ProviderProductStatePolicy.catalogConnectorIDs.filter {
+            agentSettings?.isMonitoringEnabled(for: $0) ?? true
+        }
+        let configuredOrDetectedIDs = Set(
+            (agentSettings?.entries ?? []).compactMap {
+                $0.hasBeenDetected || $0.hasNonDefaultSettings
+                    ? $0.providerID
+                    : nil
+            }
+        )
+        let reduction = ProviderProductStatePolicy.reduce(
             snapshots: providerSnapshots,
+            admissions: currentAdmissionRecords,
+            monitoringEnabledIDs: Set(monitoringEnabledIDs),
+            configuredOrDetectedIDs: configuredOrDetectedIDs,
             previousCards: presentationCards,
-            language: language
+            language: language,
+            publicationRevision: currentRegistryRevision
+        )
+        presentationCards = reduction.presentationCards
+        productInventory = reduction.inventory
+        let activeIDs = productInventory.providers.compactMap {
+            $0.isActive ? ProviderProductStatePolicy.connectorID(for: $0.id) : nil
+        }
+        let setupRequiredIDs = productInventory.providers.compactMap {
+            $0.requiredAction == .authenticate
+                ? ProviderProductStatePolicy.connectorID(for: $0.id)
+                : nil
+        }
+        agentSettings?.setProviderRuntimeState(
+            activeConnectorIDs: activeIDs,
+            setupRequiredConnectorIDs: setupRequiredIDs
         )
         guard let primary = primarySnapshot else {
             snapshot = previewDisplaysFixtureData
@@ -521,6 +546,9 @@ public final class UsageStore: ObservableObject {
 
     private var primarySnapshot: AgentUsageSnapshot? {
         guard let primaryConnectorID else { return nil }
+        guard agentSettings?.isMonitoringEnabled(for: primaryConnectorID) ?? true else {
+            return nil
+        }
         return providerSnapshots.first(where: {
             $0.id == primaryConnectorID
         })

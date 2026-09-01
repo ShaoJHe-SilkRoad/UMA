@@ -137,13 +137,16 @@ struct UMA014M1NativeShellTests {
         #expect(shell.contains("statusBarController.tearDown()"))
     }
 
-    @Test("M1 presentation preserves remaining, approximate, and unavailable semantics")
+    @Test("M1 presentation consumes the shared provider product-state semantics")
     func presentationSemanticsAreShared() throws {
         let views = try source("Sources/CodexUsageMonitor/App/NativeShellViews.swift")
-        #expect(views.contains("card.remainingDisplayText"))
-        #expect(views.contains("window.isEstimated == true"))
-        #expect(views.contains("≈\\(window.remaining.displayText)"))
-        #expect(views.contains("window.remaining.displayText"))
+        #expect(views.contains("store.productInventory.overviewProviders"))
+        #expect(views.contains("store.productInventory.providers"))
+        #expect(views.contains("provider.primaryDisplayText"))
+        #expect(views.contains("quota.displayText"))
+        #expect(views.contains("provider.quotas.isEmpty"))
+        #expect(views.contains("Usage unavailable"))
+        #expect(views.contains("Currently unavailable"))
         #expect(!views.contains("?? \"0%\""))
         #expect(!views.localizedCaseInsensitiveContains("maximum decrement"))
     }

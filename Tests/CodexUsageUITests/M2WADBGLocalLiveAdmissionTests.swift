@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import Testing
 @testable import CodexUsageUI
 
@@ -332,6 +333,10 @@ struct M2WADBGLocalLiveAdmissionTests {
 
         try await waitUntil {
             await registry.orderedSnapshots().count == 1
+        }
+        let restoredRevision = await registry.latestPublication().revision
+        for await inventory in store.$productInventory.values {
+            if inventory.publicationRevision == restoredRevision { break }
         }
         #expect((await scanner.diagnostics()).completedScanCount == 0)
         #expect(store.presentationCards.isEmpty)

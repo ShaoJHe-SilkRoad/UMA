@@ -206,8 +206,10 @@ struct STABG1StabilityContractTests {
             "Sources/CodexUsageMonitor/App/DesktopAssistantPanelController.swift"
         )
 
-        #expect(status.contains("statusUpdateScheduled"))
-        #expect(status.contains("guard let self, !self.statusUpdateScheduled"))
+        #expect(status.contains("store.$productInventory"))
+        #expect(status.contains("store.$language"))
+        #expect(status.contains("self?.updateStatusButton()"))
+        #expect(!status.contains("store.objectWillChange"))
         #expect(assistant.contains("let cardsChanged = cards != self.cards"))
         #expect(assistant.contains("if cardsChanged || densityChanged"))
         #expect(assistant.contains("guard !panel.isVisible else { return }"))

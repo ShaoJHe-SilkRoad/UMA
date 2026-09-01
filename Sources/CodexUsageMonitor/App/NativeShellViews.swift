@@ -59,7 +59,7 @@ private struct M1OverviewView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if store.presentationCards.isEmpty {
+                if store.productInventory.overviewProviders.isEmpty {
                     ContentUnavailableView(
                         "No provider usage available",
                         systemImage: "gauge.with.dots.needle.0percent",
@@ -70,8 +70,8 @@ private struct M1OverviewView: View {
                         columns: [GridItem(.adaptive(minimum: 240), spacing: 14)],
                         spacing: 14
                     ) {
-                        ForEach(store.presentationCards) { card in
-                            M1ProviderSummary(card: card)
+                        ForEach(store.productInventory.overviewProviders) { provider in
+                            M1ProviderSummary(provider: provider)
                         }
                     }
                 }
@@ -86,62 +86,60 @@ private struct M1ProvidersView: View {
 
     var body: some View {
         Group {
-            if store.presentationCards.isEmpty {
-                ContentUnavailableView(
-                    "No providers available",
-                    systemImage: "person.3",
-                    description: Text("Provider monitoring continues independently of this window.")
-                )
-            } else {
-                List(store.presentationCards) { card in
+            List(store.productInventory.providers) { provider in
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(alignment: .firstTextBaseline) {
-                            Text(card.providerName).font(.headline)
-                            if let planLabel = card.planLabel {
+                            Text(provider.displayName).font(.headline)
+                            if let planLabel = provider.planLabel {
                                 Text(planLabel).font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Text(card.remainingDisplayText)
+                            Text(provider.primaryDisplayText)
                                 .font(.title3.monospacedDigit().bold())
-                                .accessibilityLabel(card.accessibilityLabel)
                         }
-                        ForEach(card.windows) { window in
+                        ForEach(provider.quotas) { quota in
                             HStack {
-                                Text(window.compactLabel)
+                                Text(quota.compactLabel)
                                 Spacer()
-                                Text(windowDisplayText(window))
+                                Text(quota.displayText)
                                     .monospacedDigit()
-                                Text(window.resetText)
-                                    .foregroundStyle(.secondary)
                             }
                             .font(.callout)
+                        }
+                        if provider.quotas.isEmpty {
+                            Text(providerStatus(provider))
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
                         }
                     }
                     .padding(.vertical, 8)
                 }
-            }
         }
     }
 
-    private func windowDisplayText(_ window: SharedUsageWindowPresentation) -> String {
-        window.isEstimated == true && window.remaining.finitePercent != nil
-            ? "≈\(window.remaining.displayText)"
-            : window.remaining.displayText
+    private func providerStatus(_ provider: ProviderProductState) -> String {
+        switch provider.availability {
+        case .available: "Usage unavailable"
+        case .setupRequired: "Setup required"
+        case .disabled: "Monitoring disabled"
+        case .unavailable: "Currently unavailable"
+        case .unsupported: "Unsupported"
+        }
     }
 }
 
 private struct M1ProviderSummary: View {
-    let card: SharedUsageCardPresentation
+    let provider: ProviderProductState
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(card.providerName)
+            Text(provider.displayName)
                 .font(.headline)
                 .lineLimit(1)
-            Text(card.remainingDisplayText)
+            Text(provider.primaryDisplayText)
                 .font(.system(size: 34, weight: .semibold, design: .rounded))
                 .monospacedDigit()
-            Text(card.selectedWindowCompactLabel ?? "Remaining")
+            Text(provider.primaryQuota?.compactLabel ?? "Remaining")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -153,7 +151,7 @@ private struct M1ProviderSummary: View {
                 .stroke(.separator.opacity(0.55), lineWidth: 1)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(card.accessibilityLabel)
+        .accessibilityLabel("\(provider.displayName), \(provider.primaryDisplayText) remaining")
     }
 }
 

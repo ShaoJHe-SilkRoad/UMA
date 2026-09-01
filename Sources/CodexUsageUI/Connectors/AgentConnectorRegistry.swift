@@ -5,12 +5,29 @@ enum AgentConnectorRegistryError: Error, Equatable {
     case unknownConnector(AgentConnectorID)
 }
 
+/// One coherent registry revision. Consumers must never pair snapshots from
+/// one revision with admission records from another.
+struct AgentConnectorRegistryPublication: Equatable, Sendable {
+    let revision: UInt64
+    let snapshots: [AgentUsageSnapshot]
+    let admissionSet: ProviderSurfaceAdmissionSet?
+}
+
+struct AgentConnectorRegistrySubscription: Sendable {
+    fileprivate let id: UUID
+    let updates: AsyncStream<AgentConnectorRegistryPublication>
+}
+
 actor AgentConnectorRegistry {
     private var connectors: [AgentConnectorID: any AgentUsageConnector] = [:]
     private var orderedIDs: [AgentConnectorID] = []
     private var listeners: [AgentConnectorID: Task<Void, Never>] = [:]
     private var latest: [AgentConnectorID: AgentUsageSnapshot] = [:]
-    private var continuation: AsyncStream<[AgentUsageSnapshot]>.Continuation?
+    private var snapshotContinuations:
+        [UUID: AsyncStream<[AgentUsageSnapshot]>.Continuation] = [:]
+    private var publicationContinuations:
+        [UUID: AsyncStream<AgentConnectorRegistryPublication>.Continuation] = [:]
+    private var publicationRevision: UInt64 = 0
     private let snapshotStore: AgentConnectorSnapshotStore?
     private let eligibilityScanner: LocalProviderEligibilityScanner
     private var currentAdmissionSet: ProviderSurfaceAdmissionSet?
@@ -47,11 +64,52 @@ actor AgentConnectorRegistry {
 
     func snapshots() -> AsyncStream<[AgentUsageSnapshot]> {
         AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
-            self.continuation = continuation
+            let subscriptionID = UUID()
+            self.snapshotContinuations[subscriptionID] = continuation
+            continuation.yield(self.orderedSnapshots())
             continuation.onTermination = { [weak self] _ in
-                Task { await self?.clearContinuation() }
+                Task { await self?.removeSnapshotContinuation(subscriptionID) }
             }
         }
+    }
+
+    /// The transaction-safe publication boundary used by `UsageStore`.
+    /// Every subscriber receives an immediate replay and owns an independent
+    /// newest-value buffer.
+    func subscribe() -> AgentConnectorRegistrySubscription {
+        let subscriptionID = UUID()
+        let updates = AsyncStream(
+            bufferingPolicy: .bufferingNewest(1)
+        ) { continuation in
+            self.publicationContinuations[subscriptionID] = continuation
+            continuation.yield(self.currentPublication())
+            continuation.onTermination = { [weak self] _ in
+                Task { await self?.removePublicationContinuation(subscriptionID) }
+            }
+        }
+        return AgentConnectorRegistrySubscription(
+            id: subscriptionID,
+            updates: updates
+        )
+    }
+
+    func publications() -> AsyncStream<AgentConnectorRegistryPublication> {
+        subscribe().updates
+    }
+
+    func detach(_ subscription: AgentConnectorRegistrySubscription) {
+        guard let continuation = publicationContinuations.removeValue(
+            forKey: subscription.id
+        ) else { return }
+        continuation.finish()
+    }
+
+    func publicationObserverCount() -> Int {
+        publicationContinuations.count
+    }
+
+    func latestPublication() -> AgentConnectorRegistryPublication {
+        currentPublication()
     }
 
     /// Runs the one launch/manual eligibility scan and atomically replaces the
@@ -342,6 +400,35 @@ actor AgentConnectorRegistry {
         stoppedSnapshots[connector.id] = await connector.currentSnapshot()
     }
 
-    private func publish() { continuation?.yield(orderedSnapshots()) }
-    private func clearContinuation() { continuation = nil }
+    private func publish() {
+        publicationRevision &+= 1
+        let snapshots = orderedSnapshots()
+        let publication = AgentConnectorRegistryPublication(
+            revision: publicationRevision,
+            snapshots: snapshots,
+            admissionSet: currentAdmissionSet
+        )
+        for continuation in snapshotContinuations.values {
+            continuation.yield(snapshots)
+        }
+        for continuation in publicationContinuations.values {
+            continuation.yield(publication)
+        }
+    }
+
+    private func currentPublication() -> AgentConnectorRegistryPublication {
+        AgentConnectorRegistryPublication(
+            revision: publicationRevision,
+            snapshots: orderedSnapshots(),
+            admissionSet: currentAdmissionSet
+        )
+    }
+
+    private func removeSnapshotContinuation(_ id: UUID) {
+        snapshotContinuations[id] = nil
+    }
+
+    private func removePublicationContinuation(_ id: UUID) {
+        publicationContinuations[id] = nil
+    }
 }
