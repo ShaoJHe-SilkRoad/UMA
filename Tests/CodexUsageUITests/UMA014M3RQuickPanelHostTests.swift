@@ -37,23 +37,23 @@ struct UMA014M3RQuickPanelHostTests {
         )
     }
 
-    @Test("Native glass and fallback host each have exactly one contour owner")
-    func materialBranchesUseOneContourOwner() throws {
+    @Test("One layer-backed rounded host owns clipping without material or shadow")
+    func layerBackedSurfaceUsesOneOwner() throws {
         let host = try source(
             "Sources/CodexUsageMonitor/App/AdaptivePanelMaterialHostView.swift"
         )
 
-        #expect(host.contains("configureTransparentGeometryCarrier()"))
-        #expect(host.contains("layer?.cornerRadius = 0"))
-        #expect(host.contains("layer?.masksToBounds = false"))
-        #expect(host.contains("layer?.borderWidth = 0"))
-        #expect(host.contains("layer?.borderColor = nil"))
-        #expect(host.contains("private func configureFallbackContour()"))
-        #expect(host.contains("layer?.cornerRadius = cornerRadius"))
-        #expect(host.contains("layer?.masksToBounds = true"))
-        #expect(host.contains("installNativeGlass(contentView)"))
-        #expect(host.contains("glassView.cornerRadius = cornerRadius"))
-        #expect(host.contains("glassView.contentView = contentView"))
+        #expect(host.contains("private func configureSurface()"))
+        #expect(host.contains("layer.cornerRadius = cornerRadius"))
+        #expect(host.contains("layer.masksToBounds = true"))
+        #expect(host.contains("layer.borderWidth = 0"))
+        #expect(host.contains("layer.borderColor = nil"))
+        #expect(host.contains("layer.shadowOpacity = 0"))
+        #expect(host.contains("NSColor.windowBackgroundColor.cgColor"))
+        #expect(host.contains("contentView.frame = bounds"))
+        #expect(host.contains("contentView.layer?.backgroundColor = NSColor.clear.cgColor"))
+        #expect(!host.contains("NSGlassEffectView"))
+        #expect(!host.contains("NSVisualEffectView"))
         #expect(!host.contains("makeRoundedContentClipper"))
     }
 

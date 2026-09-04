@@ -1,28 +1,38 @@
 @preconcurrency import AppKit
 
-/// Hosts exactly one panel material with one branch-specific contour owner.
-/// Native glass owns both the clip and contour on macOS 26, while the host owns
-/// both on earlier or reduced-transparency appearances.
+/// Owns the Quick Panel's only visible backing surface. The layer-backed host
+/// clips one clear, exact-bounds content view; it deliberately uses no
+/// backdrop material, contour, or shadow outside those rounded bounds.
 final class AdaptivePanelMaterialHostView: NSView {
+    struct DiagnosticSnapshot: Equatable {
+        let subviewCount: Int
+        let contentFrameMatchesBounds: Bool
+        let cornerRadius: CGFloat
+        let usesContinuousCorners: Bool
+        let masksToBounds: Bool
+        let borderWidth: CGFloat
+        let shadowOpacity: Float
+        let hasBackground: Bool
+    }
+
     private let cornerRadius: CGFloat
-    private let fallbackMaterialOpacity: CGFloat
     private weak var hostedContentView: NSView?
     private var displayOptionsObserver: NSObjectProtocol?
 
     init(frame frameRect: NSRect, cornerRadius: CGFloat, fallbackMaterialOpacity: Double) {
         self.cornerRadius = cornerRadius
-        self.fallbackMaterialOpacity = fallbackMaterialOpacity
         super.init(frame: frameRect)
+        _ = fallbackMaterialOpacity
 
         wantsLayer = true
-        configureTransparentGeometryCarrier()
+        configureSurface()
         displayOptionsObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.rebuildMaterial()
+                self?.updateDynamicBackground()
             }
         }
     }
@@ -39,87 +49,64 @@ final class AdaptivePanelMaterialHostView: NSView {
     }
 
     func installContentView(_ contentView: NSView) {
+        subviews.forEach { view in
+            if view !== contentView { view.removeFromSuperview() }
+        }
         hostedContentView = contentView
-        rebuildMaterial()
+        prepareContentView(contentView)
+        if contentView.superview !== self {
+            contentView.removeFromSuperview()
+            addSubview(contentView)
+        }
+        configureSurface()
+    }
+
+    var diagnosticSnapshot: DiagnosticSnapshot {
+        DiagnosticSnapshot(
+            subviewCount: subviews.count,
+            contentFrameMatchesBounds: hostedContentView?.frame == bounds,
+            cornerRadius: layer?.cornerRadius ?? 0,
+            usesContinuousCorners: layer?.cornerCurve == .continuous,
+            masksToBounds: layer?.masksToBounds ?? false,
+            borderWidth: layer?.borderWidth ?? 0,
+            shadowOpacity: layer?.shadowOpacity ?? 0,
+            hasBackground: layer?.backgroundColor != nil
+        )
+    }
+
+    override func layout() {
+        super.layout()
+        hostedContentView?.frame = bounds
     }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        rebuildMaterial()
+        updateDynamicBackground()
     }
 
-    private func rebuildMaterial() {
-        guard let contentView = hostedContentView else { return }
-        contentView.removeFromSuperview()
-        subviews.forEach { $0.removeFromSuperview() }
-        configureTransparentGeometryCarrier()
+    private func configureSurface() {
+        guard let layer else { return }
+        layer.cornerRadius = cornerRadius
+        layer.cornerCurve = .continuous
+        layer.masksToBounds = true
+        layer.borderWidth = 0
+        layer.borderColor = nil
+        layer.shadowOpacity = 0
+        layer.shadowColor = nil
+        layer.shadowPath = nil
+        updateDynamicBackground()
+    }
 
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
-            configureFallbackContour()
-            installOpaqueBackground(contentView)
-            return
+    private func updateDynamicBackground() {
+        effectiveAppearance.performAsCurrentDrawingAppearance { [weak self] in
+            self?.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         }
-        if #available(macOS 26.0, *) {
-            installNativeGlass(contentView)
-        } else {
-            configureFallbackContour()
-            installFallbackMaterial(contentView)
-        }
-    }
-
-    private func configureTransparentGeometryCarrier() {
-        layer?.backgroundColor = NSColor.clear.cgColor
-        layer?.borderWidth = 0
-        layer?.borderColor = nil
-        layer?.cornerRadius = 0
-        layer?.cornerCurve = .continuous
-        layer?.masksToBounds = false
-    }
-
-    private func configureFallbackContour() {
-        let increasedContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
-        layer?.backgroundColor = NSColor.clear.cgColor
-        layer?.cornerRadius = cornerRadius
-        layer?.cornerCurve = .continuous
-        layer?.masksToBounds = true
-        layer?.borderWidth = increasedContrast ? 1.4 : 0.8
-        layer?.borderColor = NSColor.separatorColor
-            .withAlphaComponent(increasedContrast ? 0.72 : 0.34)
-            .cgColor
-    }
-
-    private func installOpaqueBackground(_ contentView: NSView) {
-        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        prepareContentView(contentView)
-        addSubview(contentView)
-    }
-
-    @available(macOS 26.0, *)
-    private func installNativeGlass(_ contentView: NSView) {
-        let glassView = NSGlassEffectView(frame: bounds)
-        glassView.autoresizingMask = [.width, .height]
-        glassView.cornerRadius = cornerRadius
-        glassView.style = .regular
-        prepareContentView(contentView)
-        glassView.contentView = contentView
-        addSubview(glassView)
-    }
-
-    private func installFallbackMaterial(_ contentView: NSView) {
-        let blurView = NSVisualEffectView(frame: bounds)
-        blurView.autoresizingMask = [.width, .height]
-        blurView.material = .underWindowBackground
-        blurView.blendingMode = .behindWindow
-        blurView.state = .active
-        blurView.isEmphasized = false
-        blurView.alphaValue = fallbackMaterialOpacity
-        addSubview(blurView)
-        prepareContentView(contentView)
-        addSubview(contentView)
     }
 
     private func prepareContentView(_ contentView: NSView) {
         contentView.frame = bounds
         contentView.autoresizingMask = [.width, .height]
+        contentView.wantsLayer = true
+        contentView.layer?.backgroundColor = NSColor.clear.cgColor
     }
 }

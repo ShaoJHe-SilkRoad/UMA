@@ -7,12 +7,10 @@ import Testing
 @testable import CodexUsageMonitor
 #endif
 
-/// Contract for the Task-B material host.  It deliberately checks only the
-/// public AppKit relationship and frozen geometry, never pixels or private
-/// backdrop state.
+/// Runtime contract for the final layer-backed Quick Panel surface.
 struct M1AG2DBGNativeGlassContractTests {
     @Test @MainActor
-    func materialHostKeepsFrozenPanelGeometryInItsActivePublicBranch() throws {
+    func layerBackedHostKeepsFrozenPanelGeometry() {
         let expectedFrame = NSRect(
             x: 0,
             y: 0,
@@ -27,51 +25,24 @@ struct M1AG2DBGNativeGlassContractTests {
         let content = NSView(frame: host.bounds)
         host.installContentView(content)
 
+        let snapshot = host.diagnosticSnapshot
         #expect(host.frame == expectedFrame)
         #expect(host.bounds.size == expectedFrame.size)
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
-            #expect(host.layer?.cornerRadius == 28)
-            #expect(host.layer?.cornerCurve == .continuous)
-            #expect(host.layer?.masksToBounds == true)
-            #expect(host.subviews.count == 1)
-            #expect(host.subviews.first === content)
-            #expect((host.layer?.borderWidth ?? 0) > 0)
-            #expect(host.subviews.contains(where: { $0 is NSVisualEffectView }) == false)
-            if #available(macOS 26.0, *) {
-                #expect(host.subviews.contains(where: { $0 is NSGlassEffectView }) == false)
-            }
-        } else if #available(macOS 26.0, *) {
-            let glass = try #require(host.subviews.first as? NSGlassEffectView)
-            #expect(host.subviews.count == 1)
-            #expect(host.layer?.cornerRadius == 0)
-            #expect(host.layer?.masksToBounds == false)
-            #expect(host.layer?.borderWidth == 0)
-            #expect(host.layer?.borderColor == nil)
-            #expect(host.layer?.backgroundColor == NSColor.clear.cgColor)
-            #expect(glass.frame == host.bounds)
-            #expect(glass.cornerRadius == 28)
-            #expect(glass.style == .regular)
-            #expect(glass.contentView === content)
-            #expect(content.frame == glass.bounds)
-        } else {
-            let effect = try #require(host.subviews.first as? NSVisualEffectView)
-            #expect(host.subviews.count == 2)
-            #expect(host.layer?.cornerRadius == 28)
-            #expect(host.layer?.cornerCurve == .continuous)
-            #expect(host.layer?.masksToBounds == true)
-            #expect((host.layer?.borderWidth ?? 0) > 0)
-            #expect(effect.frame == host.bounds)
-            #expect(effect.material == .underWindowBackground)
-            #expect(effect.blendingMode == .behindWindow)
-            #expect(effect.state == .active)
-            #expect(effect.alphaValue == 0.44)
-            #expect(host.subviews.last === content)
-            #expect(content.frame == host.bounds)
-        }
+        #expect(host.subviews.count == 1)
+        #expect(host.subviews.first === content)
+        #expect(content.frame == host.bounds)
+        #expect(snapshot.subviewCount == 1)
+        #expect(snapshot.contentFrameMatchesBounds)
+        #expect(snapshot.cornerRadius == 28)
+        #expect(snapshot.usesContinuousCorners)
+        #expect(snapshot.masksToBounds)
+        #expect(snapshot.borderWidth == 0)
+        #expect(snapshot.shadowOpacity == 0)
+        #expect(snapshot.hasBackground)
     }
 
     @Test @MainActor
-    func oneHundredMaterialRebuildsKeepOneClipAndOneMaterialOwner() {
+    func oneHundredContentReplacementsKeepOneSurfaceAndOneContentRoot() {
         let host = AdaptivePanelMaterialHostView(
             frame: NSRect(x: 0, y: 0, width: 320, height: 180),
             cornerRadius: 14,
@@ -82,29 +53,14 @@ struct M1AG2DBGNativeGlassContractTests {
             let content = NSView(frame: host.bounds)
             host.installContentView(content)
 
-            if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
-                #expect(host.layer?.masksToBounds == true)
-                #expect(host.layer?.cornerRadius == 14)
-                #expect((host.layer?.borderWidth ?? 0) > 0)
-                #expect(host.subviews.count == 1)
-                #expect(host.subviews.first === content)
-            } else if #available(macOS 26.0, *) {
-                #expect(host.layer?.masksToBounds == false)
-                #expect(host.layer?.cornerRadius == 0)
-                #expect(host.layer?.borderWidth == 0)
-                #expect(host.layer?.borderColor == nil)
-                #expect(host.subviews.count == 1)
-                #expect(host.subviews.first is NSGlassEffectView)
-                #expect((host.subviews.first as? NSGlassEffectView)?.contentView === content)
-                #expect((host.subviews.first as? NSGlassEffectView)?.cornerRadius == 14)
-            } else {
-                #expect(host.layer?.masksToBounds == true)
-                #expect(host.layer?.cornerRadius == 14)
-                #expect((host.layer?.borderWidth ?? 0) > 0)
-                #expect(host.subviews.count == 2)
-                #expect(host.subviews.first is NSVisualEffectView)
-                #expect(host.subviews.last === content)
-            }
+            let snapshot = host.diagnosticSnapshot
+            #expect(snapshot.subviewCount == 1)
+            #expect(host.subviews.first === content)
+            #expect(snapshot.contentFrameMatchesBounds)
+            #expect(snapshot.cornerRadius == 14)
+            #expect(snapshot.masksToBounds)
+            #expect(snapshot.borderWidth == 0)
+            #expect(snapshot.shadowOpacity == 0)
         }
     }
 
@@ -120,28 +76,15 @@ struct M1AG2DBGNativeGlassContractTests {
             let content = NSView(frame: host.bounds)
             host.installContentView(content)
 
+            let snapshot = host.diagnosticSnapshot
             #expect(host.layer?.contentsScale == contentsScale)
-            if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
-                #expect(host.layer?.cornerRadius == 14)
-                #expect(host.layer?.masksToBounds == true)
-                #expect((host.layer?.borderWidth ?? 0) > 0)
-                #expect(host.subviews.count == 1)
-                #expect(host.subviews.first === content)
-            } else if #available(macOS 26.0, *) {
-                let glass = try #require(host.subviews.first as? NSGlassEffectView)
-                #expect(host.layer?.cornerRadius == 0)
-                #expect(host.layer?.masksToBounds == false)
-                #expect(host.layer?.borderWidth == 0)
-                #expect(host.layer?.borderColor == nil)
-                #expect(glass.cornerRadius == 14)
-                #expect(glass.contentView === content)
-            } else {
-                #expect(host.layer?.cornerRadius == 14)
-                #expect(host.layer?.masksToBounds == true)
-                #expect((host.layer?.borderWidth ?? 0) > 0)
-                #expect(host.subviews.first is NSVisualEffectView)
-                #expect(host.subviews.last === content)
-            }
+            #expect(snapshot.cornerRadius == 14)
+            #expect(snapshot.masksToBounds)
+            #expect(snapshot.borderWidth == 0)
+            #expect(snapshot.shadowOpacity == 0)
+            #expect(snapshot.subviewCount == 1)
+            #expect(host.subviews.first === content)
+            #expect(snapshot.contentFrameMatchesBounds)
         }
     }
 }

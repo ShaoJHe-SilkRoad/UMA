@@ -14,8 +14,8 @@ struct QuickPanelActions {
 
 /// Owns the Quick Panel's single transient AppKit surface. The window is only
 /// a clear presentation shell: AdaptivePanelMaterialHostView exclusively owns
-/// material, clipping, and the visible contour. The panel deliberately adds no
-/// second rim or shadow outside that native material host.
+/// the rounded backing and clipping. The panel deliberately adds no material,
+/// second rim, or shadow outside that exact-bounds layer-backed surface.
 @MainActor
 final class QuickPanelPopoverController: NSObject, NSWindowDelegate {
     static let contentWidth: CGFloat = 320

@@ -193,14 +193,14 @@ struct UMA011G2VisualSystemTests {
         )
     }
 
-    @Test("Adaptive material rebuilds when effective appearance changes")
+    @Test("Adaptive surface refreshes when effective appearance changes")
     func adaptiveMaterialTracksAppearance() throws {
         let source = try source(
             "Sources/CodexUsageMonitor/App/AdaptivePanelMaterialHostView.swift"
         )
         #expect(source.contains("override func viewDidChangeEffectiveAppearance()"))
         #expect(source.contains("super.viewDidChangeEffectiveAppearance()"))
-        #expect(source.contains("rebuildMaterial()"))
+        #expect(source.contains("updateDynamicBackground()"))
     }
 
     @Test("Settings shrink to content and cap long content at panel height")
