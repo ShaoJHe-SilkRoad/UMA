@@ -38,9 +38,11 @@ struct UMA014M4InteractionHardeningTests {
         ] {
             #expect(settings.contains(identifier))
         }
-        #expect(settings.contains("Window close behavior"))
-        #expect(settings.contains("窗口关闭行为"))
-        #expect(settings.contains("Monitoring continues until you choose Quit UMA."))
+        #expect(settings.contains("Keep monitoring when windows close"))
+        #expect(settings.contains("关闭窗口后继续监控"))
+        #expect(settings.contains("setKeepMonitoringWhenWindowsClose"))
+        #expect(!settings.contains("Window close behavior"))
+        #expect(!settings.contains("Monitoring continues until you choose Quit UMA."))
         #expect(!settings.contains("isOn: .constant(true)"))
         #expect(preferences.contains("UMAApplicationAppearance"))
         #expect(preferences.contains("menuBarShowsRemaining"))

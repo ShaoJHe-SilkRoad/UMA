@@ -37,6 +37,20 @@ struct UMA014M3RQuickPanelHostTests {
         )
     }
 
+    @Test("The material host clips native glass at the one approved contour")
+    func nativeGlassIsClippedByTheSingleHostBoundary() throws {
+        let host = try source(
+            "Sources/CodexUsageMonitor/App/AdaptivePanelMaterialHostView.swift"
+        )
+
+        #expect(host.contains("layer?.cornerCurve = .continuous"))
+        #expect(host.contains("layer?.masksToBounds = true"))
+        #expect(host.contains("installNativeGlass(contentView)"))
+        #expect(host.contains("glassView.contentView = contentView"))
+        #expect(!host.contains("makeRoundedContentClipper"))
+        #expect(!host.contains("layer?.masksToBounds = false"))
+    }
+
     @Test("Quick Panel geometry stays inside the approved glance-surface bounds")
     @MainActor
     func contentGeometryContract() {

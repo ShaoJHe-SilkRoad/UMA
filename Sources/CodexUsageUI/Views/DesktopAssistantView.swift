@@ -724,17 +724,23 @@ public struct DesktopAssistantView: View {
     public let cards: [DesktopAssistantCard]
     public let density: DesktopAssistantResolvedDensity
     public let appearanceOverride: DesktopAssistantAppearanceOverride?
+    public let showsStatusIndicator: Bool
+    public let showsPercentageRail: Bool
     public let onSelectCard: ((String) -> Void)?
 
     public init(
         cards: [DesktopAssistantCard],
         density: DesktopAssistantResolvedDensity,
         appearanceOverride: DesktopAssistantAppearanceOverride? = nil,
+        showsStatusIndicator: Bool = true,
+        showsPercentageRail: Bool = true,
         onSelectCard: ((String) -> Void)? = nil
     ) {
         self.cards = cards
         self.density = density
         self.appearanceOverride = appearanceOverride
+        self.showsStatusIndicator = showsStatusIndicator
+        self.showsPercentageRail = showsPercentageRail
         self.onSelectCard = onSelectCard
     }
 
@@ -745,6 +751,8 @@ public struct DesktopAssistantView: View {
                     card: card,
                     density: density,
                     appearanceOverride: appearanceOverride,
+                    showsStatusIndicator: showsStatusIndicator,
+                    showsPercentageRail: showsPercentageRail,
                     onSelect: onSelectCard
                 )
             }
@@ -754,12 +762,13 @@ public struct DesktopAssistantView: View {
 
 private struct DesktopAssistantCardView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     let card: DesktopAssistantCard
     let density: DesktopAssistantResolvedDensity
     let appearanceOverride: DesktopAssistantAppearanceOverride?
+    let showsStatusIndicator: Bool
+    let showsPercentageRail: Bool
     let onSelect: ((String) -> Void)?
 
     private var size: CGSize { DesktopAssistantMetrics.size(for: density) }
@@ -767,7 +776,6 @@ private struct DesktopAssistantCardView: View {
         density == .minimalist ? DesktopAssistantMetrics.minimalistCornerRadius : size.height / 2
     }
     private var fraction: Double? { card.tintFraction }
-    private var isDark: Bool { colorScheme == .dark }
     private var usesReduceTransparency: Bool {
         appearanceOverride?.reduceTransparency ?? reduceTransparency
     }
@@ -786,6 +794,7 @@ private struct DesktopAssistantCardView: View {
         }
         .frame(width: size.width, height: size.height)
         .background { glassBackground }
+        .overlay(alignment: .bottomLeading) { percentageRail }
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .opacity(card.isStale ? 0.78 : 1)
         .help(card.toolTip)
@@ -802,7 +811,9 @@ private struct DesktopAssistantCardView: View {
 
     private var minimalistContent: some View {
         HStack(spacing: DesktopAssistantMetrics.minimalistGap) {
-            sourceMark(diameter: DesktopAssistantMetrics.minimalistConnectionDiameter)
+            if showsStatusIndicator {
+                sourceMark(diameter: DesktopAssistantMetrics.minimalistConnectionDiameter)
+            }
             valueLabel
         }
         .fixedSize(horizontal: true, vertical: false)
@@ -811,7 +822,9 @@ private struct DesktopAssistantCardView: View {
 
     private var regularContent: some View {
         HStack(spacing: 6) {
-            sourceMark(diameter: 24)
+            if showsStatusIndicator {
+                sourceMark(diameter: 24)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     Text(card.providerName)
@@ -853,12 +866,31 @@ private struct DesktopAssistantCardView: View {
     }
 
     private var valueLabel: some View {
-        Text(card.usageText(for: density))
-            .font(AppTypography.font(.assistantValue))
-            .monospacedDigit()
-            .foregroundStyle(valueColor)
-            .lineLimit(1)
-            .fixedSize()
+        Group {
+            switch card.usageValue {
+            case let .finite(value):
+                precisionValue(prefix: " ", value: value)
+            case let .estimated(value):
+                precisionValue(prefix: "≈", value: value)
+            default:
+                Text(card.usageText(for: density))
+                    .monospacedDigit()
+            }
+        }
+        .font(AppTypography.font(.assistantValue))
+        .foregroundStyle(valueColor)
+        .lineLimit(1)
+        .fixedSize()
+    }
+
+    private func precisionValue(prefix: String, value: Int) -> some View {
+        HStack(spacing: 0) {
+            Text(prefix)
+                .frame(width: 9, alignment: .trailing)
+            Text("\(min(100, max(0, value)))%")
+                .monospacedDigit()
+        }
+        .accessibilityHidden(true)
     }
 
     @ViewBuilder
@@ -907,51 +939,31 @@ private struct DesktopAssistantCardView: View {
 
     @ViewBuilder
     private var glassBackground: some View {
-        ZStack {
+        Group {
             if usesReduceTransparency {
                 Color(nsColor: .windowBackgroundColor)
             } else {
                 Rectangle().fill(.ultraThinMaterial)
             }
-            tintLayer
         }
     }
 
     @ViewBuilder
-    private var tintLayer: some View {
-        if let fraction {
+    private var percentageRail: some View {
+        if showsPercentageRail, let fraction {
             GeometryReader { proxy in
                 let visibleFraction = RemainingUsageVisualPolicy.visibleFraction(
                     for: fraction * 100,
                     width: proxy.size.width
                 )
-                let stops = DesktopAssistantTintGeometry.stops(
-                    remainingFraction: visibleFraction,
-                    width: proxy.size.width
-                )
-                let tint = tintColor.opacity(
-                    DesktopAssistantTintOpacity.value(
-                        isDark: isDark,
-                        reduceTransparency: usesReduceTransparency,
-                        increaseContrast: hasIncreasedContrast
-                    )
-                )
-                if visibleFraction >= 1 {
-                    tint
-                } else {
-                    LinearGradient(
-                        stops: [
-                            .init(color: tint, location: 0),
-                            .init(color: tint, location: stops.solidEnd),
-                            .init(color: tint.opacity(0.5), location: stops.midpoint),
-                            .init(color: tint.opacity(0), location: stops.clearStart),
-                            .init(color: tint.opacity(0), location: 1)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                }
+                Capsule()
+                    .fill(tintColor.opacity(hasIncreasedContrast ? 0.95 : 0.8))
+                    .frame(width: proxy.size.width * visibleFraction, height: 2)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
             }
+            .padding(.horizontal, density == .minimalist ? 8 : 12)
+            .padding(.bottom, 2)
+            .accessibilityHidden(true)
         }
     }
 

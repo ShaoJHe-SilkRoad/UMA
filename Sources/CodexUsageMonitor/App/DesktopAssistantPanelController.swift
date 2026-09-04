@@ -135,6 +135,8 @@ final class DesktopAssistantPanelController: NSObject, NSMenuDelegate {
     private var preferenceStore: ApplicationPreferences
     private var onSelectProvider: ((String) -> Void)?
     private var preferences: DesktopAssistantPreferences
+    private var showsStatusIndicator: Bool
+    private var showsPercentageRail: Bool
     private var cards: [DesktopAssistantCard] = []
     private var renderedDensity: DesktopAssistantResolvedDensity?
     private var moveObserver: NSObjectProtocol?
@@ -152,6 +154,12 @@ final class DesktopAssistantPanelController: NSObject, NSMenuDelegate {
         self.preferenceStore = preferenceStore
         self.onSelectProvider = onSelectProvider
         preferences = DesktopAssistantPreferences.load(from: preferenceStore)
+        showsStatusIndicator = preferenceStore.value(
+            for: UMAApplicationPreferenceKeys.assistantShowsStatusIndicator
+        )
+        showsPercentageRail = preferenceStore.value(
+            for: UMAApplicationPreferenceKeys.assistantShowsPercentageRail
+        )
         shouldBeVisible = preferences.isEnabled
         panel = DesktopAssistantPanel(
             contentRect: NSRect(
@@ -305,6 +313,8 @@ final class DesktopAssistantPanelController: NSObject, NSMenuDelegate {
             rootView: DesktopAssistantView(
                 cards: cards,
                 density: density,
+                showsStatusIndicator: showsStatusIndicator,
+                showsPercentageRail: showsPercentageRail,
                 onSelectCard: { [weak self] providerID in
                     self?.handleSelection(providerID: providerID)
                 }
@@ -462,19 +472,36 @@ final class DesktopAssistantPanelController: NSObject, NSMenuDelegate {
 
     private func installPreferencesObserver() {
         preferencesObservation = preferenceStore.observe { [weak self] change in
-            guard DesktopAssistantPreferences.Keys.all.contains(change.key) else { return }
+            let displayKeys = [
+                UMAApplicationPreferenceKeys.assistantShowsStatusIndicator.name,
+                UMAApplicationPreferenceKeys.assistantShowsPercentageRail.name,
+            ]
+            guard DesktopAssistantPreferences.Keys.all.contains(change.key)
+                || displayKeys.contains(change.key) else { return }
             self?.applyPreferencesFromStore()
         }
     }
 
     private func applyPreferencesFromStore() {
         let updated = DesktopAssistantPreferences.load(from: preferenceStore)
-        guard updated != preferences else { return }
+        let updatedShowsStatusIndicator = preferenceStore.value(
+            for: UMAApplicationPreferenceKeys.assistantShowsStatusIndicator
+        )
+        let updatedShowsPercentageRail = preferenceStore.value(
+            for: UMAApplicationPreferenceKeys.assistantShowsPercentageRail
+        )
+        guard updated != preferences
+            || updatedShowsStatusIndicator != showsStatusIndicator
+            || updatedShowsPercentageRail != showsPercentageRail else { return }
         let enabledChanged = updated.isEnabled != preferences.isEnabled
         let levelChanged = updated.isAlwaysOnTop != preferences.isAlwaysOnTop
         let densityChanged = updated.density != preferences.density
         let positionChanged = updated.position != preferences.position
+        let displayChanged = updatedShowsStatusIndicator != showsStatusIndicator
+            || updatedShowsPercentageRail != showsPercentageRail
         preferences = updated
+        showsStatusIndicator = updatedShowsStatusIndicator
+        showsPercentageRail = updatedShowsPercentageRail
 
         if enabledChanged {
             shouldBeVisible = updated.isEnabled
@@ -482,10 +509,12 @@ final class DesktopAssistantPanelController: NSObject, NSMenuDelegate {
         if levelChanged {
             panel.level = updated.isAlwaysOnTop ? .floating : .normal
         }
-        if densityChanged {
+        if densityChanged || displayChanged {
             let density = updated.density.resolvedDensity(visibleProviderCount: cards.count)
             installContent(density: density)
-            repairFrame(for: density, preserveSavedPosition: true)
+            if densityChanged {
+                repairFrame(for: density, preserveSavedPosition: true)
+            }
         } else if positionChanged {
             let density = updated.density.resolvedDensity(visibleProviderCount: cards.count)
             repairFrame(for: density, preserveSavedPosition: true)

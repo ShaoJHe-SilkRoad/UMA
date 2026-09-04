@@ -133,7 +133,15 @@ struct UMA014M3RAgentWorkspaceTests {
         }
         #expect(!settings.contains("case providers"))
         #expect(!settings.contains("Accuracy Sync"))
-        #expect(!settings.contains("Connect"))
+        for providerControl in [
+            "connectCodex",
+            "disconnectCodex",
+            "connectClaude",
+            "claudeAccuracySync",
+            "uma.agent.",
+        ] {
+            #expect(!settings.contains(providerControl))
+        }
         #expect(settings.contains("ApplicationPreferences"))
     }
 

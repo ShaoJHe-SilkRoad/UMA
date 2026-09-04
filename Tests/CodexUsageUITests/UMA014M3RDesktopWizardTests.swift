@@ -189,13 +189,14 @@ struct UMA014M3RDesktopWizardTests {
         #expect(localizedCard.language == .simplifiedChinese)
     }
 
-    @Test("Main and Quick rows reuse the accepted Wizard usage tint and outlined status mark")
+    @Test("Main, Quick, and Wizard share urgency rails without full-row tint washes")
     func sharedVisualLanguageContract() throws {
         let source = try sourceText("Sources/CodexUsageUI/Views/AgentSurfaceViews.swift")
         let wizard = try sourceText("Sources/CodexUsageUI/Views/DesktopAssistantView.swift")
-        #expect(source.contains("Circle()\n                .stroke(statusColor, lineWidth: 1.5)"))
-        #expect(source.contains("DesktopAssistantTintGeometry.stops("))
-        #expect(source.contains("DesktopAssistantTintOpacity.value("))
+        #expect(source.contains("RemainingUsageVisualPolicy.color(for: percent)"))
+        #expect(source.contains("Color(nsColor: .controlBackgroundColor)"))
+        #expect(!source.contains("DesktopAssistantTintGeometry.stops("))
+        #expect(!source.contains("DesktopAssistantTintOpacity.value("))
         #expect(!source.contains("Capsule()\n                        .fill(.primary.opacity(0.09))"))
         #expect(wizard.contains("private var valueColor: Color"))
         #expect(wizard.contains("Remaining urgency belongs to the shared bar palette"))

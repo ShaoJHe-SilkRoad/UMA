@@ -139,6 +139,20 @@ actor AgentConnectorSnapshotStore {
         lastSavedData = data
     }
 
+    func clear() throws {
+        for location in [url, backupURL] where fileManager.fileExists(atPath: location.path) {
+            let values = try location.resourceValues(forKeys: [
+                .isRegularFileKey,
+                .isSymbolicLinkKey,
+            ])
+            guard values.isRegularFile == true, values.isSymbolicLink != true else {
+                throw StoreError.rejected
+            }
+            try fileManager.removeItem(at: location)
+        }
+        lastSavedData = nil
+    }
+
     private func decodeEntries(at location: URL) -> [PersistedEntry]? {
         guard let data = try? Data(contentsOf: location), data.count <= Self.maximumEncodedBytes else { return nil }
         if let envelope = try? JSONDecoder.safeSnapshotDecoder.decode(Envelope.self, from: data),

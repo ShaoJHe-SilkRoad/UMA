@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum RemainingUsageColorBand: Equatable, Sendable {
@@ -74,9 +75,37 @@ public enum AgentGlanceRowStyle: Sendable {
     case mainList
 }
 
+enum AgentWorkspaceLayoutPolicy {
+    static let horizontalPadding: CGFloat = 22
+    static let moduleSpacing: CGFloat = 12
+    static let minimumTwoColumnWidth: CGFloat = 660
+
+    static func columnCount(for availableWidth: CGFloat) -> Int {
+        availableWidth >= minimumTwoColumnWidth ? 2 : 1
+    }
+}
+
+private struct AgentWorkspaceModuleSurface: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(14)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.42), lineWidth: 0.5)
+            }
+    }
+}
+
+private extension View {
+    func moduleSurface() -> some View {
+        modifier(AgentWorkspaceModuleSurface())
+    }
+}
+
 public struct AgentGlanceRow: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     private let provider: ProviderProductState
@@ -84,6 +113,8 @@ public struct AgentGlanceRow: View {
     public let selected: Bool
     public let language: AppLanguage
     public let showsReset: Bool
+    public let showsConnectivity: Bool
+    public let showsRemainingRail: Bool
     private let referenceDate: Date?
 
     public init(
@@ -92,6 +123,8 @@ public struct AgentGlanceRow: View {
         selected: Bool = false,
         language: AppLanguage = .english,
         showsReset: Bool = true,
+        showsConnectivity: Bool = true,
+        showsRemainingRail: Bool = true,
         referenceDate: Date? = nil
     ) {
         self.provider = provider
@@ -99,6 +132,8 @@ public struct AgentGlanceRow: View {
         self.selected = selected
         self.language = language
         self.showsReset = showsReset
+        self.showsConnectivity = showsConnectivity
+        self.showsRemainingRail = showsRemainingRail
         self.referenceDate = referenceDate
     }
 
@@ -118,7 +153,7 @@ public struct AgentGlanceRow: View {
     private var standardContent: some View {
         VStack(alignment: .leading, spacing: verticalContentSpacing) {
             HStack(spacing: 9) {
-                providerMark
+                if showsConnectivity { providerMark }
                 VStack(alignment: .leading, spacing: 1) {
                     Text(displayName)
                         .font(.system(size: 13, weight: .semibold))
@@ -239,7 +274,9 @@ public struct AgentGlanceRow: View {
     private var providerMark: some View {
         ZStack {
             Circle()
-                .stroke(statusColor, lineWidth: 1.5)
+                .fill(Color.primary.opacity(0.045))
+            Circle()
+                .stroke(Color.primary.opacity(colorSchemeContrast == .increased ? 0.34 : 0.15), lineWidth: 1)
             Text(providerMarkText)
                 .font(
                     .system(
@@ -247,9 +284,18 @@ public struct AgentGlanceRow: View {
                         weight: .semibold
                     )
                 )
-                .foregroundStyle(statusColor)
+                .foregroundStyle(.primary)
         }
         .frame(width: 24, height: 24)
+        .overlay(alignment: .bottomTrailing) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 7, height: 7)
+                .overlay {
+                    Circle()
+                        .stroke(Color(nsColor: .controlBackgroundColor), lineWidth: 1)
+                }
+        }
         .accessibilityHidden(true)
     }
 
@@ -257,49 +303,39 @@ public struct AgentGlanceRow: View {
     private var rowBackground: some View {
         ZStack {
             Color(nsColor: .controlBackgroundColor)
-                .opacity(style == .quickPanel ? 0.34 : 0.52)
-            remainingTint
+                .opacity(
+                    reduceTransparency
+                        ? 0.94
+                        : (style == .quickPanel ? 0.34 : 0.52)
+                )
             if selected {
                 Color.primary.opacity(0.055)
+            }
+            if showsRemainingRail {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    remainingRail
+                }
             }
         }
     }
 
     @ViewBuilder
-    private var remainingTint: some View {
+    private var remainingRail: some View {
         if let percent = remainingPercent {
             GeometryReader { proxy in
                 let visibleFraction = RemainingUsageVisualPolicy.visibleFraction(
                     for: percent,
                     width: proxy.size.width
                 )
-                let stops = DesktopAssistantTintGeometry.stops(
-                    remainingFraction: visibleFraction,
-                    width: proxy.size.width
-                )
-                let tint = RemainingUsageVisualPolicy.color(for: percent).opacity(
-                    DesktopAssistantTintOpacity.value(
-                        isDark: colorScheme == .dark,
-                        reduceTransparency: reduceTransparency,
-                        increaseContrast: colorSchemeContrast == .increased
-                    )
-                )
-                if visibleFraction >= 1 {
-                    tint
-                } else {
-                    LinearGradient(
-                        stops: [
-                            .init(color: tint, location: 0),
-                            .init(color: tint, location: stops.solidEnd),
-                            .init(color: tint.opacity(0.5), location: stops.midpoint),
-                            .init(color: tint.opacity(0), location: stops.clearStart),
-                            .init(color: tint.opacity(0), location: 1)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
+                ZStack(alignment: .leading) {
+                    Color.primary.opacity(colorSchemeContrast == .increased ? 0.13 : 0.07)
+                    RemainingUsageVisualPolicy.color(for: percent)
+                        .opacity(colorSchemeContrast == .increased ? 1 : 0.82)
+                        .frame(width: proxy.size.width * visibleFraction)
                 }
             }
+            .frame(height: 2)
             .accessibilityHidden(true)
         }
     }
@@ -375,6 +411,8 @@ public struct QuickPanelSurface: View {
                                 style: .quickPanel,
                                 language: store.language,
                                 showsReset: displayPreferences.showsReset,
+                                showsConnectivity: displayPreferences.showsConnectivity,
+                                showsRemainingRail: displayPreferences.showsRemainingRail,
                                 referenceDate: referenceDate
                             )
                         }
@@ -437,16 +475,38 @@ public struct QuickPanelSurface: View {
 @MainActor
 private final class QuickPanelDisplayPreferences: ObservableObject {
     @Published private(set) var showsReset: Bool
+    @Published private(set) var showsConnectivity: Bool
+    @Published private(set) var showsRemainingRail: Bool
     private let preferences: ApplicationPreferences
     private var observation: ApplicationPreferences.Observation?
 
     init(preferences: ApplicationPreferences) {
         self.preferences = preferences
         showsReset = preferences.value(for: UMAApplicationPreferenceKeys.quickPanelShowsReset)
+        showsConnectivity = preferences.value(
+            for: UMAApplicationPreferenceKeys.quickPanelShowsConnectivity
+        )
+        showsRemainingRail = preferences.value(
+            for: UMAApplicationPreferenceKeys.quickPanelShowsRemainingRails
+        )
         observation = preferences.observe { [weak self] change in
-            guard change.key == UMAApplicationPreferenceKeys.quickPanelShowsReset.name,
-                  let self else { return }
-            showsReset = preferences.value(for: UMAApplicationPreferenceKeys.quickPanelShowsReset)
+            guard let self else { return }
+            switch change.key {
+            case UMAApplicationPreferenceKeys.quickPanelShowsReset.name:
+                showsReset = preferences.value(
+                    for: UMAApplicationPreferenceKeys.quickPanelShowsReset
+                )
+            case UMAApplicationPreferenceKeys.quickPanelShowsConnectivity.name:
+                showsConnectivity = preferences.value(
+                    for: UMAApplicationPreferenceKeys.quickPanelShowsConnectivity
+                )
+            case UMAApplicationPreferenceKeys.quickPanelShowsRemainingRails.name:
+                showsRemainingRail = preferences.value(
+                    for: UMAApplicationPreferenceKeys.quickPanelShowsRemainingRails
+                )
+            default:
+                break
+            }
         }
     }
 }
@@ -486,29 +546,31 @@ public struct AgentWorkspaceSurface: View {
     }
 
     public var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                header
-                sectionDivider
-                usageSection
-                sectionDivider
-                connectionSection
-                sectionDivider
-                controlsSection
-                if providerID == .codex {
-                    sectionDivider
-                    codexActivitySection
-                } else if providerID == .claude {
-                    sectionDivider
-                    claudeSmartSection
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    header
+                    LazyVGrid(
+                        columns: workspaceColumns(for: geometry.size.width),
+                        alignment: .leading,
+                        spacing: AgentWorkspaceLayoutPolicy.moduleSpacing
+                    ) {
+                        usageModule
+                        connectionModule
+                        controlsModule
+                        if providerID == .codex {
+                            codexActivityModule
+                        } else if providerID == .claude {
+                            claudeSmartModule
+                        }
+                        diagnosticsModule
+                    }
                 }
-                sectionDivider
-                diagnosticsSection
+                .padding(.horizontal, AgentWorkspaceLayoutPolicy.horizontalPadding)
+                .padding(.vertical, 18)
             }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 18)
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(Color(nsColor: .windowBackgroundColor))
         .accessibilityIdentifier("uma.agent.workspace.\(providerID.rawValue)")
         .alert(
             localized("Enable Claude Local Smart?", "启用 Claude 本地智能？"),
@@ -525,6 +587,14 @@ public struct AgentWorkspaceSurface: View {
     }
 
     private var provider: ProviderProductState? { store.productInventory.provider(providerID) }
+
+    private func workspaceColumns(for width: CGFloat) -> [GridItem] {
+        let usableWidth = max(0, width - (AgentWorkspaceLayoutPolicy.horizontalPadding * 2))
+        return Array(
+            repeating: GridItem(.flexible(minimum: 0), spacing: AgentWorkspaceLayoutPolicy.moduleSpacing, alignment: .top),
+            count: AgentWorkspaceLayoutPolicy.columnCount(for: usableWidth)
+        )
+    }
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -548,13 +618,17 @@ public struct AgentWorkspaceSurface: View {
         .padding(.bottom, 3)
     }
 
-    @ViewBuilder private var usageSection: some View {
-        section(localized("Usage", "用量")) {
+    @ViewBuilder private var usageModule: some View {
+        module(localized("Usage", "用量"), systemImage: "gauge.with.dots.needle.50percent") {
             if let provider, !provider.quotas.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(Array(provider.quotas.enumerated()), id: \.element.id) { index, quota in
                         quotaRow(quota)
-                        if index < provider.quotas.count - 1 { Divider() }
+                        if index < provider.quotas.count - 1 { Divider().accessibilityHidden(true) }
+                    }
+                    if providerID == .codex, provider.fiveHourStatus == .absent {
+                        Divider().accessibilityHidden(true)
+                        missingFiveHourMessage
                     }
                 }
             } else {
@@ -572,13 +646,26 @@ public struct AgentWorkspaceSurface: View {
         }
     }
 
+    private var missingFiveHourMessage: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("5H")
+                .font(.callout.weight(.semibold))
+            Spacer(minLength: 12)
+            Text(localized("Limit not reported", "未报告限额"))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+    }
+
     private func quotaRow(_ quota: ProviderProductQuotaState) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(quota.compactLabel).font(.headline)
-                        Text(precisionLabel(quota.precision))
+                        Text(quotaDetailLabel(quota))
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(.secondary)
                     }
@@ -612,8 +699,8 @@ public struct AgentWorkspaceSurface: View {
         .accessibilityElement(children: .combine)
     }
 
-    private var connectionSection: some View {
-        section(localized("Connection & Source", "连接与来源")) {
+    private var connectionModule: some View {
+        module(localized("Connection & Source", "连接与来源"), systemImage: "link") {
             VStack(spacing: 7) {
                 factRow(localized("Status", "状态"), connectionLabel)
                 factRow(localized("Source", "来源"), sourceLabel)
@@ -631,8 +718,8 @@ public struct AgentWorkspaceSurface: View {
         }
     }
 
-    private var controlsSection: some View {
-        section(localized("Agent Controls", "智能体控制")) {
+    private var controlsModule: some View {
+        module(localized("Agent Controls", "智能体控制"), systemImage: "slider.horizontal.3") {
             HStack(spacing: 8) {
                 Button(localized("Refresh", "刷新"), action: refresh)
                     .disabled(!store.allowsManualRefresh)
@@ -682,92 +769,111 @@ public struct AgentWorkspaceSurface: View {
         }
     }
 
-    private var codexActivitySection: some View {
-        section(localized("Recent Activity", "最近活动")) {
-            VStack(alignment: .leading, spacing: 10) {
-                let metrics = store.snapshot.metrics.filter { $0.value != "—" }
-                if !metrics.isEmpty {
-                    HStack(spacing: 24) {
-                        ForEach(metrics) { metric in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(metric.value).font(.headline).monospacedDigit()
-                                Text(metric.label).font(.caption).foregroundStyle(.secondary)
+    private var codexActivityModule: some View {
+        module {
+            DisclosureGroup(localized("Recent Activity", "最近活动")) {
+                VStack(alignment: .leading, spacing: 10) {
+                    let metrics = store.snapshot.metrics.filter { $0.value != "—" }
+                    if !metrics.isEmpty {
+                        HStack(spacing: 24) {
+                            ForEach(metrics) { metric in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(metric.value).font(.headline).monospacedDigit()
+                                    Text(metric.label).font(.caption).foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
-                }
-                if store.snapshot.recentTasks.isEmpty {
-                    Text(localized("No recent allowlisted local activity metadata.", "暂无允许范围内的本地活动元数据。"))
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(store.snapshot.recentTasks) { task in
-                        HStack(spacing: 10) {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(task.title).lineLimit(1)
-                                Text(task.time).font(.caption).foregroundStyle(.secondary)
+                    if store.snapshot.recentTasks.isEmpty {
+                        Text(localized("No recent allowlisted local activity metadata.", "暂无允许范围内的本地活动元数据。"))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(store.snapshot.recentTasks) { task in
+                            HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(task.title).lineLimit(1)
+                                    Text(task.time).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(task.tokenText).monospacedDigit().foregroundStyle(.secondary)
                             }
+                        }
+                    }
+                    if let estimate = store.snapshot.apiCostEstimate {
+                        HStack {
+                            Text(localized("API-equivalent estimate", "API 等效估算"))
+                                .foregroundStyle(.secondary)
                             Spacer()
-                            Text(task.tokenText).monospacedDigit().foregroundStyle(.secondary)
+                            Text(estimate.sevenDayUSD, format: .currency(code: "USD"))
+                                .monospacedDigit()
+                            Text(localized("7 days", "7 天"))
+                                .foregroundStyle(.secondary)
                         }
+                        .font(.callout)
                     }
                 }
-                if let estimate = store.snapshot.apiCostEstimate {
-                    HStack {
-                        Text(localized("API-equivalent estimate", "API 等效估算"))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(estimate.sevenDayUSD, format: .currency(code: "USD"))
-                            .monospacedDigit()
-                        Text(localized("7 days", "7 天"))
-                            .foregroundStyle(.secondary)
-                    }
-                    .font(.callout)
-                }
+                .padding(.top, 10)
             }
+            .font(.callout)
         }
     }
 
-    private var claudeSmartSection: some View {
-        section(localized("Local Smart & Accuracy", "本地智能与精确同步")) {
-            VStack(alignment: .leading, spacing: 7) {
-                Label(claudeSmartLabel, systemImage: "lock.shield")
-                    .font(.callout.weight(.medium))
-                Text(localized(
-                    "Local Smart and one-shot Accuracy Sync retain only approved usage metadata. Prompts, responses, credentials, and raw page content do not enter UMA.",
-                    "本地智能和一次性精确同步仅保留已批准的用量元数据；提示、回复、凭据和原始页面内容不会进入 UMA。"
-                ))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+    private var claudeSmartModule: some View {
+        module {
+            DisclosureGroup(localized("Local Smart & Accuracy", "本地智能与精确同步")) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Label(claudeSmartLabel, systemImage: "lock.shield")
+                        .font(.callout.weight(.medium))
+                    Text(localized(
+                        "Local Smart and one-shot Accuracy Sync retain only approved usage metadata. Prompts, responses, credentials, and raw page content do not enter UMA.",
+                        "本地智能和一次性精确同步仅保留已批准的用量元数据；提示、回复、凭据和原始页面内容不会进入 UMA。"
+                    ))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 10)
             }
+            .font(.callout)
         }
     }
 
-    private var diagnosticsSection: some View {
-        DisclosureGroup(localized("Advanced Diagnostics", "高级诊断")) {
-            VStack(alignment: .leading, spacing: 6) {
+    private var diagnosticsModule: some View {
+        module {
+            DisclosureGroup(localized("Privacy & Advanced Diagnostics", "隐私与高级诊断")) {
+                VStack(alignment: .leading, spacing: 6) {
                     factRow(localized("Connection", "连接"), connectionLabel)
                     factRow(localized("Source health", "来源健康状态"), diagnosticLabel)
                     Text(localized("Diagnostics use bounded status classifications only.", "诊断仅使用有界状态分类。"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 8)
             }
-            .padding(.top, 8)
+            .font(.callout)
         }
-        .font(.callout)
-        .padding(.vertical, 13)
     }
 
     @ViewBuilder
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+    private func module<Content: View>(
+        _ title: String,
+        systemImage: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text(title).font(.headline)
+            Label(title, systemImage: systemImage)
+                .font(.headline)
             content().frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 13)
+        .moduleSurface()
     }
 
-    private var sectionDivider: some View { Divider().accessibilityHidden(true) }
+    @ViewBuilder
+    private func module<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .moduleSurface()
+    }
 
     private func factRow(_ label: String, _ value: String) -> some View {
         HStack(alignment: .firstTextBaseline) {
@@ -867,6 +973,16 @@ public struct AgentWorkspaceSurface: View {
         }
     }
 
+    private func quotaDetailLabel(_ quota: ProviderProductQuotaState) -> String {
+        if quota.value == .unavailable {
+            return localized("Limit not reported", "未报告限额")
+        }
+        if quota.value == .unlimited {
+            return localized("Unlimited", "不限量")
+        }
+        return precisionLabel(quota.precision)
+    }
+
     private func resetLabel(_ date: Date?) -> String {
         guard let date else { return localized("Reset not provided", "未提供重置时间") }
         return store.language.resetDescription(for: date, now: displayNow)
@@ -892,11 +1008,20 @@ final class GlobalSettingsViewModel: ObservableObject {
     @Published private(set) var appearance: UMAApplicationAppearance
     @Published private(set) var menuBarShowsRemaining: Bool
     @Published private(set) var quickPanelShowsReset: Bool
+    @Published private(set) var quickPanelShowsConnectivity: Bool
+    @Published private(set) var quickPanelShowsRemainingRails: Bool
+    @Published private(set) var keepMonitoringWhenWindowsClose: Bool
+    @Published private(set) var automaticBackgroundRefresh: Bool
+    @Published private(set) var backgroundRefreshInterval: UMABackgroundRefreshInterval
+    @Published private(set) var refreshOnWake: Bool
     @Published private(set) var assistantEnabled: Bool
     @Published private(set) var assistantAlwaysOnTop: Bool
     @Published private(set) var assistantDensity: DesktopAssistantDensity
+    @Published private(set) var assistantShowsStatusIndicator: Bool
+    @Published private(set) var assistantShowsPercentageRail: Bool
     @Published private(set) var launchAtLoginState: LaunchAtLoginState
     @Published private(set) var launchAtLoginError: String?
+    @Published private(set) var dataActionStatus: String?
 
     private let preferences: ApplicationPreferences
     private let store: UsageStore
@@ -916,6 +1041,24 @@ final class GlobalSettingsViewModel: ObservableObject {
         quickPanelShowsReset = preferences.value(
             for: UMAApplicationPreferenceKeys.quickPanelShowsReset
         )
+        quickPanelShowsConnectivity = preferences.value(
+            for: UMAApplicationPreferenceKeys.quickPanelShowsConnectivity
+        )
+        quickPanelShowsRemainingRails = preferences.value(
+            for: UMAApplicationPreferenceKeys.quickPanelShowsRemainingRails
+        )
+        keepMonitoringWhenWindowsClose = preferences.value(
+            for: UMAApplicationPreferenceKeys.keepMonitoringWhenWindowsClose
+        )
+        automaticBackgroundRefresh = preferences.value(
+            for: UMAApplicationPreferenceKeys.automaticBackgroundRefresh
+        )
+        backgroundRefreshInterval = UMABackgroundRefreshInterval(
+            rawValue: preferences.value(
+                for: UMAApplicationPreferenceKeys.backgroundRefreshInterval
+            )
+        ) ?? .fifteenMinutes
+        refreshOnWake = preferences.value(for: UMAApplicationPreferenceKeys.refreshOnWake)
         assistantEnabled = preferences.value(
             for: UMAApplicationPreferenceKeys.assistantEnabled
         )
@@ -927,8 +1070,15 @@ final class GlobalSettingsViewModel: ObservableObject {
                 for: UMAApplicationPreferenceKeys.assistantDensity
             )
         ) ?? .automatic
+        assistantShowsStatusIndicator = preferences.value(
+            for: UMAApplicationPreferenceKeys.assistantShowsStatusIndicator
+        )
+        assistantShowsPercentageRail = preferences.value(
+            for: UMAApplicationPreferenceKeys.assistantShowsPercentageRail
+        )
         launchAtLoginState = LaunchAtLoginService.state
         launchAtLoginError = nil
+        dataActionStatus = nil
         observation = preferences.observe { [weak self] change in
             self?.synchronize(changedKey: change.key)
         }
@@ -957,6 +1107,36 @@ final class GlobalSettingsViewModel: ObservableObject {
         guard quickPanelShowsReset != value else { return }
         quickPanelShowsReset = value
         preferences.set(value, for: UMAApplicationPreferenceKeys.quickPanelShowsReset)
+    }
+
+    func setQuickPanelShowsConnectivity(_ value: Bool) {
+        quickPanelShowsConnectivity = value
+        preferences.set(value, for: UMAApplicationPreferenceKeys.quickPanelShowsConnectivity)
+    }
+
+    func setQuickPanelShowsRemainingRails(_ value: Bool) {
+        quickPanelShowsRemainingRails = value
+        preferences.set(value, for: UMAApplicationPreferenceKeys.quickPanelShowsRemainingRails)
+    }
+
+    func setKeepMonitoringWhenWindowsClose(_ value: Bool) {
+        keepMonitoringWhenWindowsClose = value
+        preferences.set(value, for: UMAApplicationPreferenceKeys.keepMonitoringWhenWindowsClose)
+    }
+
+    func setAutomaticBackgroundRefresh(_ value: Bool) {
+        automaticBackgroundRefresh = value
+        preferences.set(value, for: UMAApplicationPreferenceKeys.automaticBackgroundRefresh)
+    }
+
+    func setBackgroundRefreshInterval(_ value: UMABackgroundRefreshInterval) {
+        backgroundRefreshInterval = value
+        preferences.set(value.rawValue, for: UMAApplicationPreferenceKeys.backgroundRefreshInterval)
+    }
+
+    func setRefreshOnWake(_ value: Bool) {
+        refreshOnWake = value
+        preferences.set(value, for: UMAApplicationPreferenceKeys.refreshOnWake)
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -1009,6 +1189,62 @@ final class GlobalSettingsViewModel: ObservableObject {
         )
     }
 
+    func setAssistantShowsStatusIndicator(_ value: Bool) {
+        assistantShowsStatusIndicator = value
+        preferences.set(value, for: UMAApplicationPreferenceKeys.assistantShowsStatusIndicator)
+    }
+
+    func setAssistantShowsPercentageRail(_ value: Bool) {
+        assistantShowsPercentageRail = value
+        preferences.set(value, for: UMAApplicationPreferenceKeys.assistantShowsPercentageRail)
+    }
+
+    func resetAssistantPosition() {
+        preferences.remove(UMAApplicationPreferenceKeys.assistantPosition)
+        dataActionStatus = language == .simplifiedChinese
+            ? "桌面向导位置已重置。"
+            : "Desktop Wizard position reset."
+    }
+
+    func clearRetainedUsageData() {
+        dataActionStatus = language == .simplifiedChinese ? "正在清除…" : "Clearing…"
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await SettingsRetainedDataService().clear()
+                self.dataActionStatus = self.language == .simplifiedChinese
+                    ? "已清除保留的本地用量数据。"
+                    : "Retained local usage data cleared."
+            } catch {
+                self.dataActionStatus = self.language == .simplifiedChinese
+                    ? "无法安全清除保留数据。"
+                    : "Retained data could not be cleared safely."
+            }
+        }
+    }
+
+    func exportSanitizedDiagnostics() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "UMA-sanitized-diagnostics.json"
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        do {
+            let activeCount = store.productInventory.providers.filter(\.isActive).count
+            let data = try SettingsDiagnosticsExporter.data(
+                activeProviderCount: activeCount,
+                preferences: preferences
+            )
+            try SettingsDiagnosticsExporter.write(data, to: destination)
+            dataActionStatus = language == .simplifiedChinese
+                ? "已导出不含内容的诊断信息。"
+                : "Sanitized diagnostics exported."
+        } catch {
+            dataActionStatus = language == .simplifiedChinese
+                ? "无法安全导出诊断信息。"
+                : "Diagnostics could not be exported safely."
+        }
+    }
+
     private func synchronize(changedKey: String) {
         switch changedKey {
         case UMAApplicationPreferenceKeys.language.name:
@@ -1026,6 +1262,30 @@ final class GlobalSettingsViewModel: ObservableObject {
             quickPanelShowsReset = preferences.value(
                 for: UMAApplicationPreferenceKeys.quickPanelShowsReset
             )
+        case UMAApplicationPreferenceKeys.quickPanelShowsConnectivity.name:
+            quickPanelShowsConnectivity = preferences.value(
+                for: UMAApplicationPreferenceKeys.quickPanelShowsConnectivity
+            )
+        case UMAApplicationPreferenceKeys.quickPanelShowsRemainingRails.name:
+            quickPanelShowsRemainingRails = preferences.value(
+                for: UMAApplicationPreferenceKeys.quickPanelShowsRemainingRails
+            )
+        case UMAApplicationPreferenceKeys.keepMonitoringWhenWindowsClose.name:
+            keepMonitoringWhenWindowsClose = preferences.value(
+                for: UMAApplicationPreferenceKeys.keepMonitoringWhenWindowsClose
+            )
+        case UMAApplicationPreferenceKeys.automaticBackgroundRefresh.name:
+            automaticBackgroundRefresh = preferences.value(
+                for: UMAApplicationPreferenceKeys.automaticBackgroundRefresh
+            )
+        case UMAApplicationPreferenceKeys.backgroundRefreshInterval.name:
+            backgroundRefreshInterval = UMABackgroundRefreshInterval(
+                rawValue: preferences.value(
+                    for: UMAApplicationPreferenceKeys.backgroundRefreshInterval
+                )
+            ) ?? .fifteenMinutes
+        case UMAApplicationPreferenceKeys.refreshOnWake.name:
+            refreshOnWake = preferences.value(for: UMAApplicationPreferenceKeys.refreshOnWake)
         case UMAApplicationPreferenceKeys.assistantEnabled.name:
             assistantEnabled = preferences.value(
                 for: UMAApplicationPreferenceKeys.assistantEnabled
@@ -1040,6 +1300,14 @@ final class GlobalSettingsViewModel: ObservableObject {
                     for: UMAApplicationPreferenceKeys.assistantDensity
                 )
             ) ?? .automatic
+        case UMAApplicationPreferenceKeys.assistantShowsStatusIndicator.name:
+            assistantShowsStatusIndicator = preferences.value(
+                for: UMAApplicationPreferenceKeys.assistantShowsStatusIndicator
+            )
+        case UMAApplicationPreferenceKeys.assistantShowsPercentageRail.name:
+            assistantShowsPercentageRail = preferences.value(
+                for: UMAApplicationPreferenceKeys.assistantShowsPercentageRail
+            )
         default:
             break
         }
@@ -1081,7 +1349,14 @@ public struct GlobalSettingsSurface: View {
     public var body: some View {
         HStack(spacing: 0) {
             List(GlobalSettingsPane.allCases, selection: $navigation.pane) { item in
-                Label(paneTitle(item), systemImage: symbol(item))
+                HStack(spacing: 7) {
+                    Image(systemName: symbol(item))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 14)
+                    Text(paneTitle(item))
+                        .font(.system(size: 13))
+                }
                     .tag(item)
             }
             .listStyle(.sidebar)
@@ -1145,20 +1420,46 @@ public struct GlobalSettingsSurface: View {
                             .foregroundStyle(.red)
                             .accessibilityLabel(localized("Launch at login error", "登录启动错误"))
                     }
-                    settingFact(
-                        localized("Window close behavior", "窗口关闭行为"),
-                        localized(
-                            "Monitoring continues until you choose Quit UMA.",
-                            "监控会持续运行，直到您选择退出 UMA。"
+                    Toggle(
+                        localized("Keep monitoring when windows close", "关闭窗口后继续监控"),
+                        isOn: Binding(
+                            get: { model.keepMonitoringWhenWindowsClose },
+                            set: model.setKeepMonitoringWhenWindowsClose
                         )
                     )
-                    settingFact(
-                        localized("Refresh behavior", "刷新行为"),
-                        localized(
-                            "Background updates with manual Refresh All",
-                            "后台更新，并可手动全部刷新"
+                    .accessibilityIdentifier("uma.settings.general.keep-monitoring")
+                    Toggle(
+                        localized("Automatic background refresh", "自动后台刷新"),
+                        isOn: Binding(
+                            get: { model.automaticBackgroundRefresh },
+                            set: model.setAutomaticBackgroundRefresh
                         )
                     )
+                    .accessibilityIdentifier("uma.settings.general.background-refresh")
+                    Picker(
+                        localized("Refresh interval", "刷新间隔"),
+                        selection: Binding(
+                            get: { model.backgroundRefreshInterval },
+                            set: model.setBackgroundRefreshInterval
+                        )
+                    ) {
+                        Text(localized("15 minutes", "15 分钟"))
+                            .tag(UMABackgroundRefreshInterval.fifteenMinutes)
+                        Text(localized("30 minutes", "30 分钟"))
+                            .tag(UMABackgroundRefreshInterval.thirtyMinutes)
+                        Text(localized("60 minutes", "60 分钟"))
+                            .tag(UMABackgroundRefreshInterval.sixtyMinutes)
+                    }
+                    .disabled(!model.automaticBackgroundRefresh)
+                    .accessibilityIdentifier("uma.settings.general.refresh-interval")
+                    Toggle(
+                        localized("Refresh after Mac wakes", "Mac 唤醒后刷新"),
+                        isOn: Binding(
+                            get: { model.refreshOnWake },
+                            set: model.setRefreshOnWake
+                        )
+                    )
+                    .accessibilityIdentifier("uma.settings.general.refresh-on-wake")
                     Picker(
                         localized("Language", "语言"),
                         selection: Binding(
@@ -1171,10 +1472,6 @@ public struct GlobalSettingsSurface: View {
                         }
                     }
                     .accessibilityIdentifier("uma.settings.general.language")
-                    settingFact(
-                        localized("Window lifecycle", "窗口生命周期"),
-                        localized("Closing a window keeps monitoring active.", "关闭窗口后监控仍会继续。")
-                    )
                     settingFact(
                         localized("Agent setup", "智能体设置"),
                         localized("Setup and repair actions live in each Agent workspace.", "设置和修复操作位于各智能体工作区。")
@@ -1217,6 +1514,22 @@ public struct GlobalSettingsSurface: View {
                         )
                     )
                     .accessibilityIdentifier("uma.settings.appearance.quick-reset")
+                    Toggle(
+                        localized("Show connectivity indicators", "显示连接状态指示器"),
+                        isOn: Binding(
+                            get: { model.quickPanelShowsConnectivity },
+                            set: model.setQuickPanelShowsConnectivity
+                        )
+                    )
+                    .accessibilityIdentifier("uma.settings.appearance.quick-connectivity")
+                    Toggle(
+                        localized("Show remaining-percentage rails", "显示剩余百分比用量条"),
+                        isOn: Binding(
+                            get: { model.quickPanelShowsRemainingRails },
+                            set: model.setQuickPanelShowsRemainingRails
+                        )
+                    )
+                    .accessibilityIdentifier("uma.settings.appearance.quick-rails")
                     settingFact(
                         localized("Accessibility", "辅助功能"),
                         localized("Reduce Transparency, Increase Contrast, and Reduce Motion are respected automatically.", "自动遵循降低透明度、提高对比度和减弱动态效果设置。")
@@ -1253,6 +1566,27 @@ public struct GlobalSettingsSurface: View {
                         Text(localized("Minimalist", "极简")).tag(DesktopAssistantDensity.minimalist)
                     }
                     .pickerStyle(.segmented)
+                    Toggle(
+                        localized("Show status indicator", "显示状态指示器"),
+                        isOn: Binding(
+                            get: { model.assistantShowsStatusIndicator },
+                            set: model.setAssistantShowsStatusIndicator
+                        )
+                    )
+                    .accessibilityIdentifier("uma.settings.wizard.status-indicator")
+                    Toggle(
+                        localized("Show remaining-percentage rail", "显示剩余百分比用量条"),
+                        isOn: Binding(
+                            get: { model.assistantShowsPercentageRail },
+                            set: model.setAssistantShowsPercentageRail
+                        )
+                    )
+                    .accessibilityIdentifier("uma.settings.wizard.percentage-rail")
+                    Button(
+                        localized("Reset Position", "重置位置"),
+                        action: model.resetAssistantPosition
+                    )
+                    .accessibilityIdentifier("uma.settings.wizard.reset-position")
                 }
             case .privacy:
                 settingsSection(
@@ -1278,6 +1612,24 @@ public struct GlobalSettingsSurface: View {
                         localized("Credentials", "凭据"),
                         localized("Passwords, tokens, cookies, and conversation content are not retained.", "不会保留密码、令牌、Cookie 或对话内容。")
                     )
+                    HStack {
+                        Button(
+                            localized("Clear Retained Local Data", "清除保留的本地数据"),
+                            action: model.clearRetainedUsageData
+                        )
+                        .accessibilityIdentifier("uma.settings.privacy.clear-retained-data")
+                        Button(
+                            localized("Export Sanitized Diagnostics…", "导出已净化诊断信息…"),
+                            action: model.exportSanitizedDiagnostics
+                        )
+                        .accessibilityIdentifier("uma.settings.privacy.export-diagnostics")
+                    }
+                    if let status = model.dataActionStatus {
+                        Text(status)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("uma.settings.privacy.action-status")
+                    }
                 }
             }
         }

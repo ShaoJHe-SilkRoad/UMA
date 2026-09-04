@@ -150,6 +150,8 @@ final class AppShellCoordinator {
     private var runtime: UsageMonitorRuntime?
     private var assistantStoreObserver: AnyCancellable?
     private var appearancePreferenceObservation: ApplicationPreferences.Observation?
+    private var lifecyclePreferenceObservation: ApplicationPreferences.Observation?
+    private var windowCloseObservations: [NSObjectProtocol] = []
     private var hasStarted = false
     private var isTornDown = false
 
@@ -175,6 +177,25 @@ final class AppShellCoordinator {
         statusBarController.bindAssistant(assistantController)
         commandRouter = ApplicationMenuController(coordinator: self)
         statusBarController.recordShellCreated()
+        windowCloseObservations = [
+            mainWindowController.window,
+            settingsWindowController.window,
+        ].compactMap { window in
+            guard let window else { return nil }
+            return NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    DispatchQueue.main.async { [weak self] in
+                        MainActor.assumeIsolated {
+                            self?.applicationWindowDidClose()
+                        }
+                    }
+                }
+            }
+        }
     }
 
     func start(presentMainWindow: Bool) {
@@ -212,6 +233,7 @@ final class AppShellCoordinator {
         )
         settingsWindowController.attach(store: runtime.store, preferences: runtime.preferences)
         observeAppearance(in: runtime.preferences)
+        observeLifecyclePreference(in: runtime.preferences)
         applyAppearance(from: runtime.preferences)
         observeAssistantCards(in: runtime.store)
         updateAssistant(using: runtime.store)
@@ -372,21 +394,25 @@ final class AppShellCoordinator {
 
     func showMainWindow() {
         guard !isTornDown else { return }
+        resumeMonitoringForWindowPresentation()
         mainWindowController.showCanonicalWindow()
     }
 
     func showAgent(_ providerID: ProviderProductID) {
         guard !isTornDown else { return }
+        resumeMonitoringForWindowPresentation()
         mainWindowController.showAgent(providerID)
     }
 
     func showMainWindow(destination: MainSurfaceDestination) {
         guard !isTornDown else { return }
+        resumeMonitoringForWindowPresentation()
         mainWindowController.showDestination(destination)
     }
 
     func showSettingsWindow() {
         guard !isTornDown else { return }
+        resumeMonitoringForWindowPresentation()
         settingsWindowController.showCanonicalWindow()
     }
 
@@ -477,6 +503,41 @@ final class AppShellCoordinator {
         }
     }
 
+    private func observeLifecyclePreference(in preferences: ApplicationPreferences) {
+        lifecyclePreferenceObservation = preferences.observe { [weak self] change in
+            guard change.key == UMAApplicationPreferenceKeys.keepMonitoringWhenWindowsClose.name
+            else { return }
+            self?.reconcileWindowMonitoringPolicy()
+        }
+    }
+
+    private func applicationWindowDidClose() {
+        reconcileWindowMonitoringPolicy()
+    }
+
+    private func reconcileWindowMonitoringPolicy() {
+        guard let runtime else { return }
+        let hasVisibleApplicationWindow = mainWindowController.isVisibleForTesting
+            || settingsWindowController.isVisibleForTesting
+        if hasVisibleApplicationWindow
+            || runtime.preferences.value(
+                for: UMAApplicationPreferenceKeys.keepMonitoringWhenWindowsClose
+            ) {
+            resumeMonitoringForWindowPresentation()
+        } else {
+            Task { @MainActor [weak store = runtime.store] in
+                await store?.suspendMonitoringForWindowClosure()
+            }
+        }
+    }
+
+    private func resumeMonitoringForWindowPresentation() {
+        guard let store = runtime?.store else { return }
+        Task { @MainActor [weak store] in
+            await store?.resumeMonitoringForWindowPresentation()
+        }
+    }
+
     private func applyAppearance(from preferences: ApplicationPreferences) {
         let value = UMAApplicationAppearance(
             rawValue: preferences.value(for: UMAApplicationPreferenceKeys.appearance)
@@ -494,6 +555,12 @@ final class AppShellCoordinator {
         assistantStoreObserver?.cancel()
         appearancePreferenceObservation?.cancel()
         appearancePreferenceObservation = nil
+        lifecyclePreferenceObservation?.cancel()
+        lifecyclePreferenceObservation = nil
+        for windowCloseObservation in windowCloseObservations {
+            NotificationCenter.default.removeObserver(windowCloseObservation)
+        }
+        windowCloseObservations.removeAll()
         mainWindowController.tearDown()
         settingsWindowController.tearDown()
         assistantController.tearDown()

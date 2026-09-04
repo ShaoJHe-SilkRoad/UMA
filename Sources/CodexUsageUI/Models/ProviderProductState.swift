@@ -108,6 +108,14 @@ public enum ProviderProductQuotaKind: Hashable, Sendable {
     case fiveHour, sevenDay, other, credits
 }
 
+/// Explicit product truth for the short Codex quota window. `absent` means
+/// that the admitted snapshot did not report a short window at all; `unknown`
+/// means that it reported the window but did not supply a valid finite or
+/// unlimited value. Neither state may be promoted to infinity.
+public enum ProviderProductFiveHourStatus: Equatable, Sendable {
+    case finite, unlimited, unknown, absent
+}
+
 public struct ProviderProductQuotaState: Equatable, Identifiable, Sendable {
     public let id: String
     public let kind: ProviderProductQuotaKind
@@ -226,6 +234,27 @@ public struct ProviderProductState: Equatable, Identifiable, Sendable {
     public var primaryQuota: ProviderProductQuotaState? {
         guard let primaryQuotaID else { return nil }
         return quotas.first { $0.id == primaryQuotaID }
+    }
+
+    /// Compact surfaces show only qualified values. Unknown windows remain in
+    /// `quotas` for optional detail messaging, but cannot appear as a fabricated
+    /// percentage or infinity in glance surfaces.
+    public var compactQuotas: [ProviderProductQuotaState] {
+        quotas.filter { $0.value != .unavailable }
+    }
+
+    public var fiveHourStatus: ProviderProductFiveHourStatus {
+        let shortWindows = quotas.filter { $0.kind == .fiveHour }
+        if shortWindows.contains(where: {
+            if case .remainingPercent = $0.value { return true }
+            return false
+        }) {
+            return .finite
+        }
+        if shortWindows.contains(where: { $0.value == .unlimited }) {
+            return .unlimited
+        }
+        return shortWindows.isEmpty ? .absent : .unknown
     }
 
     public var primaryDisplayText: String { primaryQuota?.displayText ?? "—" }
@@ -523,7 +552,11 @@ enum ProviderProductStatePolicy {
         card: SharedUsageCardPresentation?
     ) -> ProviderProductState {
         let freshness = freshness(snapshot?.freshness)
-        let quotas = makeQuotas(card: card, freshness: freshness)
+        let quotas = makeQuotas(
+            card: card,
+            freshness: freshness,
+            snapshot: snapshot
+        )
         let sourceSummary = sourceSummary(productID: entry.productID, snapshot: snapshot)
         let hasQualifiedClaudeLocalSmartUsage = entry.productID == .claude
             && [.localSmartExact, .localSmartEstimate].contains(sourceSummary)
@@ -613,11 +646,29 @@ enum ProviderProductStatePolicy {
 
     private static func makeQuotas(
         card: SharedUsageCardPresentation?,
-        freshness: ProviderProductFreshness
+        freshness: ProviderProductFreshness,
+        snapshot: AgentUsageSnapshot? = nil
     ) -> [ProviderProductQuotaState] {
+        if let sourceQuotas = makeCodexSourceQuotas(
+            snapshot: snapshot,
+            freshness: freshness
+        ) {
+            return sourceQuotas.sorted(by: quotaPrecedes)
+        }
         guard let card else { return [] }
         var counts: [ProviderProductQuotaKind: Int] = [:]
-        var quotas = card.windows.map { window -> ProviderProductQuotaState in
+        var quotas = card.windows.compactMap { window -> ProviderProductQuotaState? in
+            // Older Codex connector code manufactured this sentinel from the
+            // mere presence of a weekly window. It is not provider evidence of
+            // unlimited five-hour usage, so the product boundary must reject
+            // it. A real, explicitly unlimited provider window keeps its own
+            // stable identifier and passes through normally.
+            if snapshot?.id == CodexUsageConnector.connectorID,
+               window.kind == .fiveHour,
+               window.remaining == .unlimited,
+               window.id == "five-hour-unlimited" {
+                return nil
+            }
             let kind: ProviderProductQuotaKind = switch window.kind {
             case .fiveHour: .fiveHour
             case .sevenDay: .sevenDay
@@ -672,7 +723,73 @@ enum ProviderProductStatePolicy {
                 )
             ]
         }
-        return quotas
+        return quotas.sorted(by: quotaPrecedes)
+    }
+
+    /// Codex quota truth is derived from the admitted typed account channel,
+    /// one window at a time. This deliberately does not require every sibling
+    /// window to be valid: an unknown 5H value must not hide an independently
+    /// valid 7D value. Other providers continue through the shared card path.
+    private static func makeCodexSourceQuotas(
+        snapshot: AgentUsageSnapshot?,
+        freshness: ProviderProductFreshness
+    ) -> [ProviderProductQuotaState]? {
+        guard let snapshot,
+              snapshot.id == CodexUsageConnector.connectorID,
+              let account = snapshot.channels.first(where: { $0.id == .account }),
+              account.provenance == .providerReported,
+              account.sourceTier == .officialLocalService,
+              !account.rateLimitWindows.isEmpty
+        else { return nil }
+
+        var counts: [ProviderProductQuotaKind: Int] = [:]
+        return account.rateLimitWindows.compactMap { window in
+            // This identifier is created by the legacy connector when no 5H
+            // window was reported. It represents absence, not provider-declared
+            // infinity, and therefore cannot cross the product-truth boundary.
+            if window.kind == .fiveHour,
+               window.isUnlimited,
+               window.id == "five-hour-unlimited" {
+                return nil
+            }
+
+            let kind: ProviderProductQuotaKind = switch window.kind {
+            case .fiveHour: .fiveHour
+            case .sevenDay: .sevenDay
+            case .other: .other
+            }
+            let index = counts[kind, default: 0]
+            counts[kind] = index + 1
+            let value: ProviderProductQuotaValue
+            if window.isUnlimited {
+                value = .unlimited
+            } else if let remaining = window.normalizedRemainingPercent {
+                value = .remainingPercent(remaining)
+            } else {
+                value = .unavailable
+            }
+            let precision: ProviderProductPrecision = window.isEstimated == true
+                ? .estimated
+                : value == .unavailable ? .unavailable : .exact
+            let unavailableReason: ProviderProductComparisonIneligibility =
+                window.usedPercent == nil && window.remainingPercent == nil
+                    ? .missing
+                    : .invalid
+            return ProviderProductQuotaState(
+                id: "\(stableName(kind))-\(index)",
+                kind: kind,
+                compactLabel: compactLabel(kind),
+                value: value,
+                precision: precision,
+                freshness: freshness,
+                comparison: comparison(
+                    value,
+                    freshness: freshness,
+                    unavailableReason: unavailableReason
+                ),
+                resetsAt: window.resetsAt
+            )
+        }
     }
 
     private static func primaryQuotaID(
@@ -689,7 +806,49 @@ enum ProviderProductStatePolicy {
         case .other: .other
         }
         let siblings = card?.windows.filter { $0.kind == selected.kind } ?? []
-        return "\(stableName(kind))-\(siblings.firstIndex { $0.id == selected.id } ?? 0)"
+        let candidate = "\(stableName(kind))-\(siblings.firstIndex { $0.id == selected.id } ?? 0)"
+        return quotas.contains(where: { $0.id == candidate }) ? candidate : quotas.first?.id
+    }
+
+    /// Finite percentage windows are actionable and lead. A lower remaining
+    /// value leads another finite value; otherwise the weekly window wins a
+    /// deterministic tie. Explicit infinity is secondary, and unknown detail
+    /// rows are last. Native credit values never compare numerically with
+    /// percentages.
+    private static func quotaPrecedes(
+        _ lhs: ProviderProductQuotaState,
+        _ rhs: ProviderProductQuotaState
+    ) -> Bool {
+        let valueRank: (ProviderProductQuotaState) -> Int = { quota in
+            switch (quota.kind, quota.value) {
+            case (.fiveHour, .remainingPercent), (.sevenDay, .remainingPercent): 0
+            case (.other, .remainingPercent): 1
+            case (_, .remainingCredits): 2
+            case (_, .unlimited): 3
+            case (_, .unavailable), (_, .remainingPercent): 4
+            }
+        }
+        let lhsRank = valueRank(lhs)
+        let rhsRank = valueRank(rhs)
+        if lhsRank != rhsRank { return lhsRank < rhsRank }
+
+        if case let .remainingPercent(lhsValue) = lhs.value,
+           case let .remainingPercent(rhsValue) = rhs.value,
+           lhsValue != rhsValue {
+            return lhsValue < rhsValue
+        }
+
+        let kindRank: (ProviderProductQuotaKind) -> Int = { kind in
+            switch kind {
+            case .sevenDay: 0
+            case .fiveHour: 1
+            case .other: 2
+            case .credits: 3
+            }
+        }
+        let lhsKindRank = kindRank(lhs.kind)
+        let rhsKindRank = kindRank(rhs.kind)
+        return lhsKindRank == rhsKindRank ? lhs.id < rhs.id : lhsKindRank < rhsKindRank
     }
 
     private static func stableName(_ kind: ProviderProductQuotaKind) -> String {
@@ -721,7 +880,8 @@ enum ProviderProductStatePolicy {
 
     private static func comparison(
         _ value: ProviderProductQuotaValue,
-        freshness: ProviderProductFreshness
+        freshness: ProviderProductFreshness,
+        unavailableReason: ProviderProductComparisonIneligibility = .invalid
     ) -> ProviderProductQuotaComparison {
         if freshness == .stale || freshness == .unavailable { return .ineligible(.stale) }
         switch value {
@@ -729,7 +889,8 @@ enum ProviderProductStatePolicy {
             return .eligibleRemainingPercent(percent)
         case .remainingCredits: return .ineligible(.nativeUnit)
         case .unlimited: return .ineligible(.unlimited)
-        case .remainingPercent, .unavailable: return .ineligible(.invalid)
+        case .remainingPercent: return .ineligible(.invalid)
+        case .unavailable: return .ineligible(unavailableReason)
         }
     }
 

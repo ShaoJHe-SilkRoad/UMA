@@ -89,6 +89,41 @@ struct UMA014M1NativeShellTests {
         #expect(!views.contains(".navigationTitle(\"Providers\")"))
     }
 
+    @Test("Main and Settings rely exclusively on native titlebar controls")
+    @MainActor
+    func canonicalWindowsUseNativeTrafficLights() {
+        let main = MainWindowController()
+        let settings = SettingsWindowController()
+        defer {
+            main.tearDown()
+            settings.tearDown()
+        }
+
+        for window in [main.window, settings.window].compactMap({ $0 }) {
+            #expect(window.styleMask.contains(.titled))
+            #expect(window.styleMask.contains(.closable))
+            #expect(window.styleMask.contains(.miniaturizable))
+            #expect(window.styleMask.contains(.resizable))
+            #expect(!window.styleMask.contains(.fullSizeContentView))
+            #expect(window.titleVisibility == .visible)
+            #expect(!window.titlebarAppearsTransparent)
+            #expect(window.titlebarAccessoryViewControllers.isEmpty)
+
+            for kind in [
+                NSWindow.ButtonType.closeButton,
+                .miniaturizeButton,
+                .zoomButton,
+            ] {
+                let button = window.standardWindowButton(kind)
+                #expect(button != nil)
+                if let button {
+                    #expect(button.window === window)
+                    #expect(button.superview !== window.contentView)
+                }
+            }
+        }
+    }
+
     @Test("Coordinator executes close, reopen, singleton, and shell-survival lifecycle")
     @MainActor
     func coordinatorLifecycleIsExecutable() {

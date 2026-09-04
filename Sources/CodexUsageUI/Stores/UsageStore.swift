@@ -39,6 +39,11 @@ public final class UsageStore: ObservableObject {
     private var currentAdmissionRecords: [ProviderSurfaceAdmissionRecord] = []
     private var currentRegistryRevision: UInt64 = 0
     private var pendingInitialAdmissionProviderIDs: Set<AgentConnectorID> = []
+    private var applicationPreferenceObservation: ApplicationPreferences.Observation?
+    private var backgroundRefreshTask: Task<Void, Never>?
+    private var backgroundRefreshInFlight = false
+    private var monitoringSuspendedForWindowClosure = false
+    private let backgroundRefreshSleeper: @Sendable (Duration) async throws -> Void
 
     public convenience init(autoRefresh: Bool = true, language: AppLanguage? = nil) {
         self.init(
@@ -125,10 +130,14 @@ public final class UsageStore: ObservableObject {
         previewPresentationCards: [SharedUsageCardPresentation] = [],
         previewLoginOptions: [ProviderLoginOption] = [],
         visibleRefreshInterval: Duration = .seconds(120),
-        backgroundRefreshInterval: Duration = .seconds(900)
+        backgroundRefreshInterval: Duration = .seconds(900),
+        backgroundRefreshSleeper: @escaping @Sendable (Duration) async throws -> Void = {
+            try await Task.sleep(for: $0)
+        }
     ) {
         _ = visibleRefreshInterval
         _ = backgroundRefreshInterval
+        self.backgroundRefreshSleeper = backgroundRefreshSleeper
         // Internal/test construction with nil persistence remains ephemeral;
         // it must never silently escape into the production standard domain.
         let effectivePreferences = preferences
@@ -192,6 +201,8 @@ public final class UsageStore: ObservableObject {
         }
         beginAgentSettingsObservation()
         beginRegistryObservation()
+        beginApplicationPreferenceObservation()
+        reconcileBackgroundRefreshPolicy()
     }
 
     public var menuPercent: Int? {
@@ -352,14 +363,41 @@ public final class UsageStore: ObservableObject {
         _ = await performEligibilityScan(trigger: .manualRefresh)
     }
 
-    /// Wake is intentionally not a discovery trigger.
-    public func handleApplicationWake() async {}
+    /// Wake is never a discovery trigger. When explicitly enabled it refreshes
+    /// only the providers already owned by the current admission publication.
+    public func handleApplicationWake() async {
+        guard preferences?.value(for: UMAApplicationPreferenceKeys.refreshOnWake) == true,
+              !monitoringSuspendedForWindowClosure else { return }
+        await refreshAdmittedProviders(trigger: .wake)
+    }
+
+    public func suspendMonitoringForWindowClosure() async {
+        guard !previewOnly,
+              preferences?.value(
+                for: UMAApplicationPreferenceKeys.keepMonitoringWhenWindowsClose
+              ) == false,
+              !monitoringSuspendedForWindowClosure,
+              let registry else { return }
+        monitoringSuspendedForWindowClosure = true
+        backgroundRefreshTask?.cancel()
+        backgroundRefreshTask = nil
+        await registry.suspendAllPreservingState()
+    }
+
+    public func resumeMonitoringForWindowPresentation() async {
+        guard !previewOnly, monitoringSuspendedForWindowClosure, let registry else { return }
+        monitoringSuspendedForWindowClosure = false
+        await registry.resumeCurrentAdmissions()
+        reconcileBackgroundRefreshPolicy()
+    }
 
     public func stopAllConnectors() async {
         guard !previewOnly, let registry else { return }
         activeScanGeneration &+= 1
         activeScanTask?.cancel()
         activeScanTask = nil
+        backgroundRefreshTask?.cancel()
+        backgroundRefreshTask = nil
         registrySubscription?.cancel()
         if let registryStreamSubscription {
             await registry.detach(registryStreamSubscription)
@@ -413,6 +451,61 @@ public final class UsageStore: ObservableObject {
             .sink { @MainActor [weak self] _ in
                 self?.applyMonitoringPreferences()
             }
+    }
+
+    private func beginApplicationPreferenceObservation() {
+        applicationPreferenceObservation = preferences?.observe { [weak self] change in
+            guard change.key == UMAApplicationPreferenceKeys.automaticBackgroundRefresh.name
+                    || change.key == UMAApplicationPreferenceKeys.backgroundRefreshInterval.name
+                    || change.key == UMAApplicationPreferenceKeys.keepMonitoringWhenWindowsClose.name
+            else { return }
+            self?.reconcileBackgroundRefreshPolicy()
+        }
+    }
+
+    private func reconcileBackgroundRefreshPolicy() {
+        backgroundRefreshTask?.cancel()
+        backgroundRefreshTask = nil
+        guard !previewOnly,
+              !monitoringSuspendedForWindowClosure,
+              preferences?.value(
+                for: UMAApplicationPreferenceKeys.automaticBackgroundRefresh
+              ) == true else { return }
+        let rawInterval = preferences?.value(
+            for: UMAApplicationPreferenceKeys.backgroundRefreshInterval
+        )
+        let interval = rawInterval.flatMap(UMABackgroundRefreshInterval.init(rawValue:))
+            ?? .fifteenMinutes
+        let sleeper = backgroundRefreshSleeper
+        backgroundRefreshTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await sleeper(interval.duration)
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled, let self else { return }
+                await self.refreshAdmittedProviders(trigger: .timer)
+            }
+        }
+    }
+
+    private func refreshAdmittedProviders(trigger: CodexRefreshTrigger) async {
+        guard !previewOnly, !backgroundRefreshInFlight, let registry else { return }
+        let ids = providerSnapshots.map(\.id).filter {
+            agentSettings?.isMonitoringEnabled(for: $0) ?? true
+        }
+        guard !ids.isEmpty else { return }
+        backgroundRefreshInFlight = true
+        defer { backgroundRefreshInFlight = false }
+        await withTaskGroup(of: Void.self) { group in
+            for id in ids {
+                group.addTask {
+                    try? await registry.refresh(id, trigger: trigger)
+                }
+            }
+        }
+        receive(await registry.latestPublication())
     }
 
     private func applyMonitoringPreferences() {

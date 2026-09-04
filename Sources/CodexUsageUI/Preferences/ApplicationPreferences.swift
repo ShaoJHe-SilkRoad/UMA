@@ -245,6 +245,25 @@ public enum UMAApplicationAppearance: String, CaseIterable, Identifiable, Sendab
     public var id: String { rawValue }
 }
 
+/// Deliberately small, version-stable refresh choices. Persisting a raw value
+/// keeps the preference backward compatible while the interval remains a
+/// typed product contract everywhere else.
+public enum UMABackgroundRefreshInterval: String, CaseIterable, Identifiable, Sendable {
+    case fifteenMinutes
+    case thirtyMinutes
+    case sixtyMinutes
+
+    public var id: String { rawValue }
+
+    public var duration: Duration {
+        switch self {
+        case .fifteenMinutes: .seconds(15 * 60)
+        case .thirtyMinutes: .seconds(30 * 60)
+        case .sixtyMinutes: .seconds(60 * 60)
+        }
+    }
+}
+
 /// Closed catalog for preferences moved behind the typed boundary in Infra G1.
 /// The raw names are the exact 0.13 keys.
 @MainActor
@@ -277,6 +296,38 @@ public enum UMAApplicationPreferenceKeys {
     )
     public static let quickPanelShowsReset = ApplicationPreferenceKey<Bool>(
         "app.quickPanelShowsReset",
+        default: true
+    )
+    public static let quickPanelShowsConnectivity = ApplicationPreferenceKey<Bool>(
+        "app.quickPanelShowsConnectivity",
+        default: true
+    )
+    public static let quickPanelShowsRemainingRails = ApplicationPreferenceKey<Bool>(
+        "app.quickPanelShowsRemainingRails",
+        default: true
+    )
+    public static let keepMonitoringWhenWindowsClose = ApplicationPreferenceKey<Bool>(
+        "app.keepMonitoringWhenWindowsClose",
+        default: true
+    )
+    public static let automaticBackgroundRefresh = ApplicationPreferenceKey<Bool>(
+        "app.automaticBackgroundRefresh",
+        default: false
+    )
+    public static let backgroundRefreshInterval = ApplicationPreferenceKey<String>(
+        "app.backgroundRefreshInterval",
+        default: UMABackgroundRefreshInterval.fifteenMinutes.rawValue
+    )
+    public static let refreshOnWake = ApplicationPreferenceKey<Bool>(
+        "app.refreshOnWake",
+        default: false
+    )
+    public static let assistantShowsStatusIndicator = ApplicationPreferenceKey<Bool>(
+        "desktopAssistant.showsStatusIndicator",
+        default: true
+    )
+    public static let assistantShowsPercentageRail = ApplicationPreferenceKey<Bool>(
+        "desktopAssistant.showsPercentageRail",
         default: true
     )
     static let agentPreferences = ApplicationPreferenceKey<Data?>(

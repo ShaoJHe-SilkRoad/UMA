@@ -284,6 +284,29 @@ actor AgentConnectorRegistry {
         publish()
     }
 
+    /// Pauses connector work without erasing the last admitted, allowlisted
+    /// publication. This is used only when the user explicitly disables
+    /// monitoring after all application windows close.
+    func suspendAllPreservingState() async {
+        let registered = orderedIDs.compactMap { connectors[$0] }
+        listeners.values.forEach { $0.cancel() }
+        listeners.removeAll()
+        for connector in registered { await stopIfNeeded(connector) }
+    }
+
+    /// Resumes exactly the providers represented by the current admission set;
+    /// it never performs discovery or admits a dormant provider.
+    func resumeCurrentAdmissions() async {
+        let admittedIDs = Set(currentAdmissionSet?.admittedProviderIDs ?? [])
+            .subtracting(excludedProviderIDs)
+        for id in admittedIDs {
+            guard let connector = connectors[id] else { continue }
+            stoppedSnapshots[id] = nil
+            await listen(to: connector)
+            await connector.start()
+        }
+    }
+
     func orderedSnapshots() -> [AgentUsageSnapshot] {
         orderedIDs.compactMap { latest[$0] }
     }
