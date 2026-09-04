@@ -102,7 +102,7 @@ struct STABG1StabilityContractTests {
         #expect(!settings.contains(".stroke(Color.white.opacity(0.28)"))
         #expect(legacyWorkBuddy.occurrenceCount(of: "GlassCardBackground") == 1)
         #expect(!legacyWorkBuddy.contains("usesIncreaseContrast"))
-        #expect(host.contains("Hosts exactly one clipped panel material"))
+        #expect(host.contains("Hosts exactly one panel material with one branch-specific contour owner"))
         #expect(host.contains("layer?.masksToBounds = true"))
         #expect(!host.contains("makeRoundedContentClipper"))
         #expect(host.contains("configureFallbackContour()"))

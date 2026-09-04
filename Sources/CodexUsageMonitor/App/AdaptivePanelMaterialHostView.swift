@@ -1,8 +1,8 @@
 @preconcurrency import AppKit
 
-/// Hosts exactly one clipped panel material. The host layer is the only clip;
-/// native glass owns the contour on macOS 26, while the host owns the fallback
-/// contour on earlier or reduced-transparency appearances.
+/// Hosts exactly one panel material with one branch-specific contour owner.
+/// Native glass owns both the clip and contour on macOS 26, while the host owns
+/// both on earlier or reduced-transparency appearances.
 final class AdaptivePanelMaterialHostView: NSView {
     private let cornerRadius: CGFloat
     private let fallbackMaterialOpacity: CGFloat
@@ -15,10 +15,7 @@ final class AdaptivePanelMaterialHostView: NSView {
         super.init(frame: frameRect)
 
         wantsLayer = true
-        layer?.backgroundColor = NSColor.clear.cgColor
-        layer?.cornerRadius = cornerRadius
-        layer?.cornerCurve = .continuous
-        layer?.masksToBounds = true
+        configureTransparentGeometryCarrier()
         displayOptionsObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
             object: nil,
@@ -55,7 +52,7 @@ final class AdaptivePanelMaterialHostView: NSView {
         guard let contentView = hostedContentView else { return }
         contentView.removeFromSuperview()
         subviews.forEach { $0.removeFromSuperview() }
-        layer?.backgroundColor = NSColor.clear.cgColor
+        configureTransparentGeometryCarrier()
 
         if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
             configureFallbackContour()
@@ -63,8 +60,6 @@ final class AdaptivePanelMaterialHostView: NSView {
             return
         }
         if #available(macOS 26.0, *) {
-            layer?.borderWidth = 0
-            layer?.borderColor = nil
             installNativeGlass(contentView)
         } else {
             configureFallbackContour()
@@ -72,8 +67,21 @@ final class AdaptivePanelMaterialHostView: NSView {
         }
     }
 
+    private func configureTransparentGeometryCarrier() {
+        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.borderWidth = 0
+        layer?.borderColor = nil
+        layer?.cornerRadius = 0
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = false
+    }
+
     private func configureFallbackContour() {
         let increasedContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.cornerRadius = cornerRadius
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = true
         layer?.borderWidth = increasedContrast ? 1.4 : 0.8
         layer?.borderColor = NSColor.separatorColor
             .withAlphaComponent(increasedContrast ? 0.72 : 0.34)
