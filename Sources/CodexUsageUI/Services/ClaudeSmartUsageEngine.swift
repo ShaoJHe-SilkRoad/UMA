@@ -358,27 +358,26 @@ actor ClaudeSmartAnchorStore: ClaudeSmartAnchorStoring {
     private let fileManager: FileManager
     private let now: @Sendable () -> Date
     private let commitFault: CommitFault
+    private let allowsOwnedDirectoryPermissionMigration: Bool
 
     init(
-        url: URL = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        )[0]
-            .appendingPathComponent("CodexUsageMonitor", isDirectory: true)
-            .appendingPathComponent("claude-smart-anchors.json"),
+        url: URL = ApplicationDataPaths.current().smartAnchorsURL,
         fileManager: FileManager = .default,
         now: @escaping @Sendable () -> Date = Date.init,
-        commitFault: CommitFault = .none
+        commitFault: CommitFault = .none,
+        allowsOwnedDirectoryPermissionMigration: Bool = false
     ) {
         self.url = url
         self.fileManager = fileManager
         self.now = now
         self.commitFault = commitFault
+        self.allowsOwnedDirectoryPermissionMigration = allowsOwnedDirectoryPermissionMigration
     }
 
     func load() -> [ClaudeSmartWindowAnchor] {
         let loaded: Data?
         do {
+            try prepareOwnedParentIfAuthorized()
             loaded = try ClaudeOwnedFileReader.read(
                 at: url,
                 maximumBytes: Self.maximumEncodedBytes
@@ -427,6 +426,7 @@ actor ClaudeSmartAnchorStore: ClaudeSmartAnchorStoring {
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
+        try prepareOwnedParentIfAuthorized()
         guard Self.isOwnerOnlyDirectory(parent), !Self.isSymlink(url) else {
             throw StoreError.unsafePath
         }
@@ -578,6 +578,35 @@ actor ClaudeSmartAnchorStore: ClaudeSmartAnchorStoring {
                     && ($0.source == .exactLocalStatusLine
                         || $0.source == .exactSafariAccuracy)
             }
+    }
+
+    /// Only the application composition opts into repairing its own legacy
+    /// storage directory. Generic injected stores retain strict refusal.
+    private func prepareOwnedParentIfAuthorized() throws {
+        guard allowsOwnedDirectoryPermissionMigration else { return }
+        let parent = url.deletingLastPathComponent()
+        guard !Self.hasSymlinkComponent(parent), !Self.isSymlink(url) else {
+            throw StoreError.unsafePath
+        }
+        guard fileManager.fileExists(atPath: parent.path) else { return }
+        let descriptor = open(parent.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard descriptor >= 0 else { throw StoreError.unsafePath }
+        defer { close(descriptor) }
+        var opened = stat()
+        var named = stat()
+        guard fstat(descriptor, &opened) == 0,
+              lstat(parent.path, &named) == 0,
+              opened.st_dev == named.st_dev, opened.st_ino == named.st_ino,
+              (opened.st_mode & S_IFMT) == S_IFDIR,
+              opened.st_uid == getuid(), !Self.hasSymlinkComponent(parent)
+        else { throw StoreError.unsafePath }
+        if (opened.st_mode & 0o077) != 0 {
+            guard fchmod(descriptor, 0o700) == 0 else { throw StoreError.unsafePath }
+        }
+        guard lstat(parent.path, &named) == 0,
+              opened.st_dev == named.st_dev, opened.st_ino == named.st_ino,
+              Self.isOwnerOnlyDirectory(parent)
+        else { throw StoreError.unsafePath }
     }
 
     private static func hasSymlinkComponent(_ url: URL) -> Bool {

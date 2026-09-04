@@ -160,12 +160,14 @@ struct SettingsWindowRootView: View {
     let preferences: ApplicationPreferences
     @ObservedObject var store: UsageStore
     @ObservedObject var navigation: GlobalSettingsNavigationState
+    var dataPaths: ApplicationDataPaths = .current()
 
     var body: some View {
         GlobalSettingsSurface(
             preferences: preferences,
             store: store,
-            navigation: navigation
+            navigation: navigation,
+            dataPaths: dataPaths
         )
     }
 }

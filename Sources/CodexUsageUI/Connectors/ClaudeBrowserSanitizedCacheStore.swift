@@ -17,11 +17,7 @@ actor ClaudeBrowserSanitizedCacheStore {
 
     static let directoryPermissions = 0o700
     static let filePermissions = 0o600
-    static let defaultURL = FileManager.default
-        .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("CodexUsageMonitor", isDirectory: true)
-        .appendingPathComponent("ClaudeBrowserIntegration", isDirectory: true)
-        .appendingPathComponent("sanitized-quota.json", isDirectory: false)
+    static var defaultURL: URL { ApplicationDataPaths.current().browserCacheURL }
 
     private let url: URL
     private let fileManager: FileManager

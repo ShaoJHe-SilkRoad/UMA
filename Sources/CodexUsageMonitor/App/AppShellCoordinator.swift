@@ -231,7 +231,9 @@ final class AppShellCoordinator {
             connectClaude: { [weak self] in self?.connectClaude() },
             accuracySyncClaude: { [weak self] in self?.accuracySyncClaude() }
         )
-        settingsWindowController.attach(store: runtime.store, preferences: runtime.preferences)
+        settingsWindowController.attach(
+            store: runtime.store, preferences: runtime.preferences, dataPaths: runtime.dataPaths
+        )
         observeAppearance(in: runtime.preferences)
         observeLifecyclePreference(in: runtime.preferences)
         applyAppearance(from: runtime.preferences)

@@ -64,6 +64,7 @@ struct ClaudeSourceTransparency: Equatable, Sendable {
 public enum ClaudeAgentControlState: Equatable, Sendable {
     case consentRequired
     case localSmartRepairRequired
+    case statusLineConfigurationUnavailable(ClaudeStatusLineConfigurationIssue)
     case accuracyReady
     case accuracyInProgress
     case companionStarting
@@ -94,6 +95,13 @@ public enum ClaudeAgentControlState: Equatable, Sendable {
             return .onlineVerificationUnavailable
         }
     }
+}
+
+/// A statusLine installation limitation does not withdraw Desktop estimates or
+/// independently authorized one-shot Accuracy Sync.
+public enum ClaudeStatusLineConfigurationIssue: Equatable, Sendable {
+    case requiresInstalledApp
+    case developmentIsolation
 }
 
 @MainActor
@@ -156,13 +164,27 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     /// by this model; views must still route mutations through its actions.
     public var hasLocalSmartConsent: Bool { consentGranted }
 
+    public let statusLineConfigurationIssue: ClaudeStatusLineConfigurationIssue?
+    private let permitsDesktopLocalSmart: Bool
+    public var canConnectLocalSmartMode: Bool {
+        statusLineConfigurationIssue == nil || permitsDesktopLocalSmart
+    }
+    public var canRepairStatusLineConfiguration: Bool {
+        statusLineConfigurationIssue == nil
+    }
+
     public var agentControlState: ClaudeAgentControlState {
-        ClaudeAgentControlState.classify(
+        let control = ClaudeAgentControlState.classify(
             consentGranted: consentGranted,
             localSmartState: localSmartState,
             companionRuntime: productState.companionRuntime,
             browserAccuracyState: browserAccuracyState
         )
+        if !canConnectLocalSmartMode, let statusLineConfigurationIssue,
+           control == .consentRequired || control == .localSmartRepairRequired {
+            return .statusLineConfigurationUnavailable(statusLineConfigurationIssue)
+        }
+        return control
     }
 
     var productState: ClaudeProductStateMatrix {
@@ -186,11 +208,15 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         connector: ClaudeCodeUsageConnector,
         consentStore: ClaudeBrowserConsentStore,
         configurationManager: ClaudeStatusLineConfigurationManager? = nil,
+        statusLineConfigurationIssue: ClaudeStatusLineConfigurationIssue? = nil,
+        permitsDesktopLocalSmart: Bool = false,
         refreshAdmissions: @escaping @MainActor @Sendable () async -> Void = {}
     ) {
         self.connector = connector
         self.consentStore = consentStore
         self.configurationManager = configurationManager
+        self.statusLineConfigurationIssue = statusLineConfigurationIssue
+        self.permitsDesktopLocalSmart = permitsDesktopLocalSmart
         self.refreshAdmissions = refreshAdmissions
         consentGranted = consentStore.consentGranted
         autoRefreshEnabled = false
@@ -246,7 +272,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     }
 
     public func connectWithConsent() {
-        guard !actionInProgress else { return }
+        guard !actionInProgress, canConnectLocalSmartMode else { return }
         actionInProgress = true
         activeAction = .connecting
         safeError = nil
@@ -355,6 +381,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     }
 
     func repairCompanion() {
+        guard canRepairStatusLineConfiguration else { return }
         guard let configurationManager else {
             run(.repairing) { connector in await connector.syncNow() }
             return

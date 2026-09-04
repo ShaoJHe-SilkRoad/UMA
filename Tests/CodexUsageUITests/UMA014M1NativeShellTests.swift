@@ -32,7 +32,8 @@ struct UMA014M1NativeShellTests {
             "private let assistantController: DesktopAssistantPanelController",
             "private var runtime: UsageMonitorRuntime?",
             "mainWindowController.attach(",
-            "settingsWindowController.attach(store: runtime.store, preferences: runtime.preferences)",
+            "settingsWindowController.attach(",
+            "store: runtime.store, preferences: runtime.preferences, dataPaths: runtime.dataPaths",
         ] {
             #expect(shell.contains(required))
         }

@@ -39,6 +39,7 @@ public struct UsageMonitorRuntime {
     ]
 
     public let preferences: ApplicationPreferences
+    public let dataPaths: ApplicationDataPaths
     public let store: UsageStore
     public let claudeSettings: ClaudeBrowserSettingsModel
     private let startupTask: Task<Void, Never>?
@@ -47,9 +48,11 @@ public struct UsageMonitorRuntime {
         preferences: ApplicationPreferences,
         store: UsageStore,
         claudeSettings: ClaudeBrowserSettingsModel,
-        startupTask: Task<Void, Never>? = nil
+        startupTask: Task<Void, Never>? = nil,
+        dataPaths: ApplicationDataPaths = .current()
     ) {
         self.preferences = preferences
+        self.dataPaths = dataPaths
         self.store = store
         self.claudeSettings = claudeSettings
         self.startupTask = startupTask
@@ -67,41 +70,38 @@ public struct UsageMonitorRuntime {
         workBuddyStoreURL: URL? = nil,
         snapshotStoreURL: URL? = nil,
         startProviders: Bool = true,
-        preferenceDefaults: UserDefaults = .standard
+        preferenceDefaults: UserDefaults = .standard,
+        dataPaths: ApplicationDataPaths = .current()
     ) -> UsageMonitorRuntime {
         _ = workBuddyStoreURL
+        let dataPaths = dataPaths.overridingSnapshotURL(snapshotStoreURL)
         let preferences = ApplicationPreferences(userDefaults: preferenceDefaults)
-        let snapshotStore = snapshotStoreURL.map {
-            AgentConnectorSnapshotStore(url: $0)
-        } ?? AgentConnectorSnapshotStore()
-        let claudeConsent = ClaudeBrowserConsentStore(defaults: preferenceDefaults)
-        let claudeCache = ClaudeBrowserSanitizedCacheStore()
-        let claudeIntegration = ClaudeBrowserProductionIntegration.make()
-        let claudeSurfaceDetector = ClaudeLocalSurfaceDetector()
-        let claudePaths = ClaudeStatusLineConfigurationPaths()
-        let claudeRelay = Bundle.main.bundleURL
-            .appendingPathComponent("Contents", isDirectory: true)
-            .appendingPathComponent("Helpers", isDirectory: true)
-            .appendingPathComponent("ClaudeStatusLineRelay")
-        let relayCommand = [
-            claudeRelay.path,
-            "--state",
-            claudePaths.stateURL.path,
-            "--prior-status-line",
-            claudePaths.backupURL.path,
-        ].map(Self.shellQuote).joined(separator: " ")
-        let claudeLocalActivityReader: (any ClaudeLocalActivityReading)? =
-            claudeSurfaceDetector.statusLineCapableSurfaceInstalled
-                ? ClaudeLocalActivityReader()
-                : nil
-        let claudeDesktopPlanUsageReader: (any ClaudeDesktopPlanUsageReading)? =
-            claudeSurfaceDetector.claudeDesktopInstalled
-                ? ClaudeDesktopPlanUsageReader()
-                : nil
-        let claudeConfiguration = ClaudeStatusLineConfigurationManager(
-            paths: claudePaths,
-            relayCommand: relayCommand
+        let snapshotStore = AgentConnectorSnapshotStore(
+            url: dataPaths.snapshotURL
         )
+        let claudeConsent = ClaudeBrowserConsentStore(defaults: preferenceDefaults)
+        let claudeCache = ClaudeBrowserSanitizedCacheStore(url: dataPaths.browserCacheURL)
+        let claudeIntegration: ClaudeBrowserProductionIntegration = startProviders
+            ? .make() : .unavailable()
+        let claudeSurfaceDetector = ClaudeLocalSurfaceDetector()
+        // A diagnostic/fixture runtime must not inspect installed provider
+        // surfaces or establish an immutable-Host connection.
+        let statusLineSurfaceInstalled = startProviders
+            && claudeSurfaceDetector.statusLineCapableSurfaceInstalled
+        let desktopInstalled = startProviders && claudeSurfaceDetector.claudeDesktopInstalled
+        let claudePaths = dataPaths.statusLinePaths
+        let relayURL = dataPaths.supportsProviderConfiguration && statusLineSurfaceInstalled
+            ? BundledClaudeRelay.executableURL() : nil
+        let claudeConfiguration = relayURL.map { relay in
+            ClaudeStatusLineConfigurationManager(
+                paths: claudePaths,
+                relayCommand: BundledClaudeRelay.command(executableURL: relay, paths: claudePaths)
+            )
+        }
+        let claudeLocalActivityReader: (any ClaudeLocalActivityReading)? =
+            statusLineSurfaceInstalled ? ClaudeLocalActivityReader() : nil
+        let claudeDesktopPlanUsageReader: (any ClaudeDesktopPlanUsageReading)? =
+            desktopInstalled ? ClaudeDesktopPlanUsageReader() : nil
         let claudeConnector = ClaudeCodeUsageConnector.production(
             integration: claudeIntegration,
             hasConsent: { @MainActor in claudeConsent.consentGranted },
@@ -114,16 +114,20 @@ public struct UsageMonitorRuntime {
             statusStateURL: claudePaths.stateURL,
             localActivityReader: claudeLocalActivityReader,
             desktopPlanUsageReader: claudeDesktopPlanUsageReader,
-            desktopActivityContract: claudeSurfaceDetector.claudeDesktopInstalled
+            desktopActivityContract: desktopInstalled
                 ? .estimateOnlyNoActivitySignal
                 : .notApplicable,
-            anchorStore: ClaudeSmartAnchorStore()
+            anchorStore: ClaudeSmartAnchorStore(
+                url: dataPaths.smartAnchorsURL,
+                allowsOwnedDirectoryPermissionMigration: true
+            )
         )
         let agentSettings = AgentSettingsCoordinator(
             store: AgentPreferenceStore(preferences: preferences)
         )
         let registry = AgentUsageRuntime.makeCodexRegistry(
             snapshotStore: snapshotStore,
+            localActivityReader: CodexLocalActivityReader(ledgerURL: dataPaths.codexLedgerURL),
             additionalConnectors: [claudeConnector]
         )
         let claudeSettings = ClaudeBrowserSettingsModel(
@@ -132,8 +136,11 @@ public struct UsageMonitorRuntime {
             // Claude Desktop's hosted agent uses an isolated per-session
             // configuration root. Only a detected terminal/IDE surface may be
             // configured through the supported user-level statusLine scope.
-            configurationManager: claudeSurfaceDetector
-                .statusLineCapableSurfaceInstalled ? claudeConfiguration : nil,
+            configurationManager: claudeConfiguration,
+            statusLineConfigurationIssue: statusLineSurfaceInstalled && claudeConfiguration == nil
+                ? (dataPaths.supportsProviderConfiguration ? .requiresInstalledApp : .developmentIsolation)
+                : nil,
+            permitsDesktopLocalSmart: desktopInstalled,
             refreshAdmissions: { @MainActor in
                 let descriptors = await registry.orderedDescriptors()
                 let excluded = agentSettings.disabledConnectorIDs(
@@ -146,7 +153,8 @@ public struct UsageMonitorRuntime {
             }
         )
         let usageStore = UsageStore(
-            registry: registry,
+            autoRefresh: startProviders,
+            registry: startProviders ? registry : nil,
             primaryConnectorID: CodexUsageConnector.connectorID,
             consentDefaults: preferenceDefaults,
             preferences: preferences,
@@ -189,12 +197,9 @@ public struct UsageMonitorRuntime {
             preferences: preferences,
             store: usageStore,
             claudeSettings: claudeSettings,
-            startupTask: startupTask
+            startupTask: startupTask,
+            dataPaths: dataPaths
         )
-    }
-
-    private nonisolated static func shellQuote(_ value: String) -> String {
-        "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
     }
 
     nonisolated static func antigravityObservation(
@@ -261,7 +266,8 @@ public struct UsageMonitorRuntime {
             workBuddyStoreURL: configuration.workBuddyStoreURL,
             snapshotStoreURL: configuration.snapshotStoreURL,
             startProviders: startProviders,
-            preferenceDefaults: preferenceDefaults
+            preferenceDefaults: preferenceDefaults,
+            dataPaths: .current(bundleIdentifier: bundleIdentifier)
         )
     }
 
@@ -333,7 +339,12 @@ public struct UsageMonitorRuntime {
             workBuddyStoreURL: configuration.workBuddyStoreURL,
             snapshotStoreURL: configuration.snapshotStoreURL,
             startProviders: startProviders,
-            preferenceDefaults: preferenceDefaults
+            preferenceDefaults: preferenceDefaults,
+            dataPaths: .current(
+                bundleIdentifier: bundleIdentifier,
+                applicationSupportDirectory: allowedRoot.appendingPathComponent("Library/Application Support", isDirectory: true),
+                homeDirectory: allowedRoot
+            )
         )
     }
 

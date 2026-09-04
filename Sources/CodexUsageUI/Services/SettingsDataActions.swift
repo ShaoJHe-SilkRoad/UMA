@@ -14,13 +14,19 @@ actor SettingsRetainedDataService {
     private let smartAnchors: ClaudeSmartAnchorStore
 
     init(
-        snapshots: AgentConnectorSnapshotStore = AgentConnectorSnapshotStore(),
-        browserCache: ClaudeBrowserSanitizedCacheStore = ClaudeBrowserSanitizedCacheStore(),
-        smartAnchors: ClaudeSmartAnchorStore = ClaudeSmartAnchorStore()
+        snapshots: AgentConnectorSnapshotStore,
+        browserCache: ClaudeBrowserSanitizedCacheStore,
+        smartAnchors: ClaudeSmartAnchorStore
     ) {
         self.snapshots = snapshots
         self.browserCache = browserCache
         self.smartAnchors = smartAnchors
+    }
+
+    init(dataPaths: ApplicationDataPaths = .current()) {
+        snapshots = AgentConnectorSnapshotStore(url: dataPaths.snapshotURL)
+        browserCache = ClaudeBrowserSanitizedCacheStore(url: dataPaths.browserCacheURL)
+        smartAnchors = ClaudeSmartAnchorStore(url: dataPaths.smartAnchorsURL)
     }
 
     func clear() async throws {

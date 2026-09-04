@@ -64,7 +64,8 @@ struct M5RMXSafariHostProductStateTests {
 
         #expect(source.contains("ClaudeLocalActivityReader()"))
         #expect(source.contains("ClaudeDesktopPlanUsageReader()"))
-        #expect(source.contains("ClaudeBrowserProductionIntegration.make()"))
+        #expect(source.contains("let claudeIntegration: ClaudeBrowserProductionIntegration = startProviders"))
+        #expect(source.contains("? .make() : .unavailable()"))
         #expect(!source.contains("ClaudeBrowserFileHandoff"))
         #expect(!source.contains("SafariServices"))
     }

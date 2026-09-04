@@ -742,6 +742,16 @@ public struct AgentWorkspaceSurface: View {
                         Button(localized("Repair Local Smart", "修复本地智能"), action: connectClaude)
                             .buttonStyle(.borderedProminent)
                             .accessibilityIdentifier("uma.agent.claude.repair-local-smart")
+                    case .statusLineConfigurationUnavailable(let issue):
+                        VStack(alignment: .leading, spacing: 4) {
+                            Button(localized("Connect Claude Code", "连接 Claude Code")) {}
+                                .disabled(true)
+                            Text(issue == .developmentIsolation
+                                ? localized("Claude Code setup is unavailable in this development build.", "此开发版本不配置 Claude Code。")
+                                : localized("Install UMA in Applications or Desktop to connect Claude Code.", "请将 UMA 安装到 Applications 或桌面后连接 Claude Code。"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     case .accuracyReady:
                         Button(localized("Accuracy Sync", "精确同步"), action: claudeAccuracySync)
                             .buttonStyle(.borderedProminent)
@@ -1023,11 +1033,17 @@ final class GlobalSettingsViewModel: ObservableObject {
     @Published private(set) var launchAtLoginError: String?
     @Published private(set) var dataActionStatus: String?
 
+    private let retainedDataService: SettingsRetainedDataService
     private let preferences: ApplicationPreferences
     private let store: UsageStore
     private var observation: ApplicationPreferences.Observation?
 
-    init(preferences: ApplicationPreferences, store: UsageStore) {
+    init(
+        preferences: ApplicationPreferences,
+        store: UsageStore,
+        dataPaths: ApplicationDataPaths = .current()
+    ) {
+        retainedDataService = SettingsRetainedDataService(dataPaths: dataPaths)
         self.preferences = preferences
         self.store = store
         language = preferences.value(for: UMAApplicationPreferenceKeys.language)
@@ -1211,7 +1227,7 @@ final class GlobalSettingsViewModel: ObservableObject {
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                try await SettingsRetainedDataService().clear()
+                try await self.retainedDataService.clear()
                 self.dataActionStatus = self.language == .simplifiedChinese
                     ? "已清除保留的本地用量数据。"
                     : "Retained local usage data cleared."
@@ -1338,11 +1354,14 @@ public struct GlobalSettingsSurface: View {
     public init(
         preferences: ApplicationPreferences,
         store: UsageStore,
-        navigation: GlobalSettingsNavigationState
+        navigation: GlobalSettingsNavigationState,
+        dataPaths: ApplicationDataPaths = .current()
     ) {
         self.navigation = navigation
         _model = StateObject(
-            wrappedValue: GlobalSettingsViewModel(preferences: preferences, store: store)
+            wrappedValue: GlobalSettingsViewModel(
+                preferences: preferences, store: store, dataPaths: dataPaths
+            )
         )
     }
 

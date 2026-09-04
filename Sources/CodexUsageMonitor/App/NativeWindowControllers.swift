@@ -157,7 +157,11 @@ final class SettingsWindowController: NSWindowController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
-    func attach(store: UsageStore, preferences: ApplicationPreferences) {
+    func attach(
+        store: UsageStore,
+        preferences: ApplicationPreferences,
+        dataPaths: ApplicationDataPaths = .current()
+    ) {
         guard attachedStore == nil else { return }
         attachedStore = store
         self.preferences = preferences
@@ -165,7 +169,8 @@ final class SettingsWindowController: NSWindowController {
             rootView: SettingsWindowRootView(
                 preferences: preferences,
                 store: store,
-                navigation: navigation
+                navigation: navigation,
+                dataPaths: dataPaths
             )
         )
     }

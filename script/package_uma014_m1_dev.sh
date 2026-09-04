@@ -13,14 +13,45 @@ BUILD_NUMBER="${UMA014_M1_BUILD_NUMBER:-$DEFAULT_BUILD_NUMBER}"
   printf '%s\n' "UMA014_BUILD_NUMBER_INVALID" >&2
   exit 2
 }
+BUILD_ROOT="${UMA014_M1_BUILD_ROOT:-/private/tmp/uma014-m1-swift-build}"
+PACKAGE_ROOT="${UMA014_M1_PACKAGE_ROOT:-/Volumes/HE/DEV/UMA/Packages/$PACKAGE_STEM-$(date -u +%Y%m%d%H%M%S)}"
+
+# Validate before invoking the compiler or creating any output. This packager
+# creates a new development artifact; accepted review and installed bytes are
+# never an update destination.
+fail_package() {
+  printf '%s\n' "$1" >&2
+  exit 2
+}
+[[ "$BUNDLE_IDENTIFIER" =~ ^com\.silkrd\.uma\.dev\.[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*$ ]] || \
+  fail_package UMA014_DEVELOPMENT_ID_REQUIRED
+[[ "$APP_NAME" != */* && "$APP_NAME" != . && "$APP_NAME" != .. && \
+   "$APP_NAME" != *$'\n'* && "$APP_NAME" != *$'\r'* ]] || \
+  fail_package UMA014_APPLICATION_NAME_INVALID
+
+validate_output_path() {
+  local candidate="$1" current="/" component
+  [[ "$candidate" == /* && "$candidate" =~ [^/] ]] || fail_package UMA014_OUTPUT_PATH_INVALID
+  local remaining="${candidate#/}"
+  while [[ -n "$remaining" ]]; do
+    component="${remaining%%/*}"
+    if [[ "$remaining" == */* ]]; then remaining="${remaining#*/}"; else remaining=""; fi
+    [[ "$component" != . && "$component" != .. && "$component" != *.[aA][pP][pP] ]] || \
+      fail_package UMA014_OUTPUT_PATH_INVALID
+    current="${current%/}/$component"
+    [[ ! -L "$current" ]] || fail_package UMA014_OUTPUT_SYMLINK_REJECTED
+  done
+}
+validate_output_path "$BUILD_ROOT"
+validate_output_path "$PACKAGE_ROOT"
+APP_BUNDLE="$PACKAGE_ROOT/$APP_NAME.app"
+[[ ! -e "$APP_BUNDLE" && ! -L "$APP_BUNDLE" ]] || fail_package UMA014_ARTIFACT_ALREADY_EXISTS
+
 DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer}"
 export DEVELOPER_DIR
 SWIFT_BIN="$(/usr/bin/xcrun --find swift)"
 SDKROOT="$(/usr/bin/xcrun --sdk macosx --show-sdk-path)"
 export SDKROOT
-BUILD_ROOT="${UMA014_M1_BUILD_ROOT:-/private/tmp/uma014-m1-swift-build}"
-PACKAGE_ROOT="${UMA014_M1_PACKAGE_ROOT:-/Volumes/HE/DEV/UMA/Packages/$PACKAGE_STEM-$(date -u +%Y%m%d%H%M%S)}"
-APP_BUNDLE="$PACKAGE_ROOT/$APP_NAME.app"
 CONTENTS="$APP_BUNDLE/Contents"
 MACOS="$CONTENTS/MacOS"
 HELPERS="$CONTENTS/Helpers"
@@ -31,21 +62,28 @@ STATUS_LINE_RELAY="ClaudeStatusLineRelay"
 
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-$BUILD_ROOT/clang-module-cache}"
 export SWIFTPM_MODULECACHE_OVERRIDE="${SWIFTPM_MODULECACHE_OVERRIDE:-$BUILD_ROOT/swiftpm-module-cache}"
+validate_output_path "$CLANG_MODULE_CACHE_PATH"
+validate_output_path "$SWIFTPM_MODULECACHE_OVERRIDE"
+mkdir -p "$PACKAGE_ROOT"
+# Atomic reservation also refuses another invocation's artifact.
+mkdir "$APP_BUNDLE" || fail_package UMA014_ARTIFACT_ALREADY_EXISTS
 mkdir -p "$BUILD_ROOT" "$MACOS" "$HELPERS" "$RESOURCES" \
   "$CLANG_MODULE_CACHE_PATH" "$SWIFTPM_MODULECACHE_OVERRIDE"
 cd "$ROOT_DIR"
 "$SWIFT_BIN" build \
   --disable-sandbox \
+  --disable-keychain --disable-netrc \
   --scratch-path "$BUILD_ROOT" \
   --configuration debug \
   --product "$EXECUTABLE"
 "$SWIFT_BIN" build \
   --disable-sandbox \
+  --disable-keychain --disable-netrc \
   --scratch-path "$BUILD_ROOT" \
   --configuration debug \
   --product "$STATUS_LINE_RELAY"
 
-BIN_PATH="$("$SWIFT_BIN" build --disable-sandbox --scratch-path "$BUILD_ROOT" --show-bin-path)"
+BIN_PATH="$("$SWIFT_BIN" build --disable-sandbox --disable-keychain --disable-netrc --scratch-path "$BUILD_ROOT" --show-bin-path)"
 /usr/bin/install -m 755 "$BIN_PATH/$EXECUTABLE" "$MACOS/$EXECUTABLE"
 /usr/bin/install -m 755 \
   "$BIN_PATH/$STATUS_LINE_RELAY" \

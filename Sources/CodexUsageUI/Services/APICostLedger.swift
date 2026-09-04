@@ -395,15 +395,7 @@ struct APICostLedgerStore: Sendable {
     let url: URL
 
     static var defaultURL: URL {
-        let fileManager = FileManager.default
-        let applicationSupport = fileManager.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first ?? fileManager.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support", isDirectory: true)
-        return applicationSupport
-            .appendingPathComponent("CodexUsageMonitor", isDirectory: true)
-            .appendingPathComponent("token-cost-ledger.json")
+        ApplicationDataPaths.current().codexLedgerURL
     }
 
     func load() throws -> APICostLedger {
@@ -424,7 +416,8 @@ struct APICostLedgerStore: Sendable {
             // corrupted primary file or silently restart lifetime accounting.
             try? fileManager.createDirectory(
                 at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
             )
             try? data.write(to: url, options: .atomic)
             return ledger
@@ -436,7 +429,8 @@ struct APICostLedgerStore: Sendable {
         let fileManager = FileManager.default
         try fileManager.createDirectory(
             at: url.deletingLastPathComponent(),
-            withIntermediateDirectories: true
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
         )
 
         if fileManager.fileExists(atPath: url.path),

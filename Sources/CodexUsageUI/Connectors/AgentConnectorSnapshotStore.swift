@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Small, allowlisted last-known snapshot store. This is intentionally
@@ -55,12 +56,21 @@ actor AgentConnectorSnapshotStore {
         let entries: [PersistedEntry]
     }
 
-    /// Schema zero used the same allowlisted fields but did not distinguish
-    /// the envelope as a connector snapshot. Decode it once and rewrite it as
-    /// schema one on the next save; no raw legacy payload is ever retained.
-    private struct LegacyEnvelopeV0: Codable {
+    // Read the version independently of the current entry shape: a future
+    // writer may change that shape, and its bytes must survive a rollback.
+    private struct VersionHeader: Decodable {
         let schemaVersion: Int
-        let entries: [PersistedEntry]
+    }
+
+    private enum StoredEnvelope {
+        case missingOrCorrupt
+        case unsupported
+        case supported(entries: [PersistedEntry], data: Data)
+
+        var entries: [PersistedEntry]? {
+            if case let .supported(entries, _) = self { return entries }
+            return nil
+        }
     }
 
     enum StoreError: Error, Equatable {
@@ -83,21 +93,20 @@ actor AgentConnectorSnapshotStore {
     }
 
     static var defaultURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("CodexUsageMonitor", isDirectory: true)
-            .appendingPathComponent("connector-snapshots.json")
+        ApplicationDataPaths.current().snapshotURL
     }
 
     func load() -> [AgentUsageSnapshot] {
-        if let entries = decodeEntries(at: url) ?? decodeEntries(at: backupURL) {
-            return entries.compactMap(Self.restore)
-        }
-        return []
+        guard (try? validatePaths()) != nil else { return [] }
+        let entries = (try? readEnvelope(at: url))?.entries
+            ?? (try? readEnvelope(at: backupURL))?.entries
+        return entries?.compactMap(Self.restore) ?? []
     }
 
     func save(_ snapshots: [AgentUsageSnapshot]) throws {
         let incoming = try snapshots.map(Self.persisted)
-        let existing = decodeEntries(at: url) ?? decodeEntries(at: backupURL) ?? []
+        try validatePaths()
+        let existing = try readEnvelope(at: url).entries ?? readEnvelope(at: backupURL).entries ?? []
         let replacedIDs = Set(incoming.map(\.id))
         let entries = (existing.filter { !replacedIDs.contains($0.id) } + incoming)
             .sorted { $0.id < $1.id }
@@ -110,62 +119,100 @@ actor AgentConnectorSnapshotStore {
     }
 
     private func write(_ entries: [PersistedEntry]) throws {
-        guard entries.count <= Self.maximumEntries else { throw StoreError.rejected }
+        guard Self.areValid(entries: entries) else { throw StoreError.rejected }
+        try validatePaths()
+        let current = try readEnvelope(at: url)
+        let backup = try readEnvelope(at: backupURL)
+        // Routine refresh/removal must not downgrade a newer version's data,
+        // including a newer backup beside an otherwise supported main file.
+        if case .unsupported = current { throw StoreError.rejected }
+        if case .unsupported = backup { throw StoreError.rejected }
         let envelope = Envelope(schemaVersion: Self.schemaVersion, entries: entries)
         let data = try JSONEncoder.safeSnapshotEncoder.encode(envelope)
         guard data.count <= Self.maximumEncodedBytes else { throw StoreError.oversized }
-        // Suppress only a true duplicate of the file currently on disk.  A
-        // schema-zero envelope can represent the same snapshot data, but it
-        // must be rewritten during the next save so lazy migration completes.
         if data == lastSavedData,
-           let current = try? Data(contentsOf: url),
-           current == data {
+           case let .supported(_, currentData) = current,
+           currentData == data {
             return
         }
 
-        try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if let current = try? Data(contentsOf: url), (try? JSONDecoder.safeSnapshotDecoder.decode(Envelope.self, from: current)) != nil {
-            try current.write(to: backupURL, options: .atomic)
+        // This root is shared with the owner-only Claude anchor store. Whichever
+        // cache writes first must create a compatible private directory.
+        try fileManager.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try validatePaths()
+        // Only a supported, fully validated main may replace the recovery
+        // backup. Corrupt/invalid main bytes never pollute a good backup.
+        if case let .supported(_, currentData) = current {
+            try currentData.write(to: backupURL, options: .atomic)
         }
         try data.write(to: url, options: .atomic)
         lastSavedData = data
     }
 
     func remove(_ id: AgentConnectorID) throws {
-        let existing = decodeEntries(at: url) ?? decodeEntries(at: backupURL) ?? []
-        let entries = existing.filter { $0.id != id }
-        let data = try JSONEncoder.safeSnapshotEncoder.encode(Envelope(schemaVersion: Self.schemaVersion, entries: entries))
-        try data.write(to: url, options: .atomic)
-        lastSavedData = data
+        try validatePaths()
+        let existing = try readEnvelope(at: url).entries ?? readEnvelope(at: backupURL).entries ?? []
+        try write(existing.filter { $0.id != id })
     }
 
     func clear() throws {
+        // Validate both targets before deleting either, including dangling
+        // symlinks (fileExists alone follows them and misses that case).
+        try validatePaths()
         for location in [url, backupURL] where fileManager.fileExists(atPath: location.path) {
-            let values = try location.resourceValues(forKeys: [
-                .isRegularFileKey,
-                .isSymbolicLinkKey,
-            ])
-            guard values.isRegularFile == true, values.isSymbolicLink != true else {
-                throw StoreError.rejected
-            }
             try fileManager.removeItem(at: location)
         }
         lastSavedData = nil
     }
 
-    private func decodeEntries(at location: URL) -> [PersistedEntry]? {
-        guard let data = try? Data(contentsOf: location), data.count <= Self.maximumEncodedBytes else { return nil }
-        if let envelope = try? JSONDecoder.safeSnapshotDecoder.decode(Envelope.self, from: data),
-           envelope.schemaVersion == Self.schemaVersion,
-           Self.areValid(entries: envelope.entries) {
-            return envelope.entries
+    private func readEnvelope(at location: URL) throws -> StoredEnvelope {
+        var metadata = stat()
+        guard lstat(location.path, &metadata) == 0 else {
+            guard errno == ENOENT else { throw StoreError.rejected }
+            return .missingOrCorrupt
         }
-        if let legacy = try? JSONDecoder.safeSnapshotDecoder.decode(LegacyEnvelopeV0.self, from: data),
-           legacy.schemaVersion == 0,
-           Self.areValid(entries: legacy.entries) {
-            return legacy.entries
+        guard metadata.st_mode & S_IFMT == S_IFREG else { throw StoreError.rejected }
+        guard metadata.st_size <= Self.maximumEncodedBytes else { throw StoreError.oversized }
+        let data = try Data(contentsOf: location)
+        guard data.count <= Self.maximumEncodedBytes else { throw StoreError.oversized }
+        if let header = try? JSONDecoder().decode(VersionHeader.self, from: data),
+           header.schemaVersion != 0, header.schemaVersion != Self.schemaVersion {
+            return .unsupported
         }
-        return nil
+        guard let envelope = try? JSONDecoder.safeSnapshotDecoder.decode(Envelope.self, from: data),
+              (envelope.schemaVersion == 0 || envelope.schemaVersion == Self.schemaVersion),
+              Self.areValid(entries: envelope.entries) else { return .missingOrCorrupt }
+        return .supported(entries: envelope.entries, data: data)
+    }
+
+    private func validatePaths() throws {
+        for location in [url, backupURL] {
+            guard location.isFileURL, location.path.hasPrefix("/") else { throw StoreError.rejected }
+            let components = (location.path as NSString).pathComponents.dropFirst()
+            var current = "/"
+            for (index, component) in components.enumerated() {
+                guard component != ".", component != ".." else { throw StoreError.rejected }
+                current = (current as NSString).appendingPathComponent(component)
+                var metadata = stat()
+                guard lstat(current, &metadata) == 0 else {
+                    guard errno == ENOENT else { throw StoreError.rejected }
+                    continue
+                }
+                let kind = metadata.st_mode & S_IFMT
+                let isLeaf = index == components.count - 1
+                // macOS owns these root aliases. Do not resolve arbitrary
+                // caller-supplied symlinks, which would erase the boundary.
+                if !isLeaf, kind == S_IFLNK,
+                   (current == "/var" || current == "/tmp"), metadata.st_uid == 0,
+                   (try? fileManager.destinationOfSymbolicLink(atPath: current)) == "private" + current {
+                    continue
+                }
+                guard kind == (isLeaf ? S_IFREG : S_IFDIR) else { throw StoreError.rejected }
+            }
+        }
     }
 
     private static func persisted(_ snapshot: AgentUsageSnapshot) throws -> PersistedEntry {
