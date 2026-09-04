@@ -1,10 +1,11 @@
 import ClaudeBrowserBridgeProtocol
 import ClaudeBrowserNativeHostCore
 import Foundation
+import Combine
 import Testing
 @testable import CodexUsageUI
 
-@Suite("M5 Local Smart sanitized Claude snapshots")
+@Suite("M5 Local Smart sanitized Claude snapshots", .timeLimit(.minutes(1)))
 struct M5DBGN1ClaudeSnapshotTests {
     @Test
     func strictEnvelopeKeepsOnlyAllowlistedQuotaFields() throws {
@@ -173,7 +174,7 @@ actor BrowserTestBridge {
     private(set) var startCount = 0
     private(set) var stopCount = 0
     private(set) var automaticRequests: [(requestID: String, allowSafariLaunch: Bool)] = []
-    private var automaticRequestWaiters: [CheckedContinuation<Void, Never>] = []
+    private var automaticRequestWaiters: [UUID: (count: Int, continuation: CheckedContinuation<Void, Never>)] = [:]
     private(set) var closedRequestIDs: [String] = []
     private var automaticDispatchResult: ClaudeBrowserAutomaticDispatchResult = .dispatched
     private var verificationResult: ClaudeBrowserCompanionVerification = .verified
@@ -211,16 +212,29 @@ actor BrowserTestBridge {
         allowSafariLaunch: Bool
     ) -> ClaudeBrowserAutomaticDispatchResult {
         automaticRequests.append((requestID, allowSafariLaunch))
-        let waiters = automaticRequestWaiters
-        automaticRequestWaiters.removeAll()
-        waiters.forEach { $0.resume() }
+        let ready = automaticRequestWaiters.filter { automaticRequests.count >= $0.value.count }
+        for (id, waiter) in ready {
+            automaticRequestWaiters.removeValue(forKey: id)
+            waiter.continuation.resume()
+        }
         return automaticDispatchResult
     }
-    func waitForAutomaticRequest() async {
-        if !automaticRequests.isEmpty { return }
-        await withCheckedContinuation { continuation in
-            automaticRequestWaiters.append(continuation)
+    func waitForAutomaticRequest(count: Int = 1) async throws {
+        try Task.checkCancellation()
+        if automaticRequests.count >= count { return }
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled { continuation.resume() }
+                else { automaticRequestWaiters[id] = (count, continuation) }
+            }
+        } onCancel: {
+            Task { await self.cancelAutomaticRequestWait(id) }
         }
+        try Task.checkCancellation()
+    }
+    private func cancelAutomaticRequestWait(_ id: UUID) {
+        automaticRequestWaiters.removeValue(forKey: id)?.continuation.resume()
     }
     func closeOwnedTab(requestID: String) { closedRequestIDs.append(requestID) }
     func send(_ envelope: ClaudeBrowserObservationEnvelope) async {
@@ -419,4 +433,18 @@ actor BrowserTestSleeper {
         let waiter = waiters.remove(at: index)
         waiter.continuation.resume(throwing: CancellationError())
     }
+}
+
+/// Await an actual model publication; the current value is replayed on subscription.
+@MainActor
+func waitForClaudeValue<Value: Sendable>(
+    _ publisher: Published<Value>.Publisher,
+    matching predicate: @escaping (Value) -> Bool
+) async throws {
+    try Task.checkCancellation()
+    for await value in publisher.values {
+        try Task.checkCancellation()
+        if predicate(value) { return }
+    }
+    try Task.checkCancellation()
 }

@@ -41,6 +41,27 @@ public struct UsageMonitorRuntime {
     public let preferences: ApplicationPreferences
     public let store: UsageStore
     public let claudeSettings: ClaudeBrowserSettingsModel
+    private let startupTask: Task<Void, Never>?
+
+    init(
+        preferences: ApplicationPreferences,
+        store: UsageStore,
+        claudeSettings: ClaudeBrowserSettingsModel,
+        startupTask: Task<Void, Never>? = nil
+    ) {
+        self.preferences = preferences
+        self.store = store
+        self.claudeSettings = claudeSettings
+        self.startupTask = startupTask
+    }
+
+    /// Drain application-owned startup before stopping connectors. A late
+    /// admission scan must never restart monitoring after termination.
+    public func shutdown() async {
+        startupTask?.cancel()
+        await startupTask?.value
+        await store.stopAllConnectors()
+    }
 
     public static func live(
         workBuddyStoreURL: URL? = nil,
@@ -131,8 +152,10 @@ public struct UsageMonitorRuntime {
             preferences: preferences,
             agentSettings: agentSettings
         )
+        let startupTask: Task<Void, Never>?
         if startProviders {
-            Task {
+            startupTask = Task { @MainActor in
+                guard !Task.isCancelled else { return }
                 let shouldStartClaude = claudeConsent.consentGranted
                 // Local Smart Mode owns one local file monitor and no recurring
                 // browser scheduler. Start it before passive admission so the next
@@ -140,8 +163,11 @@ public struct UsageMonitorRuntime {
                 if shouldStartClaude {
                     await claudeConnector.start()
                 }
+                guard !Task.isCancelled else { return }
                 await registry.startPassiveConnectors()
+                guard !Task.isCancelled else { return }
                 let descriptors = await registry.orderedDescriptors()
+                guard !Task.isCancelled else { return }
                 var excluded = agentSettings.disabledConnectorIDs(
                     from: descriptors.map(\.id)
                 )
@@ -156,11 +182,14 @@ public struct UsageMonitorRuntime {
                     excludedProviderIDs: excluded
                 )
             }
+        } else {
+            startupTask = nil
         }
         return UsageMonitorRuntime(
             preferences: preferences,
             store: usageStore,
-            claudeSettings: claudeSettings
+            claudeSettings: claudeSettings,
+            startupTask: startupTask
         )
     }
 

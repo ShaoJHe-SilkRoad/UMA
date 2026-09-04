@@ -4,7 +4,7 @@ import JavaScriptCore
 import Testing
 @testable import CodexUsageUI
 
-@Suite("M5-AUTO-G1 Claude automatic Browser Sync migration")
+@Suite("M5-AUTO-G1 Claude automatic Browser Sync migration", .timeLimit(.minutes(1)))
 struct M5AUTOG1ClaudeAutomaticRefreshTests {
 
     @Test
@@ -144,7 +144,7 @@ struct M5AUTOG1ClaudeAutomaticRefreshTests {
         )
 
         model.connectWithConsent()
-        for _ in 0..<100 where !model.consentGranted { await Task.yield() }
+        try await waitForClaudeValue(model.$actionInProgress, matching: { !$0 })
         #expect(store.consentGranted)
         #expect(!store.autoRefreshEnabled)
         #expect(!store.allowSafariLaunch)
@@ -634,7 +634,7 @@ struct M5AUTOG1ClaudeAutomaticRefreshTests {
         #expect(await fixture.bridge.verificationCount == 1)
 
         await connector.accuracySync()
-        await waitForRequests(fixture.bridge, count: 1)
+        try await fixture.bridge.waitForAutomaticRequest()
         #expect(await fixture.bridge.automaticRequests.count == 1)
         await fixture.bridge.send(browserEnvelope(five: 25, seven: 50))
         #expect((await connector.currentSnapshot()).hasValidData)
@@ -676,20 +676,6 @@ struct M5AUTOG1ClaudeAutomaticRefreshTests {
         #expect(await failed.bridge.automaticRequests.count == 1)
         #expect(!(await failedConnector.currentSnapshot()).hasValidData)
         #expect(!(await failedConnector.diagnostics()).automaticRefreshInFlight)
-    }
-}
-
-private func waitForIntervals(_ sleeper: BrowserTestSleeper, count: Int) async {
-    for _ in 0..<200 {
-        if await sleeper.intervals.count >= count { return }
-        await Task.yield()
-    }
-}
-
-private func waitForRequests(_ bridge: BrowserTestBridge, count: Int) async {
-    for _ in 0..<200 {
-        if await bridge.automaticRequests.count >= count { return }
-        await Task.yield()
     }
 }
 

@@ -22,6 +22,21 @@ actor AgentConnectorRegistry {
     private var connectors: [AgentConnectorID: any AgentUsageConnector] = [:]
     private var orderedIDs: [AgentConnectorID] = []
     private var listeners: [AgentConnectorID: Task<Void, Never>] = [:]
+    private struct PendingListener {
+        let token: UUID
+        let generation: UInt64
+        let task: Task<AsyncStream<AgentUsageSnapshot>, Never>
+    }
+    private var pendingListeners: [AgentConnectorID: PendingListener] = [:]
+    private var retiredListenerAcquisitions: [UUID: Task<AsyncStream<AgentUsageSnapshot>, Never>] = [:]
+    private var listenerTokens: [AgentConnectorID: UUID] = [:]
+    private var suspensionTask: Task<Void, Never>?
+    private var suspensionTaskGeneration: UInt64?
+    private var suspensionRequested = false
+    private var lifecycleRequest: UInt64 = 0
+    private let onResumeWaitingForStop: @Sendable () -> Void
+    private let afterSuspensionWait: @Sendable () async -> Void
+    private let onListenerReservationJoin: @Sendable () -> Void
     private var latest: [AgentConnectorID: AgentUsageSnapshot] = [:]
     private var snapshotContinuations:
         [UUID: AsyncStream<[AgentUsageSnapshot]>.Continuation] = [:]
@@ -33,13 +48,36 @@ actor AgentConnectorRegistry {
     private var currentAdmissionSet: ProviderSurfaceAdmissionSet?
     private var excludedProviderIDs: Set<AgentConnectorID> = []
     private var stoppedSnapshots: [AgentConnectorID: AgentUsageSnapshot] = [:]
+    private var lifecycleGeneration: UInt64 = 0
+    private var monitoringSuspended = false
+    private var monitoringStopped = false
+
+    private func acceptsPublication(_ generation: UInt64) -> Bool {
+        generation == lifecycleGeneration && !monitoringSuspended && !monitoringStopped
+    }
+
+    private func acceptsWork(_ generation: UInt64) -> Bool {
+        acceptsPublication(generation) && !Task.isCancelled
+    }
+
+    private func retainedAdmission(for trigger: ProviderEligibilityScanTrigger) -> ProviderSurfaceAdmissionSet {
+        currentAdmissionSet ?? ProviderSurfaceAdmissionSet(
+            trigger: trigger, scanGeneration: 0, records: []
+        )
+    }
 
     init(
         connectors initialConnectors: [any AgentUsageConnector] = [],
         snapshotStore: AgentConnectorSnapshotStore? = nil,
-        eligibilityScanner: LocalProviderEligibilityScanner = LocalProviderEligibilityScanner()
+        eligibilityScanner: LocalProviderEligibilityScanner = LocalProviderEligibilityScanner(),
+        onResumeWaitingForStop: @escaping @Sendable () -> Void = {},
+        afterSuspensionWait: @escaping @Sendable () async -> Void = {},
+        onListenerReservationJoin: @escaping @Sendable () -> Void = {}
     ) throws {
         self.snapshotStore = snapshotStore
+        self.onResumeWaitingForStop = onResumeWaitingForStop
+        self.afterSuspensionWait = afterSuspensionWait
+        self.onListenerReservationJoin = onListenerReservationJoin
         self.eligibilityScanner = eligibilityScanner
         for connector in initialConnectors {
             let id = connector.id
@@ -118,6 +156,8 @@ actor AgentConnectorRegistry {
         trigger: ProviderEligibilityScanTrigger,
         excludedProviderIDs: Set<AgentConnectorID> = []
     ) async -> ProviderSurfaceAdmissionSet {
+        let generation = lifecycleGeneration
+        guard acceptsWork(generation) else { return retainedAdmission(for: trigger) }
         let candidates = orderedIDs.compactMap { id -> RegisteredProviderCandidate? in
             guard let connector = connectors[id] else { return nil }
             return RegisteredProviderCandidate(
@@ -130,6 +170,7 @@ actor AgentConnectorRegistry {
             excludedProviderIDs: excludedProviderIDs,
             trigger: trigger
         )
+        guard acceptsWork(generation) else { return retainedAdmission(for: trigger) }
         self.excludedProviderIDs = excludedProviderIDs
 
         let admittedIDs = Set(result.admittedProviderIDs)
@@ -144,8 +185,10 @@ actor AgentConnectorRegistry {
                       descriptor: connector.descriptor
                   ).admittedSnapshot != nil
             else { continue }
+            guard acceptsWork(generation) else { return retainedAdmission(for: trigger) }
             retainedDuringTransientScanIDs.insert(record.id)
         }
+        guard acceptsWork(generation) else { return retainedAdmission(for: trigger) }
         let lifecycleOwnedIDs = admittedIDs.union(retainedDuringTransientScanIDs)
         for id in admittedIDs { stoppedSnapshots[id] = nil }
         let previouslyAdmittedIDs = Set(latest.keys)
@@ -169,6 +212,7 @@ actor AgentConnectorRegistry {
         currentAdmissionSet = result
 
         for id in orderedIDs {
+            guard acceptsWork(generation) else { return retainedAdmission(for: trigger) }
             guard let connector = connectors[id] else { continue }
             if lifecycleOwnedIDs.contains(id) {
                 await listen(to: connector)
@@ -176,6 +220,7 @@ actor AgentConnectorRegistry {
                         == .browserCompanionUsage,
                       !excludedProviderIDs.contains(id),
                       await connector.permitsRead(for: trigger) {
+                guard acceptsWork(generation) else { return retainedAdmission(for: trigger) }
                 // Browser-companion reads are completed by a later explicit
                 // toolbar gesture. Keep the consent-owned listener alive while
                 // the provider remains hidden awaiting that first current read.
@@ -190,7 +235,9 @@ actor AgentConnectorRegistry {
                 await stopIfNeeded(connector)
             }
         }
+        guard acceptsWork(generation) else { return retainedAdmission(for: trigger) }
         await persistCurrentAdmittedSnapshots()
+        guard acceptsWork(generation) else { return retainedAdmission(for: trigger) }
         publish()
         return result
     }
@@ -204,8 +251,10 @@ actor AgentConnectorRegistry {
     }
 
     func restorePersistedSnapshots() async {
-        guard let snapshotStore else { return }
+        let generation = lifecycleGeneration
+        guard acceptsWork(generation), let snapshotStore else { return }
         let restored = await snapshotStore.load()
+        guard acceptsWork(generation) else { return }
         for snapshot in restored
         where connectors[snapshot.id]?.descriptor.supportsRestore == true {
             latest[snapshot.id] = snapshot
@@ -216,32 +265,32 @@ actor AgentConnectorRegistry {
     func startPassiveConnectors() async {
         let passive = orderedIDs.compactMap { connectors[$0] }.filter {
             $0.descriptor.capabilities.contains(.passiveLocalAvailability)
-                && $0.descriptor.localSourceClass
-                    == .admittedStructuredLocal
+                && $0.descriptor.localSourceClass == .admittedStructuredLocal
         }
-        for connector in passive { await listen(to: connector) }
-        for connector in passive { stoppedSnapshots[connector.id] = nil }
-        await withTaskGroup(of: Void.self) { group in
-            for connector in passive {
-                group.addTask {
-                    _ = await connector.probe()
-                    await connector.start()
-                    await self.receive(await connector.currentSnapshot())
-                }
-            }
-        }
+        await startRegistered(passive)
     }
 
     func startAll() async {
-        let registered = orderedIDs.compactMap { connectors[$0] }
-        for connector in registered { await listen(to: connector) }
-        for connector in registered { stoppedSnapshots[connector.id] = nil }
+        await startRegistered(orderedIDs.compactMap { connectors[$0] })
+    }
+
+    private func startRegistered(_ registered: [any AgentUsageConnector]) async {
+        let generation = lifecycleGeneration
+        guard acceptsWork(generation) else { return }
+        for connector in registered {
+            await listen(to: connector)
+            guard acceptsWork(generation) else { return }
+            stoppedSnapshots[connector.id] = nil
+        }
         await withTaskGroup(of: Void.self) { group in
             for connector in registered {
                 group.addTask {
+                    guard await self.acceptsWork(generation) else { return }
                     _ = await connector.probe()
+                    guard await self.acceptsWork(generation) else { return }
                     await connector.start()
-                    await self.receive(await connector.currentSnapshot())
+                    guard await self.acceptsWork(generation) else { return }
+                    await self.receive(await connector.currentSnapshot(), generation: generation)
                 }
             }
         }
@@ -252,31 +301,49 @@ actor AgentConnectorRegistry {
         trigger: CodexRefreshTrigger = .manual
     ) async throws {
         guard let connector = connectors[id] else { throw AgentConnectorRegistryError.unknownConnector(id) }
+        let generation = lifecycleGeneration
+        guard acceptsWork(generation) else { return }
         stoppedSnapshots[id] = nil
         await listen(to: connector)
+        guard acceptsWork(generation) else { return }
         await connector.refresh(trigger: trigger)
-        await receive(await connector.currentSnapshot())
+        guard acceptsWork(generation) else { return }
+        await receive(await connector.currentSnapshot(), generation: generation)
     }
 
     func perform(_ command: AgentConnectorCommand, for id: AgentConnectorID) async throws {
         guard let connector = connectors[id] else { throw AgentConnectorRegistryError.unknownConnector(id) }
+        let generation = lifecycleGeneration
+        guard acceptsWork(generation) else { return }
+        if command == .disconnect { await eligibilityScanner.cancelOutstandingScan() }
+        guard acceptsWork(generation) else { return }
         stoppedSnapshots[id] = nil
         await listen(to: connector)
+        guard acceptsWork(generation) else { return }
         await connector.perform(command)
+        guard acceptsWork(generation) else { return }
         let snapshot = await connector.currentSnapshot()
+        guard acceptsWork(generation) else { return }
         if command == .disconnect {
             stoppedSnapshots[id] = snapshot
         }
-        await receive(snapshot)
+        await receive(snapshot, generation: generation)
     }
 
     func stopAll() async {
+        guard !monitoringStopped else { return }
+        monitoringStopped = true
+        lifecycleRequest &+= 1
+        lifecycleGeneration &+= 1
+        await eligibilityScanner.cancelOutstandingScan()
+        // A stop already entered by suspension must settle before terminal
+        // cleanup, so it cannot later overwrite a resumed or terminal session.
+        await suspensionTask?.value
         // Stop every registered connector, including a consent-owned connector
         // that may have started a helper before it became surface-admitted and
         // therefore never acquired a snapshot listener.
         let registered = orderedIDs.compactMap { connectors[$0] }
-        listeners.values.forEach { $0.cancel() }
-        listeners.removeAll()
+        cancelListeners()
         for connector in registered { await stopIfNeeded(connector) }
         latest.removeAll()
         currentAdmissionSet = nil
@@ -288,21 +355,75 @@ actor AgentConnectorRegistry {
     /// publication. This is used only when the user explicitly disables
     /// monitoring after all application windows close.
     func suspendAllPreservingState() async {
-        let registered = orderedIDs.compactMap { connectors[$0] }
-        listeners.values.forEach { $0.cancel() }
-        listeners.removeAll()
-        for connector in registered { await stopIfNeeded(connector) }
+        guard !monitoringStopped else { return }
+        if !suspensionRequested {
+            suspensionRequested = true
+            lifecycleRequest &+= 1
+        }
+        if let suspensionTask {
+            await suspensionTask.value
+            return
+        }
+        guard !monitoringSuspended else { return }
+        monitoringSuspended = true
+        lifecycleGeneration &+= 1
+        let generation = lifecycleGeneration
+        // Reserve the transition before crossing to scanner/connector actors.
+        let task = Task<Void, Never> { [weak self] in
+            await self?.finishSuspension(generation: generation)
+        }
+        suspensionTask = task
+        suspensionTaskGeneration = generation
+        await task.value
+        await afterSuspensionWait()
     }
 
-    /// Resumes exactly the providers represented by the current admission set;
-    /// it never performs discovery or admits a dormant provider.
+    private func finishSuspension(generation: UInt64) async {
+        // Clear the transition in its own actor turn before releasing waiters.
+        // A resumed connector can otherwise be closed again while an already
+        // completed task still occupies the suspension slot.
+        defer {
+            if suspensionTaskGeneration == generation {
+                suspensionTask = nil
+                suspensionTaskGeneration = nil
+            }
+        }
+        await eligibilityScanner.cancelOutstandingScan()
+        guard generation == lifecycleGeneration, !monitoringStopped else { return }
+        cancelListeners()
+        let registered = orderedIDs.compactMap { connectors[$0] }
+        for connector in registered {
+            guard generation == lifecycleGeneration, !monitoringStopped else { return }
+            await stopIfNeeded(connector, expectedGeneration: generation)
+        }
+    }
+
+    /// A reopen waits for the existing stop transition before starting a new
+    /// session. A later close or shutdown supersedes this pending reopen.
     func resumeCurrentAdmissions() async {
+        guard !monitoringStopped, monitoringSuspended else { return }
+        if suspensionRequested {
+            suspensionRequested = false
+            lifecycleRequest &+= 1
+        }
+        let request = lifecycleRequest
+        if let suspensionTask {
+            onResumeWaitingForStop()
+            await suspensionTask.value
+        }
+        guard !monitoringStopped, monitoringSuspended, !suspensionRequested,
+              request == lifecycleRequest else { return }
+        monitoringSuspended = false
+        lifecycleGeneration &+= 1
+        let generation = lifecycleGeneration
         let admittedIDs = Set(currentAdmissionSet?.admittedProviderIDs ?? [])
             .subtracting(excludedProviderIDs)
         for id in admittedIDs {
+            guard acceptsWork(generation) else { return }
             guard let connector = connectors[id] else { continue }
             stoppedSnapshots[id] = nil
             await listen(to: connector)
+            guard acceptsWork(generation) else { return }
             await connector.start()
         }
     }
@@ -311,23 +432,63 @@ actor AgentConnectorRegistry {
         orderedIDs.compactMap { latest[$0] }
     }
 
+    private func cancelListeners() {
+        listeners.values.forEach { $0.cancel() }
+        listeners.removeAll()
+        listenerTokens.removeAll()
+        for pending in pendingListeners.values {
+            pending.task.cancel()
+            retiredListenerAcquisitions[pending.token] = pending.task
+        }
+        pendingListeners.removeAll()
+    }
+
     private func listen(to connector: any AgentUsageConnector) async {
         let id = connector.id
-        guard listeners[id] == nil else { return }
-        // Establish the connector-side continuation before returning. The first
-        // browser callback can arrive immediately after an admission scan, so a
-        // fire-and-forget stream subscription could otherwise lose that one
-        // current observation and keep the provider hidden.
-        let stream = await connector.snapshots()
+        let generation = lifecycleGeneration
+        guard acceptsWork(generation), listeners[id] == nil else { return }
+        if let pending = pendingListeners[id], pending.generation == generation {
+            onListenerReservationJoin()
+            _ = await pending.task.value
+            return
+        }
+        // One reserved acquisition precedes snapshots(). Other same-generation
+        // callers await that exact handshake, never create another stream.
+        let token = UUID()
+        let acquisition = Task { await connector.snapshots() }
+        pendingListeners[id] = PendingListener(
+            token: token, generation: generation, task: acquisition
+        )
+        let stream = await acquisition.value
+        let ownsReservation = pendingListeners[id]?.token == token
+        if ownsReservation { pendingListeners[id] = nil }
+        retiredListenerAcquisitions[token] = nil
+        guard ownsReservation, acceptsWork(generation), listeners[id] == nil else {
+            // A suspended snapshots() may ignore cancellation and return a
+            // stream late. Cancel its consumer to deliver onTermination.
+            let discarded = Task { for await _ in stream { } }
+            discarded.cancel()
+            await discarded.value
+            return
+        }
+        listenerTokens[id] = token
         listeners[id] = Task { [weak self] in
             for await snapshot in stream {
-                guard !Task.isCancelled else { return }
-                await self?.receive(snapshot)
+                guard !Task.isCancelled else { break }
+                await self?.receive(snapshot, generation: generation)
             }
+            await self?.finishListener(id: id, token: token)
         }
     }
 
-    private func receive(_ snapshot: AgentUsageSnapshot) async {
+    private func finishListener(id: AgentConnectorID, token: UUID) {
+        guard listenerTokens[id] == token else { return }
+        listenerTokens[id] = nil
+        listeners[id] = nil
+    }
+
+    private func receive(_ snapshot: AgentUsageSnapshot, generation: UInt64) async {
+        guard acceptsPublication(generation) else { return }
         guard let connector = connectors[snapshot.id] else { return }
         guard !excludedProviderIDs.contains(snapshot.id) else {
             latest[snapshot.id] = nil
@@ -361,6 +522,7 @@ actor AgentConnectorRegistry {
                 let browserReadPermitted = await connector.permitsRead(
                     for: currentAdmissionSet.trigger
                 )
+                guard acceptsPublication(generation) else { return }
                 let retainsConsentOwnedBrowserListener =
                     connector.descriptor.localSourceClass == .browserCompanionUsage
                     && browserReadPermitted
@@ -394,7 +556,9 @@ actor AgentConnectorRegistry {
                 // boundary. Persist the withdrawal in the same transaction as
                 // its in-memory publication so a relaunch cannot resurrect a
                 // snapshot that the live connector has already invalidated.
+                guard acceptsPublication(generation) else { return }
                 await persistCurrentAdmittedSnapshots()
+                guard acceptsPublication(generation) else { return }
                 publish()
                 return
             }
@@ -417,6 +581,7 @@ actor AgentConnectorRegistry {
         guard latest[snapshot.id] != snapshot else { return }
         latest[snapshot.id] = snapshot
         await persistCurrentAdmittedSnapshots()
+        guard acceptsPublication(generation) else { return }
         publish()
     }
 
@@ -430,17 +595,23 @@ actor AgentConnectorRegistry {
 
     private func stopIfNeeded(
         _ connector: any AgentUsageConnector,
-        observedSnapshot: AgentUsageSnapshot? = nil
+        observedSnapshot: AgentUsageSnapshot? = nil,
+        expectedGeneration: UInt64? = nil
     ) async {
+        let generation = expectedGeneration ?? lifecycleGeneration
         let before: AgentUsageSnapshot
         if let observedSnapshot {
             before = observedSnapshot
         } else {
             before = await connector.currentSnapshot()
         }
-        guard stoppedSnapshots[connector.id] != before else { return }
+        guard generation == lifecycleGeneration,
+              stoppedSnapshots[connector.id] != before else { return }
         await connector.stop()
-        stoppedSnapshots[connector.id] = await connector.currentSnapshot()
+        guard generation == lifecycleGeneration else { return }
+        let stopped = await connector.currentSnapshot()
+        guard generation == lifecycleGeneration else { return }
+        stoppedSnapshots[connector.id] = stopped
     }
 
     private func publish() {

@@ -2,10 +2,12 @@ import Foundation
 import Testing
 @testable import CodexUsageUI
 
+@Suite(.timeLimit(.minutes(1)))
 struct M1AG2RefreshCoordinatorTests {
     @Test
     func burstOfFiftyRequestsUsesOneProviderOperation() async throws {
-        let coordinator = CodexRefreshCoordinator<Int>()
+        let joinedRequests = M5AEventCounter()
+        let coordinator = CodexRefreshCoordinator<Int>(onRequestCoalesced: { joinedRequests.signal() })
         let gate = RefreshOperationGate()
 
         let first = Task { try await coordinator.refresh(trigger: .timer) { try await gate.perform() } }
@@ -14,10 +16,7 @@ struct M1AG2RefreshCoordinatorTests {
             Task { try await coordinator.refresh(trigger: .providerEvent) { try await gate.perform() } }
         }
 
-        for _ in 0..<20 {
-            if (await coordinator.diagnostics()).coalescedRequestCount == 49 { break }
-            await Task.yield()
-        }
+        await joinedRequests.wait(for: 49)
         let duringBurst = await coordinator.diagnostics()
         #expect(await gate.startCount == 1)
         #expect(duringBurst.activeTrigger == .timer)
@@ -36,7 +35,8 @@ struct M1AG2RefreshCoordinatorTests {
 
     @Test
     func higherPriorityTriggersCoalesceWithoutStartingAnExtraRead() async throws {
-        let coordinator = CodexRefreshCoordinator<Int>()
+        let joinedRequests = M5AEventCounter()
+        let coordinator = CodexRefreshCoordinator<Int>(onRequestCoalesced: { joinedRequests.signal() })
         let gate = RefreshOperationGate()
 
         let timer = Task { try await coordinator.refresh(trigger: .timer) { try await gate.perform() } }
@@ -45,10 +45,7 @@ struct M1AG2RefreshCoordinatorTests {
         let wake = Task { try await coordinator.refresh(trigger: .wake) { try await gate.perform() } }
         let manual = Task { try await coordinator.refresh(trigger: .manual) { try await gate.perform() } }
 
-        for _ in 0..<20 {
-            if (await coordinator.diagnostics()).coalescedRequestCount == 3 { break }
-            await Task.yield()
-        }
+        await joinedRequests.wait(for: 3)
         let diagnostics = await coordinator.diagnostics()
         #expect(await gate.startCount == 1)
         #expect(diagnostics.highestCoalescedTrigger == .manual)
@@ -67,7 +64,8 @@ struct M1AG2RefreshCoordinatorTests {
 
     @Test
     func cancellationInvalidatesLateGenerationWithoutClearingNewRefresh() async throws {
-        let coordinator = CodexRefreshCoordinator<Int>()
+        let joinedRequests = M5AEventCounter()
+        let coordinator = CodexRefreshCoordinator<Int>(onRequestCoalesced: { joinedRequests.signal() })
         let gate = RefreshOperationGate()
 
         let first = Task { try await coordinator.refresh(trigger: .timer) { try await gate.perform() } }
@@ -79,10 +77,7 @@ struct M1AG2RefreshCoordinatorTests {
         await gate.finish(value: 1, at: 0) // Deliberately ignores cancellation.
 
         let third = Task { try await coordinator.refresh(trigger: .wake) { try await gate.perform() } }
-        for _ in 0..<20 {
-            if (await coordinator.diagnostics()).coalescedRequestCount == 1 { break }
-            await Task.yield()
-        }
+        await joinedRequests.wait(for: 1)
         let afterLateCompletion = await coordinator.diagnostics()
         #expect(await gate.startCount == 2)
         #expect(afterLateCompletion.activeGeneration == 2)
@@ -129,40 +124,25 @@ struct M1AG2RefreshCoordinatorTests {
 
 private actor RefreshOperationGate {
     private var continuations: [CheckedContinuation<Int, Error>] = []
-    private var startWaiters: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
+    private let starts = M5AEventCounter()
     private(set) var startCount = 0
 
     func perform() async throws -> Int {
         startCount += 1
-        resumeSatisfiedWaiters()
+        starts.signal()
         return try await withCheckedThrowingContinuation { continuation in
             continuations.append(continuation)
         }
     }
 
     func waitUntilStarted(count: Int) async {
-        guard startCount < count else { return }
-        await withCheckedContinuation { continuation in
-            startWaiters.append((count, continuation))
-        }
+        await starts.wait(for: count)
     }
 
     func finish(value: Int, at index: Int) {
         guard continuations.indices.contains(index) else { return }
         let continuation = continuations.remove(at: index)
         continuation.resume(returning: value)
-    }
-
-    private func resumeSatisfiedWaiters() {
-        var remaining: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
-        for waiter in startWaiters {
-            if startCount >= waiter.count {
-                waiter.continuation.resume()
-            } else {
-                remaining.append(waiter)
-            }
-        }
-        startWaiters = remaining
     }
 }
 

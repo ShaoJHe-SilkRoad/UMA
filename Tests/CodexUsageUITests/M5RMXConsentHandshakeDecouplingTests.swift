@@ -4,7 +4,7 @@ import ClaudeBrowserBridgeProtocol
 import ClaudeSafariHostIPC
 @testable import CodexUsageUI
 
-@Suite("M5RMX content-free Companion qualification")
+@Suite("M5RMX content-free Companion qualification", .timeLimit(.minutes(1)))
 struct M5RMXConsentHandshakeDecouplingTests {
     @Test
     func noConsentQualificationStartsListenerCreatesRequestAndTouchesNoProvider() async {
@@ -375,17 +375,19 @@ struct M5RMXConsentHandshakeDecouplingTests {
             consentStore: consent
         )
 
+        let observationGate = ClaudeDiagnosticObservationGate()
         let qualification = Task { @MainActor in
             await model.runOneShotAccuracySyncDiagnostic(
                 maximumTerminalPolls: 100,
                 maximumCleanupPolls: 0,
-                sleep: { await Task.yield() },
+                sleep: { await observationGate.wait() },
                 receiptProbe: { true }
             )
         }
-        await fixture.bridge.waitForAutomaticRequest()
+        try await fixture.bridge.waitForAutomaticRequest()
         #expect(await fixture.bridge.automaticRequests.count == 1)
         await fixture.bridge.send(browserEnvelope(five: 9, seven: 71))
+        await observationGate.release()
 
         let result = await qualification.value
         let data = try result.encodedJSONLine()
@@ -676,5 +678,32 @@ private actor QualificationRecorder {
 
     func recordProviderAccess() {
         providerAccessCount += 1
+    }
+}
+
+private actor ClaudeDiagnosticObservationGate {
+    private var released = false
+    private var waiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+
+    func wait() async {
+        if released { return }
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled { continuation.resume() }
+                else { waiters[id] = continuation }
+            }
+        } onCancel: { Task { await self.cancelWait(id) } }
+    }
+
+    private func cancelWait(_ id: UUID) {
+        waiters.removeValue(forKey: id)?.resume()
+    }
+
+    func release() {
+        released = true
+        let ready = waiters.values
+        waiters.removeAll()
+        ready.forEach { $0.resume() }
     }
 }

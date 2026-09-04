@@ -4,7 +4,7 @@ import Foundation
 import Testing
 @testable import CodexUsageUI
 
-@Suite("M5 Local Smart connector and Settings")
+@Suite("M5 Local Smart connector and Settings", .timeLimit(.minutes(1)))
 struct M5G2ClaudeConnectorSettingsTests {
     @Test
     func descriptorLocksLocalSmartSourceAndPrivacyBoundary() {
@@ -89,12 +89,6 @@ struct M5G2ClaudeConnectorSettingsTests {
         #expect(await fixture.bridge.startCount == 1)
         await fixture.bridge.send(browserEnvelope(five: 9, seven: 71))
         try await registry.refresh(ClaudeCodeUsageConnector.connectorID)
-        for _ in 0..<20 {
-            if await registry.orderedSnapshots().first?.freshness == .fresh {
-                break
-            }
-            await Task.yield()
-        }
 
         let admitted = try #require(await registry.orderedSnapshots().first)
         #expect(admitted.id == ClaudeCodeUsageConnector.connectorID)
@@ -111,13 +105,10 @@ struct M5G2ClaudeConnectorSettingsTests {
         _ = await registry.scanSurfaceAdmissions(trigger: .applicationLaunch)
         await connector.accuracySync()
         await fixture.bridge.reject()
-        for _ in 0..<20 {
-            if await registry.surfaceAdmissionSet()?.records.first?.admission
-                == .hiddenCurrentReadFailed {
-                break
-            }
-            await Task.yield()
-        }
+        // refresh awaits the registry's receive boundary for the completed failure.
+        try await registry.refresh(ClaudeCodeUsageConnector.connectorID)
+        #expect(await registry.surfaceAdmissionSet()?.records.first?.admission
+            == .hiddenCurrentReadFailed)
 
         #expect(await registry.orderedSnapshots().isEmpty)
         #expect(await fixture.bridge.stopCount == 0)
@@ -125,12 +116,6 @@ struct M5G2ClaudeConnectorSettingsTests {
         await connector.accuracySync()
         await fixture.bridge.send(browserEnvelope(five: 9, seven: 71))
         try await registry.refresh(ClaudeCodeUsageConnector.connectorID)
-        for _ in 0..<20 {
-            if await registry.orderedSnapshots().first?.freshness == .fresh {
-                break
-            }
-            await Task.yield()
-        }
 
         #expect(await registry.orderedSnapshots().first?.freshness == .fresh)
         #expect(await fixture.bridge.stopCount == 0)

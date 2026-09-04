@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import CodexUsageUI
 
+@Suite(.timeLimit(.minutes(1)))
 struct M1AG2DBGP1FunctionalRepairTests {
     @Test
     func staleAccountChannelRemainsOverallStaleWhenLocalActivityIsFresh() async throws {
@@ -30,24 +31,21 @@ struct M1AG2DBGP1FunctionalRepairTests {
         )
 
         await connector.start()
-        for _ in 0..<50 where await client.eventStreamCount < 1 {
-            await Task.yield()
-        }
+        await client.listenerStarted.wait(for: 1)
         #expect(await client.eventStreamCount == 1)
 
         await connector.perform(.connect)
         await connector.perform(.reconnect)
-        for _ in 0..<50 where await client.eventStreamCount < 2 {
-            await Task.yield()
-        }
+        await client.listenerStarted.wait(for: 2)
         #expect(await client.eventStreamCount == 2)
 
-        // Let the cancelled first consumer reach its delayed cleanup.  The
-        // next invalidation must still be received by the replacement.
-        for _ in 0..<50 { await Task.yield() }
+        // The cancelled consumer must complete cleanup before invalidation is
+        // delivered to its replacement. This is an owned-task completion gate.
+        await connector.awaitPendingProviderEventObservationTermination()
+        let updates = await connector.snapshots()
         await client.emit(.transportRecovered)
-        for _ in 0..<100 where !(await client.triggers.contains(.providerEvent)) {
-            await Task.yield()
+        for await snapshot in updates {
+            if snapshot.lastSuccessfulAt == recoveredFixtureUsage.providerCapturedAt { break }
         }
 
         #expect(await client.triggers == [.providerEvent])
@@ -98,6 +96,7 @@ private actor StaleAccountClient: CodexUsageClient {
 }
 
 private actor ReconnectEventClient: CodexUsageClient {
+    nonisolated let listenerStarted = M5AEventCounter()
     private var continuation: AsyncStream<CodexAppServerEvent>.Continuation?
     private(set) var eventStreamCount = 0
     private(set) var triggers: [CodexRefreshTrigger] = []
@@ -112,7 +111,7 @@ private actor ReconnectEventClient: CodexUsageClient {
 
     func fetchUsage(trigger: CodexRefreshTrigger) async throws -> CodexLiveUsage {
         triggers.append(trigger)
-        return fixtureUsage
+        return recoveredFixtureUsage
     }
 
     func disconnect() async {
@@ -126,6 +125,7 @@ private actor ReconnectEventClient: CodexUsageClient {
         eventStreamCount += 1
         return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             self.continuation = continuation
+            self.listenerStarted.signal()
         }
     }
 
@@ -147,4 +147,14 @@ private let fixtureUsage = CodexLiveUsage(
     recentActivityCount: 0,
     apiCostEstimate: nil,
     providerCapturedAt: Date(timeIntervalSince1970: 1_784_332_800)
+)
+
+private let recoveredFixtureUsage = CodexLiveUsage(
+    rateLimits: fixtureUsage.rateLimits,
+    availableResetCount: fixtureUsage.availableResetCount,
+    lifetimeTokens: fixtureUsage.lifetimeTokens,
+    dailyUsage: fixtureUsage.dailyUsage,
+    recentActivityCount: fixtureUsage.recentActivityCount,
+    apiCostEstimate: fixtureUsage.apiCostEstimate,
+    providerCapturedAt: fixtureUsage.providerCapturedAt.addingTimeInterval(1)
 )

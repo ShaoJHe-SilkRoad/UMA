@@ -4,27 +4,65 @@ import Testing
 @testable import CodexUsageUI
 @testable import CodexUsageMonitor
 
-@Suite("M5RMX product shell isolation")
+@Suite("M5RMX product shell isolation", .timeLimit(.minutes(1)))
 struct M5RMXProductShellIsolationTests {
+    @Test("Settings and registry subscribers both receive Claude updates", .timeLimit(.minutes(1)))
+    func independentSnapshotSubscribersReceiveTheSameUpdate() async throws {
+        let fixture = BrowserConnectorFixture(consent: true)
+        let connector = fixture.connector()
+        let first = await connector.snapshots()
+        var firstIterator = first.makeAsyncIterator()
+        _ = await firstIterator.next()
+        let second = await connector.snapshots()
+        var secondIterator = second.makeAsyncIterator()
+        _ = await secondIterator.next()
+
+        await connector.accuracySync()
+        await fixture.bridge.send(browserEnvelope(five: 27, seven: 41))
+        let secondUpdate = try #require(await secondIterator.next())
+        let firstUpdate = try #require(await firstIterator.next())
+        #expect(firstUpdate == secondUpdate)
+        #expect(firstUpdate.channels.flatMap(\.rateLimitWindows).first?.remainingPercent == 73)
+        await connector.stop()
+    }
+
+    @Test("Cancelling one Claude subscriber leaves the other and connector active")
+    func cancellingOneSnapshotSubscriberDoesNotStopTheOther() async throws {
+        let fixture = BrowserConnectorFixture(consent: true)
+        let connector = fixture.connector()
+        let first = await connector.snapshots()
+        let second = await connector.snapshots()
+        var secondIterator = second.makeAsyncIterator()
+        _ = await secondIterator.next()
+        let detached = M5AEventCounter()
+        await connector.observeSnapshotRemoval { detached.signal() }
+        let cancelledConsumer = Task {
+            for await _ in first {}
+        }
+        cancelledConsumer.cancel()
+        await cancelledConsumer.value
+        await detached.wait()
+
+        await connector.accuracySync()
+        await fixture.bridge.send(browserEnvelope(five: 27, seven: 41))
+        let update = try #require(await secondIterator.next())
+        #expect(update.channels.flatMap(\.rateLimitWindows).first?.remainingPercent == 73)
+        #expect(await fixture.bridge.startCount == 1)
+        #expect(await fixture.bridge.stopCount == 0)
+        await connector.stop()
+    }
+
     @Test("Lifecycle reads do not republish snapshots into the Settings observer")
     func lifecycleReadIsSideEffectFree() async throws {
         let connector = ClaudeCodeUsageConnector.production(hasConsent: { false })
         let stream = await connector.snapshots()
-        let observation = Task { () -> Int in
-            var count = 0
-            for await _ in stream {
-                count += 1
-            }
-            return count
-        }
-
+        var iterator = stream.makeAsyncIterator()
+        _ = try #require(await iterator.next())
+        let before = await connector.snapshotPublicationCount()
         for _ in 0..<100 {
             _ = await connector.lifecycleState()
         }
-        try await Task.sleep(for: .milliseconds(50))
-        observation.cancel()
-
-        #expect(await observation.value == 1)
+        #expect(await connector.snapshotPublicationCount() == before)
     }
 
     @Test("Consented Local Smart startup performs no Safari work")
@@ -131,7 +169,8 @@ struct M5RMXProductShellIsolationTests {
     func shellHasOneIndependentOwner() throws {
         let app = try source("Sources/CodexUsageMonitor/App/CodexUsageMonitorApp.swift")
         let shell = try source("Sources/CodexUsageMonitor/App/AppShellCoordinator.swift")
-        #expect(app.contains("private let shellCoordinator = AppShellCoordinator()"))
+        #expect(app.contains("private let shellCoordinator: AppShellCoordinator?"))
+        #expect(app.contains("shellCoordinator: AppShellCoordinator(),"))
         #expect(!app.contains("private var statusBarController"))
         #expect(shell.contains("private static weak var activeCoordinator"))
         for forbidden in ["ClaudeCodeUsageConnector", "Safari", "PlugInKit", "Accuracy Sync"] {
@@ -165,11 +204,16 @@ struct M5RMXProductShellIsolationTests {
     @Test("Shell is created before provider runtime composition")
     func shellFirstStartupCannotBeOwnedByProviders() throws {
         let app = try source("Sources/CodexUsageMonitor/App/CodexUsageMonitorApp.swift")
-        #expect(app.contains("private let shellCoordinator = AppShellCoordinator()"))
-        #expect(app.contains("shellCoordinator.start(presentMainWindow:"))
+        let launch = try #require(app.slice(
+            from: "func applicationDidFinishLaunching",
+            through: "private func finishShellDiagnostic"
+        ))
+        let shellStart = try #require(launch.range(of: "shellCoordinator.start(presentMainWindow:"))
+        let runtimeCreation = try #require(launch.range(of: "self.runtimeFactory("))
+        #expect(shellStart.lowerBound < runtimeCreation.lowerBound)
         #expect(!app.contains("await Task.yield()"))
         #expect(app.contains("NSApp.unhide(nil)"))
-        #expect(app.contains("shellCoordinator.attach(runtime: runtime)"))
+        #expect(app.contains("self.shellCoordinator?.attach(runtime: runtime)"))
         #expect(app.contains("applicationShouldHandleReopen"))
         #expect(!app.contains("fatalError("))
 
@@ -208,7 +252,8 @@ struct M5RMXProductShellIsolationTests {
         let runtime = try source("Sources/CodexUsageUI/Connectors/AgentUsageRuntime.swift")
         #expect(app.contains("--diagnose-app-shell"))
         #expect(app.contains("guard !shellDiagnosticRequested else { return .terminateNow }"))
-        #expect(app.contains("startProviders: !self.shellDiagnosticRequested"))
+        #expect(app.contains("self.runtimeFactory(!self.shellDiagnosticRequested)"))
+        #expect(app.contains("startProviders: startProviders"))
         #expect(app.contains("runMachineDiagnostic("))
         #expect(app.contains("toggleCount: 100"))
         #expect(status.contains("NSApp.sendAction(action, to: button.target, from: button)"))

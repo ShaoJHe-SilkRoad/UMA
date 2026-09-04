@@ -6,7 +6,7 @@ import Dispatch
 import Foundation
 import Testing
 
-@Suite(.serialized)
+@Suite(.serialized, .timeLimit(.minutes(1)))
 struct ClaudeSafariHostIPCTests {
     @Test
     func dispatchCompletionGateAcceptsTheFirstCausalResultOnly() async {
@@ -407,9 +407,7 @@ struct ClaudeSafariHostIPCTests {
         }
         try server.start()
         defer { server.stop() }
-        for _ in 0..<100 where received.snapshot == nil {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await received.wait { $0 != nil }
         #expect(received.snapshot == request)
     }
 
@@ -433,8 +431,16 @@ struct ClaudeSafariHostIPCTests {
         )
         let client = ClaudeSafariHostIPCClient(endpoint: endpoint)
         try client.submit(first)
-        try await Task.sleep(for: .milliseconds(2))
         try client.submit(second)
+        // The mailbox orders by modification time, not lexical UUID. Give
+        // these owned fixtures explicit times rather than waiting for a clock tick.
+        let fixtureTime = Date().timeIntervalSince1970
+        for (request, timestamp) in [(first, fixtureTime - 1), (second, fixtureTime)] {
+            try FileManager.default.setAttributes(
+                [.modificationDate: Date(timeIntervalSince1970: timestamp)],
+                ofItemAtPath: endpoint.requestDirectoryPath + "/" + request.requestID + ".json"
+            )
+        }
 
         let received = LockedValue<[String]>([])
         let server = ClaudeSafariHostIPCRequestServer(endpoint: endpoint) { value in
@@ -442,9 +448,7 @@ struct ClaudeSafariHostIPCTests {
         }
         try server.start()
         defer { server.stop() }
-        for _ in 0..<100 where received.snapshot.count < 2 {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await received.wait { $0.count == 2 }
         #expect(received.snapshot == [first.requestID, second.requestID])
     }
 
@@ -482,9 +486,7 @@ struct ClaudeSafariHostIPCTests {
         )
         try server.start()
         defer { server.stop() }
-        for _ in 0..<100 where received.snapshot == nil {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await received.wait { $0 != nil }
         #expect(received.snapshot == packet)
         #expect(!FileManager.default.fileExists(atPath: endpoint.pendingPath))
     }
@@ -521,9 +523,7 @@ struct ClaudeSafariHostIPCTests {
             )
         )
         try ClaudeSafariHostIPCResponder(endpoint: endpoint).send(response)
-        for _ in 0..<100 where received.snapshot == nil {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await received.wait { $0 != nil }
         #expect(received.snapshot == response)
     }
 
@@ -705,9 +705,7 @@ struct ClaudeSafariHostIPCTests {
             automationEvent: terminal
         )
         try responder.send(response)
-        for _ in 0..<100 where values.snapshot.isEmpty {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await values.wait { !$0.isEmpty }
         #expect(values.snapshot == [response])
         #expect(values.snapshot.first?.observation == observation)
         #expect(values.snapshot.first?.automationEvent == terminal)
@@ -868,15 +866,38 @@ struct ClaudeSafariHostIPCTests {
     }
 }
 
-private final class LockedValue<Value>: @unchecked Sendable {
+private final class LockedValue<Value: Sendable>: @unchecked Sendable {
     private let lock = NSLock()
     private var value: Value
+    private var observers: [UUID: AsyncStream<Value>.Continuation] = [:]
 
     init(_ value: Value) { self.value = value }
 
     var snapshot: Value { lock.withLock { value } }
 
     func withLock(_ body: (inout Value) -> Void) {
-        lock.withLock { body(&value) }
+        lock.withLock {
+            body(&value)
+            for observer in observers.values { observer.yield(value) }
+        }
+    }
+
+    /// Subscribe and replay atomically, so a callback before or during waiter
+    /// setup cannot be lost. AsyncStream terminates when its task is cancelled.
+    func wait(until predicate: @Sendable (Value) -> Bool) async throws {
+        let id = UUID()
+        let (stream, continuation) = AsyncStream<Value>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        lock.withLock {
+            observers[id] = continuation
+            continuation.yield(value)
+        }
+        defer {
+            _ = lock.withLock { observers.removeValue(forKey: id) }
+            continuation.finish()
+        }
+        for await snapshot in stream {
+            if predicate(snapshot) { return }
+        }
+        throw CancellationError()
     }
 }

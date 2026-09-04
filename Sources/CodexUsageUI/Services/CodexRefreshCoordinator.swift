@@ -54,6 +54,7 @@ actor CodexRefreshCoordinator<Value: Sendable> {
     private let maximumBackoff: TimeInterval
     private let now: Now
     private let sleeper: Sleeper
+    private let onRequestCoalesced: @Sendable () -> Void
 
     private var active: ActiveRefresh?
     private var nextGeneration: UInt64 = 0
@@ -69,12 +70,14 @@ actor CodexRefreshCoordinator<Value: Sendable> {
         now: @escaping Now = { Date() },
         sleeper: @escaping Sleeper = { seconds in
             try await Task.sleep(for: .seconds(max(0, seconds)))
-        }
+        },
+        onRequestCoalesced: @escaping @Sendable () -> Void = {}
     ) {
         self.initialBackoff = max(0, initialBackoff)
         self.maximumBackoff = max(initialBackoff, maximumBackoff)
         self.now = now
         self.sleeper = sleeper
+        self.onRequestCoalesced = onRequestCoalesced
     }
 
     func refresh(
@@ -86,6 +89,7 @@ actor CodexRefreshCoordinator<Value: Sendable> {
             if trigger.priority > (highestCoalescedTrigger ?? active.trigger).priority {
                 highestCoalescedTrigger = trigger
             }
+            onRequestCoalesced()
             return try await awaitResult(of: active)
         }
 

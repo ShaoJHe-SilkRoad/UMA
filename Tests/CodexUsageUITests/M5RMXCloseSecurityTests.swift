@@ -4,7 +4,7 @@ import Testing
 @testable import ClaudeStatusLineCore
 @testable import CodexUsageUI
 
-@Suite("M5RMX Local Smart close security")
+@Suite("M5RMX Local Smart close security", .timeLimit(.minutes(1)))
 struct M5RMXCloseSecurityTests {
     @Test
     func ownedFileReaderRejectsSymlinkReplacementGrowthAndOversize() throws {
@@ -109,7 +109,7 @@ struct M5RMXCloseSecurityTests {
     }
 
     @Test
-    func browserInboundConsumerPreservesObservationCompletionOrderUnderStress() async {
+    func browserInboundConsumerPreservesObservationCompletionOrderUnderStress() async throws {
         let recorder = CloseEventRecorder()
         let consumer = ClaudeBrowserOrderedConsumer { event in
             await recorder.append(event)
@@ -133,9 +133,9 @@ struct M5RMXCloseSecurityTests {
                 occurredAt: "2030-01-01T00:00:01Z"
             )))
         }
-        for _ in 0..<1_000 where await recorder.count < 500 { await Task.yield() }
+        await recorder.waitForCount(500)
         let values = await recorder.values
-        #expect(values.count == 500)
+        try #require(values.count == 500)
         for index in 0..<250 {
             #expect(values[index * 2] == "request-\(index):observation")
             #expect(values[index * 2 + 1] == "request-\(index):refreshCompleted")
@@ -160,6 +160,23 @@ struct M5RMXCloseSecurityTests {
 private actor CloseEventRecorder {
     private(set) var values: [String] = []
     var count: Int { values.count }
+    private var waiters: [UUID: (Int, CheckedContinuation<Void, Never>)] = [:]
+
+    func waitForCount(_ count: Int) async {
+        if values.count >= count { return }
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled { continuation.resume() }
+                else { waiters[id] = (count, continuation) }
+            }
+        } onCancel: { Task { await self.cancelWait(id) } }
+    }
+
+    private func cancelWait(_ id: UUID) {
+        waiters.removeValue(forKey: id)?.1.resume()
+    }
+
     func append(_ event: ClaudeBrowserInboundEvent) {
         switch event {
         case let .observation(.success(value)):
@@ -170,6 +187,11 @@ private actor CloseEventRecorder {
             values.append("dispatchFailure:\(value)")
         case .observation(.failure):
             values.append("failure")
+        }
+        let ready = waiters.filter { values.count >= $0.value.0 }
+        for (id, waiter) in ready {
+            waiters.removeValue(forKey: id)
+            waiter.1.resume()
         }
     }
 }

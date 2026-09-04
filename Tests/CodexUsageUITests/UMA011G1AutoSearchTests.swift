@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import CodexUsageUI
 
-@Suite("UMA 0.11-G1 controlled Agent Search")
+@Suite("UMA 0.11-G1 controlled Agent Search", .timeLimit(.minutes(1)))
 struct UMA011G1AutoSearchTests {
     @Test @MainActor
     func firstLaunchNeverScansAndFirstManualSearchEnablesLaterLaunchSearch()
@@ -31,7 +31,7 @@ struct UMA011G1AutoSearchTests {
             agentSettings: firstSettings
         )
 
-        try await Task.sleep(for: .milliseconds(40))
+        await firstStore.waitForInitialObservation()
         #expect((await firstScanner.diagnostics()).completedScanCount == 0)
         #expect(!firstSettings.initialScanCompleted)
 
@@ -65,10 +65,7 @@ struct UMA011G1AutoSearchTests {
             agentSettings: restoredSettings
         )
 
-        try await waitUntil {
-            (await launchScanner.diagnostics()).completedScanCount == 1
-        }
-        try await Task.sleep(for: .milliseconds(20))
+        await launchStore.waitForInitialObservation()
         let launchDiagnostics = await launchScanner.diagnostics()
         #expect(launchDiagnostics.completedScanCount == 1)
         #expect(launchDiagnostics.countsByTrigger[.applicationLaunch] == 1)
@@ -108,7 +105,7 @@ struct UMA011G1AutoSearchTests {
             agentSettings: settings
         )
 
-        try await Task.sleep(for: .milliseconds(40))
+        await store.waitForInitialObservation()
         #expect((await scanner.diagnostics()).completedScanCount == 0)
         await store.searchForAgents()
         #expect((await scanner.diagnostics()).completedScanCount == 1)
@@ -148,6 +145,7 @@ struct UMA011G1AutoSearchTests {
         let search = Task { await store.searchForAgents() }
         await connector.waitUntilProbeEntered()
         let refresh = Task { await store.refresh() }
+        await m5aWaitForPublished(store.coalescedScanRequests, matching: { $0 == 1 })
         await connector.releaseProbe()
         await search.value
         await refresh.value
@@ -310,16 +308,6 @@ struct UMA011G1AutoSearchTests {
         defaults.string(forKey: "test.suite-name")!
     }
 
-    private func waitUntil(
-        attempts: Int = 1_000,
-        condition: @escaping @Sendable () async -> Bool
-    ) async throws {
-        for _ in 0..<attempts {
-            if await condition() { return }
-            try await Task.sleep(for: .milliseconds(5))
-        }
-        Issue.record("Timed out waiting for controlled Agent Search state.")
-    }
 }
 
 private actor SearchFixtureConnector: AgentUsageConnector {
@@ -330,7 +318,7 @@ private actor SearchFixtureConnector: AgentUsageConnector {
     private let snapshotValue: AgentUsageSnapshot
     private let blocksProbe: Bool
     private var probeContinuation: CheckedContinuation<Void, Never>?
-    private var probeEntryContinuations: [CheckedContinuation<Void, Never>] = []
+    private let probeEntered = M5AEventCounter()
     private var probeWasReleased = false
     private(set) var didEnterProbe = false
     private(set) var probeCount = 0
@@ -408,11 +396,7 @@ private actor SearchFixtureConnector: AgentUsageConnector {
     func probe() async -> AgentConnectorProbe {
         probeCount += 1
         didEnterProbe = true
-        let entryContinuations = probeEntryContinuations
-        probeEntryContinuations.removeAll()
-        for continuation in entryContinuations {
-            continuation.resume()
-        }
+        probeEntered.signal()
         if blocksProbe && !probeWasReleased {
             await withCheckedContinuation { continuation in
                 probeContinuation = continuation
@@ -422,10 +406,7 @@ private actor SearchFixtureConnector: AgentUsageConnector {
     }
 
     func waitUntilProbeEntered() async {
-        if didEnterProbe { return }
-        await withCheckedContinuation { continuation in
-            probeEntryContinuations.append(continuation)
-        }
+        await probeEntered.wait()
     }
 
     func releaseProbe() {

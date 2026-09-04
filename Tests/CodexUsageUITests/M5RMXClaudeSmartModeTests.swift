@@ -4,8 +4,85 @@ import Foundation
 import Testing
 @testable import CodexUsageUI
 
-@Suite("M5RMX Claude Local Smart Mode")
+@Suite("M5RMX Claude Local Smart Mode", .timeLimit(.minutes(1)))
 struct M5RMXClaudeSmartModeTests {
+    @Test
+    func wakeAgesLocalExactWithoutRenewingItsSuccessfulTimestampOrReadingSafari() async throws {
+        let fixture = BrowserConnectorFixture(consent: true)
+        let connector = fixture.connector()
+        await connector.start()
+        let observedAt = fixture.clock.now()
+        await connector.receiveEncodedStatusLinePacket(try smartPacket(observedAt: observedAt).encoded())
+        let fresh = await connector.currentSnapshot()
+        #expect(fresh.freshness == .fresh)
+        #expect(fresh.lastSuccessfulAt == observedAt)
+
+        fixture.clock.advance(ClaudeSmartSourceSelector.exactFreshnessInterval + 1)
+        await connector.refresh(trigger: .wake)
+        let stale = await connector.currentSnapshot()
+        #expect(stale.freshness == .stale)
+        #expect(stale.lastSuccessfulAt == observedAt)
+        #expect(stale.channels.flatMap(\.rateLimitWindows).first?.remainingPercent == 72)
+        #expect(stale.channels.flatMap(\.rateLimitWindows).allSatisfy { $0.isEstimated == false })
+        #expect((await connector.diagnostics()).localSmartState == .staleUnsupported(observedAt))
+        #expect((await connector.diagnostics()).browserAccuracyState == .notConfigured)
+
+        let renewedAt = fixture.clock.now()
+        await connector.receiveEncodedStatusLinePacket(try smartPacket(observedAt: renewedAt).encoded())
+        let recovered = await connector.currentSnapshot()
+        #expect(recovered.freshness == .fresh)
+        #expect(recovered.lastSuccessfulAt == renewedAt)
+        #expect(await fixture.bridge.startCount == 0)
+        #expect(await fixture.bridge.automaticRequests.isEmpty)
+        await connector.stop()
+    }
+
+    @Test
+    func retainedDesktopEstimateExpiresWithoutASecondProviderRead() async throws {
+        let root = URL(fileURLWithPath: "/private/tmp/uma-m5a-desktop-age-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let file = root.appendingPathComponent("estimate.json")
+        let clock = BrowserTestClock()
+        let object: [String: Any] = [
+            "version": 2,
+            "samples": [["t": clock.now().timeIntervalSince1970 * 1_000,
+                         "org": "fixture", "u": ["fh": 25, "sd": 40]]],
+        ]
+        try JSONSerialization.data(withJSONObject: object).write(to: file)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        let reader = ClaudeDesktopPlanUsageReader(fileURL: file)
+        let admitted = try #require(reader.read(now: clock.now()))
+        let bridge = BrowserTestBridge()
+        let connector = ClaudeCodeUsageConnector(
+            integration: stateSeparationIntegration(bridge),
+            hasConsent: { true }, now: clock.now,
+            desktopPlanUsageReader: StateSeparationDesktopReader(snapshot: admitted),
+            desktopActivityContract: .estimateOnlyNoActivitySignal,
+            anchorStore: ResetlessSafariAnchorStore()
+        )
+        await connector.start()
+        let before = await connector.currentSnapshot()
+        let admittedWindows = before.channels.flatMap(\.rateLimitWindows)
+        #expect(admittedWindows.count == 2)
+        #expect(admittedWindows.compactMap(\.remainingPercent).sorted() == [60, 75])
+        #expect(admittedWindows.allSatisfy { $0.isEstimated == true })
+        #expect(before.lastSuccessfulAt == admitted.observedAt)
+        let reads = (await connector.diagnostics()).desktopPlanUsageReadCount
+
+        clock.advance(ClaudeDesktopPlanUsageReader.Contract.maximumSampleAge + 1)
+        #expect(reader.read(now: clock.now()) == nil)
+        let expired = await connector.currentSnapshot()
+        #expect(expired.channels.flatMap(\.rateLimitWindows).isEmpty)
+        #expect(expired.lastSuccessfulAt == nil)
+        #expect(expired.state == .unsupported)
+        #expect((await connector.diagnostics()).localSmartState == .staleUnsupported(nil))
+        #expect((await connector.diagnostics()).desktopPlanUsageReadCount == reads)
+        #expect(await bridge.startCount == 0)
+        #expect(await bridge.automaticRequests.isEmpty)
+        await connector.stop()
+    }
+
     @Test
     func statusLineProjectionDropsEveryBroadSessionField() throws {
         let observedAt = Date(timeIntervalSince1970: 1_898_596_800)
@@ -229,31 +306,23 @@ struct M5RMXClaudeSmartModeTests {
             consentStore: consent
         )
 
-        await Task.yield()
+        try await waitForClaudeValue(model.$state, matching: { $0 != .checking })
         #expect(await fixture.bridge.automaticRequests.isEmpty)
 
         model.connectWithConsent()
-        for _ in 0..<100 where model.actionInProgress {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await waitForClaudeValue(model.$actionInProgress, matching: { !$0 })
         #expect(await fixture.bridge.automaticRequests.isEmpty)
 
         model.repairCompanion()
-        for _ in 0..<100 where model.actionInProgress {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await waitForClaudeValue(model.$actionInProgress, matching: { !$0 })
         #expect(await fixture.bridge.automaticRequests.isEmpty)
 
         model.syncNow()
-        for _ in 0..<100 where model.actionInProgress {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await waitForClaudeValue(model.$actionInProgress, matching: { !$0 })
         #expect(await fixture.bridge.automaticRequests.isEmpty)
 
         model.accuracySync()
-        for _ in 0..<100 where await fixture.bridge.automaticRequests.isEmpty {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await fixture.bridge.waitForAutomaticRequest()
         #expect(await fixture.bridge.automaticRequests.count == 1)
     }
 
@@ -272,9 +341,7 @@ struct M5RMXClaudeSmartModeTests {
         )
 
         model.requestSafariSiteAccess()
-        for _ in 0..<100 where await fixture.bridge.automaticRequests.count < 1 {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await fixture.bridge.waitForAutomaticRequest(count: 1)
         #expect(await fixture.bridge.automaticRequests.count == 1)
         let firstRequestID = await fixture.bridge.automaticRequests[0].requestID
         await fixture.bridge.sendAutomation(
@@ -282,13 +349,9 @@ struct M5RMXClaudeSmartModeTests {
             status: .ownedTabClosed
         )
 
-        while model.actionInProgress {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await waitForClaudeValue(model.$actionInProgress, matching: { !$0 })
         model.retrySafariSiteAccess()
-        for _ in 0..<100 where await fixture.bridge.automaticRequests.count < 2 {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await fixture.bridge.waitForAutomaticRequest(count: 2)
         #expect(await fixture.bridge.automaticRequests.count == 2)
         #expect(!(await connector.diagnostics()).schedulerActive)
     }
@@ -315,9 +378,7 @@ struct M5RMXClaudeSmartModeTests {
         )
 
         model.disconnect()
-        for _ in 0..<100 where model.actionInProgress {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await waitForClaudeValue(model.$actionInProgress, matching: { !$0 })
         #expect(!model.actionInProgress)
         #expect(model.state == .companionOutdated)
         #expect(model.consentGranted)
@@ -347,9 +408,7 @@ struct M5RMXClaudeSmartModeTests {
         )
 
         model.checkCompanion()
-        for _ in 0..<100 where !admissionGate.entered {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        await admissionGate.waitUntilEntered()
 
         #expect(admissionGate.entered)
         #expect(!model.actionInProgress)
@@ -998,9 +1057,10 @@ struct M5RMXClaudeSmartModeTests {
         let consent = ClaudeBrowserConsentStore(defaults: defaults)
         consent.consentGranted = true
         let model = ClaudeBrowserSettingsModel(connector: connector, consentStore: consent)
-        for _ in 0..<100 where !model.currentQuotaIncludesSafariAccuracy {
-            await Task.yield()
-        }
+        try await waitForClaudeValue(model.$state, matching: {
+            if case .fresh = $0 { return true }
+            return false
+        })
         #expect(model.currentQuotaIncludesSafariAccuracy)
         #expect(model.liveLinkStage == .localStatusLinePending)
         if case .fresh = model.state {
@@ -1732,10 +1792,32 @@ private actor WriteOnlyAnchorStore: ClaudeSmartAnchorStoring {
 private final class MainActorAdmissionRefreshGate {
     private var continuation: CheckedContinuation<Void, Never>?
     private(set) var entered = false
+    private var entryWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
 
     func wait() async {
         entered = true
-        await withCheckedContinuation { continuation = $0 }
+        let ready = entryWaiters.values
+        entryWaiters.removeAll()
+        ready.forEach { $0.resume() }
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { value in
+                if Task.isCancelled { value.resume() }
+                else { continuation = value }
+            }
+        } onCancel: { Task { @MainActor in self.release() } }
+    }
+
+    func waitUntilEntered() async {
+        if entered { return }
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { value in
+                if Task.isCancelled { value.resume() }
+                else { entryWaiters[id] = value }
+            }
+        } onCancel: {
+            Task { @MainActor in self.entryWaiters.removeValue(forKey: id)?.resume() }
+        }
     }
 
     func release() {

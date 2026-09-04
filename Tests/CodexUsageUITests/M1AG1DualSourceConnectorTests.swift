@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import CodexUsageUI
 
+@Suite(.timeLimit(.minutes(1)))
 struct M1AG1DualSourceConnectorTests {
     @Test
     func panelBudgetIncludesBothSourceRowsWithoutClippingTheExistingFooter() {
@@ -131,9 +132,7 @@ struct M1AG1DualSourceConnectorTests {
         )
         store.grantMonitorConsent()
         await store.refresh()
-        for _ in 0..<40 where store.isRefreshing {
-            try? await Task.sleep(for: .milliseconds(5))
-        }
+        await m5aWaitForPublished(store.$isRefreshing, matching: { !$0 })
 
         #expect(store.providerSnapshots.isEmpty)
         #expect(store.presentationCards.isEmpty)
@@ -156,9 +155,7 @@ struct M1AG1DualSourceConnectorTests {
         store.grantMonitorConsent()
         await store.refresh()
         await store.refresh()
-        for _ in 0..<40 where store.isRefreshing {
-            try? await Task.sleep(for: .milliseconds(5))
-        }
+        await m5aWaitForPublished(store.$isRefreshing, matching: { !$0 })
 
         #expect(store.providerSnapshots.count == 1)
         #expect(store.providerSnapshots.first?.state == .stale)
@@ -181,9 +178,7 @@ struct M1AG1DualSourceConnectorTests {
         )
         store.grantMonitorConsent()
         await store.refresh()
-        for _ in 0..<40 where store.isRefreshing {
-            try? await Task.sleep(for: .milliseconds(5))
-        }
+        await m5aWaitForPublished(store.$isRefreshing, matching: { !$0 })
 
         let presentation = CodexConnectionPresentation.make(
             state: store.currentState,
@@ -198,14 +193,16 @@ struct M1AG1DualSourceConnectorTests {
     }
 
     @Test @MainActor
-    func disconnectDuringLocalReadRetainsNoDataAfterTheIndependentProviderStarts() async {
+    func disconnectDuringLocalReadRetainsNoDataAfterTheIndependentProviderStarts() async throws {
         let localReader = BlockingLocalReader(snapshot: localSnapshot(tokenCount: 88))
         let client = RecordingProviderClient()
+        let connector = CodexUsageConnector(client: client, localActivityReader: localReader)
+        let registry = try AgentConnectorRegistry(connectors: [connector])
         let store = UsageStore(
             autoRefresh: false,
             language: .english,
-            client: client,
-            localActivityReader: localReader,
+            registry: registry,
+            primaryConnectorID: connector.id,
             consentDefaults: UserDefaults(suiteName: "m1a-g1-cancel-refresh-\(UUID().uuidString)")
         )
         store.grantMonitorConsent()
@@ -213,37 +210,55 @@ struct M1AG1DualSourceConnectorTests {
         let refresh = Task { @MainActor in await store.refresh() }
         await localReader.waitUntilReading()
         await store.disconnectAndForgetConsent()
+        let stoppedSnapshot = await connector.currentSnapshot()
         localReader.resume()
         await refresh.value
+        await connector.awaitPendingLocalActivityPublication()
 
         #expect(client.fetchUsageCallCount == 1)
         #expect(client.disconnectCallCount == 1)
         #expect(store.hasPriorRealSnapshot == false)
         #expect(store.currentState == .notAuthorizedByMonitor)
+        #expect(store.monitorConsentGranted == false)
+        let afterLatePublication = await connector.currentSnapshot()
+        #expect(afterLatePublication.state == .inactive)
+        #expect(afterLatePublication.channels == stoppedSnapshot.channels)
+        #expect(afterLatePublication.lastSuccessfulAt == stoppedSnapshot.lastSuccessfulAt)
+        #expect(afterLatePublication.channels.compactMap { $0.localActivityMetrics }.isEmpty)
     }
 
     @Test @MainActor
-    func disconnectDuringLocalReadDoesNotRetainAnIndependentAccountCheck() async {
+    func disconnectDuringLocalReadDoesNotRetainAnIndependentAccountCheck() async throws {
         let localReader = BlockingLocalReader(snapshot: localSnapshot(tokenCount: 89))
         let client = RecordingProviderClient()
+        let connector = CodexUsageConnector(client: client, localActivityReader: localReader)
+        let registry = try AgentConnectorRegistry(connectors: [connector])
         let store = UsageStore(
             autoRefresh: false,
             language: .english,
-            client: client,
-            localActivityReader: localReader,
+            registry: registry,
+            primaryConnectorID: connector.id,
             consentDefaults: UserDefaults(suiteName: "m1a-g1-cancel-account-\(UUID().uuidString)")
         )
         store.handleLocalAccessDecision(true)
         await localReader.waitUntilReading()
         await store.disconnectAndForgetConsent()
+        let stoppedSnapshot = await connector.currentSnapshot()
         localReader.resume()
-        try? await Task.sleep(for: .milliseconds(20))
+        await store.waitForLocalAccessDecision()
+        await connector.awaitPendingLocalActivityPublication()
 
         #expect(client.accountReadCallCount == 1)
         #expect(client.fetchUsageCallCount == 1)
         #expect(client.disconnectCallCount == 1)
         #expect(store.hasPriorRealSnapshot == false)
         #expect(store.currentState == .notAuthorizedByMonitor)
+        #expect(store.monitorConsentGranted == false)
+        let afterLatePublication = await connector.currentSnapshot()
+        #expect(afterLatePublication.state == .inactive)
+        #expect(afterLatePublication.channels == stoppedSnapshot.channels)
+        #expect(afterLatePublication.lastSuccessfulAt == stoppedSnapshot.lastSuccessfulAt)
+        #expect(afterLatePublication.channels.compactMap { $0.localActivityMetrics }.isEmpty)
     }
 
     @Test @MainActor
@@ -258,7 +273,7 @@ struct M1AG1DualSourceConnectorTests {
         )
 
         store.handleLocalAccessDecision(false)
-        try? await Task.sleep(for: .milliseconds(20))
+        await store.waitForLocalAccessDecision()
 
         #expect(store.currentState == .notAuthorizedByMonitor)
         #expect(store.monitorConsentGranted == false)
@@ -285,12 +300,7 @@ struct M1AG1DualSourceConnectorTests {
         store.handleLocalAccessDecision(true)
         localReader.resume()
 
-        for _ in 0..<40 where store.currentState != .ready {
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        for _ in 0..<40 where !store.allowsManualRefresh {
-            try? await Task.sleep(for: .milliseconds(5))
-        }
+        await store.waitForLocalAccessDecision()
 
         #expect(store.monitorConsentGranted)
         #expect(client.accountReadCallCount == 1)
@@ -313,12 +323,8 @@ struct M1AG1DualSourceConnectorTests {
 
         store.handleLocalAccessDecision(true)
         await localReader.waitUntilReading()
-        for _ in 0..<40 where client.accountReadCallCount == 0 {
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        for _ in 0..<40 where store.isRefreshing {
-            try? await Task.sleep(for: .milliseconds(5))
-        }
+        await client.accountReadStarted.wait()
+        await m5aWaitForPublished(store.$isRefreshing, matching: { !$0 })
 
         #expect(client.accountReadCallCount == 1)
         #expect(client.fetchUsageCallCount == 1)
@@ -436,7 +442,7 @@ struct M1AG1DualSourceConnectorTests {
         let firstRefresh = Task { @MainActor in await store.refresh() }
         await client.waitUntilFirstFetchStarts()
         let secondRefresh = Task { @MainActor in await store.refresh() }
-        await Task.yield()
+        await m5aWaitForPublished(store.coalescedScanRequests, matching: { $0 == 1 })
         #expect(await client.fetchUsageCallCount == 1)
 
         await client.finishFirstFetch()
@@ -520,6 +526,7 @@ private final class BlockingLocalReader: CodexLocalActivityReading, @unchecked S
     private let snapshot: CodexLocalActivitySnapshot
     private let condition = NSCondition()
     private var hasStarted = false
+    private let readStarted = M5AEventCounter()
     private var isResumed = false
 
     init(snapshot: CodexLocalActivitySnapshot) {
@@ -529,6 +536,7 @@ private final class BlockingLocalReader: CodexLocalActivityReading, @unchecked S
     func read(now: Date) -> CodexLocalActivitySnapshot {
         condition.lock()
         hasStarted = true
+        readStarted.signal()
         condition.broadcast()
         while !isResumed {
             condition.wait()
@@ -538,10 +546,7 @@ private final class BlockingLocalReader: CodexLocalActivityReading, @unchecked S
     }
 
     func waitUntilReading() async {
-        while true {
-            if startedReading() { return }
-            try? await Task.sleep(for: .milliseconds(5))
-        }
+        await readStarted.wait()
     }
 
     func resume() {
@@ -559,12 +564,14 @@ private final class BlockingLocalReader: CodexLocalActivityReading, @unchecked S
 }
 
 private final class RecordingProviderClient: CodexUsageClient, @unchecked Sendable {
+    let accountReadStarted = M5AEventCounter()
     private(set) var accountReadCallCount = 0
     private(set) var fetchUsageCallCount = 0
     private(set) var disconnectCallCount = 0
 
     func checkLocalAccountAvailability() async throws -> Bool {
         accountReadCallCount += 1
+        accountReadStarted.signal()
         return true
     }
 
@@ -588,25 +595,21 @@ private final class RecordingProviderClient: CodexUsageClient, @unchecked Sendab
 
 private actor CoalescingProviderClient: CodexUsageClient {
     private var fetchContinuation: CheckedContinuation<CodexLiveUsage, Never>?
-    private var firstFetchWaiter: CheckedContinuation<Void, Never>?
+    private let firstFetchStarted = M5AEventCounter()
     private(set) var fetchUsageCallCount = 0
 
     func checkLocalAccountAvailability() async throws -> Bool { true }
 
     func fetchUsage() async throws -> CodexLiveUsage {
         fetchUsageCallCount += 1
-        firstFetchWaiter?.resume()
-        firstFetchWaiter = nil
+        firstFetchStarted.signal()
         return await withCheckedContinuation { continuation in
             fetchContinuation = continuation
         }
     }
 
     func waitUntilFirstFetchStarts() async {
-        guard fetchUsageCallCount == 0 else { return }
-        await withCheckedContinuation { continuation in
-            firstFetchWaiter = continuation
-        }
+        await firstFetchStarted.wait()
     }
 
     func finishFirstFetch() {

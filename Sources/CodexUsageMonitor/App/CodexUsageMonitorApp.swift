@@ -5,32 +5,79 @@ import Foundation
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    typealias RuntimeFactory = @MainActor (Bool) throws -> UsageMonitorRuntime
     private var runtime: UsageMonitorRuntime?
-    private let shellCoordinator = AppShellCoordinator()
-    private let shellDiagnosticRequested = CommandLine.arguments.contains("--diagnose-app-shell")
+    private let shellCoordinator: AppShellCoordinator?
+    private let shellDiagnosticRequested: Bool
+    private let runtimeFactory: RuntimeFactory
+    private let wakeNotificationCenter: NotificationCenter
+    private let terminationReply: @MainActor (NSApplication) -> Void
+    private var hasStarted = false
     private var isDisconnectingForTermination = false
+    private(set) var wakeObserver: CodexWakeRefreshObserver?
+    private(set) var launchTask: Task<Void, Never>?
+    private(set) var terminationTask: Task<Void, Never>?
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
-        NSApp.unhide(nil)
-        shellCoordinator.start(presentMainWindow: !shellDiagnosticRequested)
-        // The status item exists before provider composition begins. A failed
-        // or slow provider construction can never own the macOS shell.
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                let runtime = try UsageMonitorRuntime.live(
+    override convenience init() {
+        self.init(
+            runtimeFactory: { startProviders in
+                try UsageMonitorRuntime.live(
                     bundleIdentifier: Bundle.main.bundleIdentifier,
                     environment: ProcessInfo.processInfo.environment,
-                    startProviders: !self.shellDiagnosticRequested
+                    startProviders: startProviders
                 )
+            },
+            wakeNotificationCenter: NSWorkspace.shared.notificationCenter,
+            shellCoordinator: AppShellCoordinator(),
+            shellDiagnosticRequested: CommandLine.arguments.contains("--diagnose-app-shell")
+        )
+    }
+
+    /// The injected composition runs the real delegate lifecycle without
+    /// constructing windows, production preferences, or live providers.
+    init(
+        runtimeFactory: @escaping RuntimeFactory,
+        wakeNotificationCenter: NotificationCenter,
+        shellCoordinator: AppShellCoordinator? = nil,
+        shellDiagnosticRequested: Bool = false,
+        terminationReply: @escaping @MainActor (NSApplication) -> Void = {
+            $0.reply(toApplicationShouldTerminate: true)
+        }
+    ) {
+        self.runtimeFactory = runtimeFactory
+        self.wakeNotificationCenter = wakeNotificationCenter
+        self.shellCoordinator = shellCoordinator
+        self.shellDiagnosticRequested = shellDiagnosticRequested
+        self.terminationReply = terminationReply
+        super.init()
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard !hasStarted, !isDisconnectingForTermination else { return }
+        hasStarted = true
+        if let shellCoordinator {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.unhide(nil)
+            shellCoordinator.start(presentMainWindow: !shellDiagnosticRequested)
+        }
+        // The status item exists before provider composition begins. A failed
+        // or slow provider construction can never own the macOS shell.
+        launchTask = Task { @MainActor [weak self] in
+            guard let self, !Task.isCancelled,
+                  !self.isDisconnectingForTermination else { return }
+            do {
+                let runtime = try self.runtimeFactory(!self.shellDiagnosticRequested)
                 self.runtime = runtime
-                self.shellCoordinator.attach(runtime: runtime)
+                self.wakeObserver = CodexWakeRefreshObserver(
+                    store: runtime.store,
+                    notificationCenter: self.wakeNotificationCenter
+                )
+                self.shellCoordinator?.attach(runtime: runtime)
                 if self.shellDiagnosticRequested {
                     await self.finishShellDiagnostic(runtimeAttached: true)
                 }
             } catch {
-                self.shellCoordinator.recordRuntimeAttachmentFailure()
+                self.shellCoordinator?.recordRuntimeAttachmentFailure()
                 if self.shellDiagnosticRequested {
                     await self.finishShellDiagnostic(runtimeAttached: false)
                 }
@@ -39,6 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func finishShellDiagnostic(runtimeAttached: Bool) async {
+        guard let shellCoordinator else { return }
         let result = await shellCoordinator.runMachineDiagnostic(
             toggleCount: 100,
             runtimeAttached: runtimeAttached
@@ -56,7 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hasVisibleWindows flag: Bool
     ) -> Bool {
         sender.unhide(nil)
-        shellCoordinator.showMainWindow()
+        shellCoordinator?.showMainWindow()
         return true
     }
 
@@ -65,21 +113,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !isDisconnectingForTermination else { return .terminateCancel }
+        isDisconnectingForTermination = true
+        launchTask?.cancel()
+        wakeObserver?.invalidate()
         // The shell-only diagnostic starts no providers and owns no connector
         // shutdown work. Let it exit immediately after emitting its result.
         guard !shellDiagnosticRequested else { return .terminateNow }
-        guard !isDisconnectingForTermination else { return .terminateCancel }
-        isDisconnectingForTermination = true
         guard let runtime else { return .terminateNow }
-        Task { @MainActor [store = runtime.store] in
-            await store.stopAllConnectors()
-            sender.reply(toApplicationShouldTerminate: true)
+        terminationTask = Task { @MainActor [runtime,
+                                            observer = wakeObserver,
+                                            reply = terminationReply] in
+            await observer?.waitForPendingWake()
+            await runtime.shutdown()
+            reply(sender)
         }
         return .terminateLater
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        shellCoordinator.tearDown()
+        isDisconnectingForTermination = true
+        launchTask?.cancel()
+        wakeObserver?.invalidate()
+        shellCoordinator?.tearDown()
     }
 }
 

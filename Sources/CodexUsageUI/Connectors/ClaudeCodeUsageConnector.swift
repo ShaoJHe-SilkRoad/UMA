@@ -348,7 +348,9 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
     private var snapshot: AgentUsageSnapshot
     private var lastGood: AgentUsageSnapshot?
     private var lifecycle: ClaudeConnectorLifecycleState = .disconnected
-    private var continuation: AsyncStream<AgentUsageSnapshot>.Continuation?
+    private var snapshotContinuations: [UUID: AsyncStream<AgentUsageSnapshot>.Continuation] = [:]
+    private var snapshotRemovalObserver: (@Sendable () -> Void)?
+    private var snapshotPublicationRevision: UInt64 = 0
     private var listenerStarted = false
     private var localSmartStarted = false
     private var actionInFlight = false
@@ -693,11 +695,28 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
     }
 
     func snapshots() async -> AsyncStream<AgentUsageSnapshot> {
-        AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
-            self.continuation = continuation
+        let subscriptionID = UUID()
+        return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            snapshotContinuations[subscriptionID] = continuation
             continuation.yield(snapshot)
+            continuation.onTermination = { [weak self] _ in
+                Task { await self?.removeSnapshotSubscription(subscriptionID) }
+            }
         }
     }
+
+    // Observation lifetime is independent of the application-owned connector.
+    private func removeSnapshotSubscription(_ id: UUID) {
+        snapshotContinuations.removeValue(forKey: id)
+        snapshotRemovalObserver?()
+    }
+
+    /// Internal lifecycle diagnostic: signals after actor-owned detach completes.
+    func observeSnapshotRemoval(_ observer: @escaping @Sendable () -> Void) {
+        snapshotRemovalObserver = observer
+    }
+
+    func snapshotPublicationCount() -> UInt64 { snapshotPublicationRevision }
 
     func lifecycleState() async -> ClaudeConnectorLifecycleState {
         return lifecycle
@@ -815,6 +834,10 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         automaticTimeoutTask = nil
         automaticRequestID = nil
         automaticRefreshInFlight = false
+        // Settings reloads diagnostics when a snapshot is published. Every
+        // one-shot terminal path must notify it without changing retained
+        // provider data or its original successful-update timestamp.
+        replace(snapshot)
     }
 
     private func runCoalescedAction(openUsagePage: Bool, repairing: Bool) async {
@@ -1338,6 +1361,16 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
 
     private func publishSmartSnapshot() async {
         let current = now()
+        if let desktop = latestDesktopPlanUsage {
+            // A qualified read does not grant an indefinitely current estimate.
+            // Revalidate retained metadata without accessing the provider again.
+            let age = current.timeIntervalSince(desktop.observedAt)
+            if !age.isFinite
+                || age < -ClaudeDesktopPlanUsageReader.Contract.maximumFutureSkew
+                || age > ClaudeDesktopPlanUsageReader.Contract.maximumSampleAge {
+                latestDesktopPlanUsage = nil
+            }
+        }
         var values: [ClaudeSmartWindowValue] = []
         var localEstimateDates: [Date] = []
         for kind in [AgentRateLimitWindow.Kind.fiveHour, .sevenDay] {
@@ -1781,7 +1814,10 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
 
     private func replace(_ next: AgentUsageSnapshot) {
         snapshot = next
-        continuation?.yield(next)
+        snapshotPublicationRevision &+= 1
+        for continuation in snapshotContinuations.values {
+            continuation.yield(next)
+        }
     }
 
     private static func snapshot(

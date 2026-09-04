@@ -4,7 +4,7 @@ import Foundation
 import Testing
 @testable import CodexUsageUI
 
-@Suite("M5ADBG-G1 Local Smart and one-shot Accuracy closure")
+@Suite("M5ADBG-G1 Local Smart and one-shot Accuracy closure", .timeLimit(.minutes(1)))
 struct M5ADBGG1BrowserSyncClosureTests {
     @Test
     func exactSmartFreshnessBecomesStaleThenExpiresAtProviderReset() async {
@@ -175,20 +175,34 @@ struct M5ADBGG1BrowserSyncClosureTests {
         await connector.start()
         await connector.accuracySync()
         await fixture.bridge.send(browserEnvelope(five: 19, seven: 39))
-        #expect(await waitForFresh(model))
+        try await waitForClaudeValue(model.$state, matching: { $0 == .fresh(fixture.clock.now()) })
         await connector.accuracySync()
         await fixture.bridge.reject(.invalidContract)
-        #expect(await waitForFresh(model))
+        try await waitForClaudeValue(model.$browserAccuracyStage, matching: { $0 == .accuracyRouteRejected })
+        #expect(model.state == .fresh(fixture.clock.now()))
         #expect(model.safeError == nil)
 
+        fixture.clock.advance(1)
         await connector.accuracySync()
         await fixture.bridge.send(browserEnvelope(
             five: 20,
             seven: 40,
             observedAt: "2030-03-01T12:00:01Z"
         ))
-        #expect(await waitForFresh(model))
+        try await waitForClaudeValue(model.$state, matching: { $0 == .fresh(fixture.clock.now()) })
         #expect(model.safeError == nil)
+        let retained = await connector.currentSnapshot()
+        await connector.accuracySync()
+        let requestID = try #require(await fixture.bridge.automaticRequests.last?.requestID)
+        await fixture.bridge.sendAutomation(requestID: requestID, status: .permissionRequired)
+        try await waitForClaudeValue(model.$browserAccuracyStage, matching: { $0 == .accuracyPermissionRequired })
+        let afterFailure = await connector.currentSnapshot()
+        #expect(afterFailure.channels == retained.channels)
+        #expect(afterFailure.capturedAt == retained.capturedAt)
+        #expect(afterFailure.lastSuccessfulAt == retained.lastSuccessfulAt)
+        #expect(model.state == .fresh(fixture.clock.now()))
+        #expect(!(await connector.diagnostics()).automaticRefreshInFlight)
+        await connector.disconnect()
     }
 
     @Test @MainActor
@@ -205,9 +219,7 @@ struct M5ADBGG1BrowserSyncClosureTests {
         )
 
         model.connectWithConsent()
-        for _ in 0..<80 where !model.consentGranted {
-            await Task.yield()
-        }
+        try await waitForClaudeValue(model.$actionInProgress, matching: { !$0 })
 
         #expect(consentStore.consentGranted)
         #expect(model.consentGranted)
@@ -265,12 +277,4 @@ struct M5ADBGG1BrowserSyncClosureTests {
         }
     }
 
-    @MainActor
-    private func waitForFresh(_ model: ClaudeBrowserSettingsModel) async -> Bool {
-        for _ in 0..<100 {
-            if case .fresh = model.state { return true }
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        return false
-    }
 }

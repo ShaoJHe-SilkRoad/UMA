@@ -1,8 +1,10 @@
 import AppKit
 import Foundation
+import Combine
 import Testing
 @testable import CodexUsageUI
 
+@Suite(.timeLimit(.minutes(1)))
 struct M1AG2ConnectorCoreTests {
     @Test
     func registryOrdersAndAdmitsOnlyTheHealthyProvider() async throws {
@@ -187,19 +189,14 @@ struct M1AG2ConnectorCoreTests {
                 == ["alpha.agent", "zeta.agent"]
         )
 
-        for _ in 0..<10 {
-            if await zeta.hasListener { break }
-            await Task.yield()
-        }
         #expect(await zeta.hasListener)
 
+        let removal = await registry.subscribe()
         await zeta.emit(Self.snapshot(id: "zeta.agent", state: .failed, failure: .processExited))
-        for _ in 0..<10 {
-            if await registry.orderedSnapshots().allSatisfy({
-                $0.id.rawValue != "zeta.agent"
-            }) { break }
-            await Task.yield()
+        await m5aWaitForPublication(removal.updates) { publication in
+            publication.snapshots.allSatisfy { $0.id.rawValue != "zeta.agent" }
         }
+        await registry.detach(removal)
         let snapshots = await registry.orderedSnapshots()
         #expect(snapshots.map(\.id.rawValue) == ["alpha.agent"])
         #expect(snapshots.first(where: { $0.id.rawValue == "alpha.agent" })?.hasValidData == true)
@@ -351,17 +348,17 @@ struct M1AG2ConnectorCoreTests {
         let connector = CodexUsageConnector(client: client, localActivityReader: UnavailableLocalReader())
 
         await connector.start()
-        for _ in 0..<30 where !(await client.hasEventListener) {
-            await Task.yield()
-        }
+        await client.listenerStarted.wait()
         #expect(await client.hasEventListener)
 
         await connector.perform(.connect)
         #expect(await client.verifiedFetchCount == 1)
 
+        let updates = await connector.snapshots()
         await client.emit(.rateLimitsUpdated)
-        for _ in 0..<30 where !(await client.triggers.contains(.providerEvent)) {
-            await Task.yield()
+        await client.eventRefreshStarted.wait()
+        for await snapshot in updates {
+            if snapshot.lastSuccessfulAt == Self.liveUsage.providerCapturedAt.addingTimeInterval(1) { break }
         }
         #expect(await client.triggers == [.providerEvent])
         #expect((await connector.currentSnapshot()).state == .ready)
@@ -392,12 +389,14 @@ struct M1AG2ConnectorCoreTests {
         await store.refresh()
         store.setPanelVisible(true)
 
-        try? await Task.sleep(for: .milliseconds(90))
+        await store.waitForInitialObservation()
+        #expect(!store.backgroundRefreshScheduled)
         #expect(!(await client.triggers.contains(.timer)))
 
         store.setPanelVisible(false)
         let timerCountAtBackgroundTransition = await client.timerTriggerCount
-        try? await Task.sleep(for: .milliseconds(90))
+        await store.waitForInitialObservation()
+        #expect(!store.backgroundRefreshScheduled)
         #expect(await client.timerTriggerCount == timerCountAtBackgroundTransition)
         await store.stopAllConnectors()
     }
@@ -418,13 +417,63 @@ struct M1AG2ConnectorCoreTests {
             consentDefaults: UserDefaults(suiteName: "m1a-g2-dbg-b-wake-\(UUID().uuidString)")
         )
         store.grantMonitorConsent()
-        let wakeObserver = CodexWakeRefreshObserver(store: store)
-        NotificationCenter.default.post(name: NSWorkspace.didWakeNotification, object: nil)
-
-        try? await Task.sleep(for: .milliseconds(30))
+        let center = NotificationCenter()
+        let wakeObserver = CodexWakeRefreshObserver(store: store, notificationCenter: center)
+        center.post(name: NSWorkspace.didWakeNotification, object: nil)
+        await wakeObserver.waitForPendingWake()
         #expect(await client.triggers.isEmpty)
         #expect(await client.verifiedFetchCount == 0)
         wakeObserver.invalidate()
+        await store.stopAllConnectors()
+    }
+
+    @Test @MainActor
+    func overlappingScanOwnsGenerationBeforeDescriptorReadSuspends() async throws {
+        let client = EventRecordingClient(usage: Self.liveUsage)
+        let preparationEntered = M5AEventCounter()
+        let preparationReleased = M5AEventCounter()
+        let secondProgressed = M5AEventCounter()
+        var preparations = 0
+        let store = UsageStore(
+            autoRefresh: false,
+            language: .english,
+            registry: AgentUsageRuntime.makeCodexRegistry(
+                snapshotStore: nil,
+                client: client,
+                localActivityReader: UnavailableLocalReader()
+            ),
+            primaryConnectorID: CodexUsageConnector.connectorID,
+            preferences: .inMemory(),
+            prepareEligibilityScan: {
+                preparations += 1
+                if preparations == 1 {
+                    preparationEntered.signal()
+                    await preparationReleased.wait()
+                }
+            }
+        )
+        store.grantMonitorConsent()
+        await store.waitForInitialObservation()
+        let joined = store.coalescedScanRequests.sink { count in
+            if count == 1 { secondProgressed.signal() }
+        }
+        defer { joined.cancel() }
+        let first = Task { await store.refresh() }
+        await preparationEntered.wait()
+        let second = Task {
+            await store.refresh()
+            secondProgressed.signal()
+        }
+        // Before the repair, the second scan completes independently while
+        // the first awaits descriptor preparation. After repair it joins the
+        // first's owned generation. Either boundary releases this handshake.
+        await secondProgressed.wait()
+        preparationReleased.signal()
+        await first.value
+        await second.value
+        #expect(preparations == 1)
+        #expect(await client.verifiedFetchCount == 1)
+        #expect(!store.isRefreshing)
         await store.stopAllConnectors()
     }
 
@@ -578,6 +627,8 @@ private actor ProcessExitThenRecoveryClient: CodexUsageClient {
 }
 
 private actor EventRecordingClient: CodexUsageClient {
+    nonisolated let listenerStarted = M5AEventCounter()
+    nonisolated let eventRefreshStarted = M5AEventCounter()
     private let usage: CodexLiveUsage
     private var eventContinuation: AsyncStream<CodexAppServerEvent>.Continuation?
     private(set) var verifiedFetchCount = 0
@@ -605,6 +656,18 @@ private actor EventRecordingClient: CodexUsageClient {
 
     func fetchUsage(trigger: CodexRefreshTrigger) async throws -> CodexLiveUsage {
         triggers.append(trigger)
+        if trigger == .providerEvent {
+            eventRefreshStarted.signal()
+            return CodexLiveUsage(
+                rateLimits: usage.rateLimits,
+                availableResetCount: usage.availableResetCount,
+                lifetimeTokens: usage.lifetimeTokens,
+                dailyUsage: usage.dailyUsage,
+                recentActivityCount: usage.recentActivityCount,
+                apiCostEstimate: usage.apiCostEstimate,
+                providerCapturedAt: usage.providerCapturedAt.addingTimeInterval(1)
+            )
+        }
         return usage
     }
 
@@ -620,6 +683,7 @@ private actor EventRecordingClient: CodexUsageClient {
         AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             self.eventContinuation?.finish()
             self.eventContinuation = continuation
+            self.listenerStarted.signal()
         }
     }
 

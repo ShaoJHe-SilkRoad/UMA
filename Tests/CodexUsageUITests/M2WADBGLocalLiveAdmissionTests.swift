@@ -3,7 +3,7 @@ import Combine
 import Testing
 @testable import CodexUsageUI
 
-@Suite("M2WADBG-R3 local-live provider admission")
+@Suite("M2WADBG-R3 local-live provider admission", .timeLimit(.minutes(1)))
 struct M2WADBGLocalLiveAdmissionTests {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
@@ -104,7 +104,8 @@ struct M2WADBGLocalLiveAdmissionTests {
             snapshot: snapshot(id: "codex.coalesced"),
             blocksProbe: true
         )
-        let scanner = LocalProviderEligibilityScanner()
+        let joined = M5AEventCounter()
+        let scanner = LocalProviderEligibilityScanner(onRequestCoalesced: { joined.signal() })
         let candidates = [
             RegisteredProviderCandidate(
                 connector: connector,
@@ -115,13 +116,12 @@ struct M2WADBGLocalLiveAdmissionTests {
             candidates: candidates,
             trigger: .manualRefresh
         )
-        for _ in 0..<100 where !(await connector.didEnterProbe) {
-            await Task.yield()
-        }
+        await connector.probeStarted.wait()
         async let second = scanner.scan(
             candidates: candidates,
             trigger: .manualRefresh
         )
+        await joined.wait()
         await connector.releaseProbe()
         let (firstSet, secondSet) = await (first, second)
 
@@ -131,6 +131,62 @@ struct M2WADBGLocalLiveAdmissionTests {
         #expect(diagnostics.completedScanCount == 1)
         #expect(diagnostics.coalescedRequestCount == 1)
         #expect(diagnostics.countsByTrigger[.manualRefresh] == 1)
+    }
+
+    @Test(arguments: [false, true]) @MainActor
+    func stoppedOrPausedStoreRejectsLateNonCooperativeScan(pause: Bool) async throws {
+        let connector = try TestAdmissionConnector(
+            id: "codex.local",
+            probe: .init(state: .ready, safeFailure: nil),
+            snapshot: snapshot(id: "codex.local"),
+            blocksProbe: true
+        )
+        let registry = try AgentConnectorRegistry(connectors: [connector])
+        let preferences = ApplicationPreferences.inMemory()
+        preferences.set(false, for: UMAApplicationPreferenceKeys.keepMonitoringWhenWindowsClose)
+        let store = UsageStore(
+            autoRefresh: false,
+            language: .english,
+            registry: registry,
+            primaryConnectorID: connector.id,
+            preferences: preferences
+        )
+        store.grantMonitorConsent()
+        await store.waitForInitialObservation()
+        let scan = Task { await store.refresh() }
+        await connector.probeStarted.wait()
+
+        if pause {
+            await store.suspendMonitoringForWindowClosure()
+        } else {
+            await store.stopAllConnectors()
+        }
+        // Shutdown/pause returns even while this fixture's probe deliberately
+        // ignores cancellation. Its eventual completion must not restart it.
+        let stoppedRevision = await registry.latestPublication().revision
+        #expect(await connector.stopCount == 1)
+        await connector.releaseProbe()
+        await scan.value
+
+        #expect(await connector.startCount == 0)
+        #expect(await connector.refreshCount == 0)
+        #expect(!(await connector.hasListener))
+        #expect(await registry.orderedSnapshots().isEmpty)
+        #expect(await registry.latestPublication().revision == stoppedRevision)
+        #expect(store.providerSnapshots.isEmpty)
+        #expect(store.presentationCards.isEmpty)
+        #expect(!store.isRefreshing)
+        if pause {
+            await connector.allowFutureProbes()
+            await store.resumeMonitoringForWindowPresentation()
+            await store.refresh()
+            #expect(await connector.startCount == 1)
+            #expect(store.providerSnapshots.count == 1)
+            await store.stopAllConnectors()
+        } else {
+            await store.refresh()
+            #expect(await connector.probeCount == 1)
+        }
     }
 
     @Test @MainActor
@@ -160,7 +216,8 @@ struct M2WADBGLocalLiveAdmissionTests {
             backgroundRefreshInterval: .milliseconds(1)
         )
 
-        try? await Task.sleep(for: .milliseconds(30))
+        await store.waitForInitialObservation()
+        #expect(!store.backgroundRefreshScheduled)
         #expect((await scanner.diagnostics()).completedScanCount == 0)
         await store.searchForAgents()
         #expect((await scanner.diagnostics()).completedScanCount == 1)
@@ -168,7 +225,8 @@ struct M2WADBGLocalLiveAdmissionTests {
         store.setLanguage(.simplifiedChinese)
         store.setPanelVisible(false)
         await store.handleApplicationWake()
-        try? await Task.sleep(for: .milliseconds(30))
+        await store.waitForInitialObservation()
+        #expect(!store.backgroundRefreshScheduled)
         #expect((await scanner.diagnostics()).completedScanCount == 1)
 
         await store.refresh()
@@ -267,17 +325,9 @@ struct M2WADBGLocalLiveAdmissionTests {
         )
 
         let manual = Task { await store.refresh() }
-        try await waitUntil { await connector.probeCount == 1 }
-        let checkAgainStarted = AsyncStream<Void>.makeStream()
-        var checkAgainIterator = checkAgainStarted.stream.makeAsyncIterator()
-        let checkAgain = Task { @MainActor in
-            // Yield is synchronous. The task then enters checkLocalSessionAgain
-            // without another suspension and blocks on the already-active scan.
-            checkAgainStarted.continuation.yield(())
-            await store.checkLocalSessionAgain()
-        }
-        _ = await checkAgainIterator.next()
-        checkAgainStarted.continuation.finish()
+        await connector.probeStarted.wait()
+        let checkAgain = Task { @MainActor in await store.checkLocalSessionAgain() }
+        await m5aWaitForPublished(store.coalescedScanRequests, matching: { $0 == 1 })
         await connector.releaseProbe()
         await manual.value
         await checkAgain.value
@@ -332,9 +382,7 @@ struct M2WADBGLocalLiveAdmissionTests {
             consentDefaults: defaults
         )
 
-        try await waitUntil {
-            await registry.orderedSnapshots().count == 1
-        }
+        await store.waitForInitialObservation()
         let restoredRevision = await registry.latestPublication().revision
         for await inventory in store.$productInventory.values {
             if inventory.publicationRevision == restoredRevision { break }
@@ -516,6 +564,7 @@ struct M2WADBGLocalLiveAdmissionTests {
         #expect(await snapshotStore.load().count == 1)
         let completedScans = (await scanner.diagnostics()).completedScanCount
 
+        let withdrawal = await registry.subscribe()
         await connector.emit(
             snapshot(
                 id: "codex.local",
@@ -524,11 +573,11 @@ struct M2WADBGLocalLiveAdmissionTests {
                 failure: .authorizationRequired
             )
         )
-        try await waitUntil {
-            let liveSnapshots = await registry.orderedSnapshots()
-            let persistedSnapshots = await snapshotStore.load()
-            return liveSnapshots.isEmpty && persistedSnapshots.isEmpty
+        await m5aWaitForPublication(withdrawal.updates) { publication in
+            publication.snapshots.isEmpty
+                && publication.admissionSet?.records.first?.admission == .hiddenNotAuthenticated
         }
+        await registry.detach(withdrawal)
         #expect(await registry.orderedSnapshots().isEmpty)
         #expect(await snapshotStore.load().isEmpty)
         #expect((await scanner.diagnostics()).completedScanCount == completedScans)
@@ -554,7 +603,7 @@ struct M2WADBGLocalLiveAdmissionTests {
             trigger: .applicationLaunch
         )
         #expect(initial.admittedProviderIDs == [connector.id])
-        try await waitUntil { await connector.hasListener }
+        #expect(await connector.hasListener)
 
         await connector.configure(
             probe: .init(state: .failed, safeFailure: .timedOut),
@@ -796,24 +845,17 @@ struct M2WADBGLocalLiveAdmissionTests {
         )
     }
 
-    private func waitUntil(
-        condition: @escaping @Sendable () async -> Bool
-    ) async throws {
-        while !(await condition()) {
-            try Task.checkCancellation()
-            await Task.yield()
-        }
-    }
 }
 
 private actor TestAdmissionConnector: AgentUsageConnector {
+    nonisolated let probeStarted = M5AEventCounter()
     nonisolated let id: AgentConnectorID
     nonisolated let descriptor: AgentConnectorDescriptor
     private var probeValue: AgentConnectorProbe
     private var snapshotValue: AgentUsageSnapshot
     private var continuation: AsyncStream<AgentUsageSnapshot>.Continuation?
     private var probeContinuation: CheckedContinuation<Void, Never>?
-    private let blocksProbe: Bool
+    private var blocksProbe: Bool
     private(set) var didEnterProbe = false
     private(set) var probeCount = 0
     private(set) var startCount = 0
@@ -870,6 +912,7 @@ private actor TestAdmissionConnector: AgentUsageConnector {
     func probe() async -> AgentConnectorProbe {
         probeCount += 1
         didEnterProbe = true
+        probeStarted.signal()
         if blocksProbe {
             await withCheckedContinuation { continuation in
                 probeContinuation = continuation
@@ -877,6 +920,8 @@ private actor TestAdmissionConnector: AgentUsageConnector {
         }
         return probeValue
     }
+
+    func allowFutureProbes() { blocksProbe = false }
 
     func releaseProbe() {
         probeContinuation?.resume()

@@ -160,6 +160,12 @@ actor LocalProviderEligibilityScanner {
         let task: Task<ProviderSurfaceAdmissionSet, Never>
     }
 
+    private let onRequestCoalesced: @Sendable () -> Void
+
+    init(onRequestCoalesced: @escaping @Sendable () -> Void = {}) {
+        self.onRequestCoalesced = onRequestCoalesced
+    }
+
     private var active: ActiveScan?
     private var nextGeneration: UInt64 = 0
     private var completedScanCount = 0
@@ -171,8 +177,12 @@ actor LocalProviderEligibilityScanner {
         excludedProviderIDs: Set<AgentConnectorID> = [],
         trigger: ProviderEligibilityScanTrigger
     ) async -> ProviderSurfaceAdmissionSet {
+        guard !Task.isCancelled else {
+            return ProviderSurfaceAdmissionSet(trigger: trigger, scanGeneration: nextGeneration, records: [])
+        }
         if let active {
             coalescedRequestCount += 1
+            onRequestCoalesced()
             return await active.task.value
         }
 
@@ -194,6 +204,13 @@ actor LocalProviderEligibilityScanner {
             completedScanCount += 1
         }
         return result
+    }
+
+    /// Invalidate the owned evaluation without waiting for a noncooperative
+    /// provider. Its cancellation checks prevent later connector starts/reads.
+    func cancelOutstandingScan() {
+        active?.task.cancel()
+        active = nil
     }
 
     func diagnostics() -> LocalProviderEligibilityScannerDiagnostics {
@@ -218,6 +235,7 @@ actor LocalProviderEligibilityScanner {
             }
             return $0.descriptor.providerPriority < $1.descriptor.providerPriority
         }) {
+            guard !Task.isCancelled else { break }
             let admission: ProviderSurfaceAdmission
             if excludedProviderIDs.contains(candidate.descriptor.id) {
                 admission = .hiddenNotAuthenticated
@@ -249,6 +267,7 @@ actor LocalProviderEligibilityScanner {
         trigger: ProviderEligibilityScanTrigger
     ) async -> ProviderSurfaceAdmission {
         let descriptor = candidate.descriptor
+        guard !Task.isCancelled else { return .hiddenCurrentReadFailed }
         guard descriptor.hasSurfaceAdmissibleReadContract else {
             return descriptor.localSourceClass == .unsupported
                 ? .hiddenUnsupported
@@ -258,7 +277,9 @@ actor LocalProviderEligibilityScanner {
             return .hiddenNotAuthenticated
         }
 
+        guard !Task.isCancelled else { return .hiddenCurrentReadFailed }
         let probe = await candidate.connector.probe()
+        guard !Task.isCancelled else { return .hiddenCurrentReadFailed }
         switch probe.state {
         case .unsupported:
             return .hiddenUnsupported
@@ -271,6 +292,7 @@ actor LocalProviderEligibilityScanner {
         }
 
         await candidate.connector.start()
+        guard !Task.isCancelled else { return .hiddenCurrentReadFailed }
         if !descriptor.capabilities.contains(.passiveLocalAvailability) {
             if descriptor.localSourceClass == .browserCompanionUsage,
                (await candidate.connector.currentSnapshot()).freshness == .fresh {
@@ -278,6 +300,7 @@ actor LocalProviderEligibilityScanner {
                 // current read. Admission must not multiply that provider
                 // request merely to publish the same immutable snapshot.
             } else {
+                guard !Task.isCancelled else { return .hiddenCurrentReadFailed }
                 switch probe.state {
                 case .ready, .stale:
                     await candidate.connector.refresh(trigger: .manual)
@@ -289,7 +312,9 @@ actor LocalProviderEligibilityScanner {
             }
         }
 
+        guard !Task.isCancelled else { return .hiddenCurrentReadFailed }
         let snapshot = await candidate.connector.currentSnapshot()
+        guard !Task.isCancelled else { return .hiddenCurrentReadFailed }
         return admission(
             for: snapshot,
             descriptor: descriptor

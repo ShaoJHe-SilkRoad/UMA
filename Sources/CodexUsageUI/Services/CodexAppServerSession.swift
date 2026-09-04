@@ -33,9 +33,10 @@ private enum CodexAppServerTransportError: Error {
     case launchFailed
 }
 
-/// A schema-defined provider invalidation.  The session intentionally exposes
-/// no notification payload: callers need only know which account-scoped read
-/// should be coalesced by their refresh coordinator.
+/// Internal interruption caused only by replacement of the owned transport.
+struct CodexTransportReplacementInterrupted: Error, Sendable {}
+
+/// A schema-defined provider invalidation. The session exposes no payload.
 enum CodexAppServerEvent: Sendable, Equatable {
     case accountUpdated
     case rateLimitsUpdated
@@ -43,6 +44,8 @@ enum CodexAppServerEvent: Sendable, Equatable {
     /// initialization handshake. This carries no provider payload; the
     /// connector uses it only to schedule one normal account-first refresh.
     case transportRecovered
+    /// Safe lifecycle truth only; no provider read is implied by transport loss.
+    case transportUnavailable(CodexUsageClientFailure)
 }
 
 /// The retained local app-server receives only the stable GUI environment it
@@ -68,6 +71,7 @@ struct CodexAppServerProcessLaunchConfiguration: Sendable, Equatable {
 
 final class ProcessCodexAppServerTransport: CodexAppServerTransport, @unchecked Sendable {
     private let launchConfiguration: CodexAppServerProcessLaunchConfiguration
+    private let onProcessExit: @Sendable (Int32) -> Void
     private let lock = NSLock()
     private var process: Process?
     private var input: FileHandle?
@@ -77,8 +81,12 @@ final class ProcessCodexAppServerTransport: CodexAppServerTransport, @unchecked 
     private var restartedProcessNeedsInitialization = false
     private var lastLaunchAt = Date.distantPast
 
-    init(launchConfiguration: CodexAppServerProcessLaunchConfiguration = .production()) {
+    init(
+        launchConfiguration: CodexAppServerProcessLaunchConfiguration = .production(),
+        onProcessExit: @escaping @Sendable (Int32) -> Void = { _ in }
+    ) {
         self.launchConfiguration = launchConfiguration
+        self.onProcessExit = onProcessExit
     }
 
     func start(executableURL: URL) throws {
@@ -133,6 +141,7 @@ final class ProcessCodexAppServerTransport: CodexAppServerTransport, @unchecked 
         process.terminationHandler = { [weak self, weak process] _ in
             guard let process else { return }
             self?.restartAfterUnexpectedExit(of: process)
+            self?.onProcessExit(process.processIdentifier)
         }
         self.process = process
         input = inputPipe.fileHandleForWriting
@@ -257,7 +266,8 @@ actor CodexAppServerSession {
     private var isInitialized = false
     private var nextRequestID = 1
     private var usageRefreshRequested = false
-    private var requestInFlight = false
+    private var activeRequestSlot: UUID?
+    private let requestSlotQueued: @Sendable () -> Void
     private var requestWaiters: [RequestWaiter] = []
     /// At most one request can be outstanding, but keeping the continuation
     /// keyed by its normalized JSON-RPC ID makes the ownership rule explicit
@@ -268,22 +278,30 @@ actor CodexAppServerSession {
     /// observed without adding another child, poller, or listener.
     private var receiveTask: Task<Void, Never>?
     private var receiveGeneration: UInt64 = 0
+    private var terminalReceiveGeneration: UInt64 = 0
     private var receiverReachedEOF = false
     private var eventContinuation: AsyncStream<CodexAppServerEvent>.Continuation?
     private var eventContinuationID: UUID?
+    private var lastTransportFailure: CodexUsageClientFailure?
     private var executableURL: URL?
 
     init(
         transportFactory: @escaping TransportFactory = { ProcessCodexAppServerTransport() },
         requestTimeout: TimeInterval = 10,
-        initializationTimeout: TimeInterval = 10
+        initializationTimeout: TimeInterval = 10,
+        requestSlotQueued: @escaping @Sendable () -> Void = {}
     ) {
         self.transportFactory = transportFactory
         self.requestTimeout = requestTimeout
         self.initializationTimeout = initializationTimeout
+        self.requestSlotQueued = requestSlotQueued
     }
 
     func start(executableURL: URL) throws {
+        try start(executableURL: executableURL, replacingOwnedTransport: false)
+    }
+
+    private func start(executableURL: URL, replacingOwnedTransport: Bool) throws {
         if let transport {
             if transport.isRunning { return }
             shutdown()
@@ -295,9 +313,11 @@ actor CodexAppServerSession {
             throw CodexUsageClientError(.processLaunchFailed)
         }
         self.transport = transport
+        lastTransportFailure = nil
         self.executableURL = executableURL
         receiverReachedEOF = false
         receiveGeneration &+= 1
+        if !replacingOwnedTransport { terminalReceiveGeneration = receiveGeneration }
     }
 
     func initializeIfNeeded() async throws {
@@ -309,6 +329,7 @@ actor CodexAppServerSession {
             resetReceiveLoopForReplacement()
         }
         isInitialized = false
+        let generation = receiveGeneration
 
         struct InitializeParameters: Encodable {
             let clientInfo: ClientInfo
@@ -332,6 +353,7 @@ actor CodexAppServerSession {
                 timeout: initializationTimeout,
                 timeoutFailure: .initializationTimedOut
             )
+            guard generation == receiveGeneration else { throw invalidatedRequestError(since: generation) }
             guard response.isCompatible else {
                 throw CodexUsageClientError(.protocolIncompatible)
             }
@@ -339,7 +361,7 @@ actor CodexAppServerSession {
             isInitialized = true
             transport?.markInitialized()
         } catch let error as CodexUsageClientError {
-            shutdown()
+            if generation == receiveGeneration { shutdown() }
             if error.failure == .initializationTimedOut {
                 throw error
             }
@@ -351,6 +373,8 @@ actor CodexAppServerSession {
             }
             throw error
         } catch {
+            guard generation == receiveGeneration else { throw invalidatedRequestError(since: generation) }
+            if error is CancellationError { throw error }
             shutdown()
             throw CodexUsageClientError(.protocolIncompatible)
         }
@@ -411,8 +435,10 @@ actor CodexAppServerSession {
         timeoutFailure: CodexUsageClientFailure?,
         encode: (Int) throws -> Data
     ) async throws -> Result {
-        try await acquireRequestSlot()
-        defer { releaseRequestSlot() }
+        let generation = receiveGeneration
+        let slot = try await acquireRequestSlot(expectedGeneration: generation)
+        defer { releaseRequestSlot(slot) }
+        guard generation == receiveGeneration else { throw invalidatedRequestError(since: generation) }
         let id = nextRequestID
         nextRequestID += 1
         let expectedID = JSONRPCID.integer(id)
@@ -429,6 +455,7 @@ actor CodexAppServerSession {
                 timeout: timeout ?? requestTimeout,
                 timeoutFailure: timeoutFailure ?? .requestTimedOut(method: method)
             )
+            guard generation == receiveGeneration else { throw invalidatedRequestError(since: generation) }
             let envelope: JSONRPCResponse<Result>
             do {
                 envelope = try JSONDecoder().decode(JSONRPCResponse<Result>.self, from: responseData)
@@ -446,9 +473,12 @@ actor CodexAppServerSession {
             }
             return result
         } catch let error as CodexUsageClientError {
+            guard generation == receiveGeneration else { throw invalidatedRequestError(since: generation) }
             shutdown()
             throw error
         } catch {
+            guard generation == receiveGeneration else { throw invalidatedRequestError(since: generation) }
+            if error is CancellationError { throw error }
             shutdown()
             throw CodexUsageClientError(.unknownSafeError)
         }
@@ -476,6 +506,7 @@ actor CodexAppServerSession {
 
     func shutdown() {
         receiveGeneration &+= 1
+        terminalReceiveGeneration = receiveGeneration
         receiveTask?.cancel()
         receiveTask = nil
         transport?.stop()
@@ -485,13 +516,14 @@ actor CodexAppServerSession {
         nextRequestID = 1
         usageRefreshRequested = false
         receiverReachedEOF = false
+        lastTransportFailure = nil
         let pendingResponses = self.pendingResponses.values
         self.pendingResponses.removeAll()
         pendingResponses.forEach { pending in
             pending.timeoutTask?.cancel()
             pending.continuation.resume(throwing: CancellationError())
         }
-        requestInFlight = false
+        activeRequestSlot = nil
         let waiters = requestWaiters
         requestWaiters.removeAll()
         waiters.forEach { $0.continuation.resume(throwing: CancellationError()) }
@@ -505,23 +537,45 @@ actor CodexAppServerSession {
     func maintainTransportIfNeeded() async throws -> Bool {
         guard let transport else { return false }
         if transport.isRunning, transport.needsInitialization {
-            try await initializeIfNeeded()
+            do {
+                try await initializeIfNeeded()
+            } catch {
+                if !(error is CancellationError) { publishTransportFailure(error) }
+                throw error
+            }
             publishTransportRecovered()
             return true
         }
         guard !transport.isRunning, let executableURL else { return false }
         // A new child is a new JSON-RPC session. Reset request sequencing and
         // any pending session state before its initialization handshake.
-        shutdown()
+        resetReceiveLoopForReplacement()
+        transport.stop()
+        self.transport = nil
+        isInitialized = false
         do {
-            try start(executableURL: executableURL)
+            try start(executableURL: executableURL, replacingOwnedTransport: true)
             try await initializeIfNeeded()
             publishTransportRecovered()
             return true
         } catch {
+            if error is CancellationError { throw error }
             shutdown()
+            publishTransportFailure(error)
             throw error
         }
+    }
+
+    func currentTransportFailure() -> CodexUsageClientFailure? {
+        if let lastTransportFailure { return lastTransportFailure }
+        if let transport, !transport.isRunning || receiverReachedEOF { return .processExited }
+        return nil
+    }
+
+    private func publishTransportFailure(_ error: Error) {
+        let failure = (error as? CodexUsageClientError)?.failure ?? .processExited
+        lastTransportFailure = failure
+        eventContinuation?.yield(.transportUnavailable(failure))
     }
 
     func repairExitedTransportIfNeeded() async throws {
@@ -551,6 +605,7 @@ actor CodexAppServerSession {
         timeout: TimeInterval,
         timeoutFailure: CodexUsageClientFailure
     ) async throws -> Data {
+        let generation = receiveGeneration
         let nanoseconds = UInt64(max(0.001, timeout) * 1_000_000_000)
         return try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
@@ -566,7 +621,7 @@ actor CodexAppServerSession {
                     } catch {
                         return
                     }
-                    self.timeoutPendingResponse(for: key, failure: timeoutFailure)
+                    self.timeoutPendingResponse(for: key, failure: timeoutFailure, generation: generation)
                 }
                 pendingResponses[key]?.timeoutTask = timeoutTask
                 do {
@@ -579,7 +634,7 @@ actor CodexAppServerSession {
                 }
             }
         }, onCancel: {
-            Task { await self.cancelPendingResponse(for: expectedID.normalized) }
+            Task { await self.cancelPendingResponse(for: expectedID.normalized, generation: generation) }
         })
     }
 
@@ -652,15 +707,18 @@ actor CodexAppServerSession {
 
     private func timeoutPendingResponse(
         for key: JSONRPCID,
-        failure: CodexUsageClientFailure
+        failure: CodexUsageClientFailure,
+        generation: UInt64
     ) {
+        guard generation == receiveGeneration else { return }
         guard let pending = pendingResponses.removeValue(forKey: key) else { return }
         pending.timeoutTask?.cancel()
         transport?.stop()
         pending.continuation.resume(throwing: CodexUsageClientError(failure))
     }
 
-    private func cancelPendingResponse(for key: JSONRPCID) {
+    private func cancelPendingResponse(for key: JSONRPCID, generation: UInt64) {
+        guard generation == receiveGeneration else { return }
         guard let pending = pendingResponses.removeValue(forKey: key) else { return }
         pending.timeoutTask?.cancel()
         transport?.stop()
@@ -671,6 +729,7 @@ actor CodexAppServerSession {
         guard generation == receiveGeneration else { return }
         receiveTask = nil
         receiverReachedEOF = true
+        publishTransportFailure(CodexUsageClientError(.processExited))
         let pendingResponses = self.pendingResponses.values
         self.pendingResponses.removeAll()
         pendingResponses.forEach { pending in
@@ -679,11 +738,35 @@ actor CodexAppServerSession {
         }
     }
 
+    private func invalidatedRequestError(since generation: UInt64) -> Error {
+        if !Task.isCancelled, generation >= terminalReceiveGeneration, generation != receiveGeneration {
+            return CodexTransportReplacementInterrupted()
+        }
+        return CancellationError()
+    }
+
     private func resetReceiveLoopForReplacement() {
         receiveGeneration &+= 1
         receiveTask?.cancel()
         receiveTask = nil
         receiverReachedEOF = false
+        // The transport already owns its replacement child. Retire every
+        // request belonging to the old pipe without stopping the new child;
+        // old EOF/timeout/cancellation callbacks are now generation-invalid.
+        let pending = Array(pendingResponses.values)
+        pendingResponses.removeAll()
+        activeRequestSlot = nil
+        let waiters = requestWaiters
+        requestWaiters.removeAll()
+        nextRequestID = 1
+        usageRefreshRequested = false
+        for response in pending {
+            response.timeoutTask?.cancel()
+            response.continuation.resume(throwing: CodexTransportReplacementInterrupted())
+        }
+        for waiter in waiters {
+            waiter.continuation.resume(throwing: CodexTransportReplacementInterrupted())
+        }
     }
 
     private func clearEventContinuation(id: UUID) {
@@ -692,33 +775,54 @@ actor CodexAppServerSession {
         eventContinuationID = nil
     }
 
-    private func acquireRequestSlot() async throws {
-        guard requestInFlight else {
-            requestInFlight = true
-            return
-        }
-        let waiterID = UUID()
-        try await withTaskCancellationHandler(operation: {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                if Task.isCancelled {
-                    continuation.resume(throwing: CancellationError())
-                } else {
-                    requestWaiters.append(.init(id: waiterID, continuation: continuation))
-                }
-            }
-        }, onCancel: {
-            Task { await self.cancelRequestWaiter(id: waiterID) }
-        })
-        try Task.checkCancellation()
+    /// Internal lease diagnostics support deterministic shutdown qualification.
+    func requestLaneState() -> (generation: UInt64, owner: UUID?, waitingCount: Int) {
+        (receiveGeneration, activeRequestSlot, requestWaiters.count)
     }
 
-    private func releaseRequestSlot() {
+    func acquireRequestSlot(expectedGeneration: UInt64) async throws -> UUID {
+        try Task.checkCancellation()
+        guard expectedGeneration == receiveGeneration else { throw invalidatedRequestError(since: expectedGeneration) }
+        let waiterID = UUID()
+        guard activeRequestSlot != nil else {
+            activeRequestSlot = waiterID
+            return waiterID
+        }
+        do {
+            try await withTaskCancellationHandler(operation: {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    if Task.isCancelled {
+                        continuation.resume(throwing: CancellationError())
+                    } else {
+                        requestWaiters.append(.init(id: waiterID, continuation: continuation))
+                        requestSlotQueued()
+                    }
+                }
+            }, onCancel: {
+                Task { await self.cancelRequestWaiter(id: waiterID) }
+            })
+            try Task.checkCancellation()
+            guard expectedGeneration == receiveGeneration else { throw invalidatedRequestError(since: expectedGeneration) }
+            guard activeRequestSlot == waiterID else {
+                throw CancellationError()
+            }
+            return waiterID
+        } catch {
+            releaseRequestSlot(waiterID)
+            guard expectedGeneration == receiveGeneration else { throw invalidatedRequestError(since: expectedGeneration) }
+            throw error
+        }
+    }
+
+    func releaseRequestSlot(_ owner: UUID) {
+        guard activeRequestSlot == owner else { return }
         while !requestWaiters.isEmpty {
             let next = requestWaiters.removeFirst()
+            activeRequestSlot = next.id
             next.continuation.resume()
             return
         }
-        requestInFlight = false
+        activeRequestSlot = nil
     }
 
     private func cancelRequestWaiter(id: UUID) {
@@ -742,6 +846,7 @@ actor CodexAppServerSession {
     }
 
     private func publishTransportRecovered() {
+        lastTransportFailure = nil
         eventContinuation?.yield(.transportRecovered)
     }
 

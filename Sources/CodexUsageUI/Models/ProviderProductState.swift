@@ -640,7 +640,10 @@ enum ProviderProductStatePolicy {
                 agentWorkspace: agentWorkspace
             ),
             isActive: isActive,
-            capturedAt: snapshot?.capturedAt
+            // A publication can contain retained account data or a local-only
+            // update. The product labels this date Last successful update.
+            capturedAt: snapshot?.channels.first(where: { $0.id == .account })?.capturedAt
+                ?? snapshot?.lastSuccessfulAt
         )
     }
 

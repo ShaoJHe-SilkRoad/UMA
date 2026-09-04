@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import CodexUsageUI
 
+@Suite(.timeLimit(.minutes(1)))
 struct LocalActivityObserverTests {
     @Test
     func debouncesBurstsAndRefreshesOnlyTheNamedTail() async throws {
@@ -77,15 +78,15 @@ struct LocalActivityObserverTests {
 
 private actor ChangeDeliveries {
     private(set) var count = 0
+    private let deliveries = M5AEventCounter()
 
-    func record() { count += 1 }
+    func record() {
+        count += 1
+        deliveries.signal()
+    }
 
     func waitForCount(_ expected: Int) async throws {
-        for _ in 0..<100 {
-            if count >= expected { return }
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        Issue.record("Timed out waiting for a debounced local activity event.")
+        await deliveries.wait(for: expected)
     }
 }
 

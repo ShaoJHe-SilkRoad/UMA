@@ -78,7 +78,13 @@ actor CodexAppServerClient: CodexUsageClient {
         self.ownedProcessMonitorInterval = ownedProcessMonitorInterval
     }
 
-    func connectionState() -> CodexConnectionState {
+    func connectionState() async -> CodexConnectionState {
+        let generation = lifecycleGeneration
+        if state == .ready, let failure = await session.currentTransportFailure() {
+            if generation == lifecycleGeneration {
+                _ = record(CodexUsageClientError(failure))
+            }
+        }
         return state
     }
 
@@ -104,12 +110,19 @@ actor CodexAppServerClient: CodexUsageClient {
     }
 
     func checkLocalAccountAvailability() async throws -> Bool {
+        let generation = lifecycleGeneration
         do {
-            try await prepareSession()
-            let available = try await readAccountAvailability()
+            try await prepareSession(lifecycleGeneration: generation)
+            let available = try await readAccountAvailability(lifecycleGeneration: generation)
+            try ensureCurrentLifecycle(generation)
             hasVerifiedAccountInCurrentSession = available
             return available
         } catch {
+            guard generation == lifecycleGeneration else { throw CancellationError() }
+            if error is CodexTransportReplacementInterrupted {
+                _ = record(CodexUsageClientError(.processExited))
+                throw error
+            }
             throw record(error)
         }
     }
@@ -152,10 +165,10 @@ actor CodexAppServerClient: CodexUsageClient {
         lifecycleGeneration: UInt64
     ) async throws -> CodexLiveUsage {
         do {
-            try await prepareSession()
+            try await prepareSession(lifecycleGeneration: lifecycleGeneration)
             try ensureCurrentLifecycle(lifecycleGeneration)
             if requiresFreshAccountRead {
-                guard try await readAccountAvailability() else {
+                guard try await readAccountAvailability(lifecycleGeneration: lifecycleGeneration) else {
                     try ensureCurrentLifecycle(lifecycleGeneration)
                     hasVerifiedAccountInCurrentSession = false
                     throw CodexUsageClientError(.accountAuthorizationRequired)
@@ -194,6 +207,10 @@ actor CodexAppServerClient: CodexUsageClient {
                 throw CancellationError()
             }
             hasVerifiedAccountInCurrentSession = false
+            if error is CodexTransportReplacementInterrupted {
+                _ = record(CodexUsageClientError(.processExited))
+                throw error
+            }
             throw record(error)
         }
     }
@@ -202,7 +219,8 @@ actor CodexAppServerClient: CodexUsageClient {
         guard generation == lifecycleGeneration else { throw CancellationError() }
     }
 
-    private func prepareSession() async throws {
+    private func prepareSession(lifecycleGeneration generation: UInt64) async throws {
+        try ensureCurrentLifecycle(generation)
         if executableURL == nil {
             state = .resolvingExecutable
             executableURL = try resolver.resolve()
@@ -212,8 +230,10 @@ actor CodexAppServerClient: CodexUsageClient {
         }
         state = .startingServer
         try await session.start(executableURL: executableURL)
+        try ensureCurrentLifecycle(generation)
         state = .initializing
         try await session.initializeIfNeeded()
+        try ensureCurrentLifecycle(generation)
         beginOwnedProcessMonitoring()
     }
 
@@ -249,7 +269,7 @@ actor CodexAppServerClient: CodexUsageClient {
     /// Retains only an authorization decision.  `AccountReadResult` decodes an
     /// otherwise empty presence marker, so account names, emails, and IDs are
     /// never retained by this client.
-    private func readAccountAvailability() async throws -> Bool {
+    private func readAccountAvailability(lifecycleGeneration generation: UInt64) async throws -> Bool {
         state = .checkingAccount
         let result: AccountReadResult
         do {
@@ -263,6 +283,7 @@ actor CodexAppServerClient: CodexUsageClient {
             throw CodexUsageClientError(.accountCheckTimedOut)
         }
 
+        try ensureCurrentLifecycle(generation)
         guard result.isAccountAvailable else {
             state = .authorizationRequired
             return false

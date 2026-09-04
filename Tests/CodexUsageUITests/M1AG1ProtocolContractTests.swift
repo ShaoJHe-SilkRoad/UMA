@@ -3,6 +3,7 @@ import Testing
 @testable import CodexUsageUI
 import SwiftUI
 
+@Suite(.timeLimit(.minutes(1)))
 struct M1AG1ProtocolContractTests {
     @Test
     func accountWireContractUsesSchemaRequiredShapes() async throws {
@@ -135,7 +136,7 @@ struct M1AG1ProtocolContractTests {
         await session.shutdown()
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func ownedChildReplacementPublishesOneSanitizedRecoveryInvalidation() async throws {
         let first = ProtocolTransport(messages: providerReadSequence())
         let second = ProtocolTransport(messages: providerReadSequence())
@@ -152,11 +153,18 @@ struct M1AG1ProtocolContractTests {
         _ = try await client.fetchUsage()
         first.markExited()
 
-        for _ in 0..<200 where factory.startCount < 2 {
-            try await Task.sleep(for: .milliseconds(5))
+        // This is the production-owned monitor's cadence, not a readiness
+        // delay. Await the actual replacement event; loss may precede it or
+        // coalesce with it in the latest-event buffer.
+        var observedRecovery = false
+        while let event = await iterator.next() {
+            if event == .transportRecovered {
+                observedRecovery = true
+                break
+            }
         }
+        #expect(observedRecovery)
         #expect(factory.startCount == 2)
-        #expect(await iterator.next() == .transportRecovered)
         #expect(try second.sentObjects().map { $0["method"] as? String } == [
             "initialize",
             "initialized"

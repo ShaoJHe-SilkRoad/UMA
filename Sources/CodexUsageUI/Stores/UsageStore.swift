@@ -32,6 +32,22 @@ public final class UsageStore: ObservableObject {
     private let consentDefaults: UserDefaults?
     private let preferences: ApplicationPreferences?
     private var registrySubscription: Task<Void, Never>?
+    private var localAccessDecisionTask: Task<Void, Never>?
+    private let initialObservationCompletion = CurrentValueSubject<Bool, Never>(false)
+    let coalescedScanRequests = CurrentValueSubject<Int, Never>(0)
+
+    var backgroundRefreshScheduled: Bool { backgroundRefreshTask != nil }
+
+    func waitForInitialObservation() async {
+        guard registry != nil else { return }
+        for await completed in initialObservationCompletion.values {
+            if completed { return }
+        }
+    }
+
+    func waitForLocalAccessDecision() async {
+        await localAccessDecisionTask?.value
+    }
     private var registryStreamSubscription: AgentConnectorRegistrySubscription?
     private var agentSettingsSubscription: AnyCancellable?
     private var activeScanTask: Task<UsageEligibilityScanOutcome?, Never>?
@@ -43,7 +59,10 @@ public final class UsageStore: ObservableObject {
     private var backgroundRefreshTask: Task<Void, Never>?
     private var backgroundRefreshInFlight = false
     private var monitoringSuspendedForWindowClosure = false
+    private var monitoringStopped = false
+    private var monitoringGeneration: UInt64 = 0
     private let backgroundRefreshSleeper: @Sendable (Duration) async throws -> Void
+    private let prepareEligibilityScan: @MainActor @Sendable () async -> Void
 
     public convenience init(autoRefresh: Bool = true, language: AppLanguage? = nil) {
         self.init(
@@ -133,11 +152,13 @@ public final class UsageStore: ObservableObject {
         backgroundRefreshInterval: Duration = .seconds(900),
         backgroundRefreshSleeper: @escaping @Sendable (Duration) async throws -> Void = {
             try await Task.sleep(for: $0)
-        }
+        },
+        prepareEligibilityScan: @escaping @MainActor @Sendable () async -> Void = {}
     ) {
         _ = visibleRefreshInterval
         _ = backgroundRefreshInterval
         self.backgroundRefreshSleeper = backgroundRefreshSleeper
+        self.prepareEligibilityScan = prepareEligibilityScan
         // Internal/test construction with nil persistence remains ephemeral;
         // it must never silently escape into the production standard domain.
         let effectivePreferences = preferences
@@ -282,7 +303,7 @@ public final class UsageStore: ObservableObject {
             monitorConsentDecision = .declined
             monitorConsentDecision.persist(to: consentDefaults)
             receive([], loginOptions: [])
-            Task { @MainActor [weak self] in
+            localAccessDecisionTask = Task { @MainActor [weak self] in
                 await self?.disconnectPrimary(clearConsent: false)
             }
             return
@@ -290,7 +311,7 @@ public final class UsageStore: ObservableObject {
         let wasGranted = monitorConsentDecision == .granted
         grantMonitorConsent()
         guard !wasGranted else { return }
-        Task { @MainActor [weak self] in
+        localAccessDecisionTask = Task { @MainActor [weak self] in
             _ = await self?.performEligibilityScan(trigger: .manualRefresh)
         }
     }
@@ -379,23 +400,26 @@ public final class UsageStore: ObservableObject {
               !monitoringSuspendedForWindowClosure,
               let registry else { return }
         monitoringSuspendedForWindowClosure = true
+        invalidatePendingMonitoring()
         backgroundRefreshTask?.cancel()
         backgroundRefreshTask = nil
         await registry.suspendAllPreservingState()
     }
 
     public func resumeMonitoringForWindowPresentation() async {
-        guard !previewOnly, monitoringSuspendedForWindowClosure, let registry else { return }
+        guard !previewOnly, !monitoringStopped, monitoringSuspendedForWindowClosure, let registry else { return }
         monitoringSuspendedForWindowClosure = false
+        monitoringGeneration &+= 1
         await registry.resumeCurrentAdmissions()
         reconcileBackgroundRefreshPolicy()
     }
 
     public func stopAllConnectors() async {
         guard !previewOnly, let registry else { return }
-        activeScanGeneration &+= 1
-        activeScanTask?.cancel()
-        activeScanTask = nil
+        monitoringStopped = true
+        invalidatePendingMonitoring()
+        localAccessDecisionTask?.cancel()
+        initialObservationCompletion.send(completion: .finished)
         backgroundRefreshTask?.cancel()
         backgroundRefreshTask = nil
         registrySubscription?.cancel()
@@ -405,6 +429,15 @@ public final class UsageStore: ObservableObject {
         }
         await registry.stopAll()
         receive([], loginOptions: [])
+    }
+
+    private func invalidatePendingMonitoring() {
+        monitoringGeneration &+= 1
+        activeScanGeneration &+= 1
+        activeScanTask?.cancel()
+        activeScanTask = nil
+        isRefreshing = false
+        backgroundRefreshInFlight = false
     }
 
     public func setPanelVisible(_ isVisible: Bool) {
@@ -425,12 +458,15 @@ public final class UsageStore: ObservableObject {
     private func beginRegistryObservation() {
         guard let registry else { return }
         registrySubscription = Task { [weak self] in
+            guard !Task.isCancelled, self?.monitoringStopped == false else { return }
             let subscription = await registry.subscribe()
             defer {
                 Task { await registry.detach(subscription) }
             }
+            guard !Task.isCancelled, self?.monitoringStopped == false else { return }
             self?.registryStreamSubscription = subscription
             await registry.restorePersistedSnapshots()
+            guard !Task.isCancelled, self?.monitoringStopped == false else { return }
             if self?.allowsLaunchScan == true,
                self?.agentSettings?.shouldAutoSearchAtLaunch == true {
                 _ = await self?.performEligibilityScan(
@@ -440,6 +476,9 @@ public final class UsageStore: ObservableObject {
             for await publication in subscription.updates {
                 guard !Task.isCancelled else { return }
                 self?.receive(publication)
+                if self?.initialObservationCompletion.value == false {
+                    self?.initialObservationCompletion.send(true)
+                }
             }
             self?.registryStreamSubscription = nil
         }
@@ -467,6 +506,7 @@ public final class UsageStore: ObservableObject {
         backgroundRefreshTask?.cancel()
         backgroundRefreshTask = nil
         guard !previewOnly,
+              !monitoringStopped,
               !monitoringSuspendedForWindowClosure,
               preferences?.value(
                 for: UMAApplicationPreferenceKeys.automaticBackgroundRefresh
@@ -491,13 +531,17 @@ public final class UsageStore: ObservableObject {
     }
 
     private func refreshAdmittedProviders(trigger: CodexRefreshTrigger) async {
-        guard !previewOnly, !backgroundRefreshInFlight, let registry else { return }
+        guard !previewOnly, !monitoringStopped, !monitoringSuspendedForWindowClosure,
+              !backgroundRefreshInFlight, let registry else { return }
+        let generation = monitoringGeneration
         let ids = providerSnapshots.map(\.id).filter {
             agentSettings?.isMonitoringEnabled(for: $0) ?? true
         }
         guard !ids.isEmpty else { return }
         backgroundRefreshInFlight = true
-        defer { backgroundRefreshInFlight = false }
+        defer {
+            if generation == monitoringGeneration { backgroundRefreshInFlight = false }
+        }
         await withTaskGroup(of: Void.self) { group in
             for id in ids {
                 group.addTask {
@@ -505,7 +549,9 @@ public final class UsageStore: ObservableObject {
                 }
             }
         }
-        receive(await registry.latestPublication())
+        let publication = await registry.latestPublication()
+        guard generation == monitoringGeneration, !Task.isCancelled else { return }
+        receive(publication)
     }
 
     private func applyMonitoringPreferences() {
@@ -516,36 +562,44 @@ public final class UsageStore: ObservableObject {
     private func performEligibilityScan(
         trigger: ProviderEligibilityScanTrigger
     ) async -> UsageEligibilityScanOutcome? {
-        guard !previewOnly, let registry else { return nil }
+        guard !previewOnly, !monitoringStopped, !monitoringSuspendedForWindowClosure,
+              !Task.isCancelled, let registry else { return nil }
         if let activeScanTask {
+            coalescedScanRequests.send(coalescedScanRequests.value + 1)
             return await activeScanTask.value
         }
 
-        var excluded: Set<AgentConnectorID>
-        if !monitorConsentGranted, let primaryConnectorID {
-            excluded = [primaryConnectorID]
-        } else {
-            excluded = []
-        }
-        var monitoringDisabledIDs: Set<AgentConnectorID> = []
-        if let agentSettings {
-            let descriptors = await registry.orderedDescriptors()
-            monitoringDisabledIDs = agentSettings.disabledConnectorIDs(
-                from: descriptors.map(\.id)
-            )
-            excluded.formUnion(monitoringDisabledIDs)
-        }
+        // Install ownership before the first actor suspension. Concurrent
+        // actions must join this generation even while descriptors are loading.
         isRefreshing = true
         activeScanGeneration &+= 1
         let generation = activeScanGeneration
         let task = Task<UsageEligibilityScanOutcome?, Never> {
             @MainActor [weak self] in
             guard let self else { return nil }
+            await self.prepareEligibilityScan()
+            guard self.acceptsScanCompletion(generation) else { return nil }
+            var excluded: Set<AgentConnectorID> = []
+            if !self.monitorConsentGranted, let primaryConnectorID = self.primaryConnectorID {
+                excluded.insert(primaryConnectorID)
+            }
+            var monitoringDisabledIDs: Set<AgentConnectorID> = []
+            if let agentSettings = self.agentSettings {
+                let descriptors = await registry.orderedDescriptors()
+                guard self.acceptsScanCompletion(generation) else { return nil }
+                monitoringDisabledIDs = agentSettings.disabledConnectorIDs(
+                    from: descriptors.map(\.id)
+                )
+                excluded.formUnion(monitoringDisabledIDs)
+            }
             let result = await registry.scanSurfaceAdmissions(
                 trigger: trigger,
                 excludedProviderIDs: excluded
             )
-            self.receive(await registry.latestPublication())
+            guard self.acceptsScanCompletion(generation) else { return nil }
+            let publication = await registry.latestPublication()
+            guard self.acceptsScanCompletion(generation) else { return nil }
+            self.receive(publication)
             let outcome = UsageEligibilityScanOutcome(
                 safelyDetectedProviderIDs:
                     result.safelyDetectedProviderIDs.filter {
@@ -570,6 +624,11 @@ public final class UsageStore: ObservableObject {
         return result
     }
 
+    private func acceptsScanCompletion(_ generation: UInt64) -> Bool {
+        !Task.isCancelled && !monitoringStopped && !monitoringSuspendedForWindowClosure
+            && activeScanGeneration == generation
+    }
+
     private func receive(
         _ snapshots: [AgentUsageSnapshot],
         loginOptions: [ProviderLoginOption],
@@ -587,7 +646,7 @@ public final class UsageStore: ObservableObject {
     }
 
     private func receive(_ publication: AgentConnectorRegistryPublication) {
-        guard !previewOnly else { return }
+        guard !previewOnly, !monitoringStopped, !monitoringSuspendedForWindowClosure else { return }
         guard publication.revision >= currentRegistryRevision else { return }
         if publication.revision == currentRegistryRevision,
            publication.snapshots == providerSnapshots,
@@ -682,9 +741,7 @@ public final class UsageStore: ObservableObject {
         decision: CodexMonitorConsentDecision = .unknown
     ) async {
         guard !previewOnly else { return }
-        activeScanGeneration &+= 1
-        activeScanTask?.cancel()
-        activeScanTask = nil
+        invalidatePendingMonitoring()
         if let registry, let id = primaryConnectorID {
             try? await registry.perform(.disconnect, for: id)
         }
@@ -775,6 +832,7 @@ public final class UsageStore: ObservableObject {
 
     deinit {
         registrySubscription?.cancel()
+        localAccessDecisionTask?.cancel()
         activeScanTask?.cancel()
     }
 }

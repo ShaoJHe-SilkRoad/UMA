@@ -29,6 +29,7 @@ actor CodexUsageConnector: AgentUsageConnector {
 
     private let client: any CodexUsageClient
     private let localActivityReader: any CodexLocalActivityReading
+    private let beforeProviderRefresh: @Sendable () async -> Void
     private var continuation: AsyncStream<AgentUsageSnapshot>.Continuation?
     private var latestProvider: CodexLiveUsage?
     private var latestLocal: CodexLocalActivitySnapshot?
@@ -36,6 +37,9 @@ actor CodexUsageConnector: AgentUsageConnector {
     private var lastSuccessfulAt: Date?
     private var state: AgentConnectorState = .inactive
     private var activeCommand = false
+    private var pendingTransportRecovery = false
+    private var lifecycleGeneration: UInt64 = 0
+    private var localActivityPublicationTask: Task<Void, Never>?
     private var localReadGeneration = 0
     /// Exactly one observer is retained for the built-in local metadata
     /// reader. It emits only debounced invalidations; it cannot initiate an
@@ -46,6 +50,9 @@ actor CodexUsageConnector: AgentUsageConnector {
     /// notification stream. A provider event is an invalidation only; it
     /// routes through the same serialized refresh path as every other cause.
     private var providerEventTask: Task<Void, Never>?
+    private var providerRefreshTask: Task<Void, Never>?
+    private var providerRefreshToken: UUID?
+    private var stoppedProviderEventTask: Task<Void, Never>?
     /// Identifies the retained provider-event consumer. An older cancelled
     /// consumer can finish after reconnect has installed its replacement, so
     /// its cleanup must not clear the replacement task.
@@ -53,10 +60,12 @@ actor CodexUsageConnector: AgentUsageConnector {
 
     init(
         client: any CodexUsageClient = CodexAppServerClient(),
-        localActivityReader: any CodexLocalActivityReading = CodexLocalActivityReader()
+        localActivityReader: any CodexLocalActivityReading = CodexLocalActivityReader(),
+        beforeProviderRefresh: @escaping @Sendable () async -> Void = {}
     ) {
         self.client = client
         self.localActivityReader = localActivityReader
+        self.beforeProviderRefresh = beforeProviderRefresh
     }
 
     func probe() async -> AgentConnectorProbe {
@@ -81,8 +90,14 @@ actor CodexUsageConnector: AgentUsageConnector {
         switch command {
         case .connect: await run(kind: .connect(trigger: .reconnect))
         case .reconnect:
+            lifecycleGeneration &+= 1
+            let generation = lifecycleGeneration
+            activeCommand = false
+            pendingTransportRecovery = false
+            stopLocalActivityObservation()
             stopProviderEventObservation()
             await client.disconnect()
+            guard generation == lifecycleGeneration else { return }
             await run(kind: .connect(trigger: .reconnect))
         case .refresh: await run(kind: .refresh(trigger: .manual))
         case .disconnect: await stop()
@@ -90,9 +105,17 @@ actor CodexUsageConnector: AgentUsageConnector {
     }
 
     func stop() async {
+        lifecycleGeneration &+= 1
+        let generation = lifecycleGeneration
+        activeCommand = false
+        pendingTransportRecovery = false
         stopLocalActivityObservation()
         stopProviderEventObservation()
+        state = .inactive
+        latestFailure = nil
+        publish()
         await client.disconnect()
+        guard generation == lifecycleGeneration else { return }
         state = .inactive
         latestFailure = nil
         publish()
@@ -118,9 +141,31 @@ actor CodexUsageConnector: AgentUsageConnector {
     private func run(kind: RunKind) async {
         guard !activeCommand else { return }
         activeCommand = true
-        defer { activeCommand = false }
+        let lifecycle = lifecycleGeneration
+        defer {
+            if lifecycle == lifecycleGeneration {
+                activeCommand = false
+                pendingTransportRecovery = false
+            }
+        }
         startLocalActivityObservationIfNeeded()
         startProviderEventObservationIfNeeded()
+        var nextKind = kind
+        repeat {
+            pendingTransportRecovery = false
+            await performRead(kind: nextKind, lifecycle: lifecycle)
+            guard lifecycle == lifecycleGeneration,
+                  pendingTransportRecovery,
+                  latestFailure == nil || latestFailure == .processExited || latestFailure == .timedOut
+            else { return }
+            // A recovered child invalidates the interrupted read. Coalesce
+            // its notifications into one serial follow-up owned by this run;
+            // another attempt requires another external recovery event.
+            nextKind = .refresh(trigger: .providerEvent)
+        } while true
+    }
+
+    private func performRead(kind: RunKind, lifecycle: UInt64) async {
         state = .waitingForFirstResponse
         publish()
 
@@ -137,10 +182,12 @@ actor CodexUsageConnector: AgentUsageConnector {
             switch kind {
             case .connect:
                 let available = try await client.checkLocalAccountAvailability()
+                guard lifecycle == lifecycleGeneration else { return }
                 guard available else {
                     latestFailure = .authorizationRequired
                     state = .authenticationRequired
                     latestLocal = await local.value
+                    guard lifecycle == lifecycleGeneration else { return }
                     publish()
                     return
                 }
@@ -149,30 +196,42 @@ actor CodexUsageConnector: AgentUsageConnector {
                 do {
                     provider = try await client.fetchUsage(trigger: trigger)
                 } catch let error as CodexUsageClientError {
+                    guard lifecycle == lifecycleGeneration else { return }
                     guard error.failure == .processExited,
+                          !pendingTransportRecovery,
                           await client.supportsOwnedProcessRecovery()
                     else { throw error }
+                    guard lifecycle == lifecycleGeneration else { return }
+                    guard !pendingTransportRecovery else { throw error }
                     // A retained stdio child can disappear between otherwise
                     // valid refreshes.  Its session has already been closed
                     // by the client, so one fresh account-first read can
                     // safely recreate only that owned local child.
                     await client.disconnect()
+                    guard lifecycle == lifecycleGeneration else { return }
                     provider = try await client.fetchUsage(trigger: .reconnect)
                 }
             }
+            guard lifecycle == lifecycleGeneration else { return }
             latestProvider = provider
             latestFailure = nil
             lastSuccessfulAt = provider.providerCapturedAt
             state = .ready
             publish()
-            Task { [weak self] in
+            let previousPublication = localActivityPublicationTask
+            localActivityPublicationTask = Task { [weak self] in
                 let activity = await local.value
                 await self?.acceptLocalActivity(activity, generation: generation)
+                await previousPublication?.value
             }
         } catch {
+            guard lifecycle == lifecycleGeneration else { return }
             latestLocal = await local.value
+            guard lifecycle == lifecycleGeneration else { return }
+            let currentState = await client.connectionState()
+            guard lifecycle == lifecycleGeneration else { return }
             latestFailure = Self.safeFailure(from: error)
-            state = latestProvider == nil ? Self.normalizedState(await client.connectionState()) : .stale
+            state = latestProvider == nil ? Self.normalizedState(currentState) : .stale
             if state == .ready { state = .stale }
             publish()
         }
@@ -182,6 +241,11 @@ actor CodexUsageConnector: AgentUsageConnector {
         guard generation == localReadGeneration else { return }
         latestLocal = activity
         publish()
+    }
+
+    /// Joins only the owned local-result publication, never a provider read.
+    func awaitPendingLocalActivityPublication() async {
+        await localActivityPublicationTask?.value
     }
 
     private func startLocalActivityObservationIfNeeded() {
@@ -210,9 +274,9 @@ actor CodexUsageConnector: AgentUsageConnector {
         let generation = providerEventObservationGeneration
         providerEventTask = Task { [weak self] in
             let stream = await client.eventStream()
-            for await _ in stream {
+            for await event in stream {
                 guard !Task.isCancelled else { return }
-                await self?.receiveProviderInvalidation()
+                await self?.receiveProviderEvent(event, observationGeneration: generation)
             }
             await self?.clearProviderEventObservation(generation: generation)
         }
@@ -220,8 +284,31 @@ actor CodexUsageConnector: AgentUsageConnector {
 
     private func stopProviderEventObservation() {
         providerEventObservationGeneration &+= 1
-        providerEventTask?.cancel()
+        let refresh = providerRefreshTask
+        refresh?.cancel()
+        providerRefreshTask = nil
+        providerRefreshToken = nil
+        let task = providerEventTask
+        task?.cancel()
+        if task != nil || refresh != nil {
+            let previous = stoppedProviderEventTask
+            stoppedProviderEventTask = Task {
+                await previous?.value
+                await task?.value
+                await refresh?.value
+            }
+        }
         providerEventTask = nil
+    }
+
+    /// Teardown join after disconnect: both the consumer and its owned read.
+    func awaitPendingProviderEventObservationTermination() async {
+        await stoppedProviderEventTask?.value
+    }
+
+    /// Joins the currently reserved event read, without initiating work.
+    func awaitPendingProviderEventRefresh() async {
+        await providerRefreshTask?.value
     }
 
     private func clearProviderEventObservation(generation: UInt64) {
@@ -229,12 +316,62 @@ actor CodexUsageConnector: AgentUsageConnector {
         providerEventTask = nil
     }
 
-    private func receiveProviderInvalidation() async {
-        // `run` intentionally collapses an event arriving during a current
-        // provider read. The current read remains the one owned request, so
-        // notification bursts cannot create duplicate children or a retry
-        // loop. The client coordinator applies the same rule to direct calls.
+    private func receiveProviderEvent(_ event: CodexAppServerEvent, observationGeneration: UInt64) async {
+        guard observationGeneration == providerEventObservationGeneration else { return }
+        if case .transportUnavailable(let failure) = event {
+            latestFailure = Self.safeFailure(from: CodexUsageClientError(failure))
+            state = latestProvider == nil ? .failed : .stale
+            publish()
+            return
+        }
+        if case .transportRecovered = event, activeCommand {
+            pendingTransportRecovery = true
+            return
+        }
+        // Ordinary notification bursts still collapse into the current read.
+        // Recovery alone must survive an interrupted in-flight request.
+        guard !activeCommand else { return }
+        if providerRefreshTask != nil {
+            if case .transportRecovered = event { pendingTransportRecovery = true }
+            return
+        }
+        scheduleProviderRefresh(observationGeneration: observationGeneration)
+    }
+
+    private func scheduleProviderRefresh(observationGeneration: UInt64) {
+        guard providerRefreshTask == nil else { return }
+        let token = UUID()
+        let lifecycle = lifecycleGeneration
+        let beforeProviderRefresh = beforeProviderRefresh
+        providerRefreshToken = token
+        providerRefreshTask = Task { [weak self] in
+            await beforeProviderRefresh()
+            await self?.runProviderRefresh(token: token, lifecycle: lifecycle, observationGeneration: observationGeneration)
+        }
+    }
+
+    private func runProviderRefresh(token: UUID, lifecycle: UInt64, observationGeneration: UInt64) async {
+        guard !Task.isCancelled, lifecycle == lifecycleGeneration,
+              observationGeneration == providerEventObservationGeneration,
+              providerRefreshToken == token else { return }
+        guard !activeCommand else {
+            // A manual command can acquire the lane while this task is queued.
+            // Its pending recovery belongs to that command and must survive.
+            providerRefreshTask = nil
+            providerRefreshToken = nil
+            return
+        }
         await run(kind: .refresh(trigger: .providerEvent))
+        guard lifecycle == lifecycleGeneration, providerRefreshToken == token else { return }
+        providerRefreshTask = nil
+        providerRefreshToken = nil
+        // A recovery arriving after run completes but before this task clears
+        // its ownership still gets one serial read, never an error-only retry.
+        if pendingTransportRecovery,
+           latestFailure == nil || latestFailure == .processExited || latestFailure == .timedOut {
+            pendingTransportRecovery = false
+            scheduleProviderRefresh(observationGeneration: observationGeneration)
+        }
     }
 
     /// A filesystem event refreshes the local aggregate only. The one task is
@@ -428,11 +565,12 @@ actor CodexUsageConnector: AgentUsageConnector {
     }
 
     private static func safeFailure(from error: Error) -> AgentSafeFailure {
+        if error is CodexTransportReplacementInterrupted { return .processExited }
         guard let failure = (error as? CodexUsageClientError)?.failure else { return .unknown }
         switch failure {
         case .accountAuthorizationRequired, .accountAuthorizationCanceled, .accountAuthorizationFailed:
             return .authorizationRequired
-        case .processExited: return .processExited
+        case .processExited, .processLaunchFailed: return .processExited
         case .initializationTimedOut, .accountCheckTimedOut, .requestTimedOut: return .timedOut
         case .protocolIncompatible: return .unsupported
         case .malformedResponse: return .malformedResponse
