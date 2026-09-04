@@ -34,6 +34,19 @@ struct PreviewRendererTool {
         let isDark = arguments.contains("--dark")
         let reduceTransparency = arguments.contains("--reduce-transparency")
         let increaseContrast = arguments.contains("--increase-contrast")
+        let reduceMotion = arguments.contains("--reduce-motion")
+        let renderScale: CGFloat
+        if let scaleArgument = arguments.first(where: { $0.hasPrefix("--scale=") }) {
+            guard let parsed = Double(scaleArgument.dropFirst("--scale=".count)),
+                  parsed == 1 || parsed == 2
+            else {
+                throw PreviewError.invalidScenario
+            }
+            renderScale = CGFloat(parsed)
+        } else {
+            renderScale = 2
+        }
+        let rendersAlphaMask = arguments.contains("--alpha-mask")
         let wallpaperStyle = arguments
             .first(where: { $0.hasPrefix("--wallpaper=") })
             .flatMap {
@@ -53,6 +66,25 @@ struct PreviewRendererTool {
             .first(where: { $0.hasPrefix("--percent=") })
             .flatMap { Double($0.dropFirst("--percent=".count)) }
             ?? 44
+
+        if let reviewScenario = try M3RReviewScenario.parse(arguments) {
+            let review = makeM3RReview(
+                scenario: reviewScenario,
+                language: language,
+                isDark: isDark,
+                reduceTransparency: reduceTransparency,
+                increaseContrast: increaseContrast,
+                reduceMotion: reduceMotion,
+                wallpaperStyle: wallpaperStyle
+            )
+            try renderM3RReview(
+                review,
+                to: outputPath,
+                scale: renderScale,
+                alphaMask: rendersAlphaMask
+            )
+            return
+        }
 
         let content: AnyView
         let renderSize: CGSize
@@ -391,6 +423,398 @@ struct PreviewRendererTool {
         return "startup-error domain=\(cocoaError.domain) code=\(cocoaError.code)"
     }
 
+    private static func makeM3RReview(
+        scenario: M3RReviewScenario,
+        language: AppLanguage,
+        isDark: Bool,
+        reduceTransparency: Bool,
+        increaseContrast: Bool,
+        reduceMotion: Bool,
+        wallpaperStyle: PreviewWallpaperStyle
+    ) -> M3RReviewRender {
+        let fixtureKind: M3RFixtureKind = switch scenario {
+        case .quickOne:
+            .one
+        case .quickZero:
+            .zero
+        case .quickDegraded:
+            .degraded
+        default:
+            .healthy
+        }
+        let fixture = makeM3RFixture(kind: fixtureKind, language: language)
+        let appearance = isDark ? ColorScheme.dark : ColorScheme.light
+        let reviewContent: AnyView
+        let size: CGSize
+
+        switch scenario {
+        case .quick, .quickOne, .quickZero, .quickDegraded:
+            let quickHeight: CGFloat = switch fixtureKind {
+            case .zero:
+                154
+            case .one:
+                130
+            case .healthy, .degraded:
+                196
+            }
+            size = CGSize(width: 320, height: quickHeight)
+            reviewContent = AnyView(
+                M3RQuickPanelReviewHost(
+                    store: fixture.store,
+                    reduceTransparency: reduceTransparency,
+                    increaseContrast: increaseContrast,
+                    reduceMotion: reduceMotion
+                )
+                    .frame(width: size.width, height: size.height, alignment: .top)
+            )
+        case .quickEdge:
+            size = CGSize(width: 520, height: 340)
+            reviewContent = AnyView(
+                ZStack {
+                    PreviewWallpaper(style: wallpaperStyle)
+                    M3RQuickPanelReviewHost(
+                        store: fixture.store,
+                        reduceTransparency: reduceTransparency,
+                        increaseContrast: increaseContrast,
+                        reduceMotion: reduceMotion
+                    )
+                        .frame(width: 320, height: 196, alignment: .top)
+                }
+            )
+        case .main:
+            size = CGSize(width: 860, height: 590)
+            reviewContent = AnyView(
+                M3RMainReviewSurface(
+                    store: fixture.store,
+                    selectedProviderID: .codex
+                )
+            )
+        case .mainNarrow:
+            size = CGSize(width: 760, height: 520)
+            reviewContent = AnyView(
+                M3RMainReviewSurface(
+                    store: fixture.store,
+                    selectedProviderID: .claude,
+                    narrow: true
+                )
+            )
+        case .workspaceCodex:
+            size = CGSize(width: 640, height: 620)
+            reviewContent = AnyView(
+                M3RAgentWorkspaceReview(
+                    store: fixture.store,
+                    providerID: .codex
+                )
+            )
+        case .workspaceClaude:
+            size = CGSize(width: 640, height: 620)
+            reviewContent = AnyView(
+                M3RAgentWorkspaceReview(
+                    store: fixture.store,
+                    providerID: .claude
+                )
+            )
+        case .settings:
+            size = CGSize(width: 680, height: 500)
+            let preferences = ApplicationPreferences.inMemory()
+            preferences.set(
+                language.rawValue,
+                for: UMAApplicationPreferenceKeys.language
+            )
+            preferences.set(true, for: UMAApplicationPreferenceKeys.assistantEnabled)
+            preferences.set(
+                true,
+                for: UMAApplicationPreferenceKeys.assistantAlwaysOnTop
+            )
+            preferences.set(
+                DesktopAssistantDensity.regular.rawValue,
+                for: UMAApplicationPreferenceKeys.assistantDensity
+            )
+            reviewContent = AnyView(
+                GlobalSettingsSurface(
+                    preferences: preferences,
+                    navigation: GlobalSettingsNavigationState(pane: .general)
+                )
+                .background(Color(nsColor: .windowBackgroundColor))
+            )
+        case .wizardRegular, .wizardMinimalist, .wizardContextMenu:
+            let density: DesktopAssistantResolvedDensity = scenario == .wizardMinimalist
+                ? .minimalist
+                : .regular
+            let cards = SharedUsagePresentationPolicy.assistantCards(
+                from: fixture.cards
+            ).map {
+                DesktopAssistantCard(
+                    shared: $0,
+                    language: language,
+                    now: M3RFixture.fixedNow
+                )
+            }
+            let wizardSize = DesktopAssistantMetrics.stackSize(
+                for: density,
+                rowCount: cards.count
+            )
+            if scenario == .wizardContextMenu {
+                size = CGSize(width: 430, height: max(188, wizardSize.height + 48))
+                reviewContent = AnyView(
+                    ZStack {
+                        PreviewWallpaper(style: wallpaperStyle)
+                        HStack(alignment: .top, spacing: 14) {
+                            DesktopAssistantView(
+                                cards: cards,
+                                density: density,
+                                appearanceOverride: DesktopAssistantAppearanceOverride(
+                                    reduceTransparency: reduceTransparency,
+                                    increaseContrast: increaseContrast
+                                )
+                            )
+                            M3RWizardContextMenuReview(language: language)
+                        }
+                    }
+                )
+            } else {
+                size = wizardSize
+                reviewContent = AnyView(
+                    ZStack {
+                        PreviewWallpaper(style: wallpaperStyle)
+                        DesktopAssistantView(
+                            cards: cards,
+                            density: density,
+                            appearanceOverride: DesktopAssistantAppearanceOverride(
+                                reduceTransparency: reduceTransparency,
+                                increaseContrast: increaseContrast
+                            )
+                        )
+                    }
+                )
+            }
+        case .threadOS:
+            size = CGSize(width: 860, height: 590)
+            reviewContent = AnyView(M3RThreadOSReviewSurface(language: language))
+        }
+
+        return M3RReviewRender(
+            content: AnyView(
+                reviewContent
+                    .frame(width: size.width, height: size.height)
+                    .environment(\.colorScheme, appearance)
+                    .environment(\.locale, language.locale)
+            ),
+            size: size
+        )
+    }
+
+    private static func makeM3RFixture(
+        kind: M3RFixtureKind,
+        language: AppLanguage
+    ) -> M3RFixture {
+        let cards: [SharedUsageCardPresentation]
+        switch kind {
+        case .healthy:
+            cards = [
+                makeCodexCard(
+                    arguments: [],
+                    language: language,
+                    percent: 64,
+                    scenario: .ready
+                ),
+                makeM3RClaudeCard(
+                    language: language,
+                    fiveHourPercent: 24,
+                    sevenDayPercent: 71,
+                    estimated: true,
+                    freshness: .fresh,
+                    connection: .connected
+                ),
+            ]
+        case .one:
+            cards = [
+                makeCodexCard(
+                    arguments: [],
+                    language: language,
+                    percent: 64,
+                    scenario: .ready
+                ),
+            ]
+        case .zero:
+            cards = []
+        case .degraded:
+            cards = [
+                makeCodexCard(
+                    arguments: ["--stale"],
+                    language: language,
+                    percent: 27,
+                    scenario: .stale
+                ),
+                makeM3RClaudeCard(
+                    language: language,
+                    fiveHourPercent: 8,
+                    sevenDayPercent: 43,
+                    estimated: true,
+                    freshness: .cached,
+                    connection: .connected
+                ),
+            ]
+        }
+        return M3RFixture(
+            store: UsageStore.preview(
+                scenario: .ready,
+                language: language,
+                presentationCards: cards
+            ),
+            cards: cards
+        )
+    }
+
+    private static func makeM3RClaudeCard(
+        language: AppLanguage,
+        fiveHourPercent: Double,
+        sevenDayPercent: Double,
+        estimated: Bool,
+        freshness: SharedUsageFreshness,
+        connection: SharedConnectionStatus
+    ) -> SharedUsageCardPresentation {
+        let fiveHour = SharedUsageWindowPresentation(
+            id: "claude-five-hour",
+            kind: .fiveHour,
+            compactLabel: "5H",
+            accessibilityLabel: language == .english
+                ? "five-hour window"
+                : "五小时额度窗口",
+            remaining: .finite(fiveHourPercent),
+            isEstimated: estimated,
+            resetsAt: M3RFixture.fixedNow.addingTimeInterval(7_200),
+            resetText: language == .english ? "Resets in 2 hr" : "2 小时后重置"
+        )
+        let sevenDay = SharedUsageWindowPresentation(
+            id: "claude-seven-day",
+            kind: .sevenDay,
+            compactLabel: "7D",
+            accessibilityLabel: language == .english
+                ? "seven-day window"
+                : "七天额度窗口",
+            remaining: .finite(sevenDayPercent),
+            isEstimated: estimated,
+            resetsAt: M3RFixture.fixedNow.addingTimeInterval(172_800),
+            resetText: language == .english ? "Resets in 2 days" : "2 天后重置"
+        )
+        let selected = fiveHourPercent <= sevenDayPercent ? fiveHour : sevenDay
+        return SharedUsageCardPresentation(
+            id: "claude.browserSync",
+            providerName: "Claude",
+            planLabel: "LOCAL SMART",
+            connectionStatus: connection,
+            freshness: freshness,
+            windows: [fiveHour, sevenDay],
+            selectedWindowID: selected.id,
+            remaining: selected.remaining,
+            isEstimated: estimated,
+            sourceDescription: language == .english
+                ? "Local Smart estimate · sanitized usage metadata"
+                : "本地智能估算 · 脱敏用量元数据",
+            isVisibleInDesktopAssistant: true,
+            severity: freshness == .fresh
+                ? SharedUsagePresentationPolicy.severity(for: selected.remaining)
+                : .neutral,
+            isRetainingLastValidValue: freshness != .fresh,
+            capturedAt: M3RFixture.fixedNow
+        )
+    }
+
+    private static func renderM3RReview(
+        _ review: M3RReviewRender,
+        to outputPath: String,
+        scale: CGFloat,
+        alphaMask: Bool
+    ) throws {
+        let host = NSHostingView(rootView: review.content)
+        host.frame = CGRect(origin: .zero, size: review.size)
+        let window = NSWindow(
+            contentRect: host.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.contentView = host
+        window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+        window.orderBack(nil)
+        host.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(review.size.width * scale),
+            pixelsHigh: Int(review.size.height * scale),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            throw PreviewError.renderFailed
+        }
+        bitmap.size = review.size
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        window.orderOut(nil)
+        let outputBitmap = alphaMask ? try makeAlphaMask(from: bitmap) : bitmap
+        guard let png = outputBitmap.representation(using: .png, properties: [:]) else {
+            throw PreviewError.renderFailed
+        }
+        let outputURL = URL(fileURLWithPath: outputPath).standardizedFileURL
+        try FileManager.default.createDirectory(
+            at: outputURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try png.write(to: outputURL, options: .atomic)
+    }
+
+    private static func makeAlphaMask(from source: NSBitmapImageRep) throws -> NSBitmapImageRep {
+        guard let sourceData = source.bitmapData,
+              let mask = NSBitmapImageRep(
+                bitmapDataPlanes: nil,
+                pixelsWide: source.pixelsWide,
+                pixelsHigh: source.pixelsHigh,
+                bitsPerSample: 8,
+                samplesPerPixel: 4,
+                hasAlpha: true,
+                isPlanar: false,
+                colorSpaceName: .deviceRGB,
+                bytesPerRow: 0,
+                bitsPerPixel: 0
+              ),
+              let maskData = mask.bitmapData
+        else {
+            throw PreviewError.renderFailed
+        }
+
+        var minimumAlpha = UInt8.max
+        var maximumAlpha = UInt8.min
+        for y in 0..<source.pixelsHigh {
+            for x in 0..<source.pixelsWide {
+                let sourceOffset = y * source.bytesPerRow + x * 4
+                let maskOffset = y * mask.bytesPerRow + x * 4
+                let alpha = sourceData[sourceOffset + 3]
+                minimumAlpha = min(minimumAlpha, alpha)
+                maximumAlpha = max(maximumAlpha, alpha)
+                maskData[maskOffset] = alpha
+                maskData[maskOffset + 1] = alpha
+                maskData[maskOffset + 2] = alpha
+                maskData[maskOffset + 3] = 255
+            }
+        }
+        // A single approved soft system-style shadow may contribute a very low
+        // corner alpha. Reject opaque rectangular backing while preserving it.
+        guard minimumAlpha <= 16, maximumAlpha == 255 else {
+            throw PreviewError.renderFailed
+        }
+        mask.size = source.size
+        return mask
+    }
+
     private static func codexPreviewScenario(
         _ arguments: [String]
     ) throws -> CodexPreviewScenario {
@@ -441,7 +865,7 @@ struct PreviewRendererTool {
                 ? "seven-day window"
                 : "七天额度窗口",
             remaining: remaining,
-            resetsAt: Date(timeIntervalSince1970: 1_800_007_200),
+            resetsAt: M3RFixture.fixedNow.addingTimeInterval(7_200),
             resetText: language == .english
                 ? "Resets in 2 hr"
                 : "2 小时后重置"
@@ -905,6 +1329,287 @@ struct PreviewRendererTool {
                 capturedAt: Date(timeIntervalSince1970: 1_800_000_000)
             )
         }
+    }
+}
+
+private struct M3RReviewRender {
+    let content: AnyView
+    let size: CGSize
+}
+
+private enum M3RReviewScenario: String {
+    case quick
+    case quickOne = "quick-one"
+    case quickZero = "quick-zero"
+    case quickDegraded = "quick-degraded"
+    case quickEdge = "quick-edge"
+    case main
+    case mainNarrow = "main-narrow"
+    case workspaceCodex = "workspace-codex"
+    case workspaceClaude = "workspace-claude"
+    case settings
+    case wizardRegular = "wizard-regular"
+    case wizardMinimalist = "wizard-minimalist"
+    case wizardContextMenu = "wizard-context-menu"
+    case threadOS = "threados"
+
+    static func parse(_ arguments: [String]) throws -> Self? {
+        guard let argument = arguments.first(where: {
+            $0.hasPrefix("--m3r-review=")
+        }) else {
+            return nil
+        }
+        let rawValue = String(argument.dropFirst("--m3r-review=".count))
+        guard let scenario = Self(rawValue: rawValue) else {
+            throw PreviewError.invalidScenario
+        }
+        return scenario
+    }
+}
+
+private enum M3RFixtureKind: Equatable {
+    case healthy
+    case one
+    case zero
+    case degraded
+}
+
+@MainActor
+private struct M3RFixture {
+    static let fixedNow = Date(timeIntervalSince1970: 1_788_393_600)
+    let store: UsageStore
+    let cards: [SharedUsageCardPresentation]
+}
+
+private struct M3RWizardContextMenuReview: View {
+    let language: AppLanguage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            menuItem(localized("Hide Desktop Wizard", "隐藏桌面向导"))
+            menuItem(localized("Enabled", "已启用"), checked: true)
+            menuItem(localized("Always on Top", "始终置顶"), checked: true)
+            Divider().padding(.vertical, 4)
+            menuItem(localized("Density", "密度"), trailing: "›")
+            Divider().padding(.vertical, 4)
+            menuItem(localized("Automatic", "自动"), checked: true)
+            menuItem(localized("Regular", "常规"))
+            menuItem(localized("Minimalist", "极简"))
+        }
+        .padding(6)
+        .frame(width: 186)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.primary.opacity(0.10), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.24), radius: 12, y: 5)
+        .accessibilityIdentifier("uma.review.desktop-wizard-context-menu")
+    }
+
+    private func menuItem(
+        _ title: String,
+        checked: Bool = false,
+        trailing: String? = nil
+    ) -> some View {
+        HStack(spacing: 8) {
+            Text(checked ? "✓" : "")
+                .frame(width: 12, alignment: .center)
+            Text(title)
+            Spacer(minLength: 8)
+            if let trailing {
+                Text(trailing)
+            }
+        }
+        .font(.system(size: 13))
+        .frame(height: 22)
+        .padding(.horizontal, 5)
+        .accessibilityLabel(title)
+        .accessibilityValue(checked ? localized("On", "开启") : "")
+    }
+
+    private func localized(_ english: String, _ chinese: String) -> String {
+        language == .simplifiedChinese ? chinese : english
+    }
+}
+
+private struct M3RQuickPanelReviewHost: View {
+    @ObservedObject var store: UsageStore
+    let reduceTransparency: Bool
+    let increaseContrast: Bool
+    let reduceMotion: Bool
+
+    var body: some View {
+        QuickPanelSurface(
+            store: store,
+            openMain: {},
+            scanAll: {},
+            refreshAll: {},
+            toggleWizard: {},
+            openSettings: {},
+            selectAgent: { _ in }
+        )
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background {
+            if reduceTransparency {
+                Color(nsColor: .windowBackgroundColor)
+            } else {
+                Rectangle().fill(.regularMaterial)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            if increaseContrast {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.primary.opacity(0.32), lineWidth: 1)
+            }
+        }
+        .shadow(color: .black.opacity(0.20), radius: 16, y: 7)
+        .transaction { transaction in
+            if reduceMotion {
+                transaction.animation = nil
+            }
+        }
+        .accessibilityIdentifier("uma.review.quick-panel-host")
+    }
+}
+
+private struct M3RAgentWorkspaceReview: View {
+    @ObservedObject var store: UsageStore
+    let providerID: ProviderProductID
+
+    var body: some View {
+        AgentWorkspaceSurface(
+            store: store,
+            providerID: providerID,
+            refresh: {},
+            connectCodex: {},
+            disconnectCodex: {},
+            claudeControlState: { .onlineVerificationUnavailable },
+            connectClaude: {},
+            claudeAccuracySync: {}
+        )
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+}
+
+private struct M3RMainReviewSurface: View {
+    @ObservedObject var store: UsageStore
+    let selectedProviderID: ProviderProductID
+    var narrow = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            toolbar
+            Divider()
+            HSplitView {
+                agentList
+                    .frame(
+                        minWidth: narrow ? 205 : 220,
+                        idealWidth: narrow ? 215 : 235,
+                        maxWidth: narrow ? 220 : 260
+                    )
+                M3RAgentWorkspaceReview(
+                    store: store,
+                    providerID: selectedProviderID
+                )
+                .frame(minWidth: 500)
+            }
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+        .accessibilityIdentifier("uma.review.main-two-column")
+    }
+
+    private var toolbar: some View {
+        HStack(spacing: 12) {
+            Picker(
+                localized("Destination", "导航"),
+                selection: .constant(0)
+            ) {
+                Text(localized("Agents & Settings", "智能体与设置")).tag(0)
+                Text("ThreadOS").tag(1)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 250)
+            Spacer()
+            toolbarButton(localized("Scan All", "全部扫描"), "sparkle.magnifyingglass")
+            toolbarButton(localized("Refresh All", "全部刷新"), "arrow.clockwise")
+            toolbarButton(localized("Global Settings", "全局设置"), "gearshape")
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 48)
+    }
+
+    private var agentList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(localized("Agents", "智能体"))
+                .font(.headline)
+                .padding(.horizontal, 10)
+                .padding(.top, 12)
+            ScrollView {
+                LazyVStack(spacing: 3) {
+                    ForEach(store.productInventory.agentWorkspaceProviders) { provider in
+                        AgentGlanceRow(
+                            provider: provider,
+                            style: .mainList,
+                            selected: provider.id == selectedProviderID,
+                            language: store.language
+                        )
+                    }
+                }
+                .padding(.horizontal, 6)
+            }
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func toolbarButton(_ label: String, _ symbol: String) -> some View {
+        Button(action: {}) { Image(systemName: symbol) }
+            .help(label)
+            .accessibilityLabel(label)
+    }
+
+    private func localized(_ english: String, _ chinese: String) -> String {
+        store.language == .simplifiedChinese ? chinese : english
+    }
+}
+
+private struct M3RThreadOSReviewSurface: View {
+    let language: AppLanguage
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Picker("Destination", selection: .constant(1)) {
+                    Text(localized("Agents & Settings", "智能体与设置")).tag(0)
+                    Text("ThreadOS").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 250)
+                Spacer()
+                Button(action: {}) { Image(systemName: "gearshape") }
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 48)
+            Divider()
+            ContentUnavailableView(
+                "ThreadOS",
+                systemImage: "point.3.connected.trianglepath.dotted",
+                description: Text(localized(
+                    "Reserved for a future release.",
+                    "为未来版本预留。"
+                ))
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityIdentifier("uma.threados.inert")
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func localized(_ english: String, _ chinese: String) -> String {
+        language == .simplifiedChinese ? chinese : english
     }
 }
 

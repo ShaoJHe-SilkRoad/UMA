@@ -22,7 +22,8 @@ struct UMA014M2ProviderProductStateTests {
             .codex, .claude, .workBuddy, .antigravity,
         ]
         #expect(reduction.inventory.providers.map { $0.id } == productIDs)
-        #expect(reduction.inventory.providers.allSatisfy { $0.inventory.providers })
+        #expect(reduction.inventory.agentWorkspaceProviders.isEmpty)
+        #expect(reduction.inventory.quickPanelProviders.isEmpty)
         #expect(reduction.inventory.overviewProviders.isEmpty)
         #expect(reduction.inventory.publicationRevision == 42)
         #expect(ProviderProductStatePolicy.productID(
@@ -31,6 +32,110 @@ struct UMA014M2ProviderProductStateTests {
         #expect(ProviderProductStatePolicy.productID(
             for: AgentConnectorID(rawValue: "kimi.browser")!
         ) == nil)
+    }
+
+    @Test
+    func consentGrantedInitialCodexAdmissionIsTransitionalWithoutFakeUsage() {
+        let reduction = ProviderProductStatePolicy.reduce(
+            snapshots: [],
+            admissions: [],
+            monitoringEnabledIDs: [CodexUsageConnector.connectorID],
+            configuredOrDetectedIDs: [CodexUsageConnector.connectorID],
+            pendingInitialAdmissionIDs: [CodexUsageConnector.connectorID],
+            previousCards: [],
+            language: .english,
+            now: epoch
+        )
+        let codex = reduction.inventory.provider(.codex)
+
+        #expect(codex?.connection == .transitional)
+        #expect(codex?.availability == .unavailable)
+        #expect(codex?.primaryDisplayText == "—")
+        #expect(codex?.primaryDisplayText != "0%")
+        #expect(codex?.isActive == true)
+        #expect(codex?.inventory.agentWorkspace == true)
+        #expect(codex?.inventory.quickPanel == false)
+    }
+
+    @Test
+    func enabledSupportedClaudeRemainsReachableForConsentWithoutQuickPanelLeak() {
+        let reduction = ProviderProductStatePolicy.reduce(
+            snapshots: [],
+            admissions: [],
+            monitoringEnabledIDs: [ClaudeCodeUsageConnector.connectorID],
+            configuredOrDetectedIDs: [],
+            previousCards: [],
+            language: .english,
+            now: epoch
+        )
+
+        let claude = reduction.inventory.provider(.claude)
+        #expect(claude?.availability == .unavailable)
+        #expect(claude?.inventory.agentWorkspace == true)
+        #expect(claude?.inventory.quickPanel == false)
+        #expect(reduction.inventory.agentWorkspaceProviders.map(\.id) == [.claude])
+        #expect(reduction.inventory.quickPanelProviders.isEmpty)
+    }
+
+    @Test
+    func completedTerminalAdmissionOverridesInitialTransition() {
+        let admission = ProviderSurfaceAdmissionRecord(
+            id: CodexUsageConnector.connectorID,
+            providerName: "Codex",
+            priority: 0,
+            admission: .hiddenCurrentReadFailed,
+            loginOption: nil
+        )
+        let reduction = ProviderProductStatePolicy.reduce(
+            snapshots: [],
+            admissions: [admission],
+            monitoringEnabledIDs: [CodexUsageConnector.connectorID],
+            configuredOrDetectedIDs: [CodexUsageConnector.connectorID],
+            pendingInitialAdmissionIDs: [CodexUsageConnector.connectorID],
+            previousCards: [],
+            language: .english,
+            now: epoch
+        )
+        let codex = reduction.inventory.provider(.codex)
+
+        #expect(codex?.connection == .unavailable)
+        #expect(codex?.availability == .unavailable)
+        #expect(codex?.isActive == false)
+        #expect(codex?.primaryDisplayText == "—")
+    }
+
+    @Test
+    @MainActor
+    func consentGrantedUsageStorePublishesInitialCodexTransitionSynchronously()
+        async throws
+    {
+        let suiteName = "uma-014-codex-startup-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        CodexMonitorConsentDecision.granted.persist(to: defaults)
+        let settings = AgentSettingsCoordinator(
+            store: AgentPreferenceStore(defaults: defaults)
+        )
+        let registry = try AgentConnectorRegistry()
+        let store = UsageStore(
+            autoRefresh: true,
+            previewOnly: false,
+            language: .english,
+            registry: registry,
+            primaryConnectorID: CodexUsageConnector.connectorID,
+            consentDefaults: defaults,
+            agentSettings: settings
+        )
+
+        let initial = store.productInventory.provider(.codex)
+        #expect(initial?.connection == .transitional)
+        #expect(initial?.availability == .unavailable)
+        #expect(initial?.primaryDisplayText == "—")
+
+        await store.stopAllConnectors()
+        let stopped = store.productInventory.provider(.codex)
+        #expect(stopped?.connection == .unavailable)
+        #expect(stopped?.isActive == false)
     }
 
     @Test
@@ -82,7 +187,7 @@ struct UMA014M2ProviderProductStateTests {
     }
 
     @Test
-    func creditsStayNativeAndOnlyValidatedDenominatorEnablesComparison() throws {
+    func creditsStayNativeAndNeverEnterPercentageComparison() throws {
         let rawCredits = try creditSnapshot(remaining: 30, used: nil, total: nil)
         let normalizedCredits = try creditSnapshot(remaining: 30, used: 70, total: 100)
 
@@ -95,10 +200,59 @@ struct UMA014M2ProviderProductStateTests {
         }
         #expect(raw?.comparison == .ineligible(.nativeUnit))
         guard case .remainingCredits(30, .credits) = normalized?.value else {
-            Issue.record("Expected normalized comparison to preserve native Credit display")
+            Issue.record("Expected denominator-backed comparison to preserve native Credit display")
             return
         }
-        #expect(normalized?.comparison == .eligibleRemainingPercent(30))
+        #expect(normalized?.comparison == .ineligible(.nativeUnit))
+    }
+
+    @Test
+    func dormantHistoricalProvidersCannotLeakIntoActiveSurfaces() throws {
+        let codex = usageSnapshot(
+            id: CodexUsageConnector.connectorID,
+            providerName: "Codex",
+            remaining: 64,
+            estimated: false
+        )
+        let workBuddy = try creditSnapshot(remaining: 30, used: 70, total: 100)
+        let reduction = ProviderProductStatePolicy.reduce(
+            snapshots: [codex, workBuddy],
+            admissions: [],
+            monitoringEnabledIDs: Set([
+                CodexUsageConnector.connectorID,
+                WorkBuddyAccountWebCreditsConnector.connectorID,
+                GoogleAntigravityUsageConnector.connectorID,
+            ]),
+            configuredOrDetectedIDs: Set([
+                WorkBuddyAccountWebCreditsConnector.connectorID,
+                GoogleAntigravityUsageConnector.connectorID,
+            ]),
+            previousCards: [],
+            language: .english,
+            now: epoch
+        )
+
+        #expect(reduction.inventory.quickPanelProviders.map(\.id) == [.codex])
+        #expect(reduction.inventory.agentWorkspaceProviders.map(\.id) == [.codex])
+        #expect(reduction.inventory.provider(.workBuddy)?.inventory.quickPanel == false)
+        #expect(reduction.inventory.provider(.workBuddy)?.inventory.agentWorkspace == false)
+        #expect(reduction.inventory.provider(.antigravity)?.inventory.quickPanel == false)
+        #expect(reduction.inventory.provider(.antigravity)?.inventory.agentWorkspace == false)
+    }
+
+    @Test
+    @MainActor
+    func productionRuntimeConstructsOnlyCurrentlySupportedAgents() {
+        #expect(UsageMonitorRuntime.productionConnectorIDs == Set([
+            CodexUsageConnector.connectorID,
+            ClaudeCodeUsageConnector.connectorID,
+        ]))
+        #expect(!UsageMonitorRuntime.productionConnectorIDs.contains(
+            WorkBuddyAccountWebCreditsConnector.connectorID
+        ))
+        #expect(!UsageMonitorRuntime.productionConnectorIDs.contains(
+            GoogleAntigravityUsageConnector.connectorID
+        ))
     }
 
     @Test
@@ -163,7 +317,8 @@ struct UMA014M2ProviderProductStateTests {
         #expect(reduction.presentationCards.isEmpty)
         #expect(reduction.inventory.provider(.codex)?.availability == .disabled)
         #expect(reduction.inventory.provider(.codex)?.isActive == false)
-        #expect(reduction.inventory.provider(.codex)?.inventory.providers == true)
+        #expect(reduction.inventory.provider(.codex)?.inventory.providers == false)
+        #expect(reduction.inventory.provider(.codex)?.inventory.quickPanel == false)
     }
 
     @Test
@@ -186,8 +341,49 @@ struct UMA014M2ProviderProductStateTests {
         #expect(product?.isActive == false)
     }
 
+    @Test("Qualified Claude Local Smart usage survives unavailable online verification")
+    func claudeLocalSmartUsageDoesNotCollapseIntoBrowserSetupState() {
+        let snapshot = usageSnapshot(
+            id: ClaudeCodeUsageConnector.connectorID,
+            providerName: "Claude",
+            remaining: 68,
+            secondRemaining: 41,
+            estimated: true
+        )
+        let onlineUnavailable = ProviderSurfaceAdmissionRecord(
+            id: ClaudeCodeUsageConnector.connectorID,
+            providerName: "Claude",
+            priority: 1,
+            admission: .hiddenNotAuthenticated,
+            loginOption: nil
+        )
+        let reduction = ProviderProductStatePolicy.reduce(
+            snapshots: [snapshot],
+            admissions: [onlineUnavailable],
+            monitoringEnabledIDs: [ClaudeCodeUsageConnector.connectorID],
+            configuredOrDetectedIDs: [ClaudeCodeUsageConnector.connectorID],
+            previousCards: [],
+            language: .english,
+            now: epoch
+        )
+
+        let claude = reduction.inventory.provider(.claude)
+        #expect(claude?.availability == .available)
+        #expect(claude?.connection == .connected)
+        #expect(claude?.health == .healthy)
+        #expect(claude?.requiredAction == nil)
+        #expect(claude?.sourceSummary == .localSmartEstimate)
+        #expect(claude?.primaryDisplayText == "≈41%")
+        #expect(claude?.precision == .estimated)
+        #expect(claude?.diagnosticReason == nil)
+        #expect(claude?.inventory.agentWorkspace == true)
+        #expect(claude?.inventory.quickPanel == true)
+        #expect(reduction.inventory.agentWorkspaceProviders.map(\.id) == [.claude])
+        #expect(reduction.inventory.quickPanelProviders.map(\.id) == [.claude])
+    }
+
     @Test
-    func configuredOrDetectedProviderRemainsDiscoverableWithoutFakeUsage() {
+    func dormantDetectedProviderRemainsOutOfDailyUseSurfacesWithoutFakeUsage() {
         let reduction = ProviderProductStatePolicy.reduce(
             snapshots: [],
             admissions: [],
@@ -199,7 +395,9 @@ struct UMA014M2ProviderProductStateTests {
         )
         let product = reduction.inventory.provider(.antigravity)
 
-        #expect(product?.inventory.overview == true)
+        #expect(product?.inventory.overview == false)
+        #expect(product?.inventory.quickPanel == false)
+        #expect(product?.inventory.agentWorkspace == false)
         #expect(product?.primaryDisplayText == "—")
         #expect(product?.primaryDisplayText != "0%")
         #expect(product?.isActive == false)

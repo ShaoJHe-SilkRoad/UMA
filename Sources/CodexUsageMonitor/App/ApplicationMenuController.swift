@@ -48,7 +48,7 @@ final class ApplicationMenuController: NSObject, NSMenuItemValidation {
             route(in: viewMenu, title: "Show Menu Bar Panel", action: #selector(showQuickPanel), key: "2"),
             actionRoute(
                 in: viewMenu,
-                title: "Show or Hide Desktop Assistant",
+                title: "Show or Hide Desktop Wizard",
                 action: #selector(toggleDesktopAssistant)
             ),
         ].allSatisfy { $0 }
@@ -61,9 +61,6 @@ final class ApplicationMenuController: NSObject, NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(refreshAll) {
             return coordinator?.canRefreshAll == true
-        }
-        if menuItem.action == #selector(toggleDesktopAssistant) {
-            return coordinator?.assistantIsEnabled == true
         }
         return menuItem.isEnabled
     }
@@ -94,7 +91,7 @@ final class ApplicationMenuController: NSObject, NSMenuItemValidation {
         menu.addItem(actionItem(title: "Open Main Window", action: #selector(openMainWindow), key: "1"))
         menu.addItem(actionItem(title: "Show Menu Bar Panel", action: #selector(showQuickPanel), key: "2"))
         menu.addItem(.separator())
-        menu.addItem(actionItem(title: "Show or Hide Desktop Assistant", action: #selector(toggleDesktopAssistant)))
+        menu.addItem(actionItem(title: "Show or Hide Desktop Wizard", action: #selector(toggleDesktopAssistant)))
         root.submenu = menu
         return root
     }

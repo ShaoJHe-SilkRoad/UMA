@@ -31,8 +31,8 @@ struct UMA014M1NativeShellTests {
             "private let statusBarController: StatusBarController",
             "private let assistantController: DesktopAssistantPanelController",
             "private var runtime: UsageMonitorRuntime?",
-            "mainWindowController.attach(store: runtime.store)",
-            "settingsWindowController.attach(store: runtime.store)",
+            "mainWindowController.attach(",
+            "settingsWindowController.attach(store: runtime.store, preferences: runtime.preferences)",
         ] {
             #expect(shell.contains(required))
         }
@@ -48,8 +48,18 @@ struct UMA014M1NativeShellTests {
         let store = UsageStore.preview(language: .english)
         let main = MainWindowController()
         let settings = SettingsWindowController()
-        main.attach(store: store)
-        settings.attach(store: store)
+        main.attach(
+            store: store,
+            openSettings: {},
+            scanAll: {},
+            refreshAll: {},
+                connectCodex: {},
+                disconnectCodex: {},
+                claudeControlState: { .consentRequired },
+                connectClaude: {},
+            accuracySyncClaude: {}
+        )
+        settings.attach(store: store, preferences: .inMemory())
 
         let mainIdentity = main.windowIdentityForTesting
         let settingsIdentity = settings.windowIdentityForTesting
@@ -86,7 +96,11 @@ struct UMA014M1NativeShellTests {
         defer { shell.tearDown() }
         shell.start(presentMainWindow: false)
 
-        let result = shell.runNativeLifecycleDiagnostic()
+        let result = shell.runNativeLifecycleDiagnostic(
+            mainWindowCycleCount: 25,
+            settingsWindowCycleCount: 100,
+            agentSwitchCount: 100
+        )
 
         #expect(result.mainWindowSingleton)
         #expect(result.settingsWindowSingleton)
@@ -96,6 +110,9 @@ struct UMA014M1NativeShellTests {
         #expect(result.assistantSurvivedWindowClose)
         #expect(result.nativeCommandRoutesPresent)
         #expect(result.threadOSRuntimeActivityCount == 0)
+        #expect(result.completedMainWindowCycles == 25)
+        #expect(result.completedSettingsWindowCycles == 100)
+        #expect(result.completedAgentSwitches == 100)
         #expect(result.passed)
     }
 
@@ -114,7 +131,8 @@ struct UMA014M1NativeShellTests {
         }
         #expect(menu.contains("root.isEnabled = false"))
         #expect(menu.contains("action: nil"))
-        #expect(menu.contains("title: \"Show or Hide Desktop Assistant\""))
+        #expect(menu.contains("title: \"Show or Hide Desktop Wizard\""))
+        #expect(!menu.contains("return coordinator?.assistantIsEnabled == true"))
         #expect(menu.contains("action: #selector(toggleDesktopAssistant)"))
         for forbidden in ["ThreadOSRuntime", "ThreadOSClient", "UsageMonitorRuntime.live"] {
             #expect(!menu.contains(forbidden))
@@ -137,18 +155,39 @@ struct UMA014M1NativeShellTests {
         #expect(shell.contains("statusBarController.tearDown()"))
     }
 
+    @Test("Agent workspace Connect preserves the established local-access consent boundary")
+    func codexConnectRoutesThroughConsentBeforeReconnect() throws {
+        let shell = try source("Sources/CodexUsageMonitor/App/AppShellCoordinator.swift")
+        let connect = try #require(
+            shell.slice(from: "func connectCodex()", through: "func disconnectCodex()")
+        )
+        #expect(connect.contains("store.currentState == .notAuthorizedByMonitor"))
+        #expect(connect.contains("NativeLocalCodexAccessConfirmation.action(for: store).request()"))
+        #expect(connect.contains("store.handleLocalAccessDecision"))
+        #expect(connect.contains("store.requestReconnect()"))
+    }
+
+    @Test("Codex consent owns application-launch recovery independently of Claude consent")
+    func codexLaunchRecoveryIsIndependent() throws {
+        let runtime = try source("Sources/CodexUsageUI/Connectors/AgentUsageRuntime.swift")
+        #expect(runtime.contains("if !usageStore.monitorConsentGranted"))
+        #expect(runtime.contains("excluded.insert(CodexUsageConnector.connectorID)"))
+        #expect(runtime.contains("if !shouldStartClaude"))
+        #expect(runtime.contains("excluded.insert(ClaudeCodeUsageConnector.connectorID)"))
+        #expect(!runtime.contains("guard shouldStartClaude else { return }"))
+    }
+
     @Test("M1 presentation consumes the shared provider product-state semantics")
     func presentationSemanticsAreShared() throws {
         let views = try source("Sources/CodexUsageMonitor/App/NativeShellViews.swift")
-        #expect(views.contains("store.productInventory.overviewProviders"))
-        #expect(views.contains("store.productInventory.providers"))
-        #expect(views.contains("provider.primaryDisplayText"))
-        #expect(views.contains("quota.displayText"))
-        #expect(views.contains("provider.quotas.isEmpty"))
-        #expect(views.contains("Usage unavailable"))
-        #expect(views.contains("Currently unavailable"))
-        #expect(!views.contains("?? \"0%\""))
-        #expect(!views.localizedCaseInsensitiveContains("maximum decrement"))
+        let surfaces = try source("Sources/CodexUsageUI/Views/AgentSurfaceViews.swift")
+        let presentation = views + surfaces
+        #expect(presentation.contains("store.productInventory.agentWorkspaceProviders"))
+        #expect(presentation.contains("primaryDisplayText"))
+        #expect(presentation.contains("quota.displayText"))
+        #expect(presentation.contains("No active agents"))
+        #expect(!presentation.contains("?? \"0%\""))
+        #expect(!presentation.localizedCaseInsensitiveContains("maximum decrement"))
     }
 
     @Test("M1 source changes do not import provider, Safari, or ThreadOS business logic")

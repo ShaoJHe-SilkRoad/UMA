@@ -333,20 +333,24 @@ struct M6AG1AntigravityAssistantTests {
         }
 
         #expect(occurrences(of: "installWindowObservers()", in: controller) == 2)
-        #expect(occurrences(of: "installDefaultsObserver()", in: controller) == 2)
+        #expect(controller.contains("private var preferencesObservation: ApplicationPreferences.Observation?"))
+        #expect(controller.contains("private func installPreferencesObserver()"))
+        #expect(controller.contains("preferencesObservation = preferenceStore.observe"))
+        #expect(occurrences(of: "preferencesObservation?.cancel()", in: controller) == 2)
+        #expect(occurrences(of: "preferencesObservation = nil", in: controller) == 1)
         #expect(
             occurrences(
                 of: "NotificationCenter.default.addObserver(",
                 in: controller
-            ) == 3
+            ) == 2
         )
         #expect(
             occurrences(
                 of: "NotificationCenter.default.removeObserver(",
                 in: controller
-            ) == 3
+            ) == 2
         )
-        for observer in ["moveObserver", "screenObserver", "defaultsObserver"] {
+        for observer in ["moveObserver", "screenObserver"] {
             #expect(
                 occurrences(
                     of: "NotificationCenter.default.removeObserver(\(observer))",

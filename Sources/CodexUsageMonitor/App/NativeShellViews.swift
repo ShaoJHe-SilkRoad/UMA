@@ -1,189 +1,166 @@
 import CodexUsageUI
 import SwiftUI
 
-enum MainWindowDestination: String, CaseIterable, Identifiable {
-    case overview
-    case providers
-
+enum MainSurfaceDestination: String, CaseIterable, Identifiable {
+    case agents = "Agents & Settings"
+    case threadOS = "ThreadOS"
     var id: String { rawValue }
+}
 
-    var title: String {
-        switch self {
-        case .overview: "Overview"
-        case .providers: "Providers"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .overview: "square.grid.2x2"
-        case .providers: "person.3"
-        }
-    }
+@MainActor
+final class MainSurfaceNavigationState: ObservableObject {
+    @Published var destination: MainSurfaceDestination = .agents
+    @Published var selectedAgent: ProviderProductID = .codex
 }
 
 struct MainWindowRootView: View {
     @ObservedObject var store: UsageStore
-    @State private var destination: MainWindowDestination? = .overview
+    @ObservedObject var navigation: MainSurfaceNavigationState
+    let openSettings: () -> Void
+    let scanAll: () -> Void
+    let refreshAll: () -> Void
+    let connectCodex: () -> Void
+    let disconnectCodex: () -> Void
+    let claudeControlState: () -> ClaudeAgentControlState
+    let connectClaude: () -> Void
+    let accuracySyncClaude: () -> Void
 
     var body: some View {
-        NavigationSplitView {
-            List(MainWindowDestination.allCases, selection: $destination) { item in
-                Label(item.title, systemImage: item.systemImage)
-                    .tag(item)
-            }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 260)
-            .accessibilityLabel("UMA navigation")
-        } detail: {
-            switch destination ?? .overview {
-            case .overview:
-                M1OverviewView(store: store)
-            case .providers:
-                M1ProvidersView(store: store)
+        VStack(spacing: 0) {
+            toolbar
+            Divider()
+            switch navigation.destination {
+            case .agents: agentsWorkspace
+            case .threadOS: threadOSPlaceholder
             }
         }
-        .frame(minWidth: 720, minHeight: 500)
+        .frame(minWidth: 760, minHeight: 520)
+        .environment(\.locale, store.language.locale)
     }
-}
 
-private struct M1OverviewView: View {
-    @ObservedObject var store: UsageStore
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Overview")
-                        .font(.largeTitle.bold())
-                    Text("Remaining usage from the existing UMA provider presentation.")
-                        .foregroundStyle(.secondary)
+    private var toolbar: some View {
+        HStack(spacing: 12) {
+            Picker(localized("Destination", "导航"), selection: $navigation.destination) {
+                ForEach(MainSurfaceDestination.allCases) { item in
+                    Text(destinationTitle(item)).tag(item)
                 }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 250)
+            .accessibilityLabel(localized("UMA navigation", "UMA 导航"))
+            Spacer()
+            Button(action: scanAll) { Image(systemName: "sparkle.magnifyingglass") }
+                .help(localized("Scan All", "全部扫描"))
+                .accessibilityLabel(localized("Scan All", "全部扫描"))
+                .accessibilityIdentifier("uma.main.scan")
+            Button(action: refreshAll) { Image(systemName: "arrow.clockwise") }
+                .help(localized("Refresh All", "全部刷新"))
+                .accessibilityLabel(localized("Refresh All", "全部刷新"))
+                .accessibilityIdentifier("uma.main.refresh")
+                .disabled(!store.allowsManualRefresh)
+            Button(action: openSettings) { Image(systemName: "gearshape") }
+                .help(localized("Global Settings", "全局设置"))
+                .accessibilityLabel(localized("Global Settings", "全局设置"))
+                .accessibilityIdentifier("uma.main.settings")
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 48)
+    }
 
-                if store.productInventory.overviewProviders.isEmpty {
-                    ContentUnavailableView(
-                        "No provider usage available",
-                        systemImage: "gauge.with.dots.needle.0percent",
-                        description: Text("Missing, unsupported, and error states are never shown as 0%.")
-                    )
+    private var agentsWorkspace: some View {
+        HSplitView {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(localized("Agents", "智能体"))
+                    .font(.headline)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 12)
+                if workspaceProviders.isEmpty {
+                    VStack(spacing: 8) {
+                        Text(localized("No active agents", "没有活跃的智能体"))
+                        Button(localized("Scan for Agents", "扫描智能体"), action: scanAll)
+                    }
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 240), spacing: 14)],
-                        spacing: 14
-                    ) {
-                        ForEach(store.productInventory.overviewProviders) { provider in
-                            M1ProviderSummary(provider: provider)
+                    ScrollView {
+                        LazyVStack(spacing: 3) {
+                            ForEach(workspaceProviders) { provider in
+                                Button {
+                                    navigation.selectedAgent = provider.id
+                                } label: {
+                                    AgentGlanceRow(
+                                        provider: provider,
+                                        style: .mainList,
+                                        selected: selectedProviderID == provider.id,
+                                        language: store.language
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("uma.agent.list.\(provider.id.rawValue)")
+                            }
                         }
+                        .padding(.horizontal, 6)
                     }
                 }
             }
-            .padding(28)
-        }
-    }
-}
+            .frame(minWidth: 210, idealWidth: 240, maxWidth: 285)
+            .background(Color(nsColor: .windowBackgroundColor))
 
-private struct M1ProvidersView: View {
-    @ObservedObject var store: UsageStore
-
-    var body: some View {
-        Group {
-            List(store.productInventory.providers) { provider in
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(provider.displayName).font(.headline)
-                            if let planLabel = provider.planLabel {
-                                Text(planLabel).font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Text(provider.primaryDisplayText)
-                                .font(.title3.monospacedDigit().bold())
-                        }
-                        ForEach(provider.quotas) { quota in
-                            HStack {
-                                Text(quota.compactLabel)
-                                Spacer()
-                                Text(quota.displayText)
-                                    .monospacedDigit()
-                            }
-                            .font(.callout)
-                        }
-                        if provider.quotas.isEmpty {
-                            Text(providerStatus(provider))
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.vertical, 8)
-                }
+            AgentWorkspaceSurface(
+                store: store,
+                providerID: selectedProviderID,
+                refresh: refreshAll,
+                connectCodex: connectCodex,
+                disconnectCodex: disconnectCodex,
+                claudeControlState: claudeControlState,
+                connectClaude: connectClaude,
+                claudeAccuracySync: accuracySyncClaude
+            )
+            .frame(minWidth: 500)
         }
     }
 
-    private func providerStatus(_ provider: ProviderProductState) -> String {
-        switch provider.availability {
-        case .available: "Usage unavailable"
-        case .setupRequired: "Setup required"
-        case .disabled: "Monitoring disabled"
-        case .unavailable: "Currently unavailable"
-        case .unsupported: "Unsupported"
+    private var workspaceProviders: [ProviderProductState] {
+        store.productInventory.agentWorkspaceProviders
+    }
+
+    private var selectedProviderID: ProviderProductID {
+        if workspaceProviders.contains(where: { $0.id == navigation.selectedAgent }) { return navigation.selectedAgent }
+        return workspaceProviders.first?.id ?? .codex
+    }
+
+    private var threadOSPlaceholder: some View {
+        ContentUnavailableView(
+            "ThreadOS",
+            systemImage: "point.3.connected.trianglepath.dotted",
+            description: Text(localized(
+                "Reserved for a future release.",
+                "为未来版本预留。"
+            ))
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("uma.threados.inert")
+    }
+
+    private func destinationTitle(_ destination: MainSurfaceDestination) -> String {
+        switch destination {
+        case .agents: localized("Agents & Settings", "智能体与设置")
+        case .threadOS: "ThreadOS"
         }
     }
-}
 
-private struct M1ProviderSummary: View {
-    let provider: ProviderProductState
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(provider.displayName)
-                .font(.headline)
-                .lineLimit(1)
-            Text(provider.primaryDisplayText)
-                .font(.system(size: 34, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-            Text(provider.primaryQuota?.compactLabel ?? "Remaining")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 14))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(.separator.opacity(0.55), lineWidth: 1)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(provider.displayName), \(provider.primaryDisplayText) remaining")
+    private func localized(_ english: String, _ chinese: String) -> String {
+        store.language == .simplifiedChinese ? chinese : english
     }
 }
 
 struct SettingsWindowRootView: View {
-    @ObservedObject var store: UsageStore
+    let preferences: ApplicationPreferences
+    @ObservedObject var navigation: GlobalSettingsNavigationState
 
     var body: some View {
-        Form {
-            Section("General") {
-                Picker(
-                    "Language",
-                    selection: Binding(
-                        get: { store.language },
-                        set: { store.setLanguage($0) }
-                    )
-                ) {
-                    ForEach(AppLanguage.allCases) { language in
-                        Text(language.displayName).tag(language)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .accessibilityLabel("Application language")
-            }
-
-            Section("M1 scope") {
-                Text("Existing advanced and provider settings remain available in the Quick Panel and are deferred for M4 migration.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
-        .padding(20)
-        .frame(minWidth: 480, minHeight: 320)
+        GlobalSettingsSurface(preferences: preferences, navigation: navigation)
     }
 }

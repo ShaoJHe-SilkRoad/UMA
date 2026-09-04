@@ -5,12 +5,13 @@ import SwiftUI
 @MainActor
 final class MainWindowController: NSWindowController {
     private enum Layout {
-        static let defaultFrame = NSRect(x: 0, y: 0, width: 920, height: 640)
-        static let minimumSize = NSSize(width: 720, height: 500)
+        static let defaultFrame = NSRect(x: 0, y: 0, width: 840, height: 590)
+        static let minimumSize = NSSize(width: 760, height: 520)
         static let autosaveName = "UMA014.MainWindow"
     }
 
     private var attachedStore: UsageStore?
+    private let navigation = MainSurfaceNavigationState()
 
     init() {
         let window = NSWindow(
@@ -34,12 +35,44 @@ final class MainWindowController: NSWindowController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
-    func attach(store: UsageStore) {
+    func attach(
+        store: UsageStore,
+        openSettings: @escaping () -> Void,
+        scanAll: @escaping () -> Void,
+        refreshAll: @escaping () -> Void,
+        connectCodex: @escaping () -> Void,
+        disconnectCodex: @escaping () -> Void,
+        claudeControlState: @escaping () -> ClaudeAgentControlState,
+        connectClaude: @escaping () -> Void,
+        accuracySyncClaude: @escaping () -> Void
+    ) {
         guard attachedStore == nil else { return }
         attachedStore = store
         window?.contentViewController = NSHostingController(
-            rootView: MainWindowRootView(store: store)
+            rootView: MainWindowRootView(
+                store: store,
+                navigation: navigation,
+                openSettings: openSettings,
+                scanAll: scanAll,
+                refreshAll: refreshAll,
+                connectCodex: connectCodex,
+                disconnectCodex: disconnectCodex,
+                claudeControlState: claudeControlState,
+                connectClaude: connectClaude,
+                accuracySyncClaude: accuracySyncClaude
+            )
         )
+    }
+
+    func showAgent(_ providerID: ProviderProductID) {
+        navigation.destination = .agents
+        navigation.selectedAgent = providerID
+        showCanonicalWindow()
+    }
+
+    func showDestination(_ destination: MainSurfaceDestination) {
+        navigation.destination = destination
+        showCanonicalWindow()
     }
 
     func showCanonicalWindow() {
@@ -70,6 +103,15 @@ final class MainWindowController: NSWindowController {
 
     var isVisibleForTesting: Bool { window?.isVisible == true }
 
+    var selectedAgentForTesting: ProviderProductID { navigation.selectedAgent }
+
+    var destinationForTesting: MainSurfaceDestination { navigation.destination }
+
+    var hasReadyContentForTesting: Bool {
+        attachedStore != nil
+            && window?.contentViewController is NSHostingController<MainWindowRootView>
+    }
+
     private func repairFrameIfNeeded(_ window: NSWindow) {
         let intersectsVisibleScreen = NSScreen.screens.contains { screen in
             window.frame.intersection(screen.visibleFrame).width >= 120
@@ -84,12 +126,14 @@ final class MainWindowController: NSWindowController {
 @MainActor
 final class SettingsWindowController: NSWindowController {
     private enum Layout {
-        static let defaultFrame = NSRect(x: 0, y: 0, width: 560, height: 390)
-        static let minimumSize = NSSize(width: 480, height: 320)
+        static let defaultFrame = NSRect(x: 0, y: 0, width: 640, height: 460)
+        static let minimumSize = NSSize(width: 560, height: 400)
         static let autosaveName = "UMA014.SettingsWindow"
     }
 
     private var attachedStore: UsageStore?
+    private var preferences: ApplicationPreferences?
+    private let navigation = GlobalSettingsNavigationState()
 
     init() {
         let window = NSWindow(
@@ -113,11 +157,15 @@ final class SettingsWindowController: NSWindowController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
-    func attach(store: UsageStore) {
+    func attach(store: UsageStore, preferences: ApplicationPreferences) {
         guard attachedStore == nil else { return }
         attachedStore = store
+        self.preferences = preferences
         window?.contentViewController = NSHostingController(
-            rootView: SettingsWindowRootView(store: store)
+            rootView: SettingsWindowRootView(
+                preferences: preferences,
+                navigation: navigation
+            )
         )
     }
 
@@ -148,6 +196,18 @@ final class SettingsWindowController: NSWindowController {
     }
 
     var isVisibleForTesting: Bool { window?.isVisible == true }
+
+    var selectedPaneForTesting: GlobalSettingsPane { navigation.pane }
+
+    var hasReadyContentForTesting: Bool {
+        attachedStore != nil
+            && preferences != nil
+            && window?.contentViewController is NSHostingController<SettingsWindowRootView>
+    }
+
+    func selectPaneForTesting(_ pane: GlobalSettingsPane) {
+        navigation.pane = pane
+    }
 
     private func repairFrameIfNeeded(_ window: NSWindow) {
         let intersectsVisibleScreen = NSScreen.screens.contains { screen in

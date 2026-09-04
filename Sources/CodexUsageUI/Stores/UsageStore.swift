@@ -38,6 +38,7 @@ public final class UsageStore: ObservableObject {
     private var activeScanGeneration: UInt64 = 0
     private var currentAdmissionRecords: [ProviderSurfaceAdmissionRecord] = []
     private var currentRegistryRevision: UInt64 = 0
+    private var pendingInitialAdmissionProviderIDs: Set<AgentConnectorID> = []
 
     public convenience init(autoRefresh: Bool = true, language: AppLanguage? = nil) {
         self.init(
@@ -178,8 +179,17 @@ public final class UsageStore: ObservableObject {
         self.monitorConsentGranted = decision == .granted
         if !previewOnly, decision == .granted {
             self.connectionState = .idle
+            if autoRefresh,
+               registry != nil,
+               let primaryConnectorID,
+               self.agentSettings?.isMonitoringEnabled(for: primaryConnectorID) ?? true {
+                pendingInitialAdmissionProviderIDs.insert(primaryConnectorID)
+            }
         }
         self.freshness = previewOnly ? .fixture : .noRealData
+        if !(previewOnly && !previewPresentationCards.isEmpty) {
+            rebuildPresentation()
+        }
         beginAgentSettingsObservation()
         beginRegistryObservation()
     }
@@ -475,6 +485,7 @@ public final class UsageStore: ObservableObject {
         guard !previewOnly else { return }
         providerSnapshots = snapshots
         currentAdmissionRecords = []
+        pendingInitialAdmissionProviderIDs.removeAll()
         providerLoginOptions = loginOptions.filter {
             agentSettings?.isMonitoringEnabled(for: $0.id) ?? true
         }
@@ -497,6 +508,9 @@ public final class UsageStore: ObservableObject {
             ? []
             : publication.snapshots
         currentAdmissionRecords = publication.admissionSet?.records ?? []
+        if publication.admissionSet != nil {
+            pendingInitialAdmissionProviderIDs.removeAll()
+        }
         providerLoginOptions = (publication.admissionSet?.loginOptions ?? []).filter {
             agentSettings?.isMonitoringEnabled(for: $0.id) ?? true
         }
@@ -519,6 +533,7 @@ public final class UsageStore: ObservableObject {
             admissions: currentAdmissionRecords,
             monitoringEnabledIDs: Set(monitoringEnabledIDs),
             configuredOrDetectedIDs: configuredOrDetectedIDs,
+            pendingInitialAdmissionIDs: pendingInitialAdmissionProviderIDs,
             previousCards: presentationCards,
             language: language,
             publicationRevision: currentRegistryRevision

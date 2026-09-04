@@ -41,7 +41,7 @@ struct M7CloseCursorSourceAdmissionTests {
     }
 
     @Test
-    func currentProductRegistersOnlyTheFourAcceptedProviders() throws {
+    func currentDailyRuntimeRegistersOnlyQualifiedCodexAndClaudeProviders() throws {
         let runtime = try record(
             "Sources/CodexUsageUI/Connectors/AgentUsageRuntime.swift"
         )
@@ -53,12 +53,12 @@ struct M7CloseCursorSourceAdmissionTests {
         for connector in [
             "CodexUsageConnector",
             "ClaudeCodeUsageConnector",
-            "WorkBuddyAvailabilityConnector",
-            "WorkBuddyAccountWebCreditsConnector",
-            "GoogleAntigravityUsageConnector",
         ] {
             #expect(runtime.contains(connector))
         }
+        #expect(!runtime.contains("WorkBuddyAvailabilityConnector("))
+        #expect(!runtime.contains("WorkBuddyAccountWebCreditsConnector("))
+        #expect(!runtime.contains("GoogleAntigravityUsageConnector("))
         #expect(!runtime.contains("CursorUsageConnector"))
         #expect(!settings.contains("\"Cursor\""))
         for provider in ["Codex", "Claude Code", "WorkBuddy", "Google Antigravity"] {

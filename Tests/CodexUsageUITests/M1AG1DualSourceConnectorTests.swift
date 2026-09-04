@@ -143,7 +143,7 @@ struct M1AG1DualSourceConnectorTests {
     }
 
     @Test @MainActor
-    func providerRefreshFailureRemovesStaleAndIndependentLocalPresentation() async {
+    func providerProcessExitRetainsOneTruthfulStaleSnapshotWithoutDisconnectFlicker() async {
         let firstLocal = localSnapshot(tokenCount: 10)
         let secondLocal = localSnapshot(tokenCount: 20)
         let store = UsageStore(
@@ -160,10 +160,14 @@ struct M1AG1DualSourceConnectorTests {
             try? await Task.sleep(for: .milliseconds(5))
         }
 
-        #expect(store.providerSnapshots.isEmpty)
-        #expect(store.presentationCards.isEmpty)
-        #expect(store.snapshot.providerSource == nil)
-        #expect(store.snapshot.localSource == nil)
+        #expect(store.providerSnapshots.count == 1)
+        #expect(store.providerSnapshots.first?.state == .stale)
+        #expect(store.providerSnapshots.first?.freshness == .stale)
+        #expect(store.providerSnapshots.first?.safeFailure == .processExited)
+        #expect(store.presentationCards.count == 1)
+        #expect(store.presentationCards.first?.isRetainingLastValidValue == true)
+        #expect(store.snapshot.providerSource?.freshness == .stale)
+        #expect(store.snapshot.localSource != nil)
     }
 
     @Test @MainActor

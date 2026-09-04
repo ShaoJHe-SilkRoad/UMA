@@ -33,13 +33,14 @@ enum AgentUsageRuntime {
 
 @MainActor
 public struct UsageMonitorRuntime {
+    static let productionConnectorIDs: Set<AgentConnectorID> = [
+        CodexUsageConnector.connectorID,
+        ClaudeCodeUsageConnector.connectorID,
+    ]
+
     public let preferences: ApplicationPreferences
     public let store: UsageStore
     public let claudeSettings: ClaudeBrowserSettingsModel
-    public let antigravitySettings: AntigravitySettingsModel
-    public let workBuddySettings: WorkBuddySettingsModel
-    public let workBuddyLogin: WorkBuddyLoginCoordinator
-    public let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController
 
     public static func live(
         workBuddyStoreURL: URL? = nil,
@@ -47,11 +48,8 @@ public struct UsageMonitorRuntime {
         startProviders: Bool = true,
         preferenceDefaults: UserDefaults = .standard
     ) -> UsageMonitorRuntime {
+        _ = workBuddyStoreURL
         let preferences = ApplicationPreferences(userDefaults: preferenceDefaults)
-        let manualStore = workBuddyStoreURL.map {
-            WorkBuddyManualAvailabilityStore(fileURL: $0)
-        } ?? WorkBuddyManualAvailabilityStore()
-        let manualSource = ManualWorkBuddyAvailabilitySource(store: manualStore)
         let snapshotStore = snapshotStoreURL.map {
             AgentConnectorSnapshotStore(url: $0)
         } ?? AgentConnectorSnapshotStore()
@@ -100,45 +98,12 @@ public struct UsageMonitorRuntime {
                 : .notApplicable,
             anchorStore: ClaudeSmartAnchorStore()
         )
-        let workBuddyConnector = WorkBuddyAvailabilityConnector(source: manualSource)
-        let accountWebSync = WorkBuddyAccountWebSessionController(
-            defaults: preferenceDefaults
-        )
-        let accountWebConnector = WorkBuddyAccountWebCreditsConnector(
-            hasConsent: { @MainActor in
-                accountWebSync.consentGranted
-            },
-            canReadOnApplicationLaunch: { @MainActor in
-                accountWebSync.canReadOnApplicationLaunch
-            },
-            reader: { @MainActor in
-                await accountWebSync.readCurrentCredits()
-            },
-            disconnectOwnedSession: { @MainActor in
-                await accountWebSync.disconnectAndClearOwnedWebsiteData()
-            }
-        )
         let agentSettings = AgentSettingsCoordinator(
             store: AgentPreferenceStore(preferences: preferences)
         )
-        let antigravityRefresh = AntigravityAutoRefreshPreference(
-            preferences: preferences
-        )
-        let antigravityClient = AntigravityReadOnlyCLIClient()
-        let antigravityConnector = GoogleAntigravityUsageConnector(
-            client: antigravityClient,
-            autoRefreshEnabled: { @MainActor in
-                antigravityRefresh.isEnabled
-            }
-        )
         let registry = AgentUsageRuntime.makeCodexRegistry(
             snapshotStore: snapshotStore,
-            additionalConnectors: [
-                claudeConnector,
-                workBuddyConnector,
-                accountWebConnector,
-                antigravityConnector,
-            ]
+            additionalConnectors: [claudeConnector]
         )
         let claudeSettings = ClaudeBrowserSettingsModel(
             connector: claudeConnector,
@@ -159,86 +124,12 @@ public struct UsageMonitorRuntime {
                 )
             }
         )
-        accountWebSync.configureAutoRefresh {
-            guard await MainActor.run(body: {
-                agentSettings.isMonitoringEnabled(
-                    for: WorkBuddyAccountWebCreditsConnector.connectorID
-                )
-            }) else {
-                return
-            }
-            try? await registry.refresh(
-                WorkBuddyAccountWebCreditsConnector.connectorID,
-                trigger: .timer
-            )
-        }
         let usageStore = UsageStore(
             registry: registry,
             primaryConnectorID: CodexUsageConnector.connectorID,
             consentDefaults: preferenceDefaults,
             preferences: preferences,
             agentSettings: agentSettings
-        )
-        let refreshAntigravityAdmissions:
-            @MainActor @Sendable (ProviderEligibilityScanTrigger) async -> AntigravitySettingsObservation = {
-                trigger in
-                let descriptors = await registry.orderedDescriptors()
-                let excluded = agentSettings.disabledConnectorIDs(
-                    from: descriptors.map(\.id)
-                )
-                _ = await registry.scanSurfaceAdmissions(
-                    trigger: trigger,
-                    excludedProviderIDs: excluded
-                )
-                return Self.antigravityObservation(
-                    await antigravityConnector.currentSnapshot()
-                )
-            }
-        let antigravitySettings = AntigravitySettingsModel(
-            initialState: .checking,
-            autoRefreshEnabled: antigravityRefresh.isEnabled,
-            checkAgain: {
-                await refreshAntigravityAdmissions(.checkAgain)
-            },
-            syncNow: {
-                await refreshAntigravityAdmissions(.syncNow)
-            },
-            disable: {
-                antigravityRefresh.isEnabled = false
-                await antigravityConnector.setAutomaticRefreshEnabled(false)
-                try? await registry.perform(
-                    .disconnect,
-                    for: GoogleAntigravityUsageConnector.connectorID
-                )
-                agentSettings.setMonitoringEnabled(
-                    false,
-                    for: GoogleAntigravityUsageConnector.connectorID
-                )
-            },
-            setAutoRefresh: { enabled in
-                antigravityRefresh.isEnabled = enabled
-                await antigravityConnector.setAutomaticRefreshEnabled(enabled)
-            },
-            openOfficialSetup: {
-                if let url = URL(
-                    string: "https://antigravity.google/docs/cli/install"
-                ) {
-                    NSWorkspace.shared.open(url)
-                }
-                return await refreshAntigravityAdmissions(.checkAgain)
-            },
-            openProvider: {
-                if let url = URL(
-                    string: "https://antigravity.google/docs/cli/install"
-                ) {
-                    NSWorkspace.shared.open(url)
-                }
-                return AntigravitySettingsObservation(state: .loginRequired)
-            }
-        )
-        antigravitySettings.observe(
-            from: antigravityConnector,
-            map: Self.antigravityObservation
         )
         if startProviders {
             Task {
@@ -250,27 +141,26 @@ public struct UsageMonitorRuntime {
                     await claudeConnector.start()
                 }
                 await registry.startPassiveConnectors()
-                guard shouldStartClaude else { return }
                 let descriptors = await registry.orderedDescriptors()
-                let excluded = agentSettings.disabledConnectorIDs(
+                var excluded = agentSettings.disabledConnectorIDs(
                     from: descriptors.map(\.id)
                 )
+                if !usageStore.monitorConsentGranted {
+                    excluded.insert(CodexUsageConnector.connectorID)
+                }
+                if !shouldStartClaude {
+                    excluded.insert(ClaudeCodeUsageConnector.connectorID)
+                }
                 _ = await registry.scanSurfaceAdmissions(
                     trigger: .applicationLaunch,
                     excludedProviderIDs: excluded
                 )
             }
         }
-        let settings = WorkBuddySettingsModel(source: manualSource)
-        let login = WorkBuddyLoginCoordinator(defaults: preferenceDefaults)
         return UsageMonitorRuntime(
             preferences: preferences,
             store: usageStore,
-            claudeSettings: claudeSettings,
-            antigravitySettings: antigravitySettings,
-            workBuddySettings: settings,
-            workBuddyLogin: login,
-            workBuddyAccountWebSync: accountWebSync
+            claudeSettings: claudeSettings
         )
     }
 

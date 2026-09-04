@@ -66,12 +66,21 @@ struct NativeShellLifecycleDiagnosticResult: Codable, Sendable {
     let mainWindowSingleton: Bool
     let settingsWindowSingleton: Bool
     let mainWindowReopened: Bool
+    let mainWindowStatePreserved: Bool
+    let settingsNavigationPreserved: Bool
+    let settingsContentReadyOnFirstShow: Bool
     let windowClosePreservedShell: Bool
     let statusItemSurvivedWindowClose: Bool
     let assistantSurvivedWindowClose: Bool
     let sharedRuntimeStore: Bool
     let nativeCommandRoutesPresent: Bool
     let threadOSRuntimeActivityCount: Int
+    let requestedMainWindowCycles: Int
+    let completedMainWindowCycles: Int
+    let requestedSettingsWindowCycles: Int
+    let completedSettingsWindowCycles: Int
+    let requestedAgentSwitches: Int
+    let completedAgentSwitches: Int
     let passed: Bool
 }
 
@@ -152,16 +161,16 @@ final class AppShellCoordinator {
             lifecycleGeneration: lifecycleGeneration,
             diagnostics: diagnostics
         )
-        let assistantController = DesktopAssistantPanelController(
-            onSelectProvider: { [weak statusBarController] providerID in
-                statusBarController?.showQuickPanel(expandingProviderID: providerID)
-            }
-        )
+        let assistantController = DesktopAssistantPanelController()
         self.statusBarController = statusBarController
         self.assistantController = assistantController
         mainWindowController = MainWindowController()
         settingsWindowController = SettingsWindowController()
         Self.activeCoordinator = self
+        assistantController.setSelectionHandler { [weak self] rawProviderID in
+            guard let providerID = ProviderProductID(rawValue: rawProviderID) else { return }
+            self?.showAgent(providerID)
+        }
         statusBarController.bindAssistant(assistantController)
         commandRouter = ApplicationMenuController(coordinator: self)
         statusBarController.recordShellCreated()
@@ -177,9 +186,30 @@ final class AppShellCoordinator {
     func attach(runtime: UsageMonitorRuntime) {
         guard self.runtime == nil, !isTornDown else { return }
         self.runtime = runtime
-        statusBarController.attach(runtime: runtime)
-        mainWindowController.attach(store: runtime.store)
-        settingsWindowController.attach(store: runtime.store)
+        assistantController.bind(preferences: runtime.preferences)
+        let quickActions = QuickPanelActions(
+            openMain: { [weak self] in self?.showMainWindow() },
+            scanAll: { [weak self] in self?.scanAllProviders() },
+            refreshAll: { [weak self] in self?.refreshAllProviders() },
+            toggleWizard: { [weak self] in self?.toggleDesktopAssistant() },
+            openSettings: { [weak self] in self?.showSettingsWindow() },
+            selectAgent: { [weak self] providerID in self?.showAgent(providerID) }
+        )
+        statusBarController.attach(runtime: runtime, actions: quickActions)
+        mainWindowController.attach(
+            store: runtime.store,
+            openSettings: { [weak self] in self?.showSettingsWindow() },
+            scanAll: { [weak self] in self?.scanAllProviders() },
+            refreshAll: { [weak self] in self?.refreshAllProviders() },
+            connectCodex: { [weak self] in self?.connectCodex() },
+            disconnectCodex: { [weak self] in self?.disconnectCodex() },
+            claudeControlState: { [weak self] in
+                self?.runtime?.claudeSettings.agentControlState ?? .onlineVerificationUnavailable
+            },
+            connectClaude: { [weak self] in self?.connectClaude() },
+            accuracySyncClaude: { [weak self] in self?.accuracySyncClaude() }
+        )
+        settingsWindowController.attach(store: runtime.store, preferences: runtime.preferences)
         observeAssistantCards(in: runtime.store)
         updateAssistant(using: runtime.store)
     }
@@ -192,7 +222,11 @@ final class AppShellCoordinator {
         toggleCount: Int,
         runtimeAttached: Bool = true
     ) async -> UMA014M1MachineDiagnosticResult {
-        let nativeShell = runNativeLifecycleDiagnostic()
+        let nativeShell = runNativeLifecycleDiagnostic(
+            mainWindowCycleCount: 25,
+            settingsWindowCycleCount: 100,
+            agentSwitchCount: 100
+        )
         let quickPanel = await statusBarController.runMachineDiagnostic(toggleCount: toggleCount)
         return UMA014M1MachineDiagnosticResult(
             nativeShell: nativeShell,
@@ -206,22 +240,74 @@ final class AppShellCoordinator {
         )
     }
 
-    func runNativeLifecycleDiagnostic() -> NativeShellLifecycleDiagnosticResult {
+    func runNativeLifecycleDiagnostic(
+        mainWindowCycleCount: Int = 1,
+        settingsWindowCycleCount: Int = 1,
+        agentSwitchCount: Int = 2
+    ) -> NativeShellLifecycleDiagnosticResult {
         let coordinatorIdentity = ObjectIdentifier(self)
         let statusIdentity = ObjectIdentifier(statusBarController)
         let assistantIdentity = ObjectIdentifier(assistantController)
         let runtimeStoreIdentity = runtime.map { ObjectIdentifier($0.store) }
 
-        showMainWindow()
+        showAgent(.claude)
         let mainWindowIdentity = mainWindowController.windowIdentityForTesting
-        showMainWindow()
-        let mainWindowSingleton = mainWindowController.windowIdentityForTesting == mainWindowIdentity
+        let expectedMainAgent = mainWindowController.selectedAgentForTesting
+        let expectedMainDestination = mainWindowController.destinationForTesting
+        var completedMainWindowCycles = 0
+        for _ in 0..<max(0, mainWindowCycleCount) {
+            showMainWindow()
+            guard mainWindowController.windowIdentityForTesting == mainWindowIdentity,
+                  mainWindowController.isVisibleForTesting,
+                  mainWindowController.selectedAgentForTesting == expectedMainAgent,
+                  mainWindowController.destinationForTesting == expectedMainDestination else { break }
+            mainWindowController.closeCanonicalWindow()
+            guard !mainWindowController.isVisibleForTesting else { break }
+            completedMainWindowCycles += 1
+        }
+        let mainWindowSingleton = completedMainWindowCycles == max(0, mainWindowCycleCount)
+        let mainWindowStatePreserved = mainWindowController.selectedAgentForTesting == expectedMainAgent
+            && mainWindowController.destinationForTesting == expectedMainDestination
 
+        settingsWindowController.selectPaneForTesting(.appearance)
         showSettingsWindow()
         let settingsWindowIdentity = settingsWindowController.windowIdentityForTesting
-        showSettingsWindow()
+        let requiresAttachedSettingsContent = runtime != nil
+        let settingsContentReadyOnFirstShow = !requiresAttachedSettingsContent
+            || settingsWindowController.hasReadyContentForTesting
+        var completedSettingsWindowCycles = 0
+        var settingsNavigationPreserved = true
+        for index in 0..<max(0, settingsWindowCycleCount) {
+            let expectedPane = GlobalSettingsPane.allCases[index % GlobalSettingsPane.allCases.count]
+            settingsWindowController.selectPaneForTesting(expectedPane)
+            showSettingsWindow()
+            guard settingsWindowController.windowIdentityForTesting == settingsWindowIdentity,
+                  settingsWindowController.isVisibleForTesting,
+                  settingsWindowController.selectedPaneForTesting == expectedPane,
+                  (!requiresAttachedSettingsContent
+                    || settingsWindowController.hasReadyContentForTesting) else {
+                settingsNavigationPreserved = false
+                break
+            }
+            settingsWindowController.closeCanonicalWindow()
+            guard !settingsWindowController.isVisibleForTesting,
+                  settingsWindowController.selectedPaneForTesting == expectedPane else {
+                settingsNavigationPreserved = false
+                break
+            }
+            completedSettingsWindowCycles += 1
+        }
         let settingsWindowSingleton =
-            settingsWindowController.windowIdentityForTesting == settingsWindowIdentity
+            completedSettingsWindowCycles == max(0, settingsWindowCycleCount)
+
+        var completedAgentSwitches = 0
+        for index in 0..<max(0, agentSwitchCount) {
+            let providerID: ProviderProductID = index.isMultiple(of: 2) ? .codex : .claude
+            showAgent(providerID)
+            guard mainWindowController.selectedAgentForTesting == providerID,
+                  mainWindowController.windowIdentityForTesting == mainWindowIdentity else { break }
+            completedAgentSwitches += 1
+        }
 
         mainWindowController.closeCanonicalWindow()
         settingsWindowController.closeCanonicalWindow()
@@ -246,9 +332,13 @@ final class AppShellCoordinator {
         let passed = mainWindowSingleton
             && settingsWindowSingleton
             && mainWindowReopened
+            && mainWindowStatePreserved
+            && settingsNavigationPreserved
+            && settingsContentReadyOnFirstShow
             && windowClosePreservedShell
             && statusItemSurvivedWindowClose
             && assistantSurvivedWindowClose
+            && completedAgentSwitches == max(0, agentSwitchCount)
             && (runtime == nil || sharedRuntimeStore)
             && menu.requiredRoutesPresent
             && menu.threadOSRuntimeActivityCount == 0
@@ -258,12 +348,21 @@ final class AppShellCoordinator {
             mainWindowSingleton: mainWindowSingleton,
             settingsWindowSingleton: settingsWindowSingleton,
             mainWindowReopened: mainWindowReopened,
+            mainWindowStatePreserved: mainWindowStatePreserved,
+            settingsNavigationPreserved: settingsNavigationPreserved,
+            settingsContentReadyOnFirstShow: settingsContentReadyOnFirstShow,
             windowClosePreservedShell: windowClosePreservedShell,
             statusItemSurvivedWindowClose: statusItemSurvivedWindowClose,
             assistantSurvivedWindowClose: assistantSurvivedWindowClose,
             sharedRuntimeStore: sharedRuntimeStore,
             nativeCommandRoutesPresent: menu.requiredRoutesPresent,
             threadOSRuntimeActivityCount: menu.threadOSRuntimeActivityCount,
+            requestedMainWindowCycles: max(0, mainWindowCycleCount),
+            completedMainWindowCycles: completedMainWindowCycles,
+            requestedSettingsWindowCycles: max(0, settingsWindowCycleCount),
+            completedSettingsWindowCycles: completedSettingsWindowCycles,
+            requestedAgentSwitches: max(0, agentSwitchCount),
+            completedAgentSwitches: completedAgentSwitches,
             passed: passed
         )
     }
@@ -271,6 +370,16 @@ final class AppShellCoordinator {
     func showMainWindow() {
         guard !isTornDown else { return }
         mainWindowController.showCanonicalWindow()
+    }
+
+    func showAgent(_ providerID: ProviderProductID) {
+        guard !isTornDown else { return }
+        mainWindowController.showAgent(providerID)
+    }
+
+    func showMainWindow(destination: MainSurfaceDestination) {
+        guard !isTornDown else { return }
+        mainWindowController.showDestination(destination)
     }
 
     func showSettingsWindow() {
@@ -288,8 +397,43 @@ final class AppShellCoordinator {
         await store.refresh()
     }
 
+    func refreshAllProviders() {
+        Task { [weak self] in await self?.refreshAll() }
+    }
+
+    func scanAllProviders() {
+        guard let store = runtime?.store else { return }
+        Task { await store.searchForAgents() }
+    }
+
+    func connectCodex() {
+        guard let store = runtime?.store else { return }
+        guard store.currentState == .notAuthorizedByMonitor else {
+            store.requestReconnect()
+            return
+        }
+        store.handleLocalAccessDecision(NativeLocalCodexAccessConfirmation.action(for: store).request())
+    }
+
+    func disconnectCodex() {
+        guard let store = runtime?.store else { return }
+        Task { await store.disconnectMonitor() }
+    }
+
+    func connectClaude() {
+        runtime?.claudeSettings.connectWithConsent()
+    }
+
+    func accuracySyncClaude() {
+        runtime?.claudeSettings.accuracySync()
+    }
+
     func toggleDesktopAssistant() {
         guard !isTornDown else { return }
+        if !assistantController.isEnabled {
+            assistantController.setEnabled(true)
+            return
+        }
         assistantController.toggleVisibility()
     }
 
@@ -325,8 +469,6 @@ final class AppShellCoordinator {
         guard !isTornDown else { return }
         isTornDown = true
         assistantStoreObserver?.cancel()
-        runtime?.workBuddyLogin.tearDown()
-        runtime?.workBuddyAccountWebSync.tearDown()
         mainWindowController.tearDown()
         settingsWindowController.tearDown()
         assistantController.tearDown()

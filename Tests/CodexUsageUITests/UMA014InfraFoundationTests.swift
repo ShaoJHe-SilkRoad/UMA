@@ -257,7 +257,18 @@ struct UMA014InfraFoundationTests {
         #expect(packager.contains("Development.DefaultBuildNumber"))
         #expect(packager.contains("UMA014_M1_BUILD_NUMBER"))
         #expect(packager.contains("UMA014_M1_PACKAGE_ROOT"))
+        #expect(packager.contains("UMA014_APPLICATION_NAME"))
+        #expect(packager.contains("UMA014_BUNDLE_IDENTIFIER"))
         #expect(!packager.contains("CFBundleShortVersionString -string \"0.14.0\""))
+
+        let reviewPackager = try String(
+            contentsOf: root.appendingPathComponent(
+                "script/package_uma014_m3r_review.sh"
+            ),
+            encoding: .utf8
+        )
+        #expect(reviewPackager.contains("com.silkrd.uma.dev.uma014.surface-rebuild"))
+        #expect(reviewPackager.contains("package_uma014_m1_dev.sh"))
 
         let frozenPackager = try String(
             contentsOf: root.appendingPathComponent(

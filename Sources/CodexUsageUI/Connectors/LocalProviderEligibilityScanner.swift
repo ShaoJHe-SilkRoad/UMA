@@ -125,11 +125,14 @@ enum ProviderUsageSurfacePolicy {
     }
 
     static func isAdmissibleRetainedFailure(
-        _ failure: AgentSafeFailure?
+        _ failure: AgentSafeFailure?,
+        providerID: AgentConnectorID
     ) -> Bool {
         switch failure {
         case nil, .unavailable, .timedOut, .malformedResponse:
             true
+        case .processExited:
+            providerID == CodexUsageConnector.connectorID
         default:
             false
         }
@@ -332,8 +335,14 @@ actor LocalProviderEligibilityScanner {
         if permitsRetainedValue,
            [.cached, .stale].contains(snapshot.freshness),
            account.freshness == snapshot.freshness,
-           ProviderUsageSurfacePolicy.isAdmissibleRetainedFailure(snapshot.safeFailure),
-           ProviderUsageSurfacePolicy.isAdmissibleRetainedFailure(account.safeFailure) {
+           ProviderUsageSurfacePolicy.isAdmissibleRetainedFailure(
+               snapshot.safeFailure,
+               providerID: snapshot.id
+           ),
+           ProviderUsageSurfacePolicy.isAdmissibleRetainedFailure(
+               account.safeFailure,
+               providerID: snapshot.id
+           ) {
             return .admitted(LocalLiveProviderSnapshot(snapshot: snapshot))
         }
         guard snapshot.safeFailure == nil,

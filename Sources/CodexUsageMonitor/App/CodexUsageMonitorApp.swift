@@ -40,7 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func finishShellDiagnostic(runtimeAttached: Bool) async {
         let result = await shellCoordinator.runMachineDiagnostic(
-            toggleCount: 50,
+            toggleCount: 100,
             runtimeAttached: runtimeAttached
         )
         if var data = try? JSONEncoder().encode(result) {

@@ -85,7 +85,7 @@ struct STABG1StabilityContractTests {
             "Sources/CodexUsageMonitor/App/AdaptivePanelMaterialHostView.swift"
         )
         let controller = try source(
-            "Sources/CodexUsageMonitor/App/TransparentUsagePanelController.swift"
+            "Sources/CodexUsageMonitor/App/QuickPanelPopoverController.swift"
         )
         let providerCard = try #require(
             panel.slice(
@@ -104,7 +104,8 @@ struct STABG1StabilityContractTests {
         #expect(!legacyWorkBuddy.contains("usesIncreaseContrast"))
         #expect(host.contains("NSGlassEffectView owns the one visible rounded contour"))
         #expect(host.contains("configureFallbackContour()"))
-        #expect(controller.contains("usagePanelOuterContourOwnedByNativeHost"))
+        #expect(controller.contains("AdaptivePanelMaterialHostView exclusively owns"))
+        #expect(controller.contains("panel.hasShadow = false"))
     }
 
     @Test("Settings exposes only one bounded native scroll container")
@@ -130,29 +131,22 @@ struct STABG1StabilityContractTests {
     @Test("The panel begins at natural minimum height rather than the height cap")
     func initialPanelGeometry() throws {
         let controller = try source(
-            "Sources/CodexUsageMonitor/App/TransparentUsagePanelController.swift"
+            "Sources/CodexUsageMonitor/App/QuickPanelPopoverController.swift"
         )
-        #expect(controller.contains("initialHeight = UsagePanelMetrics.minimumHeight"))
-        #expect(!controller.contains("static let height = UsagePanelMetrics.height"))
-        #expect(UsagePanelMetrics.minimumHeight < UsagePanelMetrics.height)
+        #expect(controller.contains("minimumContentHeight: CGFloat = 72"))
+        #expect(controller.contains("maximumContentHeight: CGFloat = 640"))
+        #expect(controller.contains("updateContentSize(repositionIfVisible:"))
     }
 
     @MainActor
-    @Test("Repeated Assistant selection reuses the panel tree and reissues navigation")
+    @Test("Repeated Assistant selection routes to the canonical Agent workspace")
     func repeatedAssistantSelectionReusesPanelContent() throws {
         let controller = try source(
-            "Sources/CodexUsageMonitor/App/TransparentUsagePanelController.swift"
+            "Sources/CodexUsageMonitor/App/AppShellCoordinator.swift"
         )
-        let navigation = UsagePanelNavigationCoordinator()
-        navigation.selectProvider("workbuddy.accountWeb")
-        let first = try #require(navigation.providerSelection)
-        navigation.selectProvider("workbuddy.accountWeb")
-        let second = try #require(navigation.providerSelection)
-
-        #expect(controller.contains("navigation.selectProvider(expandedProviderID)"))
-        #expect(!controller.contains("configuredExpandedProviderIDs"))
-        #expect(first.providerID == second.providerID)
-        #expect(first.revision != second.revision)
+        #expect(controller.contains("assistantController.setSelectionHandler"))
+        #expect(controller.contains("self?.showAgent(providerID)"))
+        #expect(!controller.contains("showQuickPanel(expandingProviderID: providerID)"))
     }
 
     @Test("Local session file descriptors stay bounded and resumed sessions are promoted")

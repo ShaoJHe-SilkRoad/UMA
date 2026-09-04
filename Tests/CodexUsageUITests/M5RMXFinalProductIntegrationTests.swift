@@ -62,17 +62,17 @@ struct M5RMXFinalProductIntegrationTests {
     }
 
     @Test
-    func admittedProviderSetExcludesCursorKimiAndPreservesStableOrder() throws {
+    func dailyRuntimeExcludesDormantAndRejectedProvidersWhileCatalogOrderRemainsStable() throws {
         let runtime = try source("Sources/CodexUsageUI/Connectors/AgentUsageRuntime.swift")
         let order = try source("Sources/CodexUsageUI/Connectors/AgentUsageConnector.swift")
         for connector in [
             "CodexUsageConnector(client:",
             "ClaudeCodeUsageConnector.production(",
-            "WorkBuddyAccountWebCreditsConnector(",
-            "GoogleAntigravityUsageConnector(",
         ] {
             #expect(runtime.contains(connector))
         }
+        #expect(!runtime.contains("WorkBuddyAccountWebCreditsConnector("))
+        #expect(!runtime.contains("GoogleAntigravityUsageConnector("))
         #expect(!runtime.contains("CursorUsageConnector"))
         #expect(!runtime.contains("KimiUsageConnector"))
         #expect(order.contains("case \"codex\": 0"))

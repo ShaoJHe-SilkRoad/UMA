@@ -133,10 +133,24 @@ actor AgentConnectorRegistry {
         self.excludedProviderIDs = excludedProviderIDs
 
         let admittedIDs = Set(result.admittedProviderIDs)
+        var retainedDuringTransientScanIDs: Set<AgentConnectorID> = []
+        for record in result.records where record.admission == .hiddenCurrentReadFailed {
+            guard !excludedProviderIDs.contains(record.id),
+                  let retained = latest[record.id],
+                  let connector = connectors[record.id],
+                  (await connector.currentSnapshot()).state == .waitingForFirstResponse,
+                  LocalProviderEligibilityScanner.admission(
+                      for: retained,
+                      descriptor: connector.descriptor
+                  ).admittedSnapshot != nil
+            else { continue }
+            retainedDuringTransientScanIDs.insert(record.id)
+        }
+        let lifecycleOwnedIDs = admittedIDs.union(retainedDuringTransientScanIDs)
         for id in admittedIDs { stoppedSnapshots[id] = nil }
         let previouslyAdmittedIDs = Set(latest.keys)
         let hiddenListenerIDs = listeners.keys.filter {
-            !admittedIDs.contains($0)
+            !lifecycleOwnedIDs.contains($0)
                 && connectors[$0]?.descriptor.capabilities.contains(
                     .passiveLocalAvailability
                 ) != true
@@ -147,14 +161,16 @@ actor AgentConnectorRegistry {
             listeners[id]?.cancel()
             listeners[id] = nil
         }
-        latest = Dictionary(
+        var nextLatest = Dictionary(
             uniqueKeysWithValues: result.admittedSnapshots.map { ($0.id, $0) }
         )
+        for id in retainedDuringTransientScanIDs { nextLatest[id] = latest[id] }
+        latest = nextLatest
         currentAdmissionSet = result
 
         for id in orderedIDs {
             guard let connector = connectors[id] else { continue }
-            if admittedIDs.contains(id) {
+            if lifecycleOwnedIDs.contains(id) {
                 await listen(to: connector)
             } else if connector.descriptor.localSourceClass
                         == .browserCompanionUsage,
@@ -351,6 +367,11 @@ actor AgentConnectorRegistry {
                    !retainsConsentOwnedBrowserListener {
                     await stopIfNeeded(connector, observedSnapshot: snapshot)
                 }
+                // The connector stream is an authoritative current-state
+                // boundary. Persist the withdrawal in the same transaction as
+                // its in-memory publication so a relaunch cannot resurrect a
+                // snapshot that the live connector has already invalidated.
+                await persistCurrentAdmittedSnapshots()
                 publish()
                 return
             }
@@ -381,8 +402,7 @@ actor AgentConnectorRegistry {
         let restorableSnapshots = orderedSnapshots().filter {
             connectors[$0.id]?.descriptor.supportsRestore == true
         }
-        guard !restorableSnapshots.isEmpty else { return }
-        try? await snapshotStore.save(restorableSnapshots)
+        try? await snapshotStore.replace(with: restorableSnapshots)
     }
 
     private func stopIfNeeded(

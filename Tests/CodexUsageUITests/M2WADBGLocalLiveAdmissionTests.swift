@@ -300,7 +300,8 @@ struct M2WADBGLocalLiveAdmissionTests {
             url: directory.appendingPathComponent("snapshots.json")
         )
         try await snapshotStore.save([snapshot(id: "codex.local")])
-        #expect(await snapshotStore.load().count == 1)
+        let savedSnapshots = await snapshotStore.load()
+        #expect(savedSnapshots.count == 1)
 
         let connector = try TestAdmissionConnector(
             id: "codex.local",
@@ -346,7 +347,8 @@ struct M2WADBGLocalLiveAdmissionTests {
         await store.searchForAgents()
         #expect((await scanner.diagnostics()).completedScanCount == 1)
         #expect(await registry.orderedSnapshots().isEmpty)
-        #expect(await snapshotStore.load().count == 1)
+        let clearedSnapshots = await snapshotStore.load()
+        #expect(clearedSnapshots.isEmpty)
         await store.stopAllConnectors()
     }
 
@@ -482,13 +484,25 @@ struct M2WADBGLocalLiveAdmissionTests {
     }
 
     @Test
-    func explicitLogoutEventRemovesProviderWithoutStaleFallback() async throws {
+    func explicitLogoutEventRemovesProviderAndPersistedSnapshotWithoutScan() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("r3-terminal-withdrawal-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let snapshotStore = AgentConnectorSnapshotStore(
+            url: directory.appendingPathComponent("snapshots.json")
+        )
         let connector = try TestAdmissionConnector(
             id: "codex.local",
             probe: .init(state: .ready, safeFailure: nil),
-            snapshot: snapshot(id: "codex.local")
+            snapshot: snapshot(id: "codex.local"),
+            supportsRestore: true
         )
-        let registry = try AgentConnectorRegistry(connectors: [connector])
+        let scanner = LocalProviderEligibilityScanner()
+        let registry = try AgentConnectorRegistry(
+            connectors: [connector],
+            snapshotStore: snapshotStore,
+            eligibilityScanner: scanner
+        )
         let stream = await registry.snapshots()
         let consumer = Task {
             for await _ in stream {
@@ -499,6 +513,8 @@ struct M2WADBGLocalLiveAdmissionTests {
             trigger: .applicationLaunch
         )
         #expect(initial.admittedProviderIDs == [connector.id])
+        #expect(await snapshotStore.load().count == 1)
+        let completedScans = (await scanner.diagnostics()).completedScanCount
 
         await connector.emit(
             snapshot(
@@ -509,14 +525,58 @@ struct M2WADBGLocalLiveAdmissionTests {
             )
         )
         try await waitUntil {
-            await registry.orderedSnapshots().isEmpty
+            let liveSnapshots = await registry.orderedSnapshots()
+            let persistedSnapshots = await snapshotStore.load()
+            return liveSnapshots.isEmpty && persistedSnapshots.isEmpty
         }
         #expect(await registry.orderedSnapshots().isEmpty)
+        #expect(await snapshotStore.load().isEmpty)
+        #expect((await scanner.diagnostics()).completedScanCount == completedScans)
         #expect(
             await registry.surfaceAdmissionSet()?.records.first?.admission
                 == .hiddenNotAuthenticated
         )
         consumer.cancel()
+        await registry.stopAll()
+    }
+
+    @Test
+    func transientScanFailureCannotWithdrawAdmittedCodexOrCancelItsListener() async throws {
+        let admitted = snapshot(id: "codex.local")
+        let connector = try TestAdmissionConnector(
+            id: "codex.local",
+            probe: .init(state: .ready, safeFailure: nil),
+            snapshot: admitted
+        )
+        let registry = try AgentConnectorRegistry(connectors: [connector])
+
+        let initial = await registry.scanSurfaceAdmissions(
+            trigger: .applicationLaunch
+        )
+        #expect(initial.admittedProviderIDs == [connector.id])
+        try await waitUntil { await connector.hasListener }
+
+        await connector.configure(
+            probe: .init(state: .failed, safeFailure: .timedOut),
+            snapshot: snapshot(
+                id: "codex.local",
+                state: .waitingForFirstResponse,
+                freshness: .unavailable,
+                failure: .timedOut
+            )
+        )
+
+        let transient = await registry.scanSurfaceAdmissions(
+            trigger: .manualRefresh
+        )
+
+        #expect(
+            transient.records.first?.admission == .hiddenCurrentReadFailed
+        )
+        #expect(await registry.orderedSnapshots() == [admitted])
+        #expect(await connector.hasListener)
+        #expect(await connector.stopCount == 0)
+
         await registry.stopAll()
     }
 
@@ -865,4 +925,6 @@ private actor TestAdmissionConnector: AgentUsageConnector {
         snapshotValue = snapshot
         continuation?.yield(snapshot)
     }
+
+    var hasListener: Bool { continuation != nil }
 }

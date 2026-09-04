@@ -17,15 +17,15 @@ struct UMA014M2PublicationTests {
         }
 
         let main = try source("Sources/CodexUsageMonitor/App/NativeShellViews.swift")
-        let quick = try source("Sources/CodexUsageUI/Views/UsagePanelView.swift")
+        let quick = try source("Sources/CodexUsageUI/Views/AgentSurfaceViews.swift")
         let shell = try source("Sources/CodexUsageMonitor/App/AppShellCoordinator.swift")
         let status = try source("Sources/CodexUsageMonitor/App/StatusBarController.swift")
         let store = try source("Sources/CodexUsageUI/Stores/UsageStore.swift")
 
-        #expect(main.contains("store.productInventory.overviewProviders"))
-        #expect(main.contains("List(store.productInventory.providers)"))
-        #expect(quick.contains("store.overviewPresentationCards"))
-        #expect(quick.contains("store.productInventory.activeAgentCount"))
+        #expect(main.contains("store.productInventory.agentWorkspaceProviders"))
+        #expect(main.contains("ForEach(workspaceProviders)"))
+        #expect(quick.contains("store.productInventory.quickPanelProviders"))
+        #expect(quick.contains("AgentGlanceRow"))
         #expect(shell.contains("store.$productInventory"))
         #expect(status.contains("store.$productInventory"))
         #expect(!shell.contains("store.objectWillChange"))

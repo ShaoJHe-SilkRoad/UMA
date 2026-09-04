@@ -152,6 +152,7 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
     public let tintFraction: Double?
     public let severity: DesktopAssistantUsageSeverity
     public let isStale: Bool
+    public let language: AppLanguage
     public let accessibilityLabel: String
 
     public init(
@@ -203,6 +204,7 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
             ?? usageValue.finitePercent.map { Double($0) / 100 }
         self.severity = severity
         self.isStale = isStale
+        self.language = language
         self.accessibilityLabel = accessibilityLabel ?? Self.makeAccessibilityLabel(
             providerName: providerName,
             connectionState: connectionState,
@@ -917,10 +919,14 @@ private struct DesktopAssistantCardView: View {
 
     @ViewBuilder
     private var tintLayer: some View {
-        if let fraction, fraction > 0 {
+        if let fraction {
             GeometryReader { proxy in
+                let visibleFraction = RemainingUsageVisualPolicy.visibleFraction(
+                    for: fraction * 100,
+                    width: proxy.size.width
+                )
                 let stops = DesktopAssistantTintGeometry.stops(
-                    remainingFraction: fraction,
+                    remainingFraction: visibleFraction,
                     width: proxy.size.width
                 )
                 let tint = tintColor.opacity(
@@ -930,7 +936,7 @@ private struct DesktopAssistantCardView: View {
                         increaseContrast: hasIncreasedContrast
                     )
                 )
-                if fraction >= 1 {
+                if visibleFraction >= 1 {
                     tint
                 } else {
                     LinearGradient(
@@ -965,24 +971,13 @@ private struct DesktopAssistantCardView: View {
     }
 
     private var tintColor: Color {
-        switch card.severity {
-        case .normal:
-            .green
-        case .warning, .critical:
-            .red
-        case .neutral:
-            .clear
-        }
+        fraction.map { RemainingUsageVisualPolicy.color(for: $0 * 100) } ?? .clear
     }
 
     private var valueColor: Color {
-        switch card.severity {
-        case .normal, .neutral:
-            .primary
-        case .warning, .critical:
-            isDark
-                ? Color(red: 1, green: 0.58, blue: 0.58)
-                : Color(red: 0.55, green: 0.08, blue: 0.10)
-        }
+        // Remaining urgency belongs to the shared bar palette. Keep the value
+        // readable and provider/accuracy-neutral; do not turn an estimated or
+        // moderately low percentage into an error-colored label.
+        .primary
     }
 }

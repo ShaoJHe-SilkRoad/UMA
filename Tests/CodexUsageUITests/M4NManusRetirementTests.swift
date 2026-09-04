@@ -52,7 +52,7 @@ struct M4NManusRetirementTests {
     }
 
     @Test
-    func codexAndWorkBuddyRemainRegisteredWithoutManusSettings() throws {
+    func codexAndClaudeRemainProductionRegisteredWhileRetiredProvidersStayDormant() throws {
         let root = repositoryRoot()
         let runtime = try text(
             at: root.appendingPathComponent(
@@ -66,8 +66,10 @@ struct M4NManusRetirementTests {
         )
 
         #expect(runtime.contains("CodexUsageConnector"))
-        #expect(runtime.contains("WorkBuddyAvailabilityConnector"))
-        #expect(runtime.contains("WorkBuddyAccountWebCreditsConnector"))
+        #expect(runtime.contains("ClaudeCodeUsageConnector"))
+        #expect(runtime.contains("productionConnectorIDs"))
+        #expect(!runtime.contains("WorkBuddyAvailabilityConnector("))
+        #expect(!runtime.contains("WorkBuddyAccountWebCreditsConnector("))
         #expect(!runtime.localizedCaseInsensitiveContains("manus"))
         #expect(settings.contains("Codex"))
         #expect(settings.contains("WorkBuddy"))

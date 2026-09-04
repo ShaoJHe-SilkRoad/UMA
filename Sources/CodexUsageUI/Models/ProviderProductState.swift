@@ -149,11 +149,21 @@ public struct ProviderProductInventoryDisposition: Equatable, Sendable {
     public let overview: Bool
     public let providers: Bool
     public let assistant: Bool
+    public let quickPanel: Bool
+    public let agentWorkspace: Bool
 
-    init(overview: Bool, providers: Bool = true, assistant: Bool) {
+    init(
+        overview: Bool,
+        providers: Bool = true,
+        assistant: Bool,
+        quickPanel: Bool = false,
+        agentWorkspace: Bool = false
+    ) {
         self.overview = overview
         self.providers = providers
         self.assistant = assistant
+        self.quickPanel = quickPanel
+        self.agentWorkspace = agentWorkspace
     }
 }
 
@@ -257,6 +267,14 @@ public struct ProviderProductInventory: Equatable, Sendable {
         providers.filter(\.inventory.assistant)
     }
 
+    public var quickPanelProviders: [ProviderProductState] {
+        providers.filter(\.inventory.quickPanel)
+    }
+
+    public var agentWorkspaceProviders: [ProviderProductState] {
+        providers.filter(\.inventory.agentWorkspace)
+    }
+
     public var usesAutomaticMinimalistMode: Bool { activeAgentCount > 4 }
 
     public func provider(_ id: ProviderProductID) -> ProviderProductState? {
@@ -311,6 +329,7 @@ struct ProviderProductReduction: Equatable, Sendable {
 /// Strict adapter from sanitized connector snapshots into product truth. It
 /// never retains the source snapshot, channel, descriptor, or arbitrary text.
 enum ProviderProductStatePolicy {
+    private static let currentSupportedProducts: Set<ProviderProductID> = [.codex, .claude]
     private struct CatalogEntry {
         let productID: ProviderProductID
         let connectorID: AgentConnectorID
@@ -362,23 +381,57 @@ enum ProviderProductStatePolicy {
             }
             let quotas = makeQuotas(card: card, freshness: .fresh)
             let primaryQuotaID = primaryQuotaID(card: card, quotas: quotas)
+            let freshness: ProviderProductFreshness = switch card.freshness {
+            case .fresh: .fresh
+            case .cached: .cached
+            case .stale: .stale
+            case .unavailable: .unavailable
+            }
+            // Preview fixtures must exercise the same visible state language as
+            // live product state. A retained stale observation remains a
+            // connected source with explicitly stale freshness, matching the
+            // production reducer rather than pretending the data is current.
+            let connection: ProviderProductConnection = switch card.connectionStatus {
+            case .connected: .connected
+            case .transitional: .transitional
+            case .authenticationRequired: .authenticationRequired
+            case .stale: .connected
+            case .disconnected: .disconnected
+            case .unavailable: .unavailable
+            case .failed: .failed
+            }
+            let health: ProviderProductHealth = switch card.connectionStatus {
+            case .failed: .error
+            case .authenticationRequired: .needsAttention
+            case .stale: .degraded
+            default: freshness == .fresh ? .healthy : .degraded
+            }
+            let isSupported = currentSupportedProducts.contains(entry.productID)
+            let hasUsableQuota = quotas.contains { $0.value != .unavailable }
+            let isQuickEligible = isSupported && hasUsableQuota && [
+                ProviderProductConnection.connected,
+                .transitional,
+            ].contains(connection)
             return ProviderProductState(
                 id: entry.productID,
                 planLabel: nil,
                 quotas: quotas,
                 primaryQuotaID: primaryQuotaID,
                 precision: quotas.first { $0.id == primaryQuotaID }?.precision ?? .unavailable,
-                freshness: .fresh,
+                freshness: freshness,
                 availability: .available,
-                connection: .connected,
-                health: .healthy,
+                connection: connection,
+                health: health,
                 actions: entry.productID == .claude ? [.refresh, .accuracySync] : [.refresh],
                 sourceSummary: .unavailable,
                 inventory: .init(
                     overview: true,
-                    assistant: card.isVisibleInDesktopAssistant
+                    providers: isSupported,
+                    assistant: isQuickEligible && card.isVisibleInDesktopAssistant,
+                    quickPanel: isQuickEligible,
+                    agentWorkspace: isSupported
                 ),
-                isActive: true,
+                isActive: isQuickEligible,
                 capturedAt: card.capturedAt
             )
         })
@@ -389,6 +442,7 @@ enum ProviderProductStatePolicy {
         admissions: [ProviderSurfaceAdmissionRecord],
         monitoringEnabledIDs: Set<AgentConnectorID>,
         configuredOrDetectedIDs: Set<AgentConnectorID> = [],
+        pendingInitialAdmissionIDs: Set<AgentConnectorID> = [],
         previousCards: [SharedUsageCardPresentation],
         language: AppLanguage,
         publicationRevision: UInt64 = 0,
@@ -411,6 +465,9 @@ enum ProviderProductStatePolicy {
                 admission: admittedByID[entry.connectorID]?.admission,
                 monitoringEnabled: monitoringEnabledIDs.contains(entry.connectorID),
                 configuredOrDetected: configuredOrDetectedIDs.contains(entry.connectorID),
+                pendingInitialAdmission: pendingInitialAdmissionIDs.contains(
+                    entry.connectorID
+                ),
                 card: cardsByID[entry.connectorID.rawValue]
             )
         }
@@ -434,15 +491,31 @@ enum ProviderProductStatePolicy {
         admission: ProviderSurfaceAdmission?,
         monitoringEnabled: Bool,
         configuredOrDetected: Bool,
+        pendingInitialAdmission: Bool,
         card: SharedUsageCardPresentation?
     ) -> ProviderProductState {
+        let freshness = freshness(snapshot?.freshness)
+        let quotas = makeQuotas(card: card, freshness: freshness)
+        let sourceSummary = sourceSummary(productID: entry.productID, snapshot: snapshot)
+        let hasQualifiedClaudeLocalSmartUsage = entry.productID == .claude
+            && [.localSmartExact, .localSmartEstimate].contains(sourceSummary)
+            && quotas.contains { $0.value != .unavailable }
         let availability = availability(
             snapshot: snapshot,
             admission: admission,
-            monitoringEnabled: monitoringEnabled
+            monitoringEnabled: monitoringEnabled,
+            hasQualifiedClaudeLocalSmartUsage: hasQualifiedClaudeLocalSmartUsage
         )
-        let connection = connection(snapshot?.state, availability: availability)
-        let freshness = freshness(snapshot?.freshness)
+        // Consent-granted startup is a real in-flight state, not a terminal
+        // source failure. Keep quota/source fields unavailable until the first
+        // admission completes; an actual admission result always wins.
+        let isAwaitingFirstAdmission = pendingInitialAdmission
+            && monitoringEnabled
+            && snapshot == nil
+            && admission == nil
+        let connection = isAwaitingFirstAdmission
+            ? ProviderProductConnection.transitional
+            : connection(snapshot?.state, availability: availability)
         let health = health(
             snapshot: snapshot,
             availability: availability,
@@ -453,7 +526,6 @@ enum ProviderProductStatePolicy {
             availability: availability,
             health: health
         )
-        let quotas = makeQuotas(card: card, freshness: freshness)
         let primaryQuotaID = primaryQuotaID(card: card, quotas: quotas)
         let precision = quotas.first { $0.id == primaryQuotaID }?.precision ?? .unavailable
         let isActive = monitoringEnabled && [
@@ -461,9 +533,20 @@ enum ProviderProductStatePolicy {
             .transitional,
         ].contains(connection)
         let actionRequired = health == .error || health == .needsAttention
-        let overview = monitoringEnabled && (
-            isActive || snapshot != nil || admission != nil
-                || configuredOrDetected || actionRequired || !quotas.isEmpty
+        let isSupported = currentSupportedProducts.contains(entry.productID)
+        let hasUsableQuota = quotas.contains { $0.value != .unavailable }
+        let retainedUsableState = hasUsableQuota && [
+            ProviderProductConnection.connected,
+            .transitional,
+        ].contains(connection)
+        let overview = isSupported && monitoringEnabled && (
+            isActive || configuredOrDetected || retainedUsableState || actionRequired
+        )
+        let quickPanel = isSupported && monitoringEnabled && retainedUsableState
+        let agentWorkspace = isSupported && monitoringEnabled && (
+            entry.productID == .codex
+                || entry.productID == .claude
+                || retainedUsableState || configuredOrDetected || actionRequired
         )
 
         return ProviderProductState(
@@ -481,15 +564,19 @@ enum ProviderProductStatePolicy {
                 health: health
             ),
             actions: actions,
-            sourceSummary: sourceSummary(productID: entry.productID, snapshot: snapshot),
+            sourceSummary: sourceSummary,
             diagnosticReason: diagnosticReason(
                 snapshot: snapshot,
                 admission: admission,
-                availability: availability
+                availability: availability,
+                hasQualifiedClaudeLocalSmartUsage: hasQualifiedClaudeLocalSmartUsage
             ),
             inventory: ProviderProductInventoryDisposition(
                 overview: overview,
-                assistant: isActive && availability != .unsupported
+                providers: agentWorkspace,
+                assistant: quickPanel,
+                quickPanel: quickPanel,
+                agentWorkspace: agentWorkspace
             ),
             isActive: isActive,
             capturedAt: snapshot?.capturedAt
@@ -537,9 +624,10 @@ enum ProviderProductStatePolicy {
             if freshness == .stale || freshness == .unavailable {
                 creditComparison = .ineligible(.stale)
             } else if case .remainingCredits = value {
-                creditComparison = availability.normalizedRemainingFraction.map {
-                    .eligibleRemainingPercent($0 * 100)
-                } ?? .ineligible(.nativeUnit)
+                // Credits remain native provider balances even when a source
+                // supplies a denominator. They never participate in limiting
+                // order with percentage quota windows.
+                creditComparison = .ineligible(.nativeUnit)
             } else {
                 creditComparison = comparison(value, freshness: freshness)
             }
@@ -620,9 +708,15 @@ enum ProviderProductStatePolicy {
     private static func availability(
         snapshot: AgentUsageSnapshot?,
         admission: ProviderSurfaceAdmission?,
-        monitoringEnabled: Bool
+        monitoringEnabled: Bool,
+        hasQualifiedClaudeLocalSmartUsage: Bool
     ) -> ProviderProductAvailability {
         guard monitoringEnabled else { return .disabled }
+        // Claude Local Smart and Safari Accuracy are independent channels. A
+        // qualified local quota remains available when the browser channel is
+        // unauthenticated or otherwise unavailable; the workspace reports the
+        // browser condition separately instead of erasing usable local truth.
+        if hasQualifiedClaudeLocalSmartUsage { return .available }
         switch admission {
         case .hiddenNotAuthenticated: return .setupRequired
         case .hiddenUnsupported: return .unsupported
@@ -738,15 +832,18 @@ enum ProviderProductStatePolicy {
     private static func diagnosticReason(
         snapshot: AgentUsageSnapshot?,
         admission: ProviderSurfaceAdmission?,
-        availability: ProviderProductAvailability
+        availability: ProviderProductAvailability,
+        hasQualifiedClaudeLocalSmartUsage: Bool
     ) -> ProviderProductDiagnosticReason? {
         if availability == .disabled { return nil }
-        switch admission {
-        case .hiddenNotAuthenticated: return .setupRequired
-        case .hiddenNotRunning: return .processUnavailable
-        case .hiddenNoAdmittedLocalSource, .hiddenCurrentReadFailed: return .sourceUnavailable
-        case .hiddenUnsupported: return .unsupported
-        case .admitted, nil: break
+        if !hasQualifiedClaudeLocalSmartUsage {
+            switch admission {
+            case .hiddenNotAuthenticated: return .setupRequired
+            case .hiddenNotRunning: return .processUnavailable
+            case .hiddenNoAdmittedLocalSource, .hiddenCurrentReadFailed: return .sourceUnavailable
+            case .hiddenUnsupported: return .unsupported
+            case .admitted, nil: break
+            }
         }
         switch snapshot?.safeFailure {
         case .authorizationRequired: return .authorizationRequired

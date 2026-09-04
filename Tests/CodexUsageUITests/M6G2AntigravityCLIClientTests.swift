@@ -208,7 +208,7 @@ struct M6G2AntigravityCLIClientTests {
         }
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func productionRunnerCancellationTerminatesOwnedChild() async throws {
         let runner = FoundationAntigravityProcessRunner()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -225,10 +225,11 @@ struct M6G2AntigravityCLIClientTests {
                     executable: "/bin/sh",
                     arguments: [
                         "-c",
-                        #"started="$1"; cancelled="$2"; on_term() { printf 'terminated' > "$cancelled.tmp"; /bin/mv "$cancelled.tmp" "$cancelled"; exit 0; }; trap on_term TERM INT; printf '%d' $$ > "$started.tmp"; /bin/mv "$started.tmp" "$started"; while :; do :; done"#,
+                        #"started="$1"; cancelled="$2"; fifo="$3"; on_term() { printf 'terminated' > "$cancelled.tmp"; /bin/mv "$cancelled.tmp" "$cancelled"; exit 0; }; trap on_term TERM INT; /usr/bin/mkfifo "$fifo"; exec 3<> "$fifo"; printf '%d' $$ > "$started.tmp"; /bin/mv "$started.tmp" "$started"; IFS= read -r _ <&3"#,
                         "uma-antigravity-cancellation",
                         startedReceipt.path,
                         cancellationReceipt.path,
+                        root.appendingPathComponent("control.fifo").path,
                     ],
                     cwd: root,
                     timeout: 10

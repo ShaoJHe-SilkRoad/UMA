@@ -8,7 +8,8 @@ final class StatusBarController: NSObject {
     private let lifecycleGeneration: UUID
     private let diagnostics: AppShellDiagnosticRecorder
     private let statusItem: NSStatusItem
-    private var panelController: TransparentUsagePanelController?
+    private var panelController: QuickPanelPopoverController?
+    private var quickPanelActions: QuickPanelActions?
     private weak var assistantController: DesktopAssistantPanelController?
     private var storeObserver: AnyCancellable?
     private var isTornDown = false
@@ -25,7 +26,7 @@ final class StatusBarController: NSObject {
         super.init()
 
         configureStatusButton()
-        panelController = TransparentUsagePanelController(
+        panelController = QuickPanelPopoverController(
             statusItem: statusItem,
             visibilityDidChange: { [weak self] isVisible in
                 self?.statusItem.button?.highlight(isVisible)
@@ -39,17 +40,11 @@ final class StatusBarController: NSObject {
         installStatusEventMonitor()
     }
 
-    func attach(runtime: UsageMonitorRuntime) {
+    func attach(runtime: UsageMonitorRuntime, actions: QuickPanelActions) {
         guard store == nil, !isTornDown else { return }
         store = runtime.store
-        panelController?.attachContent(
-            store: runtime.store,
-            claudeSettings: runtime.claudeSettings,
-            antigravitySettings: runtime.antigravitySettings,
-            workBuddySettings: runtime.workBuddySettings,
-            workBuddyLogin: runtime.workBuddyLogin,
-            workBuddyAccountWebSync: runtime.workBuddyAccountWebSync
-        )
+        quickPanelActions = actions
+        panelController?.attachContent(store: runtime.store, actions: actions)
         observeUsageChanges()
         updateStatusButton()
         record(.runtimeAttached)
@@ -78,15 +73,122 @@ final class StatusBarController: NSObject {
         }
         var completed = 0
         for index in 0..<toggleCount {
-            button.performClick(nil)
-            guard let state = panelController?.diagnosticState else {
+            let expectsOpen = index.isMultiple(of: 2)
+            guard let panelController else {
                 return machineDiagnosticResult(
                     requested: toggleCount,
                     completed: completed,
-                    failure: "PANEL_WINDOW_MISSING"
+                    failure: "PANEL_CONTROLLER_MISSING"
                 )
             }
-            let expectsOpen = index.isMultiple(of: 2)
+            if expectsOpen {
+                let preflight = panelController.diagnosticState
+                guard preflight.anchorAttachedToWindow else {
+                    return machineDiagnosticResult(
+                        requested: toggleCount,
+                        completed: completed,
+                        failure: "STATUS_ITEM_ANCHOR_NOT_ATTACHED"
+                    )
+                }
+                guard preflight.anchorWindowVisible else {
+                    return machineDiagnosticResult(
+                        requested: toggleCount,
+                        completed: completed,
+                        failure: "STATUS_ITEM_ANCHOR_WINDOW_NOT_VISIBLE"
+                    )
+                }
+                guard !preflight.anchorBounds.isEmpty else {
+                    return machineDiagnosticResult(
+                        requested: toggleCount,
+                        completed: completed,
+                        failure: "STATUS_ITEM_ANCHOR_BOUNDS_EMPTY"
+                    )
+                }
+            }
+            let transitioned = await panelController.performDiagnosticTransition(
+                expecting: expectsOpen
+            ) {
+                guard let action = button.action else { return false }
+                return NSApp.sendAction(action, to: button.target, from: button)
+            }
+            guard transitioned else {
+                return machineDiagnosticResult(
+                    requested: toggleCount,
+                    completed: completed,
+                    failure: expectsOpen
+                        ? "PANEL_OPEN_TRANSITION_TIMED_OUT"
+                        : "PANEL_CLOSE_TRANSITION_TIMED_OUT"
+                )
+            }
+            let state = panelController.diagnosticState
+            if expectsOpen {
+                guard state.anchorAttachedToWindow else {
+                    return machineDiagnosticResult(
+                        requested: toggleCount,
+                        completed: completed,
+                        failure: "STATUS_ITEM_ANCHOR_NOT_ATTACHED"
+                    )
+                }
+                guard state.anchorWindowVisible else {
+                    return machineDiagnosticResult(
+                        requested: toggleCount,
+                        completed: completed,
+                        failure: "STATUS_ITEM_ANCHOR_WINDOW_NOT_VISIBLE"
+                    )
+                }
+                guard !state.anchorBounds.isEmpty else {
+                    return machineDiagnosticResult(
+                        requested: toggleCount,
+                        completed: completed,
+                        failure: "STATUS_ITEM_ANCHOR_BOUNDS_EMPTY"
+                    )
+                }
+                guard state.usesSingleSurfacePanel else {
+                    return machineDiagnosticResult(
+                        requested: toggleCount,
+                        completed: completed,
+                        failure: "PANEL_NOT_SINGLE_SURFACE_HOST"
+                    )
+                }
+                guard (300...330).contains(state.contentSize.width),
+                      state.contentSize.height >= QuickPanelPopoverController.minimumContentHeight,
+                      state.contentSize.height <= QuickPanelPopoverController.maximumContentHeight
+                else {
+                    return machineDiagnosticResult(
+                        requested: toggleCount,
+                        completed: completed,
+                        failure: "PANEL_CONTENT_SIZE_OUT_OF_BOUNDS"
+                    )
+                }
+                guard state.eventMonitorCount == 0, !state.ignoresMouseEvents else {
+                    return machineDiagnosticResult(
+                        requested: toggleCount,
+                        completed: completed,
+                        failure: "PANEL_INTERACTION_OWNERSHIP_INVALID"
+                    )
+                }
+                guard state.isVisible else {
+                    return machineDiagnosticResult(
+                        requested: toggleCount,
+                        completed: completed,
+                        failure: "PANEL_NOT_SHOWN"
+                    )
+                }
+                guard state.isEffectivelyOpen else {
+                    return machineDiagnosticResult(
+                        requested: toggleCount,
+                        completed: completed,
+                        failure: "PANEL_WINDOW_NOT_VISIBLE"
+                    )
+                }
+                guard state.isResponsive else {
+                    return machineDiagnosticResult(
+                        requested: toggleCount,
+                        completed: completed,
+                        failure: "PANEL_HIT_TESTING_UNAVAILABLE"
+                    )
+                }
+            }
             let converged = expectsOpen
                 ? state.isEffectivelyOpen && state.isResponsive
                 : !state.isVisible && state.eventMonitorCount == 0
@@ -132,6 +234,7 @@ final class StatusBarController: NSObject {
         guard !isTornDown else { return }
         isTornDown = true
         panelController?.tearDown()
+        quickPanelActions = nil
         storeObserver?.cancel()
         if let statusEventMonitor { NSEvent.removeMonitor(statusEventMonitor) }
         statusEventMonitor = nil
@@ -154,7 +257,9 @@ final class StatusBarController: NSObject {
     func showQuickPanel(expandingProviderID providerID: String? = nil) {
         guard !isTornDown else { return }
         if let providerID {
-            panelController?.show(expandingProviderID: providerID)
+            panelController?.show(
+                selecting: ProviderProductID(rawValue: providerID)
+            )
         } else {
             panelController?.present()
         }
@@ -341,7 +446,7 @@ final class StatusBarController: NSObject {
     private func desktopAssistantMenuItem() -> NSMenuItem {
         guard let assistantController else { return NSMenuItem() }
         let root = NSMenuItem(
-            title: assistantText(english: "Desktop Assistant", chinese: "桌面助手"),
+            title: assistantText(english: "Desktop Wizard", chinese: "桌面向导"),
             action: nil,
             keyEquivalent: ""
         )
@@ -445,7 +550,7 @@ final class StatusBarController: NSObject {
     @objc
     private func refreshUsage() {
         guard let store, store.allowsManualRefresh else { return }
-        Task { await store.refresh() }
+        quickPanelActions?.refreshAll()
     }
 
     @objc

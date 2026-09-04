@@ -298,28 +298,15 @@ struct M2WAG1DesktopAssistantTests {
         #expect(assistant.contains("onSelectCard"))
         #expect(assistant.contains(".accessibilityAction"))
 
-        let status = try String(
+        let shell = try String(
             contentsOf: repository.appendingPathComponent(
-                "Sources/CodexUsageMonitor/App/StatusBarController.swift"
+                "Sources/CodexUsageMonitor/App/AppShellCoordinator.swift"
             ),
             encoding: .utf8
         )
-        let panel = try String(
-            contentsOf: repository.appendingPathComponent(
-                "Sources/CodexUsageMonitor/App/TransparentUsagePanelController.swift"
-            ),
-            encoding: .utf8
-        )
-        #expect(status.contains("show(expandingProviderID: providerID)"))
-        #expect(panel.contains("UsagePanelNavigationRequest.assistantSelection"))
-        #expect(!panel.contains("settingsInitiallyPresented: true"))
-
-        let request = UsagePanelNavigationRequest.assistantSelection(
-            providerID: "workbuddy.manualAvailability"
-        )
-        #expect(request.expandedProviderIDs == ["workbuddy.manualAvailability"])
-        #expect(request.settingsInitiallyPresented == false)
-        #expect(request.requestsRefresh == false)
+        #expect(shell.contains("assistantController.setSelectionHandler"))
+        #expect(shell.contains("self?.showAgent(providerID)"))
+        #expect(!shell.contains("showQuickPanel(expandingProviderID: providerID)"))
 
         let suiteName = "M2WAG1DesktopAssistantTests.navigation.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))

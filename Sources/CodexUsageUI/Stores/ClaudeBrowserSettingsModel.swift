@@ -59,6 +59,43 @@ struct ClaudeSourceTransparency: Equatable, Sendable {
     let storedLocally = "Owner-only exact anchors and sanitized calibration metadata"
 }
 
+/// Provider-specific state projected into the shared Agent workspace without
+/// leaking browser/runtime implementation types into the application shell.
+public enum ClaudeAgentControlState: Equatable, Sendable {
+    case consentRequired
+    case localSmartRepairRequired
+    case accuracyReady
+    case accuracyInProgress
+    case companionStarting
+    case companionUpdateRequired
+    case onlineVerificationUnavailable
+
+    static func classify(
+        consentGranted: Bool,
+        localSmartState: ClaudeLocalSmartState,
+        companionRuntime: ClaudeCompanionRuntimeState,
+        browserAccuracyState: ClaudeBrowserAccuracyState
+    ) -> Self {
+        guard consentGranted else { return .consentRequired }
+        switch localSmartState {
+        case .unavailable, .error:
+            return .localSmartRepairRequired
+        case .exactLocal, .estimated, .staleUnsupported:
+            break
+        }
+        switch companionRuntime {
+        case .ready:
+            return browserAccuracyState == .syncing ? .accuracyInProgress : .accuracyReady
+        case .starting:
+            return .companionStarting
+        case .updatePendingSafariRestart, .protocolMismatch:
+            return .companionUpdateRequired
+        case .notConfigured, .unavailable:
+            return .onlineVerificationUnavailable
+        }
+    }
+}
+
 @MainActor
 final class ClaudeBrowserConsentStore {
     private enum Key {
@@ -113,6 +150,20 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     @Published private(set) var browserAccuracyStage: ClaudeLiveLinkStageReason?
 
     let sourceTransparency = ClaudeSourceTransparency()
+
+    /// Product surfaces may use this to distinguish first-time consent from a
+    /// recoverable Local Smart startup failure. The consent value remains owned
+    /// by this model; views must still route mutations through its actions.
+    public var hasLocalSmartConsent: Bool { consentGranted }
+
+    public var agentControlState: ClaudeAgentControlState {
+        ClaudeAgentControlState.classify(
+            consentGranted: consentGranted,
+            localSmartState: localSmartState,
+            companionRuntime: productState.companionRuntime,
+            browserAccuracyState: browserAccuracyState
+        )
+    }
 
     var productState: ClaudeProductStateMatrix {
         ClaudeProductStateMatrix.classify(
@@ -194,7 +245,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         }
     }
 
-    func connectWithConsent() {
+    public func connectWithConsent() {
         guard !actionInProgress else { return }
         actionInProgress = true
         activeAction = .connecting
@@ -230,11 +281,11 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         }
     }
 
-    func syncNow() {
+    public func syncNow() {
         run(.refreshing) { connector in await connector.syncNow() }
     }
 
-    func accuracySync() {
+    public func accuracySync() {
         run(.refreshing) { connector in await connector.accuracySync() }
     }
 
@@ -344,7 +395,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         consentStore.allowSafariLaunch = false
     }
 
-    func disconnect() {
+    public func disconnect() {
         guard !actionInProgress else { return }
         actionInProgress = true
         activeAction = .disconnecting

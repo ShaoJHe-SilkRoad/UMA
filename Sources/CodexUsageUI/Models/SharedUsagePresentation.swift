@@ -535,8 +535,14 @@ public enum SharedUsagePresentationPolicy {
            ),
            account.freshness == snapshot.freshness,
            ProviderUsageSurfacePolicy.validatesUsage(account),
-           ProviderUsageSurfacePolicy.isAdmissibleRetainedFailure(snapshot.safeFailure),
-           ProviderUsageSurfacePolicy.isAdmissibleRetainedFailure(account.safeFailure) {
+           ProviderUsageSurfacePolicy.isAdmissibleRetainedFailure(
+               snapshot.safeFailure,
+               providerID: snapshot.id
+           ),
+           ProviderUsageSurfacePolicy.isAdmissibleRetainedFailure(
+               account.safeFailure,
+               providerID: snapshot.id
+           ) {
             return true
         }
         guard snapshot.state == .ready,

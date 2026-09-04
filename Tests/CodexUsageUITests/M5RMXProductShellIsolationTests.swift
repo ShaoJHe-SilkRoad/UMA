@@ -150,18 +150,16 @@ struct M5RMXProductShellIsolationTests {
         #expect(status.contains("button.action = #selector(handleStatusItemAction)"))
     }
 
-    @Test("Panel toggle converges from stale invisible-open state")
+    @Test("Quick Panel toggle follows the selected single-surface host")
     func panelStateFollowsActualWindow() throws {
         let panel = try source(
-            "Sources/CodexUsageMonitor/App/TransparentUsagePanelController.swift"
+            "Sources/CodexUsageMonitor/App/QuickPanelPopoverController.swift"
         )
-        #expect(panel.contains("isEffectivelyOpen ? close() : show()"))
-        #expect(panel.contains("panel.alphaValue > 0.01"))
-        #expect(panel.contains("!panel.ignoresMouseEvents"))
-        #expect(panel.contains("screen.frame.intersects(panel.frame)"))
-        #expect(panel.contains("panel.alphaValue = 1"))
-        #expect(panel.contains("panel.ignoresMouseEvents = false"))
-        #expect(panel.contains("NSApp.unhide(nil)"))
+        #expect(panel.contains("func toggle() { panel.isVisible ? close() : present() }"))
+        #expect(panel.contains("panel.hasShadow = false"))
+        #expect(panel.contains("panel.contentView === materialHost"))
+        #expect(panel.contains("eventMonitorCount: 0"))
+        #expect(panel.contains("AdaptivePanelMaterialHostView exclusively owns"))
     }
 
     @Test("Shell is created before provider runtime composition")
@@ -179,7 +177,7 @@ struct M5RMXProductShellIsolationTests {
         let initializer = try #require(
             status.slice(from: "init(", through: "func attach(runtime:")
         )
-        #expect(initializer.contains("TransparentUsagePanelController("))
+        #expect(initializer.contains("QuickPanelPopoverController("))
         #expect(!initializer.contains("DesktopAssistantPanelController("))
         #expect(!initializer.contains("UsageMonitorRuntime"))
 
@@ -203,7 +201,7 @@ struct M5RMXProductShellIsolationTests {
         }
     }
 
-    @Test("Shell-only machine diagnostic exercises 50 native AppKit toggles")
+    @Test("Shell-only machine diagnostic exercises 100 native AppKit toggles")
     func shellOnlyDiagnosticIsProviderInertAndChecksResponsiveness() throws {
         let app = try source("Sources/CodexUsageMonitor/App/CodexUsageMonitorApp.swift")
         let status = try source("Sources/CodexUsageMonitor/App/StatusBarController.swift")
@@ -212,8 +210,8 @@ struct M5RMXProductShellIsolationTests {
         #expect(app.contains("guard !shellDiagnosticRequested else { return .terminateNow }"))
         #expect(app.contains("startProviders: !self.shellDiagnosticRequested"))
         #expect(app.contains("runMachineDiagnostic("))
-        #expect(app.contains("toggleCount: 50"))
-        #expect(status.contains("button.performClick(nil)"))
+        #expect(app.contains("toggleCount: 100"))
+        #expect(status.contains("NSApp.sendAction(action, to: button.target, from: button)"))
         #expect(status.contains("state.isEffectivelyOpen && state.isResponsive"))
         #expect(runtime.contains("if startProviders"))
     }

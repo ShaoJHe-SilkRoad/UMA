@@ -96,11 +96,20 @@ actor AgentConnectorSnapshotStore {
     }
 
     func save(_ snapshots: [AgentUsageSnapshot]) throws {
-        let changed = try snapshots.map(Self.persisted)
+        let incoming = try snapshots.map(Self.persisted)
         let existing = decodeEntries(at: url) ?? decodeEntries(at: backupURL) ?? []
-        var merged = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
-        for entry in changed { merged[entry.id] = entry }
-        let entries = merged.values.sorted { $0.id < $1.id }
+        let replacedIDs = Set(incoming.map(\.id))
+        let entries = (existing.filter { !replacedIDs.contains($0.id) } + incoming)
+            .sorted { $0.id < $1.id }
+        try write(entries)
+    }
+
+    func replace(with snapshots: [AgentUsageSnapshot]) throws {
+        let entries = try snapshots.map(Self.persisted).sorted { $0.id < $1.id }
+        try write(entries)
+    }
+
+    private func write(_ entries: [PersistedEntry]) throws {
         guard entries.count <= Self.maximumEntries else { throw StoreError.rejected }
         let envelope = Envelope(schemaVersion: Self.schemaVersion, entries: entries)
         let data = try JSONEncoder.safeSnapshotEncoder.encode(envelope)

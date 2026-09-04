@@ -119,7 +119,7 @@ struct UMA011G1AutoSearchTests {
         await store.stopAllConnectors()
     }
 
-    @Test @MainActor
+    @Test(.timeLimit(.minutes(1))) @MainActor
     func overlappingManualSearchAndRefreshShareOneRegisteredProviderScan()
         async throws
     {
@@ -146,7 +146,7 @@ struct UMA011G1AutoSearchTests {
         )
 
         let search = Task { await store.searchForAgents() }
-        try await waitUntil { await connector.didEnterProbe }
+        await connector.waitUntilProbeEntered()
         let refresh = Task { await store.refresh() }
         await connector.releaseProbe()
         await search.value
@@ -330,6 +330,7 @@ private actor SearchFixtureConnector: AgentUsageConnector {
     private let snapshotValue: AgentUsageSnapshot
     private let blocksProbe: Bool
     private var probeContinuation: CheckedContinuation<Void, Never>?
+    private var probeEntryContinuations: [CheckedContinuation<Void, Never>] = []
     private var probeWasReleased = false
     private(set) var didEnterProbe = false
     private(set) var probeCount = 0
@@ -407,12 +408,24 @@ private actor SearchFixtureConnector: AgentUsageConnector {
     func probe() async -> AgentConnectorProbe {
         probeCount += 1
         didEnterProbe = true
+        let entryContinuations = probeEntryContinuations
+        probeEntryContinuations.removeAll()
+        for continuation in entryContinuations {
+            continuation.resume()
+        }
         if blocksProbe && !probeWasReleased {
             await withCheckedContinuation { continuation in
                 probeContinuation = continuation
             }
         }
         return probeValue
+    }
+
+    func waitUntilProbeEntered() async {
+        if didEnterProbe { return }
+        await withCheckedContinuation { continuation in
+            probeEntryContinuations.append(continuation)
+        }
     }
 
     func releaseProbe() {
