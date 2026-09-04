@@ -52,6 +52,7 @@ final class QuickPanelPopoverController: NSObject, NSWindowDelegate {
     private var diagnosticEvent: ((AppShellDiagnosticStage, Bool, String?) -> Void)?
     private var hostedContentView: NSView?
     private var contentObserver: AnyCancellable?
+    private var displayPreferenceObservation: ApplicationPreferences.Observation?
     private var hasAttachedContent = false
     private var isClosing = false
     private var expectedDiagnosticVisibility: Bool?
@@ -95,12 +96,17 @@ final class QuickPanelPopoverController: NSObject, NSWindowDelegate {
         )
     }
 
-    func attachContent(store: UsageStore, actions: QuickPanelActions) {
+    func attachContent(
+        store: UsageStore,
+        preferences: ApplicationPreferences,
+        actions: QuickPanelActions
+    ) {
         guard !hasAttachedContent else { return }
         hasAttachedContent = true
         installContent(
             QuickPanelSurface(
                 store: store,
+                preferences: preferences,
                 openMain: { [weak self] in
                     self?.close()
                     actions.openMain()
@@ -119,6 +125,14 @@ final class QuickPanelPopoverController: NSObject, NSWindowDelegate {
             )
         )
         contentObserver = store.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in
+                self?.updateContentSize(repositionIfVisible: true)
+            }
+        }
+        displayPreferenceObservation = preferences.observe { [weak self] change in
+            guard change.key == UMAApplicationPreferenceKeys.quickPanelShowsReset.name else {
+                return
+            }
             DispatchQueue.main.async { [weak self] in
                 self?.updateContentSize(repositionIfVisible: true)
             }
@@ -161,6 +175,8 @@ final class QuickPanelPopoverController: NSObject, NSWindowDelegate {
         completeDiagnosticTransition(false)
         contentObserver?.cancel()
         contentObserver = nil
+        displayPreferenceObservation?.cancel()
+        displayPreferenceObservation = nil
         close()
         panel.delegate = nil
         panel.orderOut(nil)

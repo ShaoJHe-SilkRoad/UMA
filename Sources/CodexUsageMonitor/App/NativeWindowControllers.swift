@@ -164,6 +164,7 @@ final class SettingsWindowController: NSWindowController {
         window?.contentViewController = NSHostingController(
             rootView: SettingsWindowRootView(
                 preferences: preferences,
+                store: store,
                 navigation: navigation
             )
         )

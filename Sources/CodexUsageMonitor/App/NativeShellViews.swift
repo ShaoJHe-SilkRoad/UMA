@@ -158,9 +158,14 @@ struct MainWindowRootView: View {
 
 struct SettingsWindowRootView: View {
     let preferences: ApplicationPreferences
+    @ObservedObject var store: UsageStore
     @ObservedObject var navigation: GlobalSettingsNavigationState
 
     var body: some View {
-        GlobalSettingsSurface(preferences: preferences, navigation: navigation)
+        GlobalSettingsSurface(
+            preferences: preferences,
+            store: store,
+            navigation: navigation
+        )
     }
 }

@@ -12,6 +12,8 @@ final class StatusBarController: NSObject {
     private var quickPanelActions: QuickPanelActions?
     private weak var assistantController: DesktopAssistantPanelController?
     private var storeObserver: AnyCancellable?
+    private var preferenceObservation: ApplicationPreferences.Observation?
+    private var showsRemainingValue = true
     private var isTornDown = false
     private var statusEventMonitor: Any?
     private var statusEventBeganAt: TimeInterval?
@@ -44,7 +46,23 @@ final class StatusBarController: NSObject {
         guard store == nil, !isTornDown else { return }
         store = runtime.store
         quickPanelActions = actions
-        panelController?.attachContent(store: runtime.store, actions: actions)
+        showsRemainingValue = runtime.preferences.value(
+            for: UMAApplicationPreferenceKeys.menuBarShowsRemaining
+        )
+        preferenceObservation = runtime.preferences.observe { [weak self, weak preferences = runtime.preferences] change in
+            guard change.key == UMAApplicationPreferenceKeys.menuBarShowsRemaining.name,
+                  let self,
+                  let preferences else { return }
+            self.showsRemainingValue = preferences.value(
+                for: UMAApplicationPreferenceKeys.menuBarShowsRemaining
+            )
+            self.updateStatusButton()
+        }
+        panelController?.attachContent(
+            store: runtime.store,
+            preferences: runtime.preferences,
+            actions: actions
+        )
         observeUsageChanges()
         updateStatusButton()
         record(.runtimeAttached)
@@ -236,6 +254,8 @@ final class StatusBarController: NSObject {
         panelController?.tearDown()
         quickPanelActions = nil
         storeObserver?.cancel()
+        preferenceObservation?.cancel()
+        preferenceObservation = nil
         if let statusEventMonitor { NSEvent.removeMonitor(statusEventMonitor) }
         statusEventMonitor = nil
         NSStatusBar.system.removeStatusItem(statusItem)
@@ -311,7 +331,9 @@ final class StatusBarController: NSObject {
 
     private func updateStatusButton() {
         repairStatusButtonContractIfNeeded()
-        statusItem.button?.title = store?.menuPercent.map { " " + String($0) + "%" } ?? " —"
+        statusItem.button?.title = showsRemainingValue
+            ? (store?.menuPercent.map { " " + String($0) + "%" } ?? " —")
+            : ""
         statusItem.button?.toolTip = store?.language.appTitle ?? "UMA"
         statusItem.button?.setAccessibilityLabel(
             store?.menuPercent.map {

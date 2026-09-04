@@ -14,8 +14,9 @@ struct UMA014M3RSettingsRebuildTests {
             DesktopAssistantPreferences.Keys.density:
                 DesktopAssistantDensity.regular.rawValue,
         ])
-        let settings = GlobalSettingsViewModel(preferences: preferences)
-        let secondSurface = GlobalSettingsViewModel(preferences: preferences)
+        let store = UsageStore.preview(language: .english)
+        let settings = GlobalSettingsViewModel(preferences: preferences, store: store)
+        let secondSurface = GlobalSettingsViewModel(preferences: preferences, store: store)
 
         #expect(settings.assistantEnabled)
         #expect(!settings.assistantAlwaysOnTop)
@@ -52,7 +53,10 @@ struct UMA014M3RSettingsRebuildTests {
         let preferences = ApplicationPreferences.inMemory(seed: [
             DesktopAssistantPreferences.Keys.density: "future-layout",
         ])
-        let settings = GlobalSettingsViewModel(preferences: preferences)
+        let settings = GlobalSettingsViewModel(
+            preferences: preferences,
+            store: UsageStore.preview(language: .english)
+        )
 
         #expect(settings.assistantDensity == .automatic)
 
@@ -61,6 +65,31 @@ struct UMA014M3RSettingsRebuildTests {
             for: UMAApplicationPreferenceKeys.assistantDensity
         )
         #expect(settings.assistantDensity == .regular)
+    }
+
+    @Test("Global appearance, menu value, and language use the shared preference truth")
+    func globalDisplayPreferencesSynchronize() {
+        let preferences = ApplicationPreferences.inMemory()
+        let store = UsageStore.preview(language: .english)
+        let settings = GlobalSettingsViewModel(preferences: preferences, store: store)
+        let secondSurface = GlobalSettingsViewModel(preferences: preferences, store: store)
+
+        settings.setAppearance(.dark)
+        settings.setMenuBarShowsRemaining(false)
+        settings.setQuickPanelShowsReset(false)
+        settings.setLanguage(.simplifiedChinese)
+
+        #expect(settings.appearance == .dark)
+        #expect(secondSurface.appearance == .dark)
+        #expect(!settings.menuBarShowsRemaining)
+        #expect(!secondSurface.menuBarShowsRemaining)
+        #expect(!settings.quickPanelShowsReset)
+        #expect(!secondSurface.quickPanelShowsReset)
+        #expect(store.language == .simplifiedChinese)
+        #expect(
+            preferences.value(for: UMAApplicationPreferenceKeys.language)
+                == AppLanguage.simplifiedChinese.rawValue
+        )
     }
 
     @Test("Settings root is stable global navigation with no provider controls")
@@ -83,6 +112,11 @@ struct UMA014M3RSettingsRebuildTests {
         #expect(!settings.contains("case providers"))
         #expect(!settings.contains("Accuracy Sync"))
         #expect(!settings.contains("Button(\"Connect\""))
+        #expect(settings.contains("uma.settings.general.launch-at-login"))
+        #expect(settings.contains("uma.settings.general.language"))
+        #expect(settings.contains("uma.settings.appearance.theme"))
+        #expect(settings.contains("uma.settings.appearance.menu-value"))
+        #expect(settings.contains("uma.settings.appearance.quick-reset"))
     }
 
     @Test("Canonical Settings controller keeps one window across repeated routes")

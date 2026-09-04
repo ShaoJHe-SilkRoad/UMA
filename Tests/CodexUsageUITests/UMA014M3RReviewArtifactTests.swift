@@ -50,6 +50,8 @@ struct UMA014M3RReviewArtifactTests {
             store.productInventory.quickPanelProviders.map { $0.id }
                 == [ProviderProductID.codex]
         )
+        #expect(store.productInventory.provider(.workBuddy)?.inventory.providers == false)
+        #expect(store.productInventory.provider(.antigravity)?.inventory.providers == false)
     }
 
     @Test("Review matrix renders real public product surfaces from preview-only state")
@@ -73,6 +75,9 @@ struct UMA014M3RReviewArtifactTests {
             "main-narrow",
             "workspace-codex",
             "workspace-claude",
+            "settings-appearance",
+            "settings-wizard",
+            "settings-privacy",
             "wizard-regular",
             "wizard-minimalist",
             "wizard-context-menu",

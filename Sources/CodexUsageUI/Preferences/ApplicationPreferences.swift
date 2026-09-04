@@ -234,6 +234,17 @@ public enum ApplicationPreferenceError: Error, Equatable {
     case invalidSuiteName
 }
 
+/// Global appearance is an application preference rather than a view-local
+/// override so Main, Settings, the Quick Panel, and Desktop Wizard always use
+/// one visual truth.
+public enum UMAApplicationAppearance: String, CaseIterable, Identifiable, Sendable {
+    case system
+    case light
+    case dark
+
+    public var id: String { rawValue }
+}
+
 /// Closed catalog for preferences moved behind the typed boundary in Infra G1.
 /// The raw names are the exact 0.13 keys.
 @MainActor
@@ -255,6 +266,18 @@ public enum UMAApplicationPreferenceKeys {
     )
     public static let assistantPosition = ApplicationPreferenceKey<Data?>(
         optionalData: DesktopAssistantPreferences.Keys.position
+    )
+    public static let appearance = ApplicationPreferenceKey<String>(
+        "app.appearance",
+        default: UMAApplicationAppearance.system.rawValue
+    )
+    public static let menuBarShowsRemaining = ApplicationPreferenceKey<Bool>(
+        "app.menuBarShowsRemaining",
+        default: true
+    )
+    public static let quickPanelShowsReset = ApplicationPreferenceKey<Bool>(
+        "app.quickPanelShowsReset",
+        default: true
     )
     static let agentPreferences = ApplicationPreferenceKey<Data?>(
         optionalData: AgentPreferenceStore.key

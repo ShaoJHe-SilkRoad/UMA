@@ -83,17 +83,23 @@ public struct AgentGlanceRow: View {
     public let style: AgentGlanceRowStyle
     public let selected: Bool
     public let language: AppLanguage
+    public let showsReset: Bool
+    private let referenceDate: Date?
 
     public init(
         provider: ProviderProductState,
         style: AgentGlanceRowStyle,
         selected: Bool = false,
-        language: AppLanguage = .english
+        language: AppLanguage = .english,
+        showsReset: Bool = true,
+        referenceDate: Date? = nil
     ) {
         self.provider = provider
         self.style = style
         self.selected = selected
         self.language = language
+        self.showsReset = showsReset
+        self.referenceDate = referenceDate
     }
 
     public var body: some View {
@@ -129,7 +135,7 @@ public struct AgentGlanceRow: View {
                     .foregroundStyle(valueColor)
             }
             if let reset = resetDate {
-                Text("\(localized("Resets", "重置于")) \(reset, style: .relative)")
+                Text(language.resetDescription(for: reset, now: displayNow))
                     .font(.system(size: resetFontSize))
                     .foregroundStyle(.tertiary)
                 .lineLimit(1)
@@ -193,8 +199,8 @@ public struct AgentGlanceRow: View {
             "\($0.compactLabel), \($0.displayText) \(localized("remaining", "剩余"))"
         }
             ?? localized("usage unavailable", "用量不可用")
-        let reset = provider.primaryQuota?.resetsAt.map {
-            ", \(language.resetDescription(for: $0, now: Date()))"
+        let reset = resetDate.map {
+            ", \(language.resetDescription(for: $0, now: displayNow))"
         } ?? ""
         return "\(provider.displayName), \(statusLabel), \(quota)\(reset)"
     }
@@ -212,8 +218,11 @@ public struct AgentGlanceRow: View {
     }
 
     private var resetDate: Date? {
-        provider.primaryQuota?.resetsAt
+        guard showsReset else { return nil }
+        return provider.primaryQuota?.resetsAt
     }
+
+    private var displayNow: Date { referenceDate ?? Date() }
 
     private func localized(_ english: String, _ chinese: String) -> String {
         language == .simplifiedChinese ? chinese : english
@@ -298,29 +307,37 @@ public struct AgentGlanceRow: View {
 
 public struct QuickPanelSurface: View {
     @ObservedObject private var store: UsageStore
+    @StateObject private var displayPreferences: QuickPanelDisplayPreferences
     private let openMain: () -> Void
     private let scanAll: () -> Void
     private let refreshAll: () -> Void
     private let toggleWizard: () -> Void
     private let openSettings: () -> Void
     private let selectAgent: (ProviderProductID) -> Void
+    private let referenceDate: Date?
 
     public init(
         store: UsageStore,
+        preferences: ApplicationPreferences,
         openMain: @escaping () -> Void,
         scanAll: @escaping () -> Void,
         refreshAll: @escaping () -> Void,
         toggleWizard: @escaping () -> Void,
         openSettings: @escaping () -> Void,
-        selectAgent: @escaping (ProviderProductID) -> Void
+        selectAgent: @escaping (ProviderProductID) -> Void,
+        referenceDate: Date? = nil
     ) {
         self.store = store
+        _displayPreferences = StateObject(
+            wrappedValue: QuickPanelDisplayPreferences(preferences: preferences)
+        )
         self.openMain = openMain
         self.scanAll = scanAll
         self.refreshAll = refreshAll
         self.toggleWizard = toggleWizard
         self.openSettings = openSettings
         self.selectAgent = selectAgent
+        self.referenceDate = referenceDate
     }
 
     public var body: some View {
@@ -356,7 +373,9 @@ public struct QuickPanelSurface: View {
                             AgentGlanceRow(
                                 provider: provider,
                                 style: .quickPanel,
-                                language: store.language
+                                language: store.language,
+                                showsReset: displayPreferences.showsReset,
+                                referenceDate: referenceDate
                             )
                         }
                         .buttonStyle(.plain)
@@ -415,6 +434,23 @@ public struct QuickPanelSurface: View {
     }
 }
 
+@MainActor
+private final class QuickPanelDisplayPreferences: ObservableObject {
+    @Published private(set) var showsReset: Bool
+    private let preferences: ApplicationPreferences
+    private var observation: ApplicationPreferences.Observation?
+
+    init(preferences: ApplicationPreferences) {
+        self.preferences = preferences
+        showsReset = preferences.value(for: UMAApplicationPreferenceKeys.quickPanelShowsReset)
+        observation = preferences.observe { [weak self] change in
+            guard change.key == UMAApplicationPreferenceKeys.quickPanelShowsReset.name,
+                  let self else { return }
+            showsReset = preferences.value(for: UMAApplicationPreferenceKeys.quickPanelShowsReset)
+        }
+    }
+}
+
 public struct AgentWorkspaceSurface: View {
     @ObservedObject private var store: UsageStore
     public let providerID: ProviderProductID
@@ -424,6 +460,7 @@ public struct AgentWorkspaceSurface: View {
     private let claudeControlState: () -> ClaudeAgentControlState
     private let connectClaude: () -> Void
     private let claudeAccuracySync: () -> Void
+    private let referenceDate: Date?
     @State private var showingClaudeConsent = false
 
     public init(
@@ -434,7 +471,8 @@ public struct AgentWorkspaceSurface: View {
         disconnectCodex: @escaping () -> Void,
         claudeControlState: @escaping () -> ClaudeAgentControlState,
         connectClaude: @escaping () -> Void,
-        claudeAccuracySync: @escaping () -> Void
+        claudeAccuracySync: @escaping () -> Void,
+        referenceDate: Date? = nil
     ) {
         self.store = store
         self.providerID = providerID
@@ -444,6 +482,7 @@ public struct AgentWorkspaceSurface: View {
         self.claudeControlState = claudeControlState
         self.connectClaude = connectClaude
         self.claudeAccuracySync = claudeAccuracySync
+        self.referenceDate = referenceDate
     }
 
     public var body: some View {
@@ -584,7 +623,7 @@ public struct AgentWorkspaceSurface: View {
                     HStack {
                         Text(localized("Last successful update", "上次成功更新")).foregroundStyle(.secondary)
                         Spacer()
-                        Text(capturedAt, style: .relative).monospacedDigit()
+                        Text(relativeUpdateDescription(since: capturedAt)).monospacedDigit()
                     }
                 }
             }
@@ -830,7 +869,16 @@ public struct AgentWorkspaceSurface: View {
 
     private func resetLabel(_ date: Date?) -> String {
         guard let date else { return localized("Reset not provided", "未提供重置时间") }
-        return store.language.resetDescription(for: date, now: Date())
+        return store.language.resetDescription(for: date, now: displayNow)
+    }
+
+    private var displayNow: Date { referenceDate ?? Date() }
+
+    private func relativeUpdateDescription(since date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = store.language.locale
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: displayNow)
     }
 
     private func localized(_ english: String, _ chinese: String) -> String {
@@ -841,17 +889,33 @@ public struct AgentWorkspaceSurface: View {
 @MainActor
 final class GlobalSettingsViewModel: ObservableObject {
     @Published private(set) var language: AppLanguage
+    @Published private(set) var appearance: UMAApplicationAppearance
+    @Published private(set) var menuBarShowsRemaining: Bool
+    @Published private(set) var quickPanelShowsReset: Bool
     @Published private(set) var assistantEnabled: Bool
     @Published private(set) var assistantAlwaysOnTop: Bool
     @Published private(set) var assistantDensity: DesktopAssistantDensity
+    @Published private(set) var launchAtLoginState: LaunchAtLoginState
+    @Published private(set) var launchAtLoginError: String?
 
     private let preferences: ApplicationPreferences
+    private let store: UsageStore
     private var observation: ApplicationPreferences.Observation?
 
-    init(preferences: ApplicationPreferences) {
+    init(preferences: ApplicationPreferences, store: UsageStore) {
         self.preferences = preferences
+        self.store = store
         language = preferences.value(for: UMAApplicationPreferenceKeys.language)
             .flatMap(AppLanguage.init(rawValue:)) ?? .english
+        appearance = UMAApplicationAppearance(
+            rawValue: preferences.value(for: UMAApplicationPreferenceKeys.appearance)
+        ) ?? .system
+        menuBarShowsRemaining = preferences.value(
+            for: UMAApplicationPreferenceKeys.menuBarShowsRemaining
+        )
+        quickPanelShowsReset = preferences.value(
+            for: UMAApplicationPreferenceKeys.quickPanelShowsReset
+        )
         assistantEnabled = preferences.value(
             for: UMAApplicationPreferenceKeys.assistantEnabled
         )
@@ -863,9 +927,55 @@ final class GlobalSettingsViewModel: ObservableObject {
                 for: UMAApplicationPreferenceKeys.assistantDensity
             )
         ) ?? .automatic
+        launchAtLoginState = LaunchAtLoginService.state
+        launchAtLoginError = nil
         observation = preferences.observe { [weak self] change in
             self?.synchronize(changedKey: change.key)
         }
+    }
+
+    func setLanguage(_ value: AppLanguage) {
+        guard language != value else { return }
+        preferences.set(value.rawValue, for: UMAApplicationPreferenceKeys.language)
+        store.setLanguage(value)
+        language = value
+    }
+
+    func setAppearance(_ value: UMAApplicationAppearance) {
+        guard appearance != value else { return }
+        appearance = value
+        preferences.set(value.rawValue, for: UMAApplicationPreferenceKeys.appearance)
+    }
+
+    func setMenuBarShowsRemaining(_ value: Bool) {
+        guard menuBarShowsRemaining != value else { return }
+        menuBarShowsRemaining = value
+        preferences.set(value, for: UMAApplicationPreferenceKeys.menuBarShowsRemaining)
+    }
+
+    func setQuickPanelShowsReset(_ value: Bool) {
+        guard quickPanelShowsReset != value else { return }
+        quickPanelShowsReset = value
+        preferences.set(value, for: UMAApplicationPreferenceKeys.quickPanelShowsReset)
+    }
+
+    func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            launchAtLoginState = try LaunchAtLoginService.setEnabled(enabled)
+            launchAtLoginError = nil
+        } catch {
+            launchAtLoginState = LaunchAtLoginService.state
+            launchAtLoginError = error.localizedDescription
+        }
+    }
+
+    func refreshLaunchAtLoginState() {
+        launchAtLoginState = LaunchAtLoginService.state
+        launchAtLoginError = nil
+    }
+
+    func openLoginItemSettings() {
+        LaunchAtLoginService.openSystemSettings()
     }
 
     deinit {
@@ -904,6 +1014,18 @@ final class GlobalSettingsViewModel: ObservableObject {
         case UMAApplicationPreferenceKeys.language.name:
             language = preferences.value(for: UMAApplicationPreferenceKeys.language)
                 .flatMap(AppLanguage.init(rawValue:)) ?? .english
+        case UMAApplicationPreferenceKeys.appearance.name:
+            appearance = UMAApplicationAppearance(
+                rawValue: preferences.value(for: UMAApplicationPreferenceKeys.appearance)
+            ) ?? .system
+        case UMAApplicationPreferenceKeys.menuBarShowsRemaining.name:
+            menuBarShowsRemaining = preferences.value(
+                for: UMAApplicationPreferenceKeys.menuBarShowsRemaining
+            )
+        case UMAApplicationPreferenceKeys.quickPanelShowsReset.name:
+            quickPanelShowsReset = preferences.value(
+                for: UMAApplicationPreferenceKeys.quickPanelShowsReset
+            )
         case UMAApplicationPreferenceKeys.assistantEnabled.name:
             assistantEnabled = preferences.value(
                 for: UMAApplicationPreferenceKeys.assistantEnabled
@@ -947,11 +1069,12 @@ public struct GlobalSettingsSurface: View {
 
     public init(
         preferences: ApplicationPreferences,
+        store: UsageStore,
         navigation: GlobalSettingsNavigationState
     ) {
         self.navigation = navigation
         _model = StateObject(
-            wrappedValue: GlobalSettingsViewModel(preferences: preferences)
+            wrappedValue: GlobalSettingsViewModel(preferences: preferences, store: store)
         )
     }
 
@@ -973,6 +1096,14 @@ public struct GlobalSettingsSurface: View {
         }
         .frame(minWidth: 560, minHeight: 400)
         .environment(\.locale, model.language.locale)
+        .onAppear(perform: model.refreshLaunchAtLoginState)
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: NSApplication.didBecomeActiveNotification
+            )
+        ) { _ in
+            model.refreshLaunchAtLoginState()
+        }
         .accessibilityIdentifier("uma.settings.surface")
     }
 
@@ -985,6 +1116,61 @@ public struct GlobalSettingsSurface: View {
                     title: localized("General", "通用"),
                     subtitle: localized("Application behavior", "应用行为")
                 ) {
+                    Toggle(
+                        localized("Launch UMA at login", "登录时启动 UMA"),
+                        isOn: Binding(
+                            get: { model.launchAtLoginState.isOn },
+                            set: model.setLaunchAtLogin
+                        )
+                    )
+                    .accessibilityIdentifier("uma.settings.general.launch-at-login")
+                    if model.launchAtLoginState == .requiresApproval {
+                        HStack {
+                            Text(localized(
+                                "macOS approval is required before UMA can open at login.",
+                                "需要 macOS 批准后，UMA 才能在登录时启动。"
+                            ))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            Spacer()
+                            Button(
+                                localized("Open Login Items", "打开登录项"),
+                                action: model.openLoginItemSettings
+                            )
+                        }
+                    }
+                    if let error = model.launchAtLoginError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .accessibilityLabel(localized("Launch at login error", "登录启动错误"))
+                    }
+                    settingFact(
+                        localized("Window close behavior", "窗口关闭行为"),
+                        localized(
+                            "Monitoring continues until you choose Quit UMA.",
+                            "监控会持续运行，直到您选择退出 UMA。"
+                        )
+                    )
+                    settingFact(
+                        localized("Refresh behavior", "刷新行为"),
+                        localized(
+                            "Background updates with manual Refresh All",
+                            "后台更新，并可手动全部刷新"
+                        )
+                    )
+                    Picker(
+                        localized("Language", "语言"),
+                        selection: Binding(
+                            get: { model.language },
+                            set: model.setLanguage
+                        )
+                    ) {
+                        ForEach(AppLanguage.allCases) { language in
+                            Text(language.displayName).tag(language)
+                        }
+                    }
+                    .accessibilityIdentifier("uma.settings.general.language")
                     settingFact(
                         localized("Window lifecycle", "窗口生命周期"),
                         localized("Closing a window keeps monitoring active.", "关闭窗口后监控仍会继续。")
@@ -999,10 +1185,38 @@ public struct GlobalSettingsSurface: View {
                     title: localized("Appearance", "外观"),
                     subtitle: localized("System appearance", "系统外观")
                 ) {
-                    settingFact(
-                        localized("Color scheme", "配色方案"),
-                        localized("UMA follows Light and Dark appearance from macOS.", "UMA 跟随 macOS 的浅色与深色外观。")
+                    Picker(
+                        localized("Appearance", "外观"),
+                        selection: Binding(
+                            get: { model.appearance },
+                            set: model.setAppearance
+                        )
+                    ) {
+                        Text(localized("System", "跟随系统"))
+                            .tag(UMAApplicationAppearance.system)
+                        Text(localized("Light", "浅色"))
+                            .tag(UMAApplicationAppearance.light)
+                        Text(localized("Dark", "深色"))
+                            .tag(UMAApplicationAppearance.dark)
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("uma.settings.appearance.theme")
+                    Toggle(
+                        localized("Show remaining percentage in menu bar", "在菜单栏显示剩余百分比"),
+                        isOn: Binding(
+                            get: { model.menuBarShowsRemaining },
+                            set: model.setMenuBarShowsRemaining
+                        )
                     )
+                    .accessibilityIdentifier("uma.settings.appearance.menu-value")
+                    Toggle(
+                        localized("Show reset times in Quick Panel", "在快速面板显示重置时间"),
+                        isOn: Binding(
+                            get: { model.quickPanelShowsReset },
+                            set: model.setQuickPanelShowsReset
+                        )
+                    )
+                    .accessibilityIdentifier("uma.settings.appearance.quick-reset")
                     settingFact(
                         localized("Accessibility", "辅助功能"),
                         localized("Reduce Transparency, Increase Contrast, and Reduce Motion are respected automatically.", "自动遵循降低透明度、提高对比度和减弱动态效果设置。")
@@ -1048,6 +1262,13 @@ public struct GlobalSettingsSurface: View {
                     settingFact(
                         localized("Usage data", "用量数据"),
                         localized("UMA retains only allowlisted usage metadata.", "UMA 仅保留允许范围内的用量元数据。")
+                    )
+                    settingFact(
+                        localized("Retained state", "保留状态"),
+                        localized(
+                            "Only admitted bounded usage state is retained; stale and unsupported values remain explicitly labeled.",
+                            "仅保留已批准的有限用量状态；过期和不支持的值会明确标注。"
+                        )
                     )
                     settingFact(
                         localized("Agent access", "智能体访问"),

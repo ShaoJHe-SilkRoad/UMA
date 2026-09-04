@@ -514,7 +514,7 @@ struct PreviewRendererTool {
                     providerID: .claude
                 )
             )
-        case .settings:
+        case .settingsGeneral, .settingsAppearance, .settingsWizard, .settingsPrivacy:
             size = CGSize(width: 680, height: 500)
             let preferences = ApplicationPreferences.inMemory()
             preferences.set(
@@ -530,10 +530,18 @@ struct PreviewRendererTool {
                 DesktopAssistantDensity.regular.rawValue,
                 for: UMAApplicationPreferenceKeys.assistantDensity
             )
+            let pane: GlobalSettingsPane = switch scenario {
+            case .settingsGeneral: .general
+            case .settingsAppearance: .appearance
+            case .settingsWizard: .desktopWizard
+            case .settingsPrivacy: .privacy
+            default: .general
+            }
             reviewContent = AnyView(
                 GlobalSettingsSurface(
                     preferences: preferences,
-                    navigation: GlobalSettingsNavigationState(pane: .general)
+                    store: fixture.store,
+                    navigation: GlobalSettingsNavigationState(pane: pane)
                 )
                 .background(Color(nsColor: .windowBackgroundColor))
             )
@@ -1347,7 +1355,10 @@ private enum M3RReviewScenario: String {
     case mainNarrow = "main-narrow"
     case workspaceCodex = "workspace-codex"
     case workspaceClaude = "workspace-claude"
-    case settings
+    case settingsGeneral = "settings"
+    case settingsAppearance = "settings-appearance"
+    case settingsWizard = "settings-wizard"
+    case settingsPrivacy = "settings-privacy"
     case wizardRegular = "wizard-regular"
     case wizardMinimalist = "wizard-minimalist"
     case wizardContextMenu = "wizard-context-menu"
@@ -1435,6 +1446,7 @@ private struct M3RWizardContextMenuReview: View {
 
 private struct M3RQuickPanelReviewHost: View {
     @ObservedObject var store: UsageStore
+    private let preferences = ApplicationPreferences.inMemory()
     let reduceTransparency: Bool
     let increaseContrast: Bool
     let reduceMotion: Bool
@@ -1442,12 +1454,14 @@ private struct M3RQuickPanelReviewHost: View {
     var body: some View {
         QuickPanelSurface(
             store: store,
+            preferences: preferences,
             openMain: {},
             scanAll: {},
             refreshAll: {},
             toggleWizard: {},
             openSettings: {},
-            selectAgent: { _ in }
+            selectAgent: { _ in },
+            referenceDate: M3RFixture.fixedNow
         )
         .frame(maxHeight: .infinity, alignment: .top)
         .background {
@@ -1487,7 +1501,8 @@ private struct M3RAgentWorkspaceReview: View {
             disconnectCodex: {},
             claudeControlState: { .onlineVerificationUnavailable },
             connectClaude: {},
-            claudeAccuracySync: {}
+            claudeAccuracySync: {},
+            referenceDate: M3RFixture.fixedNow
         )
         .background(Color(nsColor: .controlBackgroundColor))
     }
@@ -1554,7 +1569,8 @@ private struct M3RMainReviewSurface: View {
                             provider: provider,
                             style: .mainList,
                             selected: provider.id == selectedProviderID,
-                            language: store.language
+                            language: store.language,
+                            referenceDate: M3RFixture.fixedNow
                         )
                     }
                 }

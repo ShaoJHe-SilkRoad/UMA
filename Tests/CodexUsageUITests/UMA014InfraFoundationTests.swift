@@ -14,6 +14,12 @@ struct UMA014InfraFoundationTests {
 
         #expect(preferences.value(for: UMAApplicationPreferenceKeys.assistantEnabled))
         #expect(
+            preferences.value(for: UMAApplicationPreferenceKeys.appearance)
+                == UMAApplicationAppearance.system.rawValue
+        )
+        #expect(preferences.value(for: UMAApplicationPreferenceKeys.menuBarShowsRemaining))
+        #expect(preferences.value(for: UMAApplicationPreferenceKeys.quickPanelShowsReset))
+        #expect(
             preferences.value(for: UMAApplicationPreferenceKeys.assistantDensity)
                 == DesktopAssistantDensity.automatic.rawValue
         )
@@ -32,6 +38,26 @@ struct UMA014InfraFoundationTests {
         ])
         #expect(changes.map(\.revision) == [1, 2])
         observation.cancel()
+    }
+
+    @Test
+    func m4GlobalDisplayPreferencesRoundTripWithoutChangingLegacyDefaults() {
+        let preferences = ApplicationPreferences.inMemory()
+        preferences.set(
+            UMAApplicationAppearance.light.rawValue,
+            for: UMAApplicationPreferenceKeys.appearance
+        )
+        preferences.set(false, for: UMAApplicationPreferenceKeys.menuBarShowsRemaining)
+        preferences.set(false, for: UMAApplicationPreferenceKeys.quickPanelShowsReset)
+
+        #expect(
+            UMAApplicationAppearance(
+                rawValue: preferences.value(for: UMAApplicationPreferenceKeys.appearance)
+            ) == .light
+        )
+        #expect(!preferences.value(for: UMAApplicationPreferenceKeys.menuBarShowsRemaining))
+        #expect(!preferences.value(for: UMAApplicationPreferenceKeys.quickPanelShowsReset))
+        #expect(preferences.value(for: UMAApplicationPreferenceKeys.assistantEnabled))
     }
 
     @Test

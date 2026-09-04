@@ -375,7 +375,13 @@ enum ProviderProductStatePolicy {
                     connection: .unavailable,
                     health: .degraded,
                     actions: [.openSettings],
-                    inventory: .init(overview: false, assistant: false),
+                    inventory: .init(
+                        overview: false,
+                        providers: false,
+                        assistant: false,
+                        quickPanel: false,
+                        agentWorkspace: false
+                    ),
                     isActive: false
                 )
             }
@@ -423,7 +429,10 @@ enum ProviderProductStatePolicy {
                 connection: connection,
                 health: health,
                 actions: entry.productID == .claude ? [.refresh, .accuracySync] : [.refresh],
-                sourceSummary: .unavailable,
+                sourceSummary: previewSourceSummary(
+                    productID: entry.productID,
+                    isEstimated: card.isEstimated == true
+                ),
                 inventory: .init(
                     overview: true,
                     providers: isSupported,
@@ -435,6 +444,25 @@ enum ProviderProductStatePolicy {
                 capturedAt: card.capturedAt
             )
         })
+    }
+
+    /// Keeps review fixtures semantically coherent without interpreting any
+    /// connector-owned source text. Production state still uses the admitted
+    /// snapshot provenance and version mapping in `sourceSummary` below.
+    private static func previewSourceSummary(
+        productID: ProviderProductID,
+        isEstimated: Bool
+    ) -> ProviderProductSourceSummary {
+        switch productID {
+        case .codex:
+            return .officialLocal
+        case .claude:
+            return isEstimated ? .localSmartEstimate : .accuracySync
+        case .workBuddy:
+            return .authenticatedAccountWeb
+        case .antigravity:
+            return .officialCLI
+        }
     }
 
     static func reduce(

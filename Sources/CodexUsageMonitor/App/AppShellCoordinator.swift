@@ -149,6 +149,7 @@ final class AppShellCoordinator {
     private var commandRouter: ApplicationMenuController!
     private var runtime: UsageMonitorRuntime?
     private var assistantStoreObserver: AnyCancellable?
+    private var appearancePreferenceObservation: ApplicationPreferences.Observation?
     private var hasStarted = false
     private var isTornDown = false
 
@@ -210,6 +211,8 @@ final class AppShellCoordinator {
             accuracySyncClaude: { [weak self] in self?.accuracySyncClaude() }
         )
         settingsWindowController.attach(store: runtime.store, preferences: runtime.preferences)
+        observeAppearance(in: runtime.preferences)
+        applyAppearance(from: runtime.preferences)
         observeAssistantCards(in: runtime.store)
         updateAssistant(using: runtime.store)
     }
@@ -465,10 +468,32 @@ final class AppShellCoordinator {
         )
     }
 
+    private func observeAppearance(in preferences: ApplicationPreferences) {
+        appearancePreferenceObservation = preferences.observe { [weak self, weak preferences] change in
+            guard change.key == UMAApplicationPreferenceKeys.appearance.name,
+                  let self,
+                  let preferences else { return }
+            self.applyAppearance(from: preferences)
+        }
+    }
+
+    private func applyAppearance(from preferences: ApplicationPreferences) {
+        let value = UMAApplicationAppearance(
+            rawValue: preferences.value(for: UMAApplicationPreferenceKeys.appearance)
+        ) ?? .system
+        NSApp.appearance = switch value {
+        case .system: nil
+        case .light: NSAppearance(named: .aqua)
+        case .dark: NSAppearance(named: .darkAqua)
+        }
+    }
+
     func tearDown() {
         guard !isTornDown else { return }
         isTornDown = true
         assistantStoreObserver?.cancel()
+        appearancePreferenceObservation?.cancel()
+        appearancePreferenceObservation = nil
         mainWindowController.tearDown()
         settingsWindowController.tearDown()
         assistantController.tearDown()
