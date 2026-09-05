@@ -948,7 +948,8 @@ private struct DesktopAssistantCardView: View {
         DesktopAgentLogo(
             providerID: card.id,
             tint: card.sourceMark == .manual ? .secondary : connectionColor,
-            diameter: diameter
+            diameter: diameter,
+            silhouetteScale: density == .minimalist ? 1.1 : 1
         )
         // The containing card already announces the agent and connection state.
         .accessibilityHidden(true)
@@ -961,6 +962,11 @@ private struct DesktopAssistantCardView: View {
                 Color(nsColor: .windowBackgroundColor)
             } else {
                 Rectangle().fill(.ultraThinMaterial)
+                    .overlay {
+                        if colorScheme == .light {
+                            Color.black.opacity(0.07)
+                        }
+                    }
             }
         }
     }
@@ -968,7 +974,7 @@ private struct DesktopAssistantCardView: View {
     private var connectionColor: Color {
         switch card.connectionState {
         case .connected:
-            AgentConnectionIndicatorPalette.connected(isDark: colorScheme == .dark)
+            AgentConnectionIndicatorPalette.connected(isDark: colorScheme == .dark, increasedLightContrast: true)
         case .reconnecting:
             .orange
         case .stale:

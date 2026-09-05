@@ -2,8 +2,9 @@ import AppKit
 import SwiftUI
 
 enum AgentConnectionIndicatorPalette {
-    static func connected(isDark: Bool) -> Color {
-        isDark ? Color(red: 0.35, green: 1.0, blue: 0.52) : .green
+    static func connected(isDark: Bool, increasedLightContrast: Bool = false) -> Color {
+        isDark ? Color(red: 0.35, green: 1.0, blue: 0.52)
+            : (increasedLightContrast ? Color(red: 0.02, green: 0.46, blue: 0.18) : .green)
     }
 }
 
@@ -27,6 +28,7 @@ struct DesktopAgentLogo: View {
     let providerID: String
     let tint: Color
     let diameter: CGFloat
+    var silhouetteScale: CGFloat = 1
 
     private static let images: [DesktopAgentLogoAsset: NSImage] = {
         Dictionary(uniqueKeysWithValues: DesktopAgentLogoAsset.allCases.compactMap { asset in
@@ -53,7 +55,7 @@ struct DesktopAgentLogo: View {
         }
         .foregroundStyle(tint)
         // Keep the silhouette halo inside the existing identity allocation.
-        .padding(diameter / 12)
+        .padding(diameter * (1 - (5.0 / 6.0) * silhouetteScale) / 2)
         .frame(width: diameter, height: diameter)
         .shadow(color: tint.opacity(0.24), radius: diameter / 20)
         .allowsHitTesting(false)

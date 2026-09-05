@@ -229,7 +229,9 @@ public struct AgentGlanceRow: View {
 
     private var statusColor: Color {
         return switch AgentGlancePresentationPolicy.status(for: provider) {
-        case .connected: AgentConnectionIndicatorPalette.connected(isDark: colorScheme == .dark)
+        case .connected: AgentConnectionIndicatorPalette.connected(
+            isDark: colorScheme == .dark, increasedLightContrast: style == .quickPanel
+        )
         case .reconnecting, .stale, .cached, .needsAttention,
              .authenticationRequired: .orange
         case .disconnected, .unavailable: .secondary

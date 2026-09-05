@@ -99,7 +99,14 @@ final class AdaptivePanelMaterialHostView: NSView {
 
     private func updateDynamicBackground() {
         effectiveAppearance.performAsCurrentDrawingAppearance { [weak self] in
-            self?.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+            guard let self else { return }
+            if self.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
+                self.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+            } else {
+                // Darken the existing opaque surface, never add an outer layer.
+                self.layer?.backgroundColor = NSColor.windowBackgroundColor
+                    .blended(withFraction: 0.07, of: .black)?.cgColor
+            }
         }
     }
 
