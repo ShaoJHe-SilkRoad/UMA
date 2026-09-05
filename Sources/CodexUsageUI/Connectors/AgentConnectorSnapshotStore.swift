@@ -145,8 +145,20 @@ actor AgentConnectorSnapshotStore {
         try validatePaths()
         // Only a supported, fully validated main may replace the recovery
         // backup. Corrupt/invalid main bytes never pollute a good backup.
-        if case let .supported(_, currentData) = current {
-            try currentData.write(to: backupURL, options: .atomic)
+        if case let .supported(currentEntries, currentData) = current {
+            // Decoding ignores unknown fields. Never copy those raw fields
+            // into a new backup. Preserve legitimate legacy bytes when their
+            // entire field structure fits the same-schema typed projection.
+            // Set order and numeric encoding can change during a round trip.
+            let version = try JSONDecoder().decode(VersionHeader.self, from: currentData)
+            let projected = try JSONEncoder.safeSnapshotEncoder.encode(
+                Envelope(schemaVersion: version.schemaVersion, entries: currentEntries)
+            )
+            let originalObject = try JSONSerialization.jsonObject(with: currentData)
+            let projectedObject = try JSONSerialization.jsonObject(with: projected)
+            let backupData = Self.containsOnlyProjectedFields(originalObject, projection: projectedObject)
+                ? currentData : projected
+            try backupData.write(to: backupURL, options: .atomic)
         }
         try data.write(to: url, options: .atomic)
         lastSavedData = data
@@ -325,6 +337,25 @@ actor AgentConnectorSnapshotStore {
         entries.count <= maximumEntries
             && Set(entries.map(\.id)).count == entries.count
             && entries.allSatisfy(isValid)
+    }
+
+    private static func containsOnlyProjectedFields(_ original: Any, projection: Any) -> Bool {
+        if let fields = original as? [String: Any] {
+            guard let allowed = projection as? [String: Any],
+                  Set(fields.keys).isSubset(of: Set(allowed.keys)) else { return false }
+            return fields.allSatisfy { key, value in
+                guard let projected = allowed[key] else { return false }
+                return containsOnlyProjectedFields(value, projection: projected)
+            }
+        }
+        if let values = original as? [Any] {
+            guard let projected = projection as? [Any], values.count == projected.count else { return false }
+            return zip(values, projected).allSatisfy {
+                containsOnlyProjectedFields($0.0, projection: $0.1)
+            }
+        }
+        // Scalar values have already passed the typed decoder and validators.
+        return true
     }
 
     private static func isValid(_ entry: PersistedEntry) -> Bool {

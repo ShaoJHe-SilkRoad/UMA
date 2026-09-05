@@ -388,8 +388,13 @@ struct TokenCounts: Codable, Equatable, Sendable {
 }
 
 struct APICostLedgerStore: Sendable {
-    enum StoreError: Error {
+    enum StoreError: Error, Equatable {
         case corruptedLedger
+        case unsupportedSchema
+    }
+
+    private struct VersionHeader: Decodable {
+        let schemaVersion: Int
     }
 
     let url: URL
@@ -403,14 +408,19 @@ struct APICostLedgerStore: Sendable {
         guard fileManager.fileExists(atPath: url.path) else { return APICostLedger() }
 
         let decoder = JSONDecoder()
-        if let data = try? Data(contentsOf: url),
-           let ledger = try? decoder.decode(APICostLedger.self, from: data) {
-            return ledger
+        if let data = try? Data(contentsOf: url) {
+            try validateSupportedSchema(in: data)
+            if let ledger = try? decoder.decode(APICostLedger.self, from: data) {
+                return ledger
+            }
         }
 
         let backupURL = backupURL
-        if let data = try? Data(contentsOf: backupURL),
-           let ledger = try? decoder.decode(APICostLedger.self, from: data) {
+        if let data = try? Data(contentsOf: backupURL) {
+            try validateSupportedSchema(in: data)
+            guard let ledger = try? decoder.decode(APICostLedger.self, from: data) else {
+                throw StoreError.corruptedLedger
+            }
             // A valid backup is the last known good state. Restore it
             // atomically so the next launch does not repeatedly parse the
             // corrupted primary file or silently restart lifetime accounting.
@@ -419,7 +429,9 @@ struct APICostLedgerStore: Sendable {
                 withIntermediateDirectories: true,
                 attributes: [.posixPermissions: 0o700]
             )
-            try? data.write(to: url, options: .atomic)
+            // Restore the typed projection, never unknown fields from the
+            // original backup JSON. The existing backup remains untouched.
+            try? encoded(ledger).write(to: url, options: .atomic)
             return ledger
         }
         throw StoreError.corruptedLedger
@@ -427,22 +439,41 @@ struct APICostLedgerStore: Sendable {
 
     func save(_ ledger: APICostLedger) throws {
         let fileManager = FileManager.default
+        guard ledger.schemaVersion == APICostLedger().schemaVersion else {
+            throw StoreError.unsupportedSchema
+        }
+        // Refuse an unsupported main or backup before any filesystem write.
+        // Its newer representation must survive a rollback unchanged.
+        let existingData = try? Data(contentsOf: url)
+        if let existingData { try validateSupportedSchema(in: existingData) }
+        if let backupData = try? Data(contentsOf: backupURL) {
+            try validateSupportedSchema(in: backupData)
+        }
         try fileManager.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
 
-        if fileManager.fileExists(atPath: url.path),
-           let existingData = try? Data(contentsOf: url),
-           (try? JSONDecoder().decode(APICostLedger.self, from: existingData)) != nil {
-            try? fileManager.removeItem(at: backupURL)
-            try? fileManager.copyItem(at: url, to: backupURL)
+        if let existingData,
+           let existing = try? JSONDecoder().decode(APICostLedger.self, from: existingData) {
+            try encoded(existing).write(to: backupURL, options: .atomic)
         }
 
+        try encoded(ledger).write(to: url, options: .atomic)
+    }
+
+    private func validateSupportedSchema(in data: Data) throws {
+        if let header = try? JSONDecoder().decode(VersionHeader.self, from: data),
+           header.schemaVersion != APICostLedger().schemaVersion {
+            throw StoreError.unsupportedSchema
+        }
+    }
+
+    private func encoded(_ ledger: APICostLedger) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(ledger).write(to: url, options: .atomic)
+        return try encoder.encode(ledger)
     }
 
     private var backupURL: URL {
