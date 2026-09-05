@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import plistlib
 import subprocess
+import struct
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -120,7 +121,8 @@ class RCGuards(unittest.TestCase):
     def test_canonical_metadata_and_invalid_build(self):
         authority, metadata, version = rc.version_metadata(rc.ROOT)
         self.assertEqual(version, '0.14.0')
-        self.assertEqual(metadata['BuildNumber'], '2026090501')
+        self.assertEqual(metadata['BuildNumber'], authority['ReleaseCandidate']['BuildNumber'])
+        self.assertRegex(metadata['BuildNumber'], r'^[1-9]\d*$')
         self.assertEqual(metadata['BundleIdentifier'], 'com.silkrd.uma')
         (self.root / 'Configuration').mkdir()
         authority['ReleaseCandidate']['BuildNumber'] = '-1'
@@ -161,6 +163,66 @@ class RCGuards(unittest.TestCase):
                     subprocess.CompletedProcess([], 0, f'app:\n\t{dependency} (compatibility version 1.0)\n'.encode(), b'')):
                 with self.assertRaisesRegex(rc.Refusal, 'NON_SYSTEM_DEPENDENCY'):
                     rc.linkage(self.root / 'app')
+
+    def macho_fixture(self, *, minimum=(14, 0, 0), sdk=(27, 0, 0), platform=1,
+                      command_count=1, legacy=False):
+        def packed(value):
+            return value[0] << 16 | value[1] << 8 | value[2]
+        command = (struct.pack('<4I', 0x24, 16, packed(minimum), packed(sdk)) if legacy else
+                   struct.pack('<6I', 0x32, 24, platform, packed(minimum), packed(sdk), 0))
+        body = command * command_count
+        path = self.root / 'synthetic-mach-o'
+        path.write_bytes(struct.pack('<8I', 0xfeedfacf, 0x0100000c, 0, 2,
+                                     command_count, len(body), 0, 0) + body)
+        return path
+
+    def test_raw_build_version_accepts_matching_sdk_and_minimum(self):
+        path = self.macho_fixture()
+        before = path.read_bytes()
+        report = rc.macho_build_version(path, '27.0', '14.0.0')
+        self.assertEqual(report['verification'], 'PASS')
+        self.assertEqual(report['sdk'], '27.0.0')
+        self.assertEqual(report['minimum_os'], '14.0.0')
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_raw_build_version_rejects_reproduced_sdk_fallback(self):
+        path = self.macho_fixture(sdk=(14, 0, 0))
+        before = path.read_bytes()
+        with self.assertRaisesRegex(rc.Refusal, 'BUILD_VERSION_SDK_MISMATCH'):
+            rc.macho_build_version(path, '27.0', '14.0')
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_raw_build_version_rejects_wrong_minimum_platform_and_legacy(self):
+        for options, reason in [({'minimum': (15, 0, 0)}, 'MINIMUM_OS_MISMATCH'),
+                                ({'platform': 2}, 'PLATFORM_MISMATCH'),
+                                ({'legacy': True}, 'LEGACY_MACOS_VERSION')]:
+            with self.subTest(options=options), self.assertRaisesRegex(rc.Refusal, reason):
+                rc.macho_build_version(self.macho_fixture(**options), '27.0', '14.0')
+
+    def test_raw_build_version_requires_one_complete_command(self):
+        for count in (0, 2):
+            with self.subTest(count=count), self.assertRaisesRegex(rc.Refusal, 'MISSING_OR_DUPLICATE'):
+                rc.macho_build_version(self.macho_fixture(command_count=count), '27.0', '14.0')
+        path = self.macho_fixture()
+        path.write_bytes(path.read_bytes()[:-1])
+        with self.assertRaisesRegex(rc.Refusal, 'LOAD_COMMANDS_TRUNCATED'):
+            rc.macho_build_version(path, '27.0', '14.0')
+        path = self.macho_fixture()
+        data = bytearray(path.read_bytes())
+        struct.pack_into('<I', data, 36, 8)
+        path.write_bytes(data)
+        with self.assertRaisesRegex(rc.Refusal, 'BUILD_VERSION_TRUNCATED'):
+            rc.macho_build_version(path, '27.0', '14.0')
+
+    def test_raw_build_version_rejects_wrong_architecture_and_tool_records(self):
+        for offset, value, reason in [(4, 0x01000007, 'NOT_ARM64_EXECUTABLE'),
+                                      (52, 1, 'TOOL_RECORDS_INVALID')]:
+            path = self.macho_fixture()
+            data = bytearray(path.read_bytes())
+            struct.pack_into('<I', data, offset, value)
+            path.write_bytes(data)
+            with self.subTest(reason=reason), self.assertRaisesRegex(rc.Refusal, reason):
+                rc.macho_build_version(path, '27.0', '14.0')
 
     def test_manifest_hash_mode_and_link_target(self):
         path = self.root / 'file'

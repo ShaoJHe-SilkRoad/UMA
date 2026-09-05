@@ -10,6 +10,7 @@ import plistlib
 import re
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tarfile
@@ -140,6 +141,49 @@ def extract_source(root, commit, destination):
         members.extractall(destination)
 
 
+def macho_build_version(path, expected_sdk, expected_minimum):
+    """Read the arm64 executable load commands; refuse ambiguous release metadata."""
+    def version(value):
+        require(isinstance(value, str) and re.fullmatch(r'\d+(?:\.\d+){0,2}', value),
+                'BUILD_VERSION_EXPECTATION_INVALID')
+        parts = [int(item) for item in value.split('.')]
+        return tuple(parts + [0] * (3 - len(parts)))
+
+    def unpack_version(value):
+        return (value >> 16, (value >> 8) & 0xff, value & 0xff)
+
+    data = path.read_bytes()
+    require(len(data) >= 32, 'MACHO_HEADER_TRUNCATED')
+    magic, cpu, _, filetype, count, size, _, _ = struct.unpack_from('<8I', data)
+    require(magic == 0xfeedfacf and cpu == 0x0100000c and filetype == 2,
+            'MACHO_NOT_ARM64_EXECUTABLE')
+    end = 32 + size
+    require(end <= len(data), 'MACHO_LOAD_COMMANDS_TRUNCATED')
+    offset, versions = 32, []
+    for _ in range(count):
+        require(offset + 8 <= end, 'MACHO_LOAD_COMMAND_TRUNCATED')
+        command, length = struct.unpack_from('<2I', data, offset)
+        require(length >= 8 and length % 8 == 0 and offset + length <= end,
+                'MACHO_LOAD_COMMAND_SIZE_INVALID')
+        require(command != 0x24, 'LEGACY_MACOS_VERSION_COMMAND_REJECTED')
+        if command == 0x32:  # LC_BUILD_VERSION, including its linker tool records.
+            require(length >= 24, 'BUILD_VERSION_TRUNCATED')
+            platform, minimum, sdk, tools = struct.unpack_from('<4I', data, offset + 8)
+            require(length == 24 + tools * 8, 'BUILD_VERSION_TOOL_RECORDS_INVALID')
+            versions.append((platform, unpack_version(minimum), unpack_version(sdk)))
+        offset += length
+    require(offset == end, 'MACHO_LOAD_COMMANDS_SIZE_MISMATCH')
+    require(len(versions) == 1, 'BUILD_VERSION_MISSING_OR_DUPLICATE')
+    platform, minimum, sdk = versions[0]
+    require(platform == 1, 'BUILD_VERSION_PLATFORM_MISMATCH')
+    require(minimum == version(expected_minimum), 'BUILD_VERSION_MINIMUM_OS_MISMATCH')
+    require(sdk == version(expected_sdk), 'BUILD_VERSION_SDK_MISMATCH')
+    return {'verification': 'PASS', 'command': 'LC_BUILD_VERSION', 'platform': 'macOS',
+            'minimum_os': '.'.join(map(str, minimum)), 'sdk': '.'.join(map(str, sdk)),
+            'expected_minimum_os': expected_minimum, 'expected_sdk': expected_sdk,
+            'parser': 'RAW_MACHO_ARM64'}
+
+
 def linkage(path):
     linked = run(['/usr/bin/otool', '-L', path]).stdout.decode()
     loads = run(['/usr/bin/otool', '-l', path]).stdout.decode()
@@ -188,6 +232,7 @@ def main():
     env = dict(os.environ, DEVELOPER_DIR=str(DEVELOPER))
     swift = run(['/usr/bin/xcrun', '--find', 'swift'], env=env).stdout.decode().strip()
     sdk = run(['/usr/bin/xcrun', '--sdk', 'macosx', '--show-sdk-path'], env=env).stdout.decode().strip()
+    sdk_version = run(['/usr/bin/xcrun', '--sdk', sdk, '--show-sdk-version'], env=env).stdout.decode().strip()
     os.umask(0o077)
     output.mkdir()  # Atomic reservation; an incomplete build is retained as evidence.
     build.parent.mkdir(parents=True, exist_ok=True)
@@ -203,10 +248,15 @@ def main():
     env.update(SDKROOT=sdk, TMPDIR=str(build / 'tmp'),
                CLANG_MODULE_CACHE_PATH=str(build / 'cache/clang'),
                SWIFTPM_MODULECACHE_OVERRIDE=str(build / 'cache/swiftpm'))
-    options = ['--disable-sandbox', '--disable-keychain', '--disable-netrc',
+    # SwiftBuild sanitizes SDKROOT from child linker environments. Swift's
+    # --sysroot forwarding alone leaves this clang's SDK metadata at the minimum
+    # OS. Forward the same selected SDK explicitly as clang's -isysroot.
+    options = ['--build-system', 'swiftbuild', '--disable-sandbox', '--disable-keychain', '--disable-netrc',
                '--manifest-cache', 'local', '--cache-path', build / 'cache/swiftpm',
                '--config-path', build / 'config', '--security-path', build / 'security',
                '--sdk', sdk, '-Xswiftc', '-sdk', '-Xswiftc', sdk,
+               '-Xswiftc', '-Xclang-linker', '-Xswiftc', '-isysroot',
+               '-Xswiftc', '-Xclang-linker', '-Xswiftc', sdk,
                '-Xswiftc', '-D', '-Xswiftc', 'UMA_PRODUCTION_RELEASE',
                '--scratch-path', build / 'swift', '--configuration', 'release']
     commands = []
@@ -245,7 +295,8 @@ def main():
             'UMASafariHostExtensionBuild': rc['FrozenHostBuild']}
     (app / 'Contents/Info.plist').write_bytes(plistlib.dumps(info, sort_keys=True))
     (app / 'Contents/Info.plist').chmod(0o644)
-    reports = {name: linkage(path) for name, path in executables.items()}
+    reports = {name: dict(linkage(path), build_version=macho_build_version(
+        path, sdk_version, rc['MinimumSystemVersion'])) for name, path in executables.items()}
     write_json(output / 'linkage-report.json', reports)
     write_json(output / 'hash-manifest.json', manifest(app))
     source_state(ROOT, args.commit, args.tree)
@@ -253,7 +304,8 @@ def main():
     toolchain = {'commands': commands, 'swift_version': run([swift, '--version'], env=env).stdout.decode(),
                  'xcode_version': run(['/usr/bin/xcodebuild', '-version'], env=env).stdout.decode(),
                  'developer_directory': str(DEVELOPER), 'sdk': sdk,
-                 'sdk_version': run(['/usr/bin/xcrun', '--sdk', 'macosx', '--show-sdk-version'], env=env).stdout.decode().strip(),
+                 'sdk_version': sdk_version, 'build_system': 'swiftbuild',
+                 'linker_sdk_selection': 'EXPLICIT_CLANG_ISYSROOT',
                  'deployment_target': rc['MinimumSystemVersion'], 'configuration': 'release',
                  'swift_path': swift, 'swift_sha256': sha(Path(swift)),
                  'compile_definitions': ['UMA_PRODUCTION_RELEASE'],
