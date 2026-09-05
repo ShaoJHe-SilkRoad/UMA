@@ -1,35 +1,46 @@
 import AppKit
 import SwiftUI
 
-enum RemainingUsageColorBand: Equatable, Sendable {
-    case green
-    case yellowGreen
-    case red
-}
-
 enum RemainingUsageVisualPolicy {
-    static func band(for percent: Double) -> RemainingUsageColorBand {
-        if percent < 10 { return .red }
-        if percent < 30 { return .yellowGreen }
-        return .green
-    }
-
-    static func color(for percent: Double) -> Color {
-        switch band(for: percent) {
-        case .green:
-            .green
-        case .yellowGreen:
-            // Keep the caution band visibly green. The slight warm shift is a
-            // low-quota cue, not a provider/accent color or accuracy signal.
-            Color(red: 0.31, green: 0.74, blue: 0.32)
-        case .red:
-            .red
-        }
-    }
-
     static func visibleFraction(for percent: Double, width: CGFloat) -> Double {
         let fraction = min(1, max(0, percent / 100))
         return max(fraction, min(1, 2 / max(1, width)))
+    }
+}
+
+// Compact rows own their clipping; this is only an internal, full-height fill.
+// Keep legacy preference names stable while restoring their usage visualization.
+enum CompactUsageFillPolicy {
+    static func fraction(for percent: Double?) -> Double? {
+        guard let percent, percent.isFinite, (0...100).contains(percent) else { return nil }
+        return percent / 100
+    }
+}
+
+struct CompactUsageFill: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let remainingPercent: Double?
+    let reduceTransparency: Bool
+    let increaseContrast: Bool
+    var providerID: String = "unknown"
+    var admittedPlan: String? = nil
+
+    var body: some View {
+        if let fraction = CompactUsageFillPolicy.fraction(for: remainingPercent) {
+            GeometryReader { proxy in
+                LowRemainingUsagePolicy.color(for: LowRemainingUsagePolicy.assessment(
+                    providerID: providerID, admittedPlan: admittedPlan, remainingPercent: remainingPercent
+                ))
+                    .opacity(DesktopAssistantTintOpacity.value(
+                        isDark: colorScheme == .dark,
+                        reduceTransparency: reduceTransparency,
+                        increaseContrast: increaseContrast
+                    ))
+                    .frame(width: proxy.size.width * fraction, height: proxy.size.height)
+            }
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
+        }
     }
 }
 
@@ -105,6 +116,7 @@ private extension View {
 }
 
 public struct AgentGlanceRow: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
@@ -217,7 +229,7 @@ public struct AgentGlanceRow: View {
 
     private var statusColor: Color {
         return switch AgentGlancePresentationPolicy.status(for: provider) {
-        case .connected: .green
+        case .connected: AgentConnectionIndicatorPalette.connected(isDark: colorScheme == .dark)
         case .reconnecting, .stale, .cached, .needsAttention,
              .authenticationRequired: .orange
         case .disconnected, .unavailable: .secondary
@@ -263,30 +275,8 @@ public struct AgentGlanceRow: View {
         language == .simplifiedChinese ? chinese : english
     }
 
-    private var providerMarkText: String {
-        let words = displayName.split(whereSeparator: \.isWhitespace)
-        if words.count > 1 {
-            return words.prefix(2).compactMap(\.first).map(String.init).joined()
-        }
-        return words.first?.first.map(String.init) ?? "?"
-    }
-
     private var providerMark: some View {
-        ZStack {
-            Circle()
-                .fill(Color.primary.opacity(0.045))
-            Circle()
-                .stroke(Color.primary.opacity(colorSchemeContrast == .increased ? 0.34 : 0.15), lineWidth: 1)
-            Text(providerMarkText)
-                .font(
-                    .system(
-                        size: providerMarkText.count > 1 ? 9 : 11,
-                        weight: .semibold
-                    )
-                )
-                .foregroundStyle(.primary)
-        }
-        .frame(width: 24, height: 24)
+        DesktopAgentLogo(providerID: provider.id.rawValue, tint: statusColor, diameter: 24)
         .overlay(alignment: .bottomTrailing) {
             Circle()
                 .fill(statusColor)
@@ -312,33 +302,17 @@ public struct AgentGlanceRow: View {
                 Color.primary.opacity(0.055)
             }
             if showsRemainingRail {
-                VStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    remainingRail
-                }
+                CompactUsageFill(
+                    remainingPercent: remainingPercent,
+                    reduceTransparency: reduceTransparency,
+                    increaseContrast: colorSchemeContrast == .increased,
+                    providerID: provider.id.rawValue,
+                    admittedPlan: provider.planLabel
+                )
             }
         }
     }
 
-    @ViewBuilder
-    private var remainingRail: some View {
-        if let percent = remainingPercent {
-            GeometryReader { proxy in
-                let visibleFraction = RemainingUsageVisualPolicy.visibleFraction(
-                    for: percent,
-                    width: proxy.size.width
-                )
-                ZStack(alignment: .leading) {
-                    Color.primary.opacity(colorSchemeContrast == .increased ? 0.13 : 0.07)
-                    RemainingUsageVisualPolicy.color(for: percent)
-                        .opacity(colorSchemeContrast == .increased ? 1 : 0.82)
-                        .frame(width: proxy.size.width * visibleFraction)
-                }
-            }
-            .frame(height: 2)
-            .accessibilityHidden(true)
-        }
-    }
 }
 
 public struct QuickPanelSurface: View {
@@ -512,6 +486,7 @@ private final class QuickPanelDisplayPreferences: ObservableObject {
 }
 
 public struct AgentWorkspaceSurface: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var store: UsageStore
     public let providerID: ProviderProductID
     private let refresh: () -> Void
@@ -596,8 +571,21 @@ public struct AgentWorkspaceSurface: View {
         )
     }
 
+    private var workspaceLogoColor: Color {
+        guard let provider else { return .secondary }
+        switch AgentGlancePresentationPolicy.status(for: provider) {
+        case .connected: return AgentConnectionIndicatorPalette.connected(isDark: colorScheme == .dark)
+        case .reconnecting, .stale, .cached, .needsAttention, .authenticationRequired: return .orange
+        case .error: return .red
+        case .disconnected, .unavailable: return .secondary
+        }
+    }
+
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
+            DesktopAgentLogo(providerID: providerID.rawValue,
+                             tint: workspaceLogoColor, diameter: 32)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(providerID.displayName)
                     .font(.title2.weight(.semibold))
@@ -684,7 +672,10 @@ public struct AgentWorkspaceSurface: View {
                         .fill(.primary.opacity(0.08))
                         .overlay(alignment: .leading) {
                             Capsule()
-                                .fill(RemainingUsageVisualPolicy.color(for: percent).opacity(0.78))
+                                .fill(LowRemainingUsagePolicy.color(for: LowRemainingUsagePolicy.assessment(
+                                    providerID: providerID.rawValue, admittedPlan: provider?.planLabel,
+                                    remainingPercent: percent
+                                )).opacity(0.78))
                                 .frame(width: geometry.size.width * RemainingUsageVisualPolicy.visibleFraction(
                                     for: percent,
                                     width: geometry.size.width

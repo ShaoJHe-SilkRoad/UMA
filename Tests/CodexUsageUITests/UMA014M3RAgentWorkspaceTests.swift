@@ -185,25 +185,23 @@ struct UMA014M3RAgentWorkspaceTests {
         #expect(failed?.inventory.quickPanel == false)
     }
 
-    @Test("Remaining bars use provider-neutral green yellow-green red thresholds")
+    @Test("Remaining bars share plan-aware policy while preserving geometry")
     func remainingBarsUseApprovedThresholds() throws {
         let source = try read("Sources/CodexUsageUI/Views/AgentSurfaceViews.swift")
         let wizard = try read("Sources/CodexUsageUI/Views/DesktopAssistantView.swift")
 
-        #expect(RemainingUsageVisualPolicy.band(for: 100) == .green)
-        #expect(RemainingUsageVisualPolicy.band(for: 50) == .green)
-        #expect(RemainingUsageVisualPolicy.band(for: 35) == .green)
-        #expect(RemainingUsageVisualPolicy.band(for: 30) == .green)
-        #expect(RemainingUsageVisualPolicy.band(for: 29.9) == .yellowGreen)
-        #expect(RemainingUsageVisualPolicy.band(for: 10) == .yellowGreen)
-        #expect(RemainingUsageVisualPolicy.band(for: 9.9) == .red)
-        #expect(RemainingUsageVisualPolicy.band(for: 0) == .red)
         #expect(RemainingUsageVisualPolicy.visibleFraction(for: 0, width: 200) == 0.01)
         #expect(RemainingUsageVisualPolicy.visibleFraction(for: 35, width: 200) == 0.35)
-        #expect(source.contains("Color(red: 0.31, green: 0.74, blue: 0.32)"))
-        #expect(!source.contains("Color.accentColor.opacity(0.11)"))
-        #expect(source.contains("RemainingUsageVisualPolicy.color(for: percent)"))
-        #expect(wizard.contains("RemainingUsageVisualPolicy.color(for: $0 * 100)"))
+        #expect(source.contains("LowRemainingUsagePolicy.assessment("))
+        #expect(wizard.contains("CompactUsageFill("))
+    }
+
+    @Test("Product projection preserves an admitted plan for the represented quota")
+    func admittedPlanProjection() throws {
+        let card = previewCard(connection: .connected, freshness: .fresh)
+        let projected = try #require(ProviderProductStatePolicy.previewInventory(
+            cards: [card], language: .english).provider(.codex))
+        #expect(projected.planLabel == card.planLabel)
     }
 
     private func read(_ relativePath: String) throws -> String {
@@ -227,6 +225,7 @@ struct UMA014M3RAgentWorkspaceTests {
         return SharedUsageCardPresentation(
             id: CodexUsageConnector.connectorID.rawValue,
             providerName: "Codex",
+            planLabel: "plus",
             connectionStatus: connection,
             freshness: freshness,
             windows: [window],

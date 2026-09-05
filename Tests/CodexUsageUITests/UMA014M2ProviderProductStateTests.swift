@@ -452,6 +452,35 @@ struct UMA014M2ProviderProductStateTests {
         #expect(second.inventory.provider(.codex)?.primaryDisplayText == "40%")
     }
 
+    @Test("Production projection forwards only recognized admitted plans for quota color")
+    func productionProjectionPreservesAdmittedPlanIdentifiers() {
+        let cases: [(AgentConnectorID, ProviderProductID, String, String, LowRemainingAssessment)] = [
+            (CodexUsageConnector.connectorID, .codex, "PRO", "pro", .normal),
+            (CodexUsageConnector.connectorID, .codex, " Plus ", "plus", .low),
+            (ClaudeCodeUsageConnector.connectorID, .claude, "PRO", "pro", .low),
+            (ClaudeCodeUsageConnector.connectorID, .claude, "Max", "max", .normal),
+        ]
+        for (connector, identity, admitted, canonical, expected) in cases {
+            let snapshot = usageSnapshot(id: connector, providerName: identity.displayName,
+                remaining: 14, estimated: identity == .claude, planLabel: admitted)
+            let product = reduce([snapshot]).inventory.provider(identity)
+            #expect(product?.planLabel == canonical)
+            #expect(product?.primaryQuota?.value.remainingPercent == 14)
+            #expect(LowRemainingUsagePolicy.assessment(providerID: identity.rawValue,
+                admittedPlan: product?.planLabel,
+                remainingPercent: product?.primaryQuota?.value.remainingPercent) == expected)
+        }
+        // Valid words for another provider are still not admitted plan aliases.
+        for (connector, identity, plan) in [
+            (CodexUsageConnector.connectorID, ProviderProductID.codex, "max"),
+            (ClaudeCodeUsageConnector.connectorID, ProviderProductID.claude, "plus")
+        ] {
+            let snapshot = usageSnapshot(id: connector, providerName: identity.displayName,
+                remaining: 0, estimated: false, planLabel: plan)
+            #expect(reduce([snapshot]).inventory.provider(identity)?.planLabel == nil)
+        }
+    }
+
     @Test
     func projectionRejectsArbitraryProviderPlanWindowAndFailureText() {
         let snapshot = usageSnapshot(

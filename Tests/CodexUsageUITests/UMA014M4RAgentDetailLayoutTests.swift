@@ -12,15 +12,26 @@ struct UMA014M4RAgentDetailLayoutTests {
         #expect(AgentWorkspaceLayoutPolicy.columnCount(for: 1_200) == 2)
     }
 
-    @Test("Glance rows use a thin rail and optional connectivity mark without a full tint wash")
+    @Test("Compact rows retain proportional full-height fill inside their existing container")
     func glanceRowVisualContract() throws {
         let source = try sourceText()
+        let glance = source.components(separatedBy: "public struct QuickPanelSurface")[0]
+        #expect(glance.contains("CompactUsageFill("))
+        #expect(!glance.contains("private var remainingRail:"))
+        #expect(!glance.contains(".frame(height: 2)"))
+        #expect(glance.contains("if showsConnectivity { providerMark }"))
+        #expect(glance.contains("if showsRemainingRail"))
+    }
 
-        #expect(source.contains("private var remainingRail: some View"))
-        #expect(source.contains(".frame(height: 2)"))
-        #expect(source.contains("if showsConnectivity { providerMark }"))
-        #expect(source.contains("if showsRemainingRail"))
-        #expect(!source.contains("private var remainingTint: some View"))
+    @Test("Compact fill uses remaining usage exactly and never fabricates unavailable or infinite fill")
+    func compactFillGeometry() {
+        for percent in [0.0, 14, 50, 77, 90, 100] {
+            #expect(CompactUsageFillPolicy.fraction(for: percent) == percent / 100)
+        }
+        let invalid: [Double?] = [nil, .nan, .infinity, -.infinity, -1, 101]
+        for percent in invalid {
+            #expect(CompactUsageFillPolicy.fraction(for: percent) == nil)
+        }
     }
 
     @Test("Agent detail remains modular and collapses activity and privacy diagnostics")

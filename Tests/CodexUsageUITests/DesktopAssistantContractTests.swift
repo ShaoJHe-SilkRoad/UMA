@@ -9,7 +9,7 @@ struct DesktopAssistantContractTests {
     func geometry() {
         #expect(DesktopAssistantMetrics.regularWidth == 210)
         #expect(DesktopAssistantMetrics.regularHeight == 60)
-        #expect(DesktopAssistantMetrics.minimalistWidth == 58.333333)
+        #expect(DesktopAssistantMetrics.minimalistWidth == DesktopAssistantMinimalistTypography.metrics().size.width)
         #expect(DesktopAssistantMetrics.minimalistHeight == 30)
         #expect(DesktopAssistantMetrics.minimalistCornerRadius == 15)
     }
@@ -101,9 +101,9 @@ struct DesktopAssistantContractTests {
     @Test("Tint midpoint uses the complete capsule width")
     func tintMidpoint() {
         let width = DesktopAssistantMetrics.minimalistWidth
-        #expect(abs(DesktopAssistantTintGeometry.midpointX(remainingFraction: 0.75, width: width) - 43.74999975) < 0.000001)
-        #expect(abs(DesktopAssistantTintGeometry.midpointX(remainingFraction: 0.50, width: width) - 29.1666665) < 0.000001)
-        #expect(abs(DesktopAssistantTintGeometry.midpointX(remainingFraction: 0.10, width: width) - 5.8333333) < 0.000001)
+        #expect(abs(DesktopAssistantTintGeometry.midpointX(remainingFraction: 0.75, width: width) - width * 0.75) < 0.000001)
+        #expect(abs(DesktopAssistantTintGeometry.midpointX(remainingFraction: 0.50, width: width) - width * 0.50) < 0.000001)
+        #expect(abs(DesktopAssistantTintGeometry.midpointX(remainingFraction: 0.10, width: width) - width * 0.10) < 0.000001)
         #expect(DesktopAssistantTintGeometry.midpointX(remainingFraction: 0, width: width) == 0)
         #expect(DesktopAssistantTintGeometry.midpointX(remainingFraction: 1, width: width) == width)
     }

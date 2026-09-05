@@ -449,7 +449,7 @@ enum ProviderProductStatePolicy {
             ].contains(connection)
             return ProviderProductState(
                 id: entry.productID,
-                planLabel: nil,
+                planLabel: LowRemainingUsagePolicy.admittedPlanIdentifier(providerID: entry.productID.rawValue, label: card.planLabel),
                 quotas: quotas,
                 primaryQuotaID: primaryQuotaID,
                 precision: quotas.first { $0.id == primaryQuotaID }?.precision ?? .unavailable,
@@ -612,7 +612,7 @@ enum ProviderProductStatePolicy {
 
         return ProviderProductState(
             id: entry.productID,
-            planLabel: nil,
+            planLabel: LowRemainingUsagePolicy.admittedPlanIdentifier(providerID: entry.productID.rawValue, label: card?.planLabel),
             quotas: quotas,
             primaryQuotaID: primaryQuotaID,
             precision: precision,

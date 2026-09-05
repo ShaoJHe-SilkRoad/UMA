@@ -115,7 +115,9 @@ struct M2WADBGCombinedCloseoutTests {
             #expect(shared.id == WorkBuddyManualPersistenceRecord.connectorID)
             #expect(assistant.id == shared.id)
             #expect(assistant.usageText(for: .regular) == main.compactValue)
-            #expect(assistant.tintFraction == main.remainingFraction)
+            // Native credits retain their exact value, never a percentage fill.
+            #expect(assistant.tintFraction == nil)
+            #expect(assistant.remainingPercent == nil)
             #expect(assistant.sourceMark == .manual)
             #expect(assistant.accessibilityLabel == main.accessibilityLabel)
             #expect(assistant.toolTip == main.accessibilityLabel)
@@ -166,7 +168,9 @@ struct M2WADBGCombinedCloseoutTests {
             )
             #expect(assistant.accessibilityLabel == main.accessibilityLabel)
             #expect(assistant.usageText(for: .regular) == main.compactValue)
-            #expect(assistant.tintFraction == main.remainingFraction)
+            // Native credits retain their exact value, never a percentage fill.
+            #expect(assistant.tintFraction == nil)
+            #expect(assistant.remainingPercent == nil)
         }
 
         #expect(

@@ -279,6 +279,12 @@ def main():
         target.chmod(0o755)
     shutil.copyfile(source / 'Assets/AppIcon.icns', app / 'Contents/Resources/AppIcon.icns')
     (app / 'Contents/Resources/AppIcon.icns').chmod(0o644)
+    logos = app / 'Contents/Resources/AgentLogos'
+    logos.mkdir()
+    for name in ('codex', 'claude-code', 'workbuddy'):
+        target = logos / f'{name}.svg'
+        shutil.copyfile(source / 'Assets/AgentLogos' / target.name, target)
+        target.chmod(0o644)
     info = {'CFBundleExecutable': 'CodexUsageMonitor', 'CFBundleIdentifier': rc['BundleIdentifier'],
             'CFBundleName': rc['ApplicationName'], 'CFBundleDisplayName': rc['ApplicationName'],
             'CFBundlePackageType': 'APPL', 'CFBundleShortVersionString': version,

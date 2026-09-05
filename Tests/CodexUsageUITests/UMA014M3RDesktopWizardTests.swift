@@ -6,6 +6,15 @@ import Testing
 
 @Suite("UMA014 M3R Desktop Wizard")
 struct UMA014M3RDesktopWizardTests {
+    @Test("Logo selection identifies brands without admitting providers")
+    func logoAssetIdentity() {
+        #expect(DesktopAgentLogoAsset.resolve(providerID: "codex.local") == .codex)
+        #expect(DesktopAgentLogoAsset.resolve(providerID: "claude.browserSync") == .claudeCode)
+        #expect(DesktopAgentLogoAsset.resolve(providerID: "workbuddy.manualAvailability") == .workbuddy)
+        #expect(DesktopAgentLogoAsset.resolve(providerID: "unknown.local") == nil)
+        #expect(DesktopAgentLogoAsset.resolve(providerID: "codex-impostor.local") == nil)
+    }
+
     @Test("Regular restores the accepted Wizard composition and keeps Minimalist unchanged")
     func regularPresentationContract() throws {
         let regular = DesktopAssistantContentContract.visibleFields(for: .regular)
@@ -189,17 +198,18 @@ struct UMA014M3RDesktopWizardTests {
         #expect(localizedCard.language == .simplifiedChinese)
     }
 
-    @Test("Main, Quick, and Wizard share urgency rails without full-row tint washes")
+    @Test("Main, Quick, and Wizard share clipped solid fill without compact rails")
     func sharedVisualLanguageContract() throws {
         let source = try sourceText("Sources/CodexUsageUI/Views/AgentSurfaceViews.swift")
         let wizard = try sourceText("Sources/CodexUsageUI/Views/DesktopAssistantView.swift")
-        #expect(source.contains("RemainingUsageVisualPolicy.color(for: percent)"))
+        #expect(source.contains("LowRemainingUsagePolicy.assessment("))
         #expect(source.contains("Color(nsColor: .controlBackgroundColor)"))
         #expect(!source.contains("DesktopAssistantTintGeometry.stops("))
-        #expect(!source.contains("DesktopAssistantTintOpacity.value("))
+        #expect(source.contains("DesktopAssistantTintOpacity.value("))
+        #expect(wizard.contains("CompactUsageFill("))
+        #expect(!wizard.contains("private var percentageRail:"))
         #expect(!source.contains("Capsule()\n                        .fill(.primary.opacity(0.09))"))
         #expect(wizard.contains("private var valueColor: Color"))
-        #expect(wizard.contains("Remaining urgency belongs to the shared bar palette"))
         #expect(!wizard.contains("case .warning, .critical:"))
     }
 

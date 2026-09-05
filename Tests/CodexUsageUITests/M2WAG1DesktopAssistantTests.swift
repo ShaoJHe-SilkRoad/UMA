@@ -81,7 +81,7 @@ struct M2WAG1DesktopAssistantTests {
         )
         #expect(
             DesktopAssistantMetrics.stackSize(for: .minimalist, rowCount: 2)
-                == CGSize(width: 58.333333, height: 64)
+                == CGSize(width: DesktopAssistantMetrics.minimalistWidth, height: 64)
         )
         #expect(DesktopAssistantMetrics.rowSpacing == 4)
     }
@@ -113,7 +113,7 @@ struct M2WAG1DesktopAssistantTests {
     }
 
     @Test
-    func founderFiveHundredStateUsesSharedFractionSeverityAndFullAccessibility() throws {
+    func founderFiveHundredStatePreservesNativeCreditsAndFullAccessibility() throws {
         let confirmedAt = now.addingTimeInterval(-3_600)
         let shared = try workBuddyCard(
             remaining: 500,
@@ -124,7 +124,8 @@ struct M2WAG1DesktopAssistantTests {
         let card = DesktopAssistantCard(shared: shared)
 
         #expect(card.usageValue == .credits("500"))
-        #expect(card.tintFraction == 1)
+        #expect(card.tintFraction == nil)
+        #expect(card.availableCredits == 500)
         #expect(card.severity == .normal)
         #expect(card.sourceMark == .manual)
         #expect(card.accessibilityLabel.contains("WorkBuddy"))
@@ -251,9 +252,11 @@ struct M2WAG1DesktopAssistantTests {
             shared: try workBuddyCard(remaining: 400, used: 3_600, total: 4_000)
         )
         #expect(warning.severity == .warning)
-        #expect(warning.tintFraction == 0.25)
+        #expect(warning.tintFraction == nil)
+        #expect(warning.availableCredits == 1_000)
         #expect(critical.severity == .critical)
-        #expect(critical.tintFraction == 0.1)
+        #expect(critical.tintFraction == nil)
+        #expect(critical.availableCredits == 400)
         #expect(warning.sourceMark == .manual)
         #expect(critical.sourceMark == .manual)
     }

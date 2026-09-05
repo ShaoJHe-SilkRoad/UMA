@@ -141,7 +141,19 @@ struct M5RMXUIFIXG1DesktopAssistantTests {
         )
 
         #expect(view.occurrenceCount(of: ".strokeBorder(") == 0)
-        #expect(view.contains(".background { glassBackground }"))
+        // The accepted fill is internal to the existing material row and is
+        // clipped by that row's one boundary; whitespace is not the contract.
+        let compactView = view.filter { !$0.isWhitespace }
+        let backgroundStart = try #require(compactView.range(of: ".background{glassBackground.overlay{"))
+        let rowClip = try #require(compactView.range(
+            of: ".clipShape(RoundedRectangle(",
+            range: backgroundStart.upperBound..<compactView.endIndex
+        ))
+        let rowBackground = String(compactView[backgroundStart.lowerBound..<rowClip.lowerBound])
+        #expect(rowBackground.occurrenceCount(of: "glassBackground") == 1)
+        #expect(rowBackground.occurrenceCount(of: ".background{") == 1)
+        #expect(rowBackground.occurrenceCount(of: "CompactUsageFill(") == 1)
+        #expect(!rowBackground.contains("NSVisualEffectView"))
         #expect(view.contains(".clipShape(RoundedRectangle("))
         #expect(view.contains(".accessibilityLabel(Text(card.accessibilityLabel))"))
         #expect(view.contains(".accessibilityAction"))

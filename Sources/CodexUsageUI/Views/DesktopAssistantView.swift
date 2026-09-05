@@ -4,7 +4,9 @@ import SwiftUI
 public enum DesktopAssistantMetrics {
     public static let regularWidth: CGFloat = 210
     public static let regularHeight: CGFloat = 60
-    public static let minimalistWidth: CGFloat = 58.333333
+    public static var minimalistWidth: CGFloat {
+        DesktopAssistantMinimalistTypography.metrics().size.width
+    }
     public static let minimalistHeight: CGFloat = 30
     public static let minimalistCornerRadius: CGFloat = 15
     public static let minimalistConnectionDiameter: CGFloat = 18
@@ -14,20 +16,24 @@ public enum DesktopAssistantMetrics {
     public static let tintFeatherWidth: CGFloat = 6
     public static let rowSpacing: CGFloat = 4
 
-    public static func size(for density: DesktopAssistantResolvedDensity) -> CGSize {
+    public static func size(
+        for density: DesktopAssistantResolvedDensity,
+        valueTexts: [String] = []
+    ) -> CGSize {
         switch density {
         case .regular:
             CGSize(width: regularWidth, height: regularHeight)
         case .minimalist:
-            CGSize(width: minimalistWidth, height: minimalistHeight)
+            DesktopAssistantMinimalistTypography.metrics(valueTexts: valueTexts).size
         }
     }
 
     public static func stackSize(
         for density: DesktopAssistantResolvedDensity,
-        rowCount: Int
+        rowCount: Int,
+        valueTexts: [String] = []
     ) -> CGSize {
-        let row = size(for: density)
+        let row = size(for: density, valueTexts: valueTexts)
         let count = max(0, rowCount)
         let gaps = max(0, count - 1)
         return CGSize(
@@ -150,6 +156,8 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
     public let usageValue: DesktopAssistantUsageValue
     public let regularUsageText: String?
     public let tintFraction: Double?
+    public let remainingPercent: Double?
+    public let availableCredits: Decimal?
     public let severity: DesktopAssistantUsageSeverity
     public let isStale: Bool
     public let language: AppLanguage
@@ -173,6 +181,8 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         usageValue: DesktopAssistantUsageValue,
         regularUsageText: String? = nil,
         tintFraction: Double? = nil,
+        remainingPercent: Double? = nil,
+        availableCredits: Decimal? = nil,
         severity: DesktopAssistantUsageSeverity,
         isStale: Bool,
         language: AppLanguage = .english,
@@ -200,8 +210,17 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         self.detailText = detailText
         self.usageValue = usageValue
         self.regularUsageText = regularUsageText
-        self.tintFraction = tintFraction.map { min(1, max(0, $0)) }
-            ?? usageValue.finitePercent.map { Double($0) / 100 }
+        self.availableCredits = availableCredits
+        let representedPercent: Double? = switch usageValue {
+        case let .finite(value), let .estimated(value):
+            remainingPercent ?? tintFraction.map { $0 * 100 } ?? Double(value)
+        case .credits, .unlimited, .unavailable:
+            nil
+        }
+        self.remainingPercent = representedPercent.flatMap {
+            $0.isFinite && (0...100).contains($0) ? $0 : nil
+        }
+        self.tintFraction = self.remainingPercent.map { $0 / 100 }
         self.severity = severity
         self.isStale = isStale
         self.language = language
@@ -321,7 +340,7 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
                 regularUsageText: availability?.exactCreditValue.map {
                     CreditFormatter.exact($0, language: language)
                 },
-                tintFraction: availability?.normalizedRemainingFraction,
+                availableCredits: availability?.exactCreditValue,
                 severity: availabilitySeverity,
                 isStale: card.isRetainingLastValidValue,
                 language: language,
@@ -365,7 +384,7 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
                         )
                         : CreditFormatter.exact($0, language: language)
                 },
-                tintFraction: availability.normalizedRemainingFraction,
+                availableCredits: availability.exactCreditValue,
                 severity: availabilitySeverity,
                 isStale: card.freshness == .stale || card.isRetainingLastValidValue,
                 language: language,
@@ -399,7 +418,10 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
                 language: language
             ),
             usageValue: percentageUsageValue,
-            tintFraction: card.remaining.tintFraction,
+            remainingPercent: {
+                if case let .finite(value) = card.remaining { return value }
+                return nil
+            }(),
             severity: percentageSeverity,
             isStale: card.freshness == .stale,
             language: language
@@ -745,11 +767,17 @@ public struct DesktopAssistantView: View {
     }
 
     public var body: some View {
-        VStack(spacing: DesktopAssistantMetrics.rowSpacing) {
+        let valueTexts = cards.map { $0.usageText(for: density) }
+        let measured = DesktopAssistantMinimalistTypography.metrics(valueTexts: valueTexts)
+        let sharedSize = density == .minimalist
+            ? measured.size : DesktopAssistantMetrics.size(for: .regular)
+        return VStack(spacing: DesktopAssistantMetrics.rowSpacing) {
             ForEach(cards) { card in
                 DesktopAssistantCardView(
                     card: card,
                     density: density,
+                    sharedSize: sharedSize,
+                    minimalistMetrics: measured,
                     appearanceOverride: appearanceOverride,
                     showsStatusIndicator: showsStatusIndicator,
                     showsPercentageRail: showsPercentageRail,
@@ -761,17 +789,20 @@ public struct DesktopAssistantView: View {
 }
 
 private struct DesktopAssistantCardView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     let card: DesktopAssistantCard
     let density: DesktopAssistantResolvedDensity
+    let sharedSize: CGSize
+    let minimalistMetrics: DesktopAssistantMinimalistTypography.Measurement
     let appearanceOverride: DesktopAssistantAppearanceOverride?
     let showsStatusIndicator: Bool
     let showsPercentageRail: Bool
     let onSelect: ((String) -> Void)?
 
-    private var size: CGSize { DesktopAssistantMetrics.size(for: density) }
+    private var size: CGSize { sharedSize }
     private var radius: CGFloat {
         density == .minimalist ? DesktopAssistantMetrics.minimalistCornerRadius : size.height / 2
     }
@@ -793,8 +824,20 @@ private struct DesktopAssistantCardView: View {
             }
         }
         .frame(width: size.width, height: size.height)
-        .background { glassBackground }
-        .overlay(alignment: .bottomLeading) { percentageRail }
+        .background {
+            glassBackground
+                .overlay {
+                    if showsPercentageRail {
+                        CompactUsageFill(
+                            remainingPercent: card.remainingPercent,
+                            reduceTransparency: usesReduceTransparency,
+                            increaseContrast: hasIncreasedContrast,
+                            providerID: card.id,
+                            admittedPlan: card.planLabel
+                        )
+                    }
+                }
+        }
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .opacity(card.isStale ? 0.78 : 1)
         .help(card.toolTip)
@@ -814,10 +857,22 @@ private struct DesktopAssistantCardView: View {
             if showsStatusIndicator {
                 sourceMark(diameter: DesktopAssistantMetrics.minimalistConnectionDiameter)
             }
-            valueLabel
+            minimalistValueLabel
         }
         .fixedSize(horizontal: true, vertical: false)
         .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private var minimalistValueLabel: some View {
+        Text(card.usageText(for: .minimalist))
+            .frame(width: minimalistMetrics.prefixWidth + minimalistMetrics.valueWidth,
+                   alignment: .trailing)
+        .font(DesktopAssistantMinimalistTypography.font)
+        .foregroundStyle(valueColor)
+        .lineLimit(1)
+        .fixedSize()
+        // Precision stays adjacent to its number; the whole value is right-aligned.
+        .accessibilityHidden(true)
     }
 
     private var regularContent: some View {
@@ -884,57 +939,19 @@ private struct DesktopAssistantCardView: View {
     }
 
     private func precisionValue(prefix: String, value: Int) -> some View {
-        HStack(spacing: 0) {
-            Text(prefix)
-                .frame(width: 9, alignment: .trailing)
-            Text("\(min(100, max(0, value)))%")
-                .monospacedDigit()
-        }
+        Text("\(prefix.trimmingCharacters(in: .whitespaces))\(min(100, max(0, value)))%")
+            .monospacedDigit()
         .accessibilityHidden(true)
     }
 
-    @ViewBuilder
     private func sourceMark(diameter: CGFloat) -> some View {
-        switch card.sourceMark {
-        case .connection:
-            ZStack {
-                Circle()
-                    .stroke(connectionColor, lineWidth: 1.5)
-                Text(card.providerMarkText)
-                    .font(
-                        AppTypography.systemFont(
-                            diameter * (card.providerMarkText.count > 1 ? 0.42 : 0.56),
-                            weight: .semibold
-                        )
-                    )
-                    .foregroundStyle(connectionColor)
-            }
-            .frame(width: diameter, height: diameter)
-            .accessibilityHidden(true)
-        case .accountWeb:
-            ZStack {
-                Circle()
-                    .stroke(connectionColor, lineWidth: 1.5)
-                Text("W")
-                    .font(AppTypography.systemFont(diameter * 0.52, weight: .semibold))
-                    .foregroundStyle(connectionColor)
-            }
-            .frame(width: diameter, height: diameter)
-            .accessibilityHidden(true)
-        case .manual:
-            ZStack {
-                RoundedRectangle(cornerRadius: diameter * 0.28, style: .continuous)
-                    .stroke(
-                        Color.secondary,
-                        style: StrokeStyle(lineWidth: 1.5, dash: [2, 1.5])
-                    )
-                Text("M")
-                    .font(AppTypography.systemFont(diameter * 0.50, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .frame(width: diameter, height: diameter)
-            .accessibilityHidden(true)
-        }
+        DesktopAgentLogo(
+            providerID: card.id,
+            tint: card.sourceMark == .manual ? .secondary : connectionColor,
+            diameter: diameter
+        )
+        // The containing card already announces the agent and connection state.
+        .accessibilityHidden(true)
     }
 
     @ViewBuilder
@@ -948,29 +965,10 @@ private struct DesktopAssistantCardView: View {
         }
     }
 
-    @ViewBuilder
-    private var percentageRail: some View {
-        if showsPercentageRail, let fraction {
-            GeometryReader { proxy in
-                let visibleFraction = RemainingUsageVisualPolicy.visibleFraction(
-                    for: fraction * 100,
-                    width: proxy.size.width
-                )
-                Capsule()
-                    .fill(tintColor.opacity(hasIncreasedContrast ? 0.95 : 0.8))
-                    .frame(width: proxy.size.width * visibleFraction, height: 2)
-                    .frame(maxHeight: .infinity, alignment: .bottom)
-            }
-            .padding(.horizontal, density == .minimalist ? 8 : 12)
-            .padding(.bottom, 2)
-            .accessibilityHidden(true)
-        }
-    }
-
     private var connectionColor: Color {
         switch card.connectionState {
         case .connected:
-            .green
+            AgentConnectionIndicatorPalette.connected(isDark: colorScheme == .dark)
         case .reconnecting:
             .orange
         case .stale:
@@ -982,14 +980,15 @@ private struct DesktopAssistantCardView: View {
         }
     }
 
-    private var tintColor: Color {
-        fraction.map { RemainingUsageVisualPolicy.color(for: $0 * 100) } ?? .clear
-    }
-
     private var valueColor: Color {
-        // Remaining urgency belongs to the shared bar palette. Keep the value
-        // readable and provider/accuracy-neutral; do not turn an estimated or
-        // moderately low percentage into an error-colored label.
-        .primary
+        // Credits have no percentage surface: only their native-unit value is
+        // colored. Connectivity retains its independent status palette.
+        if case .credits = card.usageValue {
+            return LowRemainingUsagePolicy.color(for: LowRemainingUsagePolicy.assessment(
+                providerID: card.id, admittedPlan: card.planLabel,
+                remainingPercent: nil, availableCredits: card.availableCredits
+            ))
+        }
+        return .primary
     }
 }

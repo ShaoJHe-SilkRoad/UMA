@@ -206,6 +206,9 @@ public enum AppTypography {
     /// cannot activate the override.
     nonisolated(unsafe) private static var previewPointSizeScale: CGFloat = 1
 
+    /// Shared by measured native layouts and the existing preview typography.
+    static var currentPointSizeScale: CGFloat { previewPointSizeScale }
+
     public static func configurePreviewPointSizeScale(_ scale: CGFloat) {
         let processName = ProcessInfo.processInfo.processName
         guard processName == "PreviewRendererTool"

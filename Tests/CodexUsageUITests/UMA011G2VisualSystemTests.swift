@@ -258,7 +258,7 @@ struct UMA011G2VisualSystemTests {
         #expect(design.contains("AnyShapeStyle(.thinMaterial)"))
         #expect(design.contains(".strokeBorder("))
         #expect(!design.contains("radius: usesReducedTransparency ? 2 : 5"))
-        #expect(assistant.contains(".background { glassBackground }"))
+        #expect(assistant.contains("glassBackground"))
         #expect(assistant.contains(".clipShape(RoundedRectangle("))
         #expect(!assistant.contains(".strokeBorder("))
         #expect(panel.contains(".strokeBorder("))
@@ -342,7 +342,7 @@ struct UMA011G2VisualSystemTests {
     func assistantGeometry() throws {
         #expect(DesktopAssistantMetrics.regularWidth == 210)
         #expect(DesktopAssistantMetrics.regularHeight == 60)
-        #expect(DesktopAssistantMetrics.minimalistWidth == 58.333333)
+        #expect(DesktopAssistantMetrics.minimalistWidth == DesktopAssistantMinimalistTypography.metrics().size.width)
         #expect(DesktopAssistantMetrics.minimalistHeight == 30)
         #expect(DesktopAssistantMetrics.minimalistReservedWindowWidth == 0)
         #expect(DesktopAssistantMetrics.percentageFontSize == 13)

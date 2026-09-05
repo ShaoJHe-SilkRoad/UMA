@@ -24,7 +24,7 @@ struct PreviewRendererTool {
 
         let arguments = Array(CommandLine.arguments.dropFirst())
         let interactive = arguments.contains("--interactive")
-        if interactive {
+        if interactive || arguments.contains("--live-review") {
             NSApplication.shared.setActivationPolicy(.regular)
         }
         let outputPath = arguments.first(where: { !$0.hasPrefix("--") })
@@ -67,7 +67,22 @@ struct PreviewRendererTool {
             .flatMap { Double($0.dropFirst("--percent=".count)) }
             ?? 44
 
+        let compactFill = try CompactFillReviewFixture.parse(arguments)
+        for provider in ["codex", "claude"] {
+            let prefix = "--\(provider)-plan="
+            let values = arguments.filter { $0.hasPrefix(prefix) }
+            guard values.count <= 1,
+                  values.allSatisfy({ ["pro", "plus", "max", "unknown"].contains(String($0.dropFirst(prefix.count)).lowercased()) })
+            else { throw PreviewError.invalidScenario }
+        }
+        let creditFixtures = arguments.filter { $0.hasPrefix("--workbuddy-credits=") }
+        guard creditFixtures.count <= 1,
+              creditFixtures.allSatisfy({ ["499", "500", "501"].contains(String($0.dropFirst("--workbuddy-credits=".count))) })
+        else { throw PreviewError.invalidScenario }
         if let reviewScenario = try M3RReviewScenario.parse(arguments) {
+            guard compactFill == nil || reviewScenario.supportsCompactFillFixture else {
+                throw PreviewError.invalidScenario
+            }
             let review = makeM3RReview(
                 scenario: reviewScenario,
                 language: language,
@@ -75,16 +90,21 @@ struct PreviewRendererTool {
                 reduceTransparency: reduceTransparency,
                 increaseContrast: increaseContrast,
                 reduceMotion: reduceMotion,
-                wallpaperStyle: wallpaperStyle
+                wallpaperStyle: wallpaperStyle,
+                compactFill: compactFill,
+                arguments: arguments
             )
             try renderM3RReview(
                 review,
                 to: outputPath,
                 scale: renderScale,
-                alphaMask: rendersAlphaMask
+                alphaMask: rendersAlphaMask,
+                liveReview: arguments.contains("--live-review")
             )
             return
         }
+
+        guard compactFill == nil else { throw PreviewError.invalidScenario }
 
         let content: AnyView
         let renderSize: CGSize
@@ -407,6 +427,7 @@ struct PreviewRendererTool {
             withIntermediateDirectories: true
         )
         try png.write(to: outputURL, options: .atomic)
+
     }
 
     private static func startupDiagnostic(for error: Error) -> String {
@@ -430,7 +451,9 @@ struct PreviewRendererTool {
         reduceTransparency: Bool,
         increaseContrast: Bool,
         reduceMotion: Bool,
-        wallpaperStyle: PreviewWallpaperStyle
+        wallpaperStyle: PreviewWallpaperStyle,
+        compactFill: CompactFillReviewFixture?,
+        arguments: [String]
     ) -> M3RReviewRender {
         let fixtureKind: M3RFixtureKind = switch scenario {
         case .quickOne:
@@ -442,7 +465,9 @@ struct PreviewRendererTool {
         default:
             .healthy
         }
-        let fixture = makeM3RFixture(kind: fixtureKind, language: language)
+        let fixture = makeM3RFixture(
+            kind: fixtureKind, language: language, compactFill: compactFill, arguments: arguments
+        )
         let appearance = isDark ? ColorScheme.dark : ColorScheme.light
         let reviewContent: AnyView
         let size: CGSize
@@ -480,6 +505,41 @@ struct PreviewRendererTool {
                     )
                         .frame(width: 320, height: 196, alignment: .top)
                 }
+            )
+        case .compactRows:
+            size = CGSize(width: 600, height: 240)
+            reviewContent = AnyView(
+                HStack(alignment: .top, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Quick Panel row fixture")
+                            .font(.headline)
+                        ForEach(fixture.store.productInventory.agentWorkspaceProviders) { provider in
+                            AgentGlanceRow(
+                                provider: provider,
+                                style: .quickPanel,
+                                language: language,
+                                referenceDate: M3RFixture.fixedNow
+                            )
+                        }
+                    }
+                    .frame(width: 300)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Main list row fixture")
+                            .font(.headline)
+                        ForEach(fixture.store.productInventory.agentWorkspaceProviders) { provider in
+                            AgentGlanceRow(
+                                provider: provider,
+                                style: .mainList,
+                                language: language,
+                                referenceDate: M3RFixture.fixedNow
+                            )
+                        }
+                    }
+                    .frame(width: 235)
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(Color(nsColor: .windowBackgroundColor))
             )
         case .main:
             size = CGSize(width: 860, height: 590)
@@ -545,13 +605,15 @@ struct PreviewRendererTool {
                 )
                 .background(Color(nsColor: .windowBackgroundColor))
             )
-        case .wizardRegular, .wizardMinimalist, .wizardContextMenu:
+        case .wizardRegular, .wizardMinimalist, .wizardContextMenu,
+             .wizardLogosRegular, .wizardLogosMinimalist:
             let density: DesktopAssistantResolvedDensity = scenario == .wizardMinimalist
+                || scenario == .wizardLogosMinimalist
                 ? .minimalist
                 : .regular
-            let cards = SharedUsagePresentationPolicy.assistantCards(
-                from: fixture.cards
-            ).map {
+            let cards = scenario == .wizardLogosRegular || scenario == .wizardLogosMinimalist
+                ? makeWizardLogoFixture(language: language, compactFill: compactFill, arguments: arguments)
+                : SharedUsagePresentationPolicy.assistantCards(from: fixture.cards).map {
                 DesktopAssistantCard(
                     shared: $0,
                     language: language,
@@ -560,7 +622,8 @@ struct PreviewRendererTool {
             }
             let wizardSize = DesktopAssistantMetrics.stackSize(
                 for: density,
-                rowCount: cards.count
+                rowCount: cards.count,
+                valueTexts: cards.map { $0.usageText(for: density) }
             )
             if scenario == .wizardContextMenu {
                 size = CGSize(width: 430, height: max(188, wizardSize.height + 48))
@@ -607,62 +670,125 @@ struct PreviewRendererTool {
                     .frame(width: size.width, height: size.height)
                     .environment(\.colorScheme, appearance)
                     .environment(\.locale, language.locale)
+                    .environment(\.dynamicTypeSize, arguments.contains("--large-text") ? .accessibility1 : .medium)
             ),
             size: size
         )
     }
 
+    private static func fixturePlan(_ arguments: [String], provider: String, fallback: String) -> String {
+        let prefix = "--\(provider)-plan="
+        return arguments.first(where: { $0.hasPrefix(prefix) })
+            .map { String($0.dropFirst(prefix.count)).uppercased() } ?? fallback
+    }
+
+    // Render-only identity fixtures. WorkBuddy never enters ProviderProductInventory.
+    private static func makeWizardLogoFixture(
+        language: AppLanguage,
+        compactFill: CompactFillReviewFixture?,
+        arguments: [String]
+    ) -> [DesktopAssistantCard] {
+        let shared = makeM3RFixture(
+            kind: .healthy, language: language,
+            compactFill: compactFill ?? .percent(77), arguments: arguments
+        ).cards
+        var cards = shared.map {
+            DesktopAssistantCard(shared: $0, language: language, now: M3RFixture.fixedNow)
+        }
+        let credits = arguments.first(where: { $0.hasPrefix("--workbuddy-credits=") })
+            .flatMap { Int($0.dropFirst("--workbuddy-credits=".count)) }
+        cards.append(DesktopAssistantCard(
+            id: "workbuddy.logoPreview",
+            providerName: "WorkBuddy",
+            connectionState: .unavailable,
+            selectedWindowShortLabel: "",
+            selectedWindowAccessibilityLabel: "Synthetic credits, dormant provider; no runtime connection",
+            usageValue: credits.map { .credits(String($0)) } ?? .unavailable,
+            availableCredits: credits.map { Decimal($0) },
+            severity: .neutral,
+            isStale: false,
+            language: language
+        ))
+        return cards
+    }
+
     private static func makeM3RFixture(
         kind: M3RFixtureKind,
-        language: AppLanguage
+        language: AppLanguage,
+        compactFill: CompactFillReviewFixture?,
+        arguments: [String]
     ) -> M3RFixture {
         let cards: [SharedUsageCardPresentation]
-        switch kind {
-        case .healthy:
+        if let compactFill {
+            let unavailable = compactFill == .unavailable
+            let percent = compactFill.remainingPercent ?? 0
             cards = [
                 makeCodexCard(
-                    arguments: [],
+                    arguments: arguments + (unavailable ? ["--unavailable"] : (compactFill == .infinity ? ["--unlimited"] : [])),
                     language: language,
-                    percent: 64,
+                    percent: percent,
                     scenario: .ready
                 ),
                 makeM3RClaudeCard(
                     language: language,
-                    fiveHourPercent: 24,
-                    sevenDayPercent: 71,
+                    fiveHourPercent: percent,
+                    sevenDayPercent: percent,
                     estimated: true,
                     freshness: .fresh,
-                    connection: .connected
+                    connection: .connected,
+                    unavailable: unavailable,
+                    unlimited: compactFill == .infinity,
+                    planLabel: fixturePlan(arguments, provider: "claude", fallback: "PRO")
                 ),
             ]
-        case .one:
-            cards = [
-                makeCodexCard(
-                    arguments: [],
-                    language: language,
-                    percent: 64,
-                    scenario: .ready
-                ),
-            ]
-        case .zero:
-            cards = []
-        case .degraded:
-            cards = [
-                makeCodexCard(
-                    arguments: ["--stale"],
-                    language: language,
-                    percent: 27,
-                    scenario: .stale
-                ),
-                makeM3RClaudeCard(
-                    language: language,
-                    fiveHourPercent: 8,
-                    sevenDayPercent: 43,
-                    estimated: true,
-                    freshness: .cached,
-                    connection: .connected
-                ),
-            ]
+        } else {
+            switch kind {
+            case .healthy:
+                cards = [
+                    makeCodexCard(
+                        arguments: [],
+                        language: language,
+                        percent: 64,
+                        scenario: .ready
+                    ),
+                    makeM3RClaudeCard(
+                        language: language,
+                        fiveHourPercent: 24,
+                        sevenDayPercent: 71,
+                        estimated: true,
+                        freshness: .fresh,
+                        connection: .connected
+                    ),
+                ]
+            case .one:
+                cards = [
+                    makeCodexCard(
+                        arguments: [],
+                        language: language,
+                        percent: 64,
+                        scenario: .ready
+                    ),
+                ]
+            case .zero:
+                cards = []
+            case .degraded:
+                cards = [
+                    makeCodexCard(
+                        arguments: ["--stale"],
+                        language: language,
+                        percent: 27,
+                        scenario: .stale
+                    ),
+                    makeM3RClaudeCard(
+                        language: language,
+                        fiveHourPercent: 8,
+                        sevenDayPercent: 43,
+                        estimated: true,
+                        freshness: .cached,
+                        connection: .connected
+                    ),
+                ]
+            }
         }
         return M3RFixture(
             store: UsageStore.preview(
@@ -680,7 +806,10 @@ struct PreviewRendererTool {
         sevenDayPercent: Double,
         estimated: Bool,
         freshness: SharedUsageFreshness,
-        connection: SharedConnectionStatus
+        connection: SharedConnectionStatus,
+        unavailable: Bool = false,
+        unlimited: Bool = false,
+        planLabel: String = "LOCAL SMART"
     ) -> SharedUsageCardPresentation {
         let fiveHour = SharedUsageWindowPresentation(
             id: "claude-five-hour",
@@ -689,7 +818,7 @@ struct PreviewRendererTool {
             accessibilityLabel: language == .english
                 ? "five-hour window"
                 : "五小时额度窗口",
-            remaining: .finite(fiveHourPercent),
+            remaining: unavailable ? .unavailable : (unlimited ? .unlimited : .finite(fiveHourPercent)),
             isEstimated: estimated,
             resetsAt: M3RFixture.fixedNow.addingTimeInterval(7_200),
             resetText: language == .english ? "Resets in 2 hr" : "2 小时后重置"
@@ -701,7 +830,7 @@ struct PreviewRendererTool {
             accessibilityLabel: language == .english
                 ? "seven-day window"
                 : "七天额度窗口",
-            remaining: .finite(sevenDayPercent),
+            remaining: unavailable ? .unavailable : (unlimited ? .unlimited : .finite(sevenDayPercent)),
             isEstimated: estimated,
             resetsAt: M3RFixture.fixedNow.addingTimeInterval(172_800),
             resetText: language == .english ? "Resets in 2 days" : "2 天后重置"
@@ -710,7 +839,7 @@ struct PreviewRendererTool {
         return SharedUsageCardPresentation(
             id: "claude.browserSync",
             providerName: "Claude",
-            planLabel: "LOCAL SMART",
+            planLabel: planLabel,
             connectionStatus: connection,
             freshness: freshness,
             windows: [fiveHour, sevenDay],
@@ -733,7 +862,8 @@ struct PreviewRendererTool {
         _ review: M3RReviewRender,
         to outputPath: String,
         scale: CGFloat,
-        alphaMask: Bool
+        alphaMask: Bool,
+        liveReview: Bool
     ) throws {
         let host = NSHostingView(rootView: review.content)
         host.frame = CGRect(origin: .zero, size: review.size)
@@ -778,6 +908,18 @@ struct PreviewRendererTool {
             withIntermediateDirectories: true
         )
         try png.write(to: outputURL, options: .atomic)
+        if liveReview {
+            let closeDelegate = SyntheticReviewWindowDelegate()
+            window.delegate = closeDelegate
+            window.styleMask = [.titled, .closable, .miniaturizable]
+            window.title = "UMA synthetic component review — no provider connections"
+            window.setFrameOrigin(NSPoint(x: 180, y: 180))
+            window.makeKeyAndOrderFront(nil)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            withExtendedLifetime(closeDelegate) {
+                NSApplication.shared.run()
+            }
+        }
     }
 
     private static func makeAlphaMask(from source: NSBitmapImageRep) throws -> NSBitmapImageRep {
@@ -887,7 +1029,7 @@ struct PreviewRendererTool {
                         : "Codex 扩展本机服务提供商"
                 )
                 : "Codex",
-            planLabel: "PRO",
+            planLabel: fixturePlan(arguments, provider: "codex", fallback: "PRO"),
             connectionStatus: arguments.contains("--failed")
                 ? .failed
                 : (isRefreshing ? .transitional : (isStale ? .stale : .connected)),
@@ -1352,6 +1494,7 @@ private enum M3RReviewScenario: String {
     case quickDegraded = "quick-degraded"
     case quickEdge = "quick-edge"
     case main
+    case compactRows = "compact-rows"
     case mainNarrow = "main-narrow"
     case workspaceCodex = "workspace-codex"
     case workspaceClaude = "workspace-claude"
@@ -1362,7 +1505,19 @@ private enum M3RReviewScenario: String {
     case wizardRegular = "wizard-regular"
     case wizardMinimalist = "wizard-minimalist"
     case wizardContextMenu = "wizard-context-menu"
+    case wizardLogosRegular = "wizard-logos-regular"
+    case wizardLogosMinimalist = "wizard-logos-minimalist"
     case threadOS = "threados"
+
+    var supportsCompactFillFixture: Bool {
+        switch self {
+        case .quick, .quickEdge, .main, .mainNarrow, .compactRows, .wizardRegular, .wizardMinimalist,
+             .wizardLogosRegular, .wizardLogosMinimalist, .workspaceCodex, .workspaceClaude:
+            true
+        default:
+            false
+        }
+    }
 
     static func parse(_ arguments: [String]) throws -> Self? {
         guard let argument = arguments.first(where: {
@@ -1375,6 +1530,35 @@ private enum M3RReviewScenario: String {
             throw PreviewError.invalidScenario
         }
         return scenario
+    }
+}
+
+private enum CompactFillReviewFixture: Equatable {
+    case percent(Double)
+    case unavailable
+    case infinity
+
+    var remainingPercent: Double? {
+        guard case let .percent(value) = self else { return nil }
+        return value
+    }
+
+    static func parse(_ arguments: [String]) throws -> Self? {
+        let values = arguments.filter { $0.hasPrefix("--compact-fill-percent=") }
+        let unavailable = arguments.filter { $0 == "--compact-fill-unavailable" }
+        let infinity = arguments.filter { $0 == "--compact-fill-infinity" }
+        guard values.count + unavailable.count + infinity.count <= 1 else {
+            throw PreviewError.invalidScenario
+        }
+        if !unavailable.isEmpty { return .unavailable }
+        if !infinity.isEmpty { return .infinity }
+        guard let argument = values.first else { return nil }
+        guard let value = Double(argument.dropFirst("--compact-fill-percent=".count)),
+              value.isFinite, (0...100).contains(value)
+        else {
+            throw PreviewError.invalidScenario
+        }
+        return .percent(value)
     }
 }
 
@@ -1699,5 +1883,13 @@ private struct PreviewWallpaper: View {
         case .flat:
             Color(red: 0.42, green: 0.49, blue: 0.55)
         }
+    }
+}
+
+// This window hosts synthetic views only. Closing it terminates its dedicated renderer.
+@MainActor
+private final class SyntheticReviewWindowDelegate: NSObject, NSWindowDelegate {
+    func windowWillClose(_ notification: Notification) {
+        NSApplication.shared.terminate(nil)
     }
 }

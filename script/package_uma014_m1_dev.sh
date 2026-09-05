@@ -88,6 +88,10 @@ BIN_PATH="$("$SWIFT_BIN" build --disable-sandbox --disable-keychain --disable-ne
 /usr/bin/install -m 755 \
   "$BIN_PATH/$STATUS_LINE_RELAY" \
   "$HELPERS/$STATUS_LINE_RELAY"
+mkdir -p "$RESOURCES/AgentLogos"
+for logo in codex claude-code workbuddy; do
+  /usr/bin/install -m 644 "$ROOT_DIR/Assets/AgentLogos/$logo.svg" "$RESOURCES/AgentLogos/$logo.svg"
+done
 if [[ -f "$ROOT_DIR/Assets/AppIcon.icns" ]]; then
   /usr/bin/install -m 644 "$ROOT_DIR/Assets/AppIcon.icns" "$RESOURCES/AppIcon.icns"
 fi

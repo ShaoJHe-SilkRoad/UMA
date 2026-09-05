@@ -533,7 +533,8 @@ final class DesktopAssistantPanelController: NSObject, NSMenuDelegate {
     ) {
         let targetSize = DesktopAssistantMetrics.stackSize(
             for: density,
-            rowCount: max(1, cards.count)
+            rowCount: max(1, cards.count),
+            valueTexts: cards.map { $0.usageText(for: density) }
         )
         let screen = screenForSavedPosition() ?? panel.screen ?? NSScreen.main ?? NSScreen.screens.first
         guard let screen else { return }
