@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// A deliberately narrow, local-only summary.  It is independent from the
@@ -24,6 +25,33 @@ struct CodexLocalActivitySnapshot: Sendable {
     let excludedFileCount: Int
     let tasks: [Task]
     let apiEquivalentCost: CodexAPICostEstimate?
+    /// Connector-owned historical analytics are attached after this local
+    /// metadata read. The reader never opens a ThreadOS source itself.
+    let threadOSAnalytics: ThreadOSUsageAnalytics?
+
+    init(
+        availability: Availability,
+        source: String,
+        scope: String,
+        capturedAt: Date,
+        discoveredFileCount: Int,
+        readableFileCount: Int,
+        excludedFileCount: Int,
+        tasks: [Task],
+        apiEquivalentCost: CodexAPICostEstimate?,
+        threadOSAnalytics: ThreadOSUsageAnalytics? = nil
+    ) {
+        self.availability = availability
+        self.source = source
+        self.scope = scope
+        self.capturedAt = capturedAt
+        self.discoveredFileCount = discoveredFileCount
+        self.readableFileCount = readableFileCount
+        self.excludedFileCount = excludedFileCount
+        self.tasks = tasks
+        self.apiEquivalentCost = apiEquivalentCost
+        self.threadOSAnalytics = threadOSAnalytics
+    }
 
     static func unavailable(now: Date) -> Self {
         Self(
@@ -44,6 +72,13 @@ protocol CodexLocalActivityReading: Sendable {
     func read(now: Date) -> CodexLocalActivitySnapshot
 }
 
+/// Lets the connector acquire the bounded historical export before the sole
+/// ledger mutation, while keeping injected test readers and other consumers
+/// on the existing read-only protocol.
+protocol CodexLocalActivityHistoricalAttributionReading: CodexLocalActivityReading {
+    func read(now: Date, threadOSAnalytics: ThreadOSUsageAnalytics) -> CodexLocalActivitySnapshot
+}
+
 /// Optional capability for the built-in local metadata reader. Consumers that
 /// need near-real-time local estimates can subscribe without teaching the
 /// account connector anything about session files or their contents.
@@ -57,7 +92,7 @@ protocol CodexLocalActivityObservationProviding: CodexLocalActivityReading {
 /// never reads account files, credentials, prompts, tool input/output, or
 /// arbitrary JSON values.  Files outside the two declared roots, symlinks,
 /// non-regular files, and oversized frames are excluded before opening.
-struct CodexLocalActivityReader: CodexLocalActivityObservationProviding, @unchecked Sendable {
+struct CodexLocalActivityReader: CodexLocalActivityObservationProviding, CodexLocalActivityHistoricalAttributionReading, @unchecked Sendable {
     let sessionRoots: [URL]
     let ledgerURL: URL
     private let fileManager: FileManager
@@ -97,6 +132,10 @@ struct CodexLocalActivityReader: CodexLocalActivityObservationProviding, @unchec
     }
 
     func read(now: Date = Date()) -> CodexLocalActivitySnapshot {
+        read(now: now, threadOSAnalytics: .sourceGap(now: now))
+    }
+
+    func read(now: Date, threadOSAnalytics: ThreadOSUsageAnalytics) -> CodexLocalActivitySnapshot {
         let scan = discoveryCache.scan(roots: sessionRoots, fileManager: fileManager)
         checkpointCache.prune(keeping: Set(scan.files.map(\.stableID)))
         guard !scan.files.isEmpty else {
@@ -109,19 +148,29 @@ struct CodexLocalActivityReader: CodexLocalActivityObservationProviding, @unchec
                 readableFileCount: 0,
                 excludedFileCount: scan.excludedFileCount,
                 tasks: [],
-                apiEquivalentCost: nil
+                apiEquivalentCost: nil,
+                threadOSAnalytics: threadOSAnalytics
             )
         }
 
-        let parsedFiles = scan.files.compactMap { file in
+        let parsedFiles = deduplicatedSessionFiles(scan.files.compactMap { file in
             checkpointCache.summary(for: file).map { ParsedSessionFile(file: file, summary: $0) }
-        }
+        })
 
         let calendar = Calendar.current
         let parentSummaries = ParentSummaryIndex(parsedFiles: parsedFiles)
         var observations: [SessionFileObservation] = []
         var directTaskTotals: [String: Int64] = [:]
         for parsed in parsedFiles {
+            // A session may be rotated from the live root into the archive,
+            // or renamed, after a previous read.  Its admitted native ID is
+            // the only identity that survives that operation.  Keep the
+            // opaque path-derived ID exclusively as the compatibility
+            // fallback for old metadata without a native ID.
+            let ledgerSessionID = stableLedgerSessionID(
+                nativeSessionIdentifier: parsed.summary.sessionIdentifier,
+                legacyPathIdentifier: parsed.file.stableID
+            )
             let inheritedBaseline = parentSummaries.baseline(for: parsed.summary)
             let requiresInheritedBaseline = parsed.summary.parentSessionIdentifier != nil
             let rawCounts = TokenCounts(summary: parsed.summary)
@@ -136,13 +185,22 @@ struct CodexLocalActivityReader: CodexLocalActivityObservationProviding, @unchec
             }
             let fallbackDate = parsed.file.createdAt ?? parsed.file.modifiedAt
             observations.append(SessionFileObservation(
-                sessionID: parsed.file.stableID,
+                ledgerSessionID: ledgerSessionID,
+                legacySessionID: parsed.file.stableID,
+                taskStableID: parsed.file.stableID,
                 summary: parsed.summary,
                 initialUsageDay: usageDay(for: parsed.summary.observedAt ?? fallbackDate, calendar: calendar),
                 incrementalUsageDay: usageDay(for: parsed.summary.observedAt ?? parsed.file.modifiedAt, calendar: calendar),
                 priceDate: parsed.summary.observedAt,
+                localTransitionEvidence: localTransitionEvidence(for: parsed.summary),
                 inheritedBaseline: inheritedBaseline,
-                requiresInheritedBaseline: requiresInheritedBaseline
+                requiresInheritedBaseline: requiresInheritedBaseline,
+                intervalPartitions: matchedIntervalPartitions(
+                    sessionID: ledgerSessionID,
+                    summary: parsed.summary,
+                    inheritedBaseline: inheritedBaseline,
+                    analytics: threadOSAnalytics
+                )
             ))
         }
 
@@ -150,6 +208,10 @@ struct CodexLocalActivityReader: CodexLocalActivityObservationProviding, @unchec
             observations: observations,
             now: now,
             ledgerURL: ledgerURL
+        )
+        let displayedAnalytics = recording == nil ? threadOSAnalytics : ledgerBackedAnalytics(
+            threadOSAnalytics,
+            ledger: recording!.ledger
         )
         var tasks: [CodexLocalActivitySnapshot.Task] = []
         for parsed in parsedFiles {
@@ -172,7 +234,8 @@ struct CodexLocalActivityReader: CodexLocalActivityObservationProviding, @unchec
             readableFileCount: observations.count,
             excludedFileCount: scan.excludedFileCount,
             tasks: Array(recentTasks),
-            apiEquivalentCost: recording?.estimate
+            apiEquivalentCost: recording?.estimate,
+            threadOSAnalytics: displayedAnalytics
         )
     }
 
@@ -245,7 +308,8 @@ enum SessionAPICostEstimator {
             var currentTokenTotals: [String: Int64] = [:]
             for observation in observations {
                 if let outcome = ledger.observeDetailed(
-                    sessionID: observation.sessionID,
+                    sessionID: observation.ledgerSessionID,
+                    legacySessionID: observation.legacySessionID,
                     summary: observation.summary,
                     initialUsageDay: observation.initialUsageDay,
                     incrementalUsageDay: observation.incrementalUsageDay,
@@ -254,16 +318,19 @@ enum SessionAPICostEstimator {
                         observedAt: observation.priceDate
                     ),
                     inheritedBaseline: observation.inheritedBaseline,
-                    requiresInheritedBaseline: observation.requiresInheritedBaseline
+                    requiresInheritedBaseline: observation.requiresInheritedBaseline,
+                    intervalPartitions: observation.intervalPartitions,
+                    localTransitionEvidence: observation.localTransitionEvidence
                 ) {
-                    currentTokenTotals[observation.sessionID] = outcome.current.totalTokens
+                    currentTokenTotals[observation.taskStableID] = outcome.current.totalTokens
                     didChange = didChange || outcome.didChange
                 }
             }
             if didChange { try store.save(ledger) }
             return CostRecording(
                 estimate: ledger.estimate(sevenDayKeys: sevenDayKeys(now: now, calendar: .current)),
-                currentTokenTotals: currentTokenTotals
+                currentTokenTotals: currentTokenTotals,
+                ledger: ledger
             )
         } catch {
             return nil
@@ -272,23 +339,197 @@ enum SessionAPICostEstimator {
 }
 
 private struct SessionFileObservation {
-    let sessionID: String
+    let ledgerSessionID: String
+    /// Exact TU2-compatible key for this currently observed file. It is used
+    /// only to adopt its direct checkpoint, never to infer a cross-path alias.
+    let legacySessionID: String
+    let taskStableID: String
     let summary: SessionTokenSummary
     let initialUsageDay: String
     let incrementalUsageDay: String
     let priceDate: Date?
+    /// Independently decoded, bounded local model state for the aggregate
+    /// remainder. Producer matching cannot add, remove, or alter this proof.
+    let localTransitionEvidence: APICostLedger.LocalTransitionEvidence
     let inheritedBaseline: TokenCounts?
     let requiresInheritedBaseline: Bool
+    let intervalPartitions: [APICostLedger.IntervalPartition]
+}
+
+/// Persists only a domain-separated native identity for newly observed
+/// sessions. Path-derived IDs remain the compatibility lane for historical
+/// metadata that never contained a native session ID; existing ledger records
+/// are deliberately left immutable.
+private func stableLedgerSessionID(
+    nativeSessionIdentifier: String?,
+    legacyPathIdentifier: String
+) -> String {
+    guard let nativeSessionIdentifier else { return legacyPathIdentifier }
+    return domainSeparatedDigest(
+        domain: "uma.api-cost-ledger.v1:session",
+        value: nativeSessionIdentifier
+    )
+}
+
+/// Only COMPLETE exporter rows can become ledger partitions. A partition ID
+/// binds this local session file, exact producer thread/turn, and the ending
+/// counter so refreshes and archived/live duplicates cannot coalesce.
+private func matchedIntervalPartitions(
+    sessionID: String,
+    summary: SessionTokenSummary,
+    inheritedBaseline: TokenCounts?,
+    analytics: ThreadOSUsageAnalytics
+) -> [APICostLedger.IntervalPartition] {
+    guard analytics.sourceStatus == .available else { return [] }
+    return summary.localIntervals.compactMap { interval in
+        guard let intervalModel = interval.model,
+              let row = ThreadOSHistoricalAttributionMatcher.uniquelyMatchedRow(for: interval, in: analytics),
+              let preceding = interval.preceding,
+              let ending = interval.ending,
+              let adjustedPreceding = adjustedCounter(preceding, by: inheritedBaseline),
+              let adjustedEnding = adjustedCounter(ending, by: inheritedBaseline),
+              let delta = adjustedEnding.delta(since: adjustedPreceding),
+              let observedStart = interval.startedAt,
+              let observedEnd = interval.endedAt,
+              observedEnd >= observedStart,
+              delta.totalTokens > 0
+        else { return nil }
+        let counter = "\(ending.inputTokens):\(ending.cachedInputTokens):\(ending.outputTokens):\(ending.totalTokens)"
+        let identity = stableAttributionIntervalID(sessionID: sessionID, thread: row.threadDigest, turn: row.turnDigest, counter: counter)
+        let price = APIModelPrice.price(for: intervalModel, observedAt: observedEnd)
+        return .init(
+            attributionIntervalID: identity,
+            counts: delta,
+            preceding: adjustedPreceding,
+            ending: adjustedEnding,
+            projection: .init(
+                projectKey: row.projectKey,
+                projectRootDigest: row.projectRootDigest,
+                taskID: row.taskID,
+                localRole: row.localRole,
+                threadDigest: row.threadDigest,
+                turnDigest: row.turnDigest,
+                intervalID: identity,
+                model: intervalModel,
+                counts: delta,
+                observedStart: observedStart,
+                observedEnd: observedEnd
+            ),
+            model: intervalModel,
+            price: price,
+            hasValidatedPrice: true
+        )
+    }
+}
+
+/// Preserve local turn-transition evidence before producer matching. The
+/// ledger uses this alongside its existing checkpoint model; it never assigns
+/// a residual by partition position or counter-size coincidence.
+private func localTransitionEvidence(for summary: SessionTokenSummary) -> APICostLedger.LocalTransitionEvidence {
+    .init(
+        models: summary.localIntervals.compactMap { interval in
+            // A source gap cannot form a producer partition, but a bounded
+            // local turn model remains transition evidence. Retaining it
+            // prevents a later matching interval from masking A→B→A as a
+            // same-model aggregate continuation.
+            interval.disposition == .ambiguous ? nil : interval.model
+        },
+        hasUnknownOrAmbiguousInterval: summary.localIntervals.contains {
+            $0.disposition == .ambiguous
+                || $0.model == nil
+        }
+    )
+}
+
+/// Partition bounds and ledger checkpoints must use the same coordinate
+/// system. A child session's raw counters include inherited parent history;
+/// convert both interval ends before asking the ledger whether an interval is
+/// inside the newly observed child high-water window.
+private func adjustedCounter(
+    _ counter: TokenCounts,
+    by inheritedBaseline: TokenCounts?
+) -> TokenCounts? {
+    guard let inheritedBaseline else { return counter }
+    return counter.delta(since: inheritedBaseline)
+}
+
+private func stableAttributionIntervalID(sessionID: String, thread: String, turn: String, counter: String) -> String {
+    let material = "threados.apicost.interval.v1:\(sessionID):\(thread):\(turn):\(counter)"
+    return SHA256.hash(data: Data(material.utf8)).map { String(format: "%02x", $0) }.joined()
+}
+
+/// This projection is intentionally reconstructed only from accepted frozen
+/// exporter identities plus an exact local interval. It never labels a whole
+/// session lifetime with the latest task or role.
+private func ledgerBackedAnalytics(
+    _ analytics: ThreadOSUsageAnalytics,
+    ledger: APICostLedger
+) -> ThreadOSUsageAnalytics {
+    guard analytics.sourceStatus == .available else { return analytics }
+    let rows = ledger.records.compactMap { record -> ThreadOSUsageAnalytics.Row? in
+        guard let projection = record.projection
+        else { return nil }
+        guard let root = projection.projectRootDigest, let thread = projection.threadDigest, let turn = projection.turnDigest else { return nil }
+        let sources = analytics.rows.filter { $0.projectKey == projection.projectKey && $0.projectRootDigest == root && $0.taskID == projection.taskID && $0.localRole == projection.localRole && $0.threadDigest == thread && $0.turnDigest == turn }
+        guard sources.count == 1, let source = sources.first else { return nil }
+        return .init(projectKey: projection.projectKey, projectRootDigest: source.projectRootDigest, taskID: projection.taskID, localRole: projection.localRole, threadDigest: source.threadDigest, turnDigest: source.turnDigest, observation: source.observation, waveID: nil, model: projection.model, inputTokens: projection.counts.inputTokens, cachedInputTokens: projection.counts.cachedInputTokens, outputTokens: projection.counts.outputTokens, totalTokens: projection.counts.totalTokens, observedStart: projection.observedStart, observedEnd: projection.observedEnd, apiEquivalentUSD: record.price == nil ? nil : record.usd, isPriceKnown: record.price != nil, intervalID: projection.intervalID)
+    }
+    let knownLocalTokens = ledger.records.reduce(Int64(0)) { $0 + $1.counts.totalTokens }
+    let matchedLocalTokens = ledger.records.reduce(Int64(0)) { partial, record in
+        record.projection == nil ? partial : partial + record.counts.totalTokens
+    }
+    let coverage = knownLocalTokens > 0
+        ? ThreadOSUsageAnalytics.LocalLedgerCoverage(
+            knownLocalTokens: knownLocalTokens,
+            matchedLocalTokens: matchedLocalTokens
+        )
+        : nil
+    return .init(
+        sourceStatus: analytics.sourceStatus,
+        rows: rows,
+        unavailableCount: analytics.unavailableCount,
+        capturedAt: analytics.capturedAt,
+        localLedgerCoverage: coverage
+    )
 }
 
 private struct CostRecording {
     let estimate: CodexAPICostEstimate?
     let currentTokenTotals: [String: Int64]
+    let ledger: APICostLedger
 }
 
 private struct ParsedSessionFile {
     let file: SessionMetadataFile
     let summary: SessionTokenSummary
+}
+
+/// A session can briefly exist in both live and archived roots during local
+/// rotation. The session identifier is metadata already admitted by the
+/// reader, so retain one deterministic high-water representative instead of
+/// charging the same logical session twice.
+private func deduplicatedSessionFiles(_ files: [ParsedSessionFile]) -> [ParsedSessionFile] {
+    var anonymous: [ParsedSessionFile] = []
+    var bySessionIdentifier: [String: ParsedSessionFile] = [:]
+    for file in files {
+        guard let identifier = file.summary.sessionIdentifier else {
+            anonymous.append(file)
+            continue
+        }
+        guard let existing = bySessionIdentifier[identifier] else {
+            bySessionIdentifier[identifier] = file
+            continue
+        }
+        let existingDate = existing.summary.observedAt ?? .distantPast
+        let candidateDate = file.summary.observedAt ?? .distantPast
+        if file.summary.totalTokens > existing.summary.totalTokens
+            || (file.summary.totalTokens == existing.summary.totalTokens
+                && (candidateDate > existingDate
+                    || (candidateDate == existingDate && file.file.stableID < existing.file.stableID))) {
+            bySessionIdentifier[identifier] = file
+        }
+    }
+    return anonymous + bySessionIdentifier.values
 }
 
 private struct ParentSummaryIndex {
@@ -341,8 +582,22 @@ struct SessionMetadataScan {
     let files: [SessionMetadataFile]
 }
 
+/// The cache payload is intentionally transient and contains no source text.
+/// A continuation is admitted only after its boundary digest proves the file
+/// still contains the exact previously consumed bytes.
+struct SessionMetadataRead {
+    let summary: SessionTokenSummary
+    let continuation: ThreadOSLocalIntervalDecoder.Continuation?
+    /// Test-visible accounting for this one read path. It is never persisted
+    /// and contains only byte counts, not session text.
+    let bytesRead: Int
+    let bytesDecoded: Int
+    let fileIdentity: UInt64?
+}
+
 enum SessionMetadataScanner {
     private static let tailBytes = 1_048_576
+    private static let checkpointBytes = 64 * 1024
 
     static func scan(roots: [URL], fileManager: FileManager) -> SessionMetadataScan {
         var rootsExist = false
@@ -443,13 +698,25 @@ enum SessionMetadataScanner {
         return "\(rootCategory.value):\(String(format: "%016llx", hash))"
     }
 
-    static func readSummary(from url: URL, fileSize: Int) -> SessionTokenSummary? {
+    static func readSummary(from url: URL, fileSize: Int) -> SessionMetadataRead? {
         guard fileSize > 0, let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
         do {
             let amount = min(fileSize, tailBytes)
             try handle.seek(toOffset: UInt64(max(0, fileSize - amount)))
-            let data = try handle.readToEnd() ?? Data()
+            // `fileSize` may be a proven continuation boundary rather than
+            // the physical EOF. Never let an unterminated suffix alter the
+            // aggregate counters that accompany a decoder-bounded append.
+            let data = try handle.read(upToCount: amount) ?? Data()
+            let completeData = completedJSONLData(data)
+            let orderedLines = completeData.split(separator: 0x0A).map(Data.init)
+            // A tail that starts after byte zero has no independently proven
+            // header/baseline. It may still support aggregate accounting, but
+            // cannot manufacture an interval attribution context.
+            let decoded = fileSize <= tailBytes
+                ? ThreadOSLocalIntervalDecoder.decodeContinuing(lines: orderedLines)
+                : nil
+            let localIntervals = decoded?.candidates ?? []
             var tokenUsage: SessionTokenUsage?
             var tokenObservedAt: Date?
             var tokenCheckpoints: [TokenCountCheckpoint] = []
@@ -493,9 +760,17 @@ enum SessionMetadataScanner {
                     forkedAt = timestamp
                 }
             }
-            guard let tokenUsage, let model, tokenUsage.totalTokens > 0 else { return nil }
-            return SessionTokenSummary(
-                model: model,
+            guard let tokenUsage, tokenUsage.totalTokens > 0 else { return nil }
+            // A tail may legitimately omit the turn context that preceded it.
+            // Keep aggregate accounting available, but never borrow an older
+            // model to price that unknown crossing.
+            let resolvedModel = model ?? "UNKNOWN"
+            // A local candidate is not producer attribution. Until an
+            // admitted producer row uniquely matches the same interval under
+            // the frozen contract, the ledger must retain aggregate costs
+            // without an attribution identity.
+            let summary = SessionTokenSummary(
+                model: resolvedModel,
                 inputTokens: tokenUsage.inputTokens,
                 cachedInputTokens: tokenUsage.cachedInputTokens,
                 outputTokens: tokenUsage.outputTokens,
@@ -504,9 +779,236 @@ enum SessionMetadataScanner {
                 parentSessionIdentifier: parentSessionIdentifier,
                 forkedAt: forkedAt,
                 observedAt: tokenObservedAt,
-                tokenCheckpoints: tokenCheckpoints
+                tokenCheckpoints: tokenCheckpoints,
+                localIntervals: localIntervals,
+                attributionIntervalID: nil
+            )
+            var continuation = decoded?.continuation
+            var checkpointRead = 0
+            if continuation != nil {
+                // The continuation stops before an unterminated final frame.
+                // A later append replays that frame together with its newline.
+                continuation?.byteOffset = fileSize - data.count + completeData.count
+                let checkpoint = boundaryDigest(from: url, endingAt: continuation?.byteOffset ?? 0)
+                continuation?.boundaryDigest = checkpoint?.value
+                checkpointRead = checkpoint?.bytesRead ?? 0
+                if var decodedContinuation = continuation {
+                    decodedContinuation.contextWitnesses = contextWitnesses(
+                        in: completeData,
+                        baseOffset: fileSize - data.count,
+                        continuation: decodedContinuation,
+                        retaining: []
+                    )
+                    continuation = decodedContinuation
+                }
+            }
+            return SessionMetadataRead(
+                summary: summary,
+                continuation: continuation,
+                bytesRead: data.count + checkpointRead,
+                bytesDecoded: completeData.count,
+                fileIdentity: fileIdentity(for: url)
             )
         } catch { return nil }
+    }
+
+    /// Continues only a proven contiguous append. A changed file with an
+    /// unknown prefix, a shrink, a replaced boundary, or an incomplete frame
+    /// is deliberately re-read without interval attribution.
+    static func readAppendedSummary(
+        from url: URL,
+        fileSize: Int,
+        previous: SessionMetadataRead
+    ) -> SessionMetadataRead? {
+        guard var continuation = previous.continuation,
+              continuation.byteOffset > 0,
+              continuation.byteOffset < fileSize,
+              fileSize - continuation.byteOffset <= tailBytes,
+              let previousIdentity = previous.fileIdentity,
+              previousIdentity == fileIdentity(for: url),
+              let previousCheckpoint = boundaryDigest(from: url, endingAt: continuation.byteOffset),
+              continuation.boundaryDigest == previousCheckpoint.value,
+              (continuation.contextWitnesses.isEmpty || contextWitnessesMatch(continuation.contextWitnesses, in: url)),
+              let handle = try? FileHandle(forReadingFrom: url)
+        else { return nil }
+        defer { try? handle.close() }
+        do {
+            try handle.seek(toOffset: UInt64(continuation.byteOffset))
+            let appended = try handle.readToEnd() ?? Data()
+            // A trailing partial frame is retained only as an offset; it is
+            // never decoded until a later append terminates it with a newline.
+            guard let newline = appended.lastIndex(of: 0x0A), newline > appended.startIndex else {
+                return SessionMetadataRead(
+                    // A valid JSON object without a newline is still an
+                    // uncommitted append frame on this continuation path.
+                    // Keep the admitted aggregate stable until its terminator
+                    // arrives, even though a cold read may inspect it.
+                    summary: previous.summary,
+                    continuation: continuation,
+                    bytesRead: previousCheckpoint.bytesRead + appended.count,
+                    bytesDecoded: 0,
+                    fileIdentity: previousIdentity
+                )
+            }
+            let complete = appended.prefix(through: newline)
+            // The aggregate summary and local decoder must stop at the same
+            // committed JSONL boundary. A syntactically valid but
+            // unterminated final frame stays outside both until its newline
+            // arrives on a later contiguous append.
+            let aggregateBoundary = continuation.byteOffset + complete.count
+            guard let aggregateRead = readSummary(from: url, fileSize: aggregateBoundary) else {
+                return nil
+            }
+            let decoded = ThreadOSLocalIntervalDecoder.decodeContinuing(
+                lines: complete.split(separator: 0x0A).map(Data.init),
+                continuation: continuation
+            )
+            let previousContinuation = continuation
+            continuation = decoded.continuation
+            continuation.byteOffset += complete.count
+            let nextCheckpoint = boundaryDigest(from: url, endingAt: continuation.byteOffset)
+            continuation.boundaryDigest = nextCheckpoint?.value
+            continuation.contextWitnesses = contextWitnesses(
+                in: Data(complete),
+                baseOffset: previousContinuation.byteOffset,
+                continuation: continuation,
+                retaining: previousContinuation.contextWitnesses,
+                contextChanged: previousContinuation.activeTurnDigest != continuation.activeTurnDigest
+                    || previousContinuation.activeModel != continuation.activeModel
+            )
+            let summary = SessionTokenSummary(
+                model: aggregateRead.summary.model,
+                inputTokens: aggregateRead.summary.inputTokens,
+                cachedInputTokens: aggregateRead.summary.cachedInputTokens,
+                outputTokens: aggregateRead.summary.outputTokens,
+                totalTokens: aggregateRead.summary.totalTokens,
+                sessionIdentifier: aggregateRead.summary.sessionIdentifier ?? previous.summary.sessionIdentifier,
+                parentSessionIdentifier: aggregateRead.summary.parentSessionIdentifier ?? previous.summary.parentSessionIdentifier,
+                forkedAt: aggregateRead.summary.forkedAt ?? previous.summary.forkedAt,
+                observedAt: aggregateRead.summary.observedAt,
+                tokenCheckpoints: aggregateRead.summary.tokenCheckpoints,
+                localIntervals: decoded.candidates,
+                attributionIntervalID: nil
+            )
+            return SessionMetadataRead(
+                summary: summary,
+                continuation: continuation,
+                bytesRead: previousCheckpoint.bytesRead + appended.count + aggregateRead.bytesRead + (nextCheckpoint?.bytesRead ?? 0),
+                bytesDecoded: complete.count + aggregateRead.bytesDecoded,
+                fileIdentity: previousIdentity
+            )
+        } catch { return nil }
+    }
+
+    /// This fixed checkpoint plus an unchanged filesystem identity proves the
+    /// local append boundary without rescanning historical bytes. A missing
+    /// identity or changed checkpoint is unproven and therefore rejected.
+    private static func boundaryDigest(from url: URL, endingAt offset: Int) -> (value: String, bytesRead: Int)? {
+        guard offset >= 0, let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        let width = min(checkpointBytes, offset)
+        do {
+            try handle.seek(toOffset: UInt64(offset - width))
+            let data = try handle.read(upToCount: width) ?? Data()
+            guard data.count == width else { return nil }
+            let value = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            return (value, data.count)
+        } catch { return nil }
+    }
+
+    private static func fileIdentity(for url: URL) -> UInt64? {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        return (attributes?[.systemFileNumber] as? NSNumber)?.uint64Value
+    }
+
+    private static func contextWitnessesMatch(_ witnesses: [SessionContextWitness], in url: URL) -> Bool {
+        guard !witnesses.isEmpty, let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        for witness in witnesses {
+            guard witness.offset >= 0, witness.length > 0,
+                  (try? handle.seek(toOffset: UInt64(witness.offset))) != nil,
+                  let data = try? handle.read(upToCount: witness.length),
+                  data.count == witness.length,
+                  SHA256.hash(data: data).map({ String(format: "%02x", $0) }).joined() == witness.digest
+            else { return false }
+        }
+        return true
+    }
+
+    private static func contextWitnesses(
+        in data: Data,
+        baseOffset: Int,
+        continuation: ThreadOSLocalIntervalDecoder.Continuation,
+        retaining existing: [SessionContextWitness],
+        contextChanged: Bool = true
+    ) -> [SessionContextWitness] {
+        var found: [SessionContextWitnessKind: SessionContextWitness] = [:]
+        var offset = 0
+        for rawLine in data.split(separator: 0x0A, omittingEmptySubsequences: false) {
+            defer { offset += rawLine.count + 1 }
+            guard !rawLine.isEmpty,
+                  let line = try? JSONDecoder().decode(SessionMetadataLine.self, from: Data(rawLine))
+            else { continue }
+            let payload = line.payload
+            let lifecycleType = line.type == "event_msg" ? payload?.type : line.type
+            let kind: SessionContextWitnessKind?
+            if line.type == "session_meta",
+               let identifier = allowedIdentifier(payload?.id),
+               domainSeparatedDigest(domain: "threados.usage-attribution.v1:thread", value: identifier) == continuation.nativeThreadDigest {
+                kind = .header
+            } else if lifecycleType == "task_started",
+                      let turn = allowedIdentifier(payload?.turnID),
+                      domainSeparatedDigest(domain: "threados.usage-attribution.v1:turn", value: turn) == continuation.activeTurnDigest {
+                kind = .activeStart
+            } else if lifecycleType == "turn_context",
+                      let turn = allowedIdentifier(payload?.turnID),
+                      domainSeparatedDigest(domain: "threados.usage-attribution.v1:turn", value: turn) == continuation.activeTurnDigest,
+                      allowedModel(payload?.model) == continuation.activeModel {
+                kind = .activeContext
+            } else {
+                kind = nil
+            }
+            if let kind {
+                let raw = Data(rawLine)
+                found[kind] = .init(
+                    kind: kind,
+                    offset: baseOffset + offset,
+                    length: raw.count,
+                    digest: SHA256.hash(data: raw).map { String(format: "%02x", $0) }.joined()
+                )
+            }
+        }
+        var merged = Dictionary(uniqueKeysWithValues: existing.map { ($0.kind, $0) })
+        if contextChanged {
+            merged.removeValue(forKey: .activeStart)
+            merged.removeValue(forKey: .activeContext)
+        }
+        for (kind, witness) in found { merged[kind] = witness }
+        if continuation.activeTurnDigest == nil {
+            merged.removeValue(forKey: .activeStart)
+            merged.removeValue(forKey: .activeContext)
+        }
+        return [.header, .activeStart, .activeContext].compactMap { merged[$0] }
+    }
+
+    private static func completedJSONLData(_ data: Data) -> Data {
+        guard !data.isEmpty else { return data }
+        guard data.last != 0x0A else { return data }
+        // JSONL writers commonly leave their final complete record without a
+        // newline. Admit it only when this narrow metadata decoder can prove
+        // it is a complete allowlisted frame; otherwise retain it for a later
+        // append that supplies the terminator.
+        let finalFrame: Data
+        if let newline = data.lastIndex(of: 0x0A) {
+            finalFrame = Data(data[data.index(after: newline)...])
+        } else {
+            finalFrame = data
+        }
+        if (try? JSONDecoder().decode(SessionMetadataLine.self, from: finalFrame)) != nil {
+            return data
+        }
+        guard let newline = data.lastIndex(of: 0x0A) else { return Data() }
+        return Data(data[...newline])
     }
 }
 
@@ -610,7 +1112,7 @@ private final class SessionMetadataDiscoveryCache: @unchecked Sendable {
             )
             guard let oldFile = filesByID[stableID],
                   fileManager.fileExists(atPath: changed.path),
-                  let values = try? changed.resourceValues(forKeys: [
+                  let values = freshResourceValues(for: changed, keys: [
                     .isRegularFileKey,
                     .isSymbolicLinkKey,
                     .fileSizeKey,
@@ -645,7 +1147,7 @@ private final class SessionMetadataDiscoveryCache: @unchecked Sendable {
     ) -> Bool {
         for file in scan.files {
             guard fileManager.fileExists(atPath: file.url.path),
-                  let values = try? file.url.resourceValues(forKeys: [
+                  let values = freshResourceValues(for: file.url, keys: [
                     .isRegularFileKey,
                     .isSymbolicLinkKey,
                     .fileSizeKey,
@@ -673,7 +1175,7 @@ private struct SessionRootSignature: Equatable {
         let root = candidate.standardizedFileURL
         var isDirectory = ObjCBool(false)
         let exists = fileManager.fileExists(atPath: root.path, isDirectory: &isDirectory)
-        let values = try? root.resourceValues(forKeys: [
+        let values = freshResourceValues(for: root, keys: [
             .contentModificationDateKey,
             .isSymbolicLinkKey
         ])
@@ -687,6 +1189,19 @@ private struct SessionRootSignature: Equatable {
     }
 }
 
+/// Foundation may retain URL resource values across rapid same-length writes.
+/// Discovery signatures are an explicit filesystem boundary, so refresh only
+/// the small metadata key set used by the existing cache before comparing it.
+/// This neither adds a scanner nor changes the observer/refresh cadence.
+private func freshResourceValues(
+    for url: URL,
+    keys: Set<URLResourceKey>
+) -> URLResourceValues? {
+    var refreshedURL = url
+    for key in keys { try? refreshedURL.removeCachedResourceValue(forKey: key) }
+    return try? refreshedURL.resourceValues(forKeys: keys)
+}
+
 /// Metadata checkpoints are in-memory only. A cache hit avoids reopening and
 /// tail-decoding an unchanged session file, while a changed size or mtime is a
 /// hard invalidation boundary. Negative parses are cached too, so malformed
@@ -694,7 +1209,7 @@ private struct SessionRootSignature: Equatable {
 private final class SessionMetadataCheckpointCache: @unchecked Sendable {
     private struct Entry {
         let signature: SessionFileSignature
-        let summary: SessionTokenSummary?
+        let read: SessionMetadataRead?
     }
 
     private let lock = NSLock()
@@ -705,14 +1220,16 @@ private final class SessionMetadataCheckpointCache: @unchecked Sendable {
         let cached = entries[file.stableID]
         lock.unlock()
         if cached?.signature == file.signature {
-            return cached?.summary
+            return cached?.read?.summary
         }
 
-        let parsed = SessionMetadataScanner.readSummary(from: file.url, fileSize: file.size)
+        let parsed = cached?.read.flatMap {
+            SessionMetadataScanner.readAppendedSummary(from: file.url, fileSize: file.size, previous: $0)
+        } ?? SessionMetadataScanner.readSummary(from: file.url, fileSize: file.size)
         lock.lock()
-        entries[file.stableID] = Entry(signature: file.signature, summary: parsed)
+        entries[file.stableID] = Entry(signature: file.signature, read: parsed)
         lock.unlock()
-        return parsed
+        return parsed?.summary
     }
 
     func prune(keeping stableIDs: Set<String>) {
@@ -748,6 +1265,7 @@ private struct SessionMetadataLine: Decodable {
         let type: String?
         let model: String?
         let id: String?
+        let turnID: String?
         let sessionID: String?
         let parentID: String?
         let parentSessionID: String?
@@ -760,6 +1278,7 @@ private struct SessionMetadataLine: Decodable {
 
         enum CodingKeys: String, CodingKey {
             case type, model, id, timestamp, info
+            case turnID = "turn_id"
             case sessionID = "session_id"
             case parentID = "parent_id"
             case parentSessionID = "parent_session_id"
@@ -780,6 +1299,216 @@ private struct SessionMetadataLine: Decodable {
         let totalTokenUsage: SessionTokenUsage?
         enum CodingKeys: String, CodingKey { case totalTokenUsage = "total_token_usage" }
     }
+}
+
+/// A local, transient projection of one token delta whose enclosing native
+/// thread and turn are both present in the admitted session metadata.  The
+/// projection deliberately exposes only versioned digests, counters, and the
+/// model recorded by that turn.  It is not durable attribution and cannot
+/// establish ThreadOS execution or model admission on its own.
+struct ThreadOSLocalIntervalCandidate: Equatable, Sendable {
+    enum Disposition: Equatable, Sendable {
+        case candidate
+        case sourceGap
+        case ambiguous
+    }
+
+    let disposition: Disposition
+    let nativeThreadDigest: String?
+    let turnDigest: String?
+    let model: String?
+    let preceding: TokenCounts?
+    let ending: TokenCounts?
+    let startedAt: Date?
+    let endedAt: Date?
+}
+
+enum SessionContextWitnessKind: Hashable, Sendable {
+    case header
+    case activeStart
+    case activeContext
+}
+
+/// An opaque, bounded proof of each source record that supplies retained
+/// decoder context. It records a byte range and its digest, never the record.
+struct SessionContextWitness: Sendable {
+    let kind: SessionContextWitnessKind
+    let offset: Int
+    let length: Int
+    let digest: String
+}
+
+/// Decodes only the narrowly allowlisted session metadata needed to form
+/// ordered token intervals.  It accepts complete JSONL records in file order;
+/// callers must never use it as a general session-record decoder.  A missing
+/// header, lifecycle boundary, or preceding checkpoint fails closed as a
+/// SOURCE_GAP. Conflicting local context never gets assigned to either turn.
+enum ThreadOSLocalIntervalDecoder {
+    /// Process-local continuation deliberately retains only allowlisted
+    /// identity digests, lifecycle/counter state, and an exact byte offset.
+    /// It never holds JSON text, prompts, tool data, paths, or account data.
+    struct Continuation: Sendable {
+        var nativeThreadDigest: String?
+        var activeTurnDigest: String?
+        var activeModel: String?
+        var activeStartedAt: Date?
+        var previousCheckpoint: TokenCountCheckpoint?
+        var contextIsAmbiguous = false
+        var byteOffset = 0
+        var boundaryDigest: String?
+        var contextWitnesses: [SessionContextWitness] = []
+    }
+
+    static func decode(lines: [Data]) -> [ThreadOSLocalIntervalCandidate] {
+        decodeContinuing(lines: lines).candidates
+    }
+
+    static func decodeContinuing(lines: [Data], continuation: Continuation = .init()) -> (candidates: [ThreadOSLocalIntervalCandidate], continuation: Continuation) {
+        var results: [ThreadOSLocalIntervalCandidate] = []
+        var state = continuation
+
+        for rawLine in lines {
+            guard let line = try? JSONDecoder().decode(SessionMetadataLine.self, from: rawLine) else {
+                // A malformed record leaves the next delta without a proven
+                // continuation rather than letting stale context bridge it.
+                state.activeTurnDigest = nil
+                state.previousCheckpoint = nil
+                state.contextIsAmbiguous = true
+                continue
+            }
+            let timestamp = line.timestamp?.date ?? line.payload?.timestamp?.date
+            let payload = line.payload
+            let lifecycleType = line.type == "event_msg" ? payload?.type : line.type
+
+            if line.type == "session_meta", let identifier = allowedIdentifier(payload?.id) {
+                let digest = threadDigest(identifier)
+                if let nativeThreadDigest = state.nativeThreadDigest, nativeThreadDigest != digest {
+                    state.contextIsAmbiguous = true
+                } else {
+                    state.nativeThreadDigest = digest
+                }
+            }
+
+            if lifecycleType == "task_started", let turn = allowedIdentifier(payload?.turnID) {
+                guard state.activeTurnDigest == nil else {
+                    state.activeTurnDigest = nil
+                    state.previousCheckpoint = nil
+                    state.contextIsAmbiguous = true
+                    continue
+                }
+                state.activeTurnDigest = turnDigest(turn)
+                state.activeModel = nil
+                state.activeStartedAt = timestamp
+                // A turn boundary cannot inherit a preceding turn's token
+                // counter. The first checkpoint is therefore intentionally
+                // unattributable; only a subsequent delta can be considered.
+                state.previousCheckpoint = nil
+                state.contextIsAmbiguous = false
+            }
+
+            if lifecycleType == "turn_context", let turn = allowedIdentifier(payload?.turnID) {
+                let model = allowedModel(payload?.model)
+                let digest = turnDigest(turn)
+                if state.activeTurnDigest == digest {
+                    if let known = state.activeModel, let model, known != model {
+                        state.contextIsAmbiguous = true
+                    } else {
+                        state.activeModel = state.activeModel ?? model
+                    }
+                } else if state.activeTurnDigest != nil {
+                    // A checkpoint may not cross turn contexts.
+                    state.contextIsAmbiguous = true
+                    state.activeTurnDigest = digest
+                    state.activeModel = model
+                    state.activeStartedAt = nil
+                } else {
+                    // A context is not a lifecycle start. Keep it useful for
+                    // diagnostics but fail closed until task_started exists.
+                    state.activeTurnDigest = digest
+                    state.activeModel = model
+                    state.activeStartedAt = nil
+                }
+            }
+
+            if lifecycleType == "task_complete", let turn = allowedIdentifier(payload?.turnID) {
+                guard state.activeTurnDigest == turnDigest(turn) else {
+                    state.contextIsAmbiguous = true
+                    continue
+                }
+                state.activeTurnDigest = nil
+                state.activeModel = nil
+                state.activeStartedAt = nil
+            }
+
+            guard line.type == "event_msg", payload?.type == "token_count",
+                  let usage = payload?.info?.totalTokenUsage,
+                  let timestamp
+            else { continue }
+            let ending = TokenCountCheckpoint(capturedAt: timestamp, counts: TokenCounts(
+                inputTokens: usage.inputTokens,
+                cachedInputTokens: usage.cachedInputTokens,
+                outputTokens: usage.outputTokens,
+                totalTokens: usage.totalTokens
+            ))
+            defer { state.previousCheckpoint = ending }
+
+            guard let previousCheckpoint = state.previousCheckpoint,
+                  let nativeThreadDigest = state.nativeThreadDigest,
+                  let turnDigest = state.activeTurnDigest,
+                  let model = state.activeModel,
+                  state.activeStartedAt != nil,
+                  !state.contextIsAmbiguous,
+                  ending.capturedAt > previousCheckpoint.capturedAt,
+                  ending.counts.delta(since: previousCheckpoint.counts) != nil
+            else {
+                results.append(.init(
+                    disposition: state.contextIsAmbiguous ? .ambiguous : .sourceGap,
+                    nativeThreadDigest: state.nativeThreadDigest,
+                    turnDigest: state.activeTurnDigest,
+                    model: state.activeModel,
+                    preceding: state.previousCheckpoint?.counts,
+                    ending: ending.counts,
+                    startedAt: state.activeStartedAt,
+                    endedAt: timestamp
+                ))
+                continue
+            }
+            results.append(.init(
+                disposition: .candidate,
+                nativeThreadDigest: nativeThreadDigest,
+                turnDigest: turnDigest,
+                model: model,
+                preceding: previousCheckpoint.counts,
+                ending: ending.counts,
+                startedAt: state.activeStartedAt,
+                endedAt: timestamp
+            ))
+        }
+        return (results, state)
+    }
+
+    private static func threadDigest(_ value: String) -> String {
+        domainSeparatedDigest(domain: "threados.usage-attribution.v1:thread", value: value)
+    }
+
+    private static func turnDigest(_ value: String) -> String {
+        domainSeparatedDigest(domain: "threados.usage-attribution.v1:turn", value: value)
+    }
+}
+
+private func allowedModel(_ value: String?) -> String? {
+    guard let value, !value.isEmpty, value.utf8.count <= 128 else { return nil }
+    let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_.:"))
+    return value.unicodeScalars.allSatisfy { allowed.contains($0) } ? value : nil
+}
+
+/// SHA-256 is used only to avoid retaining raw local identifiers in the
+/// projection. The domain strings are pinned to the frozen producer contract;
+/// equality remains necessary but not sufficient for attribution.
+private func domainSeparatedDigest(domain: String, value: String) -> String {
+    SHA256.hash(data: Data("\(domain):\(value)".utf8))
+        .map { String(format: "%02x", $0) }
+        .joined()
 }
 
 /// Decodes only an event timestamp. Both ISO-8601 strings and numeric seconds

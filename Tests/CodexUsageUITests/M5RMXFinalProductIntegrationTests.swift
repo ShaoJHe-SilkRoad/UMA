@@ -66,7 +66,7 @@ struct M5RMXFinalProductIntegrationTests {
         let runtime = try source("Sources/CodexUsageUI/Connectors/AgentUsageRuntime.swift")
         let order = try source("Sources/CodexUsageUI/Connectors/AgentUsageConnector.swift")
         for connector in [
-            "CodexUsageConnector(client:",
+            "let connector = CodexUsageConnector(",
             "ClaudeCodeUsageConnector.production(",
         ] {
             #expect(runtime.contains(connector))

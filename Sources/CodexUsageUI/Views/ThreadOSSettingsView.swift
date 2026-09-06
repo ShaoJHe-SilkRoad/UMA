@@ -196,6 +196,61 @@ public struct ThreadOSSettingsRolePresentation: Identifiable, Equatable {
     private func invalidateReceiptAndCopy() { copiedRevision = nil; message = ""; receipt = ""; acceptedReceipt = nil; receiptInputIsInvalid = false }
 }
 
+/// Editable, local preference fields for the application-owned historical
+/// attribution binding. Saving validates the currently selected executables
+/// and their hashes; it neither launches the exporter nor promotes a future
+/// read into native or provider proof.
+@MainActor public final class ThreadOSAttributionBindingFormState: ObservableObject {
+    @Published public var interpreterPath = ""
+    @Published public var helperPath = ""
+    @Published public var runtimeRootPath = ""
+    @Published public var journalPath = ""
+    @Published public var projectKey = ""
+    @Published public var projectRootDigest = ""
+    @Published public var interpreterSHA256 = ""
+    @Published public var helperSHA256 = ""
+    @Published public var journalID = ""
+    @Published public private(set) var message = ""
+    @Published public private(set) var isSaved = false
+    private let preferences: ApplicationPreferences
+
+    public init(preferences: ApplicationPreferences = .production) {
+        self.preferences = preferences
+        guard let data = preferences.value(for: ThreadOSHistoricalAttributionPreferences.binding),
+              let binding = try? JSONDecoder().decode(ThreadOSHistoricalAttributionBinding.self, from: data)
+        else { return }
+        interpreterPath = binding.interpreterPath; helperPath = binding.helperPath
+        runtimeRootPath = binding.runtimeRootPath; journalPath = binding.journalPath
+        projectKey = binding.projectKey; projectRootDigest = binding.projectRootDigest
+        interpreterSHA256 = binding.interpreterSHA256; helperSHA256 = binding.helperSHA256
+        journalID = binding.journalID ?? ""
+        isSaved = binding.launchIfVerified() != nil
+    }
+
+    public func save(language: AppLanguage) {
+        let binding = ThreadOSHistoricalAttributionBinding(
+            interpreterPath: interpreterPath, helperPath: helperPath,
+            runtimeRootPath: runtimeRootPath, journalPath: journalPath,
+            projectKey: projectKey, projectRootDigest: projectRootDigest,
+            interpreterSHA256: interpreterSHA256, helperSHA256: helperSHA256,
+            journalID: journalID.isEmpty ? nil : journalID
+        )
+        guard binding.launchIfVerified() != nil else {
+            message = localized(language, "Binding was not saved: paths, project scope, or current executable hashes are invalid. Any prior saved binding was left unchanged; no exporter was started.", "未保存绑定：路径、项目范围或当前可执行文件哈希无效。任何先前保存的绑定保持不变；未启动导出器。")
+            return
+        }
+        ThreadOSHistoricalAttributionPreferences.save(binding, to: preferences)
+        isSaved = true
+        message = localized(language, "Trusted local binding saved. It can be read only by the normal application runtime; it does not prove coverage, native execution, or a model.", "已保存受信任的本地绑定。它只能由正常应用运行时读取；不证明覆盖范围、原生执行或模型。")
+    }
+
+    public func clear(language: AppLanguage) {
+        ThreadOSHistoricalAttributionPreferences.save(nil, to: preferences)
+        isSaved = false
+        message = localized(language, "Trusted local binding cleared. Historical attribution will remain unavailable until a new verified local binding is saved.", "已清除受信任的本地绑定。在保存新的已验证本地绑定之前，历史归因将保持不可用。")
+    }
+}
+
 private func receiptToken(_ value: ThreadOSSettingsAcknowledgementPresentation) -> String {
     switch value {
     case .pendingNativeSelection: "PENDING_NATIVE_SELECTION"
@@ -211,23 +266,143 @@ private func receiptToken(_ value: ThreadOSSettingsAcknowledgementPresentation) 
 }
 private func localized(_ language: AppLanguage, _ english: String, _ chinese: String) -> String { language == .simplifiedChinese ? chinese : english }
 
+/// Pure, local-only analytics presentation rules. Keeping these rules outside
+/// the SwiftUI body makes their partial-coverage and unknown-value behavior
+/// directly testable without launching a helper or rendering a window.
+enum ThreadOSAnalyticsPresentation {
+    struct Totals: Equatable {
+        let input: Int64
+        let cached: Int64
+        let output: Int64
+        let total: Int64
+        let usd: Double
+        let unknownPrice: Int64
+        let knownRows: Int
+        let pricedRows: Int
+    }
+
+    static func filteredRows(_ rows: [ThreadOSUsageAnalytics.Row], project: String, task: String, role: String, wave: String, model: String) -> [ThreadOSUsageAnalytics.Row] {
+        rows.filter { row in
+            contains(row.projectKey, project)
+                && contains(row.taskID, task)
+                && contains(row.localRole, role)
+                && contains(row.waveID ?? "", wave)
+                && contains(row.model ?? "UNKNOWN", model)
+        }
+    }
+
+    static func totals(_ rows: [ThreadOSUsageAnalytics.Row]) -> Totals {
+        rows.reduce(.init(input: 0, cached: 0, output: 0, total: 0, usd: 0, unknownPrice: 0, knownRows: 0, pricedRows: 0)) { result, row in
+            guard let input = row.inputTokens, let cached = row.cachedInputTokens, let output = row.outputTokens, let total = row.totalTokens else { return result }
+            return .init(input: result.input + input, cached: result.cached + cached, output: result.output + output, total: result.total + total, usd: result.usd + (row.apiEquivalentUSD ?? 0), unknownPrice: result.unknownPrice + (row.isPriceKnown ? 0 : total), knownRows: result.knownRows + 1, pricedRows: result.pricedRows + (row.isPriceKnown ? 1 : 0))
+        }
+    }
+
+    private static func contains(_ value: String, _ filter: String) -> Bool {
+        filter.isEmpty || value.localizedCaseInsensitiveContains(filter)
+    }
+}
+
 public struct ThreadOSSettingsView: View {
     public let language: AppLanguage
+    let analytics: ThreadOSUsageAnalytics?
     private let preferences: ApplicationPreferences
     @StateObject private var form: ThreadOSSettingsFormState
-    public init(language: AppLanguage, preferences: ApplicationPreferences = .production) {
-        self.language = language; self.preferences = preferences
+    @StateObject private var attributionBinding: ThreadOSAttributionBindingFormState
+    @State private var projectFilter = ""
+    @State private var taskFilter = ""
+    @State private var roleFilter = ""
+    @State private var waveFilter = ""
+    @State private var modelFilter = ""
+    public init(language: AppLanguage, analytics: ThreadOSUsageAnalytics? = nil, preferences: ApplicationPreferences = .production) {
+        self.language = language; self.analytics = analytics; self.preferences = preferences
         _form = StateObject(wrappedValue: ThreadOSSettingsFormState(preferences: preferences))
+        _attributionBinding = StateObject(wrappedValue: ThreadOSAttributionBindingFormState(preferences: preferences))
     }
     public var body: some View { Form {
+        Section(title("ThreadOS Usage Analytics", "ThreadOS 使用分析")) { analyticsSection }
         Section(title("ThreadOS Settings", "ThreadOS 设置")) {
             Text(title("Complete project Setup with Leader first. This local-only page saves and copies a next-wave request; it never sends work, switches models, or proves native model selection.", "请先由 Leader 完成项目 Setup。本地专用页面只保存和复制下一波请求；不会发送工作、切换模型，也不能证明原生模型选择。")).foregroundStyle(.secondary).accessibilityIdentifier("uma.threados.provenance")
             Picker(title("Project", "项目"), selection: Binding(get: { form.selectedProject }, set: { form.select(project: $0) })) { Text(title("No project selected", "未选择项目")).tag(""); ForEach(ThreadOSSettingsPreferences.projects(from: preferences), id: \.self) { Text($0).tag($0) } }.accessibilityIdentifier("uma.threados.project-selector")
             HStack { TextField(title("New project key", "新项目键"), text: $form.newProject).accessibilityIdentifier("uma.threados.new-project"); Button(title("Use project", "使用项目"), action: form.createProject).disabled(!ThreadOSSettingsDraft.isToken(form.newProject)).accessibilityIdentifier("uma.threados.use-project") }
             if form.draft.isValidProject { settingsFields } else { Text(title("No valid project is selected. Choose an existing project or enter a project key to create a local draft.", "尚未选择有效项目。请选择现有项目，或输入项目键以创建本地草稿。")).foregroundStyle(.orange).accessibilityIdentifier("uma.threados.no-project") }
         }
+        Section(title("Historical attribution binding", "历史归因绑定")) { attributionBindingFields }
         Section(title("Paste a ThreadOS receipt", "粘贴 ThreadOS 回执")) { TextEditor(text: Binding(get: { form.receipt }, set: form.receiveReceipt)).frame(minHeight: 90).accessibilityIdentifier("uma.threados.receipt"); Text(form.receiptStatus(catalog: catalog, language: language)).foregroundStyle(.secondary).accessibilityIdentifier("uma.threados.receipt-status") }
     }.padding().accessibilityIdentifier("uma.threados.settings") }
+    @ViewBuilder private var analyticsSection: some View {
+        let value = analytics ?? .sourceGap()
+        Text(analyticsStatus(value)).foregroundStyle(.secondary).accessibilityIdentifier("uma.threados.analytics-status")
+        HStack {
+            TextField(title("Project filter", "项目筛选"), text: $projectFilter)
+            TextField(title("Task filter", "任务筛选"), text: $taskFilter)
+        }
+        HStack {
+            TextField(title("Role filter", "角色筛选"), text: $roleFilter)
+            TextField(title("Wave filter", "波次筛选"), text: $waveFilter)
+        }
+        TextField(title("Model filter", "模型筛选"), text: $modelFilter)
+            .accessibilityIdentifier("uma.threados.analytics-model-filter")
+        LabeledContent(title("Observed interval range", "观察到的区间范围"), value: observedRange(value.rows))
+            .accessibilityIdentifier("uma.threados.analytics-window")
+        LabeledContent(title("Observed model", "观察到的模型"), value: title("Only matched local intervals", "仅限匹配的本地区间"))
+            .accessibilityIdentifier("uma.threados.analytics-model-gap")
+        Text(title("API estimate, token breakdown, duration, and unknown-price totals appear only after a unique interval match. They are never inferred from this historical export.", "API 估算、令牌明细、持续时间和未知价格总计仅在唯一的区间匹配后显示；绝不从此历史导出中推断。"))
+            .foregroundStyle(.secondary).accessibilityIdentifier("uma.threados.analytics-economics-gap")
+        if let coverage = value.localLedgerCoverage {
+            LabeledContent(title("Global local-ledger coverage (matched / known)", "全局本地台账覆盖（已匹配 / 已知）"), value: "\(coverage.matchedLocalTokens) / \(coverage.knownLocalTokens)")
+                .accessibilityIdentifier("uma.threados.analytics-local-ledger-coverage")
+            LabeledContent(title("Global local-ledger remainder (unassigned)", "全局本地台账余量（未分配）"), value: "\(coverage.localUnassignedTokens)")
+                .accessibilityIdentifier("uma.threados.analytics-local-ledger-unassigned")
+            Text(title("These global local-ledger totals ignore the filters below and are not account coverage.", "这些全局本地台账总计不受下方筛选影响，也不是账户覆盖范围。"))
+                .foregroundStyle(.secondary).accessibilityIdentifier("uma.threados.analytics-local-ledger-provenance")
+        }
+        let rows = ThreadOSAnalyticsPresentation.filteredRows(value.rows, project: projectFilter, task: taskFilter, role: roleFilter, wave: waveFilter, model: modelFilter)
+        let totals = ThreadOSAnalyticsPresentation.totals(rows)
+        if totals.knownRows > 0 {
+            LabeledContent(title("Known token subtotal (input / cached / output)", "已知令牌小计（输入 / 缓存 / 输出）"), value: "\(totals.input) / \(totals.cached) / \(totals.output)").accessibilityIdentifier("uma.threados.analytics-token-totals")
+            LabeledContent(title("Filtered matched local tokens", "筛选后的已匹配本地令牌"), value: "\(totals.total)").accessibilityIdentifier("uma.threados.analytics-coverage")
+            LabeledContent(title("Known API-equivalent / unknown-price tokens", "已知 API 等价估算 / 未知价格令牌"), value: totals.pricedRows > 0 ? "$\(String(format: "%.4f", totals.usd)) / \(totals.unknownPrice)" : "UNKNOWN_PRICE / \(totals.unknownPrice)").accessibilityIdentifier("uma.threados.analytics-price")
+        }
+        if rows.isEmpty {
+            Text(title("No eligible historical attribution is available. Aggregate local usage remains separate.", "没有可用的合格历史归因；本地汇总使用量仍独立显示。"))
+                .foregroundStyle(.secondary).accessibilityIdentifier("uma.threados.analytics-empty")
+        } else {
+            ForEach(rows) { row in
+                VStack(alignment: .leading) {
+                    LabeledContent("\(row.projectKey) / \(row.taskID)", value: row.waveID.map { "\(row.localRole) · \($0)" } ?? "\(row.localRole) · \(title("wave unavailable", "波次不可用"))")
+                    Text("\(row.model ?? title("model unavailable", "模型不可用")) · \(tokenText(row)) · \(row.isPriceKnown ? String(format: "$%.4f", row.apiEquivalentUSD ?? 0) : "UNKNOWN_PRICE")")
+                    Text(row.observedStart.flatMap { start in row.observedEnd.map { "\(start.formatted()) – \($0.formatted())" } } ?? title("duration unavailable", "持续时间不可用")).foregroundStyle(.secondary)
+                }
+                    .accessibilityIdentifier("uma.threados.analytics-row-\(row.id)")
+            }
+        }
+        if value.unavailableCount > 0 {
+            Text(title("Producer observations unavailable (separate from local-ledger remainder): \(value.unavailableCount)", "生产者观察不可用（与本地台账余量分开）：\(value.unavailableCount)"))
+                .foregroundStyle(.orange).accessibilityIdentifier("uma.threados.analytics-unattributed")
+        }
+    }
+    @ViewBuilder private var attributionBindingFields: some View {
+        Text(title("Optional local setup for an application-owned historical export reader. Save verifies the selected executable bytes but does not run the exporter.", "应用自有历史导出读取器的可选本地设置。保存会验证所选可执行文件字节，但不会运行导出器。"))
+            .foregroundStyle(.secondary).accessibilityIdentifier("uma.threados.attribution-binding-provenance")
+        DisclosureGroup(title("Advanced binding details", "高级绑定详情")) {
+            TextField(title("Interpreter path", "解释器路径"), text: $attributionBinding.interpreterPath).accessibilityIdentifier("uma.threados.attribution-binding-interpreter")
+            TextField(title("Helper path", "辅助程序路径"), text: $attributionBinding.helperPath).accessibilityIdentifier("uma.threados.attribution-binding-helper")
+            TextField(title("Runtime root path", "运行时根路径"), text: $attributionBinding.runtimeRootPath).accessibilityIdentifier("uma.threados.attribution-binding-runtime-root")
+            TextField(title("Journal path", "日志路径"), text: $attributionBinding.journalPath).accessibilityIdentifier("uma.threados.attribution-binding-journal")
+            TextField(title("Project key", "项目键"), text: $attributionBinding.projectKey).accessibilityIdentifier("uma.threados.attribution-binding-project")
+            TextField(title("Project-root SHA-256", "项目根 SHA-256"), text: $attributionBinding.projectRootDigest).accessibilityIdentifier("uma.threados.attribution-binding-project-digest")
+            TextField(title("Interpreter SHA-256", "解释器 SHA-256"), text: $attributionBinding.interpreterSHA256).accessibilityIdentifier("uma.threados.attribution-binding-interpreter-digest")
+            TextField(title("Helper SHA-256", "辅助程序 SHA-256"), text: $attributionBinding.helperSHA256).accessibilityIdentifier("uma.threados.attribution-binding-helper-digest")
+            TextField(title("Journal ID (optional)", "日志 ID（可选）"), text: $attributionBinding.journalID).accessibilityIdentifier("uma.threados.attribution-binding-journal-id")
+        }
+        .accessibilityIdentifier("uma.threados.attribution-binding-advanced")
+        HStack {
+            Button(title("Save verified binding", "保存已验证绑定"), action: { attributionBinding.save(language: language) }).accessibilityIdentifier("uma.threados.attribution-binding-save")
+            Button(title("Clear binding", "清除绑定"), action: { attributionBinding.clear(language: language) }).accessibilityIdentifier("uma.threados.attribution-binding-clear")
+        }
+        if !attributionBinding.message.isEmpty { Text(attributionBinding.message).accessibilityIdentifier("uma.threados.attribution-binding-status") }
+    }
     @ViewBuilder private var settingsFields: some View {
         TextField(title("Request ID", "请求 ID"), text: stringBinding(\.id)).accessibilityIdentifier("uma.threados.request-id")
         LabeledContent(title("Revision", "修订版本"), value: "\(form.draft.revision)").accessibilityIdentifier("uma.threados.revision")
@@ -268,4 +443,23 @@ public struct ThreadOSSettingsView: View {
     private func stringBinding(_ keyPath: WritableKeyPath<ThreadOSSettingsDraft, String>) -> Binding<String> { Binding(get: { form.draft[keyPath: keyPath] }, set: { value in form.semanticEdit({ $0[keyPath: keyPath] = value }, language: language) }) }
     private func intBinding(_ keyPath: WritableKeyPath<ThreadOSSettingsDraft, Int>) -> Binding<Int> { Binding(get: { form.draft[keyPath: keyPath] }, set: { value in form.semanticEdit({ $0[keyPath: keyPath] = value }, language: language) }) }
     private func title(_ english: String, _ chinese: String) -> String { localized(language, english, chinese) }
+    private func analyticsStatus(_ value: ThreadOSUsageAnalytics) -> String {
+        switch value.sourceStatus {
+        case .available: return title("Historical attribution coverage is partial and local.", "历史归因覆盖不完整且仅限本地。")
+        case .truncated: return title("Historical attribution export was truncated; coverage is unknown.", "历史归因导出已截断；覆盖范围未知。")
+        case .sourceGap: return title("Historical attribution source is unavailable (SOURCE_GAP).", "历史归因来源不可用（SOURCE_GAP）。")
+        case .unavailable: return title("Historical attribution is unavailable.", "历史归因不可用。")
+        case .malformed: return title("Historical attribution export was rejected.", "历史归因导出已被拒绝。")
+        }
+    }
+    private func tokenText(_ row: ThreadOSUsageAnalytics.Row) -> String {
+        guard let input = row.inputTokens, let cached = row.cachedInputTokens, let output = row.outputTokens else { return title("tokens UNKNOWN", "令牌 UNKNOWN") }
+        return "\(input) / \(cached) / \(output)"
+    }
+    private func observedRange(_ rows: [ThreadOSUsageAnalytics.Row]) -> String {
+        let starts = rows.compactMap(\.observedStart)
+        let ends = rows.compactMap(\.observedEnd)
+        guard let start = starts.min(), let end = ends.max() else { return title("unavailable", "不可用") }
+        return "\(start.formatted()) – \(end.formatted())"
+    }
 }

@@ -31,7 +31,7 @@ struct MainWindowRootView: View {
             Divider()
             switch navigation.destination {
             case .agents: agentsWorkspace
-            case .threadOS: ThreadOSSettingsView(language: store.language)
+            case .threadOS: ThreadOSSettingsView(language: store.language, analytics: store.threadOSAnalytics)
             }
         }
         .frame(minWidth: 760, minHeight: 520)

@@ -20,7 +20,7 @@ struct UMA014M3RAgentWorkspaceTests {
         #expect(source.contains("AgentWorkspaceSurface("))
         #expect(source.contains("connectClaude: connectClaude"))
         #expect(source.contains("store.productInventory.agentWorkspaceProviders"))
-        #expect(source.contains("ThreadOSSettingsView(language: store.language)"))
+        #expect(source.contains("ThreadOSSettingsView(language: store.language, analytics: store.threadOSAnalytics)"))
         #expect(!source.contains("ThreadOSRuntime"))
         #expect(!source.contains("ThreadOSClient"))
     }

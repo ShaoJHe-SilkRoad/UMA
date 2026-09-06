@@ -313,6 +313,7 @@ extension UsageSnapshot {
                     modelNames: $0.modelNames
                 )
             },
+            threadOSAnalytics: localActivity.threadOSAnalytics,
             availableResets: nil,
             updatedAt: now,
             providerSource: UsageSourceStatus(

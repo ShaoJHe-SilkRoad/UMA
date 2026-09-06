@@ -74,6 +74,7 @@ struct UsageSnapshot: Codable, Sendable {
     var metrics: [UsageMetric]
     var recentTasks: [RecentTask]
     var apiCostEstimate: APICostEstimateSnapshot?
+    var threadOSAnalytics: ThreadOSUsageAnalytics? = nil
     /// `nil` means the provider did not supply reset-credit information. It
     /// must remain unavailable rather than being rendered as a fabricated 0.
     var availableResets: Int?
@@ -220,6 +221,7 @@ extension UsageSnapshot {
                 guard let sevenDay = local.estimatedSevenDayUSD, let lifetime = local.estimatedLifetimeUSD else { return nil }
                 return APICostEstimateSnapshot(sevenDayUSD: sevenDay, lifetimeUSD: lifetime, coveragePercent: local.coveragePercent ?? 0, modelNames: [])
             },
+            threadOSAnalytics: localMetrics?.threadOSAnalytics,
             availableResets: account?.accountMetrics?.availableResets,
             updatedAt: agentSnapshot.capturedAt,
             providerSource: account.map {

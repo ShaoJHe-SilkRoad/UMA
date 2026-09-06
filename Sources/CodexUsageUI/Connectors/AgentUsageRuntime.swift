@@ -19,9 +19,14 @@ enum AgentUsageRuntime {
         snapshotStore: AgentConnectorSnapshotStore? = AgentConnectorSnapshotStore(),
         client: any CodexUsageClient = CodexAppServerClient(),
         localActivityReader: any CodexLocalActivityReading = CodexLocalActivityReader(),
+        threadOSAttributionSource: any ThreadOSHistoricalAttributionReading = UnavailableThreadOSHistoricalAttributionSource(),
         additionalConnectors: [any AgentUsageConnector] = []
     ) -> AgentConnectorRegistry {
-        let connector = CodexUsageConnector(client: client, localActivityReader: localActivityReader)
+        let connector = CodexUsageConnector(
+            client: client,
+            localActivityReader: localActivityReader,
+            threadOSAttributionSource: threadOSAttributionSource
+        )
         // The composition is static and internally controlled, so duplicate
         // registration here is a programmer error rather than runtime input.
         return try! AgentConnectorRegistry(
@@ -43,12 +48,14 @@ public struct UsageMonitorRuntime {
     public let store: UsageStore
     public let claudeSettings: ClaudeBrowserSettingsModel
     private let startupTask: Task<Void, Never>?
+    private let threadOSAttributionPreferenceObservation: ApplicationPreferences.Observation?
 
     init(
         preferences: ApplicationPreferences,
         store: UsageStore,
         claudeSettings: ClaudeBrowserSettingsModel,
         startupTask: Task<Void, Never>? = nil,
+        threadOSAttributionPreferenceObservation: ApplicationPreferences.Observation? = nil,
         dataPaths: ApplicationDataPaths = .current()
     ) {
         self.preferences = preferences
@@ -56,6 +63,7 @@ public struct UsageMonitorRuntime {
         self.store = store
         self.claudeSettings = claudeSettings
         self.startupTask = startupTask
+        self.threadOSAttributionPreferenceObservation = threadOSAttributionPreferenceObservation
     }
 
     /// Drain application-owned startup before stopping connectors. A late
@@ -125,9 +133,17 @@ public struct UsageMonitorRuntime {
         let agentSettings = AgentSettingsCoordinator(
             store: AgentPreferenceStore(preferences: preferences)
         )
+        let threadOSAttributionSource = ReloadableThreadOSHistoricalAttributionSource(
+            ThreadOSHistoricalAttributionPreferences.source(from: preferences)
+        )
+        let threadOSAttributionPreferenceObservation = preferences.observe { change in
+            guard change.key == ThreadOSHistoricalAttributionPreferences.binding.name else { return }
+            threadOSAttributionSource.replace(with: ThreadOSHistoricalAttributionPreferences.source(from: preferences))
+        }
         let registry = AgentUsageRuntime.makeCodexRegistry(
             snapshotStore: snapshotStore,
             localActivityReader: CodexLocalActivityReader(ledgerURL: dataPaths.codexLedgerURL),
+            threadOSAttributionSource: threadOSAttributionSource,
             additionalConnectors: [claudeConnector]
         )
         let claudeSettings = ClaudeBrowserSettingsModel(
@@ -198,6 +214,7 @@ public struct UsageMonitorRuntime {
             store: usageStore,
             claudeSettings: claudeSettings,
             startupTask: startupTask,
+            threadOSAttributionPreferenceObservation: threadOSAttributionPreferenceObservation,
             dataPaths: dataPaths
         )
     }

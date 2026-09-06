@@ -375,6 +375,9 @@ struct AgentLocalActivityMetrics: Codable, Sendable, Equatable {
     let estimatedLifetimeUSD: Double?
     let coveragePercent: Int?
     let recognizedModelCount: Int?
+    /// Ephemeral presentation data from the admitted historical exporter.
+    /// The snapshot-store allowlist deliberately never persists this field.
+    var threadOSAnalytics: ThreadOSUsageAnalytics? = nil
 }
 
 struct AgentUsageChannel: Codable, Sendable, Equatable, Identifiable {

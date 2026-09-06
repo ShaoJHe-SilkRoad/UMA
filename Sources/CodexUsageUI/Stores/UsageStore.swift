@@ -9,6 +9,8 @@ private struct UsageEligibilityScanOutcome: Sendable {
 @MainActor
 public final class UsageStore: ObservableObject {
     @Published private(set) var snapshot: UsageSnapshot
+    /// Read-only presentation access; source acquisition remains connector-owned.
+    public var threadOSAnalytics: ThreadOSUsageAnalytics? { snapshot.threadOSAnalytics }
     @Published private(set) var providerSnapshots: [AgentUsageSnapshot] = []
     @Published public private(set) var presentationCards: [SharedUsageCardPresentation] = []
     @Published public private(set) var productInventory: ProviderProductInventory

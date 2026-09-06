@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 @testable import CodexUsageUI
@@ -17,6 +18,48 @@ import Testing
         #expect(reloaded.codingWorkers == 2 && reloaded.reviewWorkers == 4)
         #expect(reloaded.tier == "priority")
         #expect(reloaded.customRoles == customRoles)
+    }
+
+    @Test func attributionBindingFormSavesOnlyVerifiedCurrentBytesAndClearsThroughPreferences() throws {
+        let preferences = ApplicationPreferences.inMemory()
+        let form = ThreadOSAttributionBindingFormState(preferences: preferences)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("threados-binding-sentinel-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let sentinel = directory.appendingPathComponent("helper-launched")
+        let helper = directory.appendingPathComponent("helper.sh")
+        try "#!/bin/sh\nprintf launched > '\(sentinel.path)'\n".data(using: .utf8)!.write(to: helper)
+        form.interpreterPath = "/bin/sh"
+        form.helperPath = helper.path
+        form.runtimeRootPath = directory.path
+        form.journalPath = directory.appendingPathComponent("journal.jsonl").path
+        form.projectKey = "TOSUMA"
+        form.projectRootDigest = String(repeating: "a", count: 64)
+        form.interpreterSHA256 = try digest("/bin/sh")
+        form.helperSHA256 = try digest(helper.path)
+        form.save(language: .english)
+        #expect(form.isSaved)
+        #expect(form.message.contains("does not prove coverage"))
+        #expect(!FileManager.default.fileExists(atPath: sentinel.path))
+        let stored = try #require(preferences.value(for: ThreadOSHistoricalAttributionPreferences.binding))
+        #expect(try JSONDecoder().decode(ThreadOSHistoricalAttributionBinding.self, from: stored).projectKey == "TOSUMA")
+
+        form.helperSHA256 = String(repeating: "0", count: 64)
+        form.save(language: .english)
+        #expect(form.isSaved)
+        #expect(form.message.localizedCaseInsensitiveContains("no exporter was started"))
+        #expect(preferences.value(for: ThreadOSHistoricalAttributionPreferences.binding) == stored)
+        #expect(!FileManager.default.fileExists(atPath: sentinel.path))
+
+        form.clear(language: .simplifiedChinese)
+        #expect(!form.isSaved)
+        #expect(preferences.value(for: ThreadOSHistoricalAttributionPreferences.binding) == nil)
+        #expect(form.message.contains("已清除"))
+        #expect(!FileManager.default.fileExists(atPath: sentinel.path))
+    }
+
+    private func digest(_ path: String) throws -> String {
+        SHA256.hash(data: try Data(contentsOf: URL(fileURLWithPath: path))).map { String(format: "%02x", $0) }.joined()
     }
 
     @Test func malformedStoredDraftFallsBackWithoutClaimingConfiguredState() {
@@ -365,7 +408,7 @@ import Testing
         let source = try String(contentsOf: root.appendingPathComponent("Sources/CodexUsageUI/Views/ThreadOSSettingsView.swift"), encoding: .utf8)
         let view = try #require(source.range(of: "public struct ThreadOSSettingsView: View"))
         let body = String(source[view.lowerBound...])
-        for wiring in ["        roleFields", "form.rolePresentations(catalog: catalog)", "ForEach(roles)", "role.summary(language: language)", "if role.isEditable", "selection: customModelBinding(role.role)", "selection: customEffortBinding(role.role)", "ForEach(role.modelOptions", "ForEach(role.effortOptions", ".accessibilityIdentifier(role.summaryIdentifier)", ".accessibilityIdentifier(role.modelIdentifier)", ".accessibilityIdentifier(role.effortIdentifier)", "form.selectPreset($0", "form.selectCustomModel($0", "form.selectCustomEffort($0", "uma.threados.service-tier", "uma.threados.copy", "uma.threados.receipt", "uma.threados.project-selector"] {
+        for wiring in ["        roleFields", "form.rolePresentations(catalog: catalog)", "ForEach(roles)", "role.summary(language: language)", "if role.isEditable", "selection: customModelBinding(role.role)", "selection: customEffortBinding(role.role)", "ForEach(role.modelOptions", "ForEach(role.effortOptions", ".accessibilityIdentifier(role.summaryIdentifier)", ".accessibilityIdentifier(role.modelIdentifier)", ".accessibilityIdentifier(role.effortIdentifier)", "form.selectPreset($0", "form.selectCustomModel($0", "form.selectCustomEffort($0", "uma.threados.service-tier", "uma.threados.copy", "uma.threados.receipt", "uma.threados.project-selector", "uma.threados.analytics-local-ledger-coverage", "uma.threados.analytics-local-ledger-unassigned", "not account coverage", "separate from local-ledger remainder", "DisclosureGroup(title(\"Advanced binding details\"", "uma.threados.attribution-binding-advanced"] {
             #expect(body.contains(wiring), "Missing actual View wiring: \(wiring)")
         }
     }

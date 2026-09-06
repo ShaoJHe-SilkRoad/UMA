@@ -29,6 +29,7 @@ actor CodexUsageConnector: AgentUsageConnector {
 
     private let client: any CodexUsageClient
     private let localActivityReader: any CodexLocalActivityReading
+    private let threadOSAttributionSource: any ThreadOSHistoricalAttributionReading
     private let beforeProviderRefresh: @Sendable () async -> Void
     private var continuation: AsyncStream<AgentUsageSnapshot>.Continuation?
     private var latestProvider: CodexLiveUsage?
@@ -61,10 +62,12 @@ actor CodexUsageConnector: AgentUsageConnector {
     init(
         client: any CodexUsageClient = CodexAppServerClient(),
         localActivityReader: any CodexLocalActivityReading = CodexLocalActivityReader(),
+        threadOSAttributionSource: any ThreadOSHistoricalAttributionReading = UnavailableThreadOSHistoricalAttributionSource(),
         beforeProviderRefresh: @escaping @Sendable () async -> Void = {}
     ) {
         self.client = client
         self.localActivityReader = localActivityReader
+        self.threadOSAttributionSource = threadOSAttributionSource
         self.beforeProviderRefresh = beforeProviderRefresh
     }
 
@@ -170,11 +173,16 @@ actor CodexUsageConnector: AgentUsageConnector {
         publish()
 
         let reader = localActivityReader
+        let attributionSource = threadOSAttributionSource
         let now = Date()
         localReadGeneration += 1
         let generation = localReadGeneration
         let local = Task.detached(priority: .utility) {
-            reader.read(now: now)
+            let analytics = attributionSource.read(now: now)
+            if let historicalReader = reader as? any CodexLocalActivityHistoricalAttributionReading {
+                return historicalReader.read(now: now, threadOSAnalytics: analytics)
+            }
+            return reader.read(now: now).replacingThreadOSAnalytics(analytics)
         }
 
         do {
@@ -382,9 +390,15 @@ actor CodexUsageConnector: AgentUsageConnector {
         localReadGeneration &+= 1
         let generation = localReadGeneration
         let reader = localActivityReader
+        let attributionSource = threadOSAttributionSource
         localActivityRefreshTask = Task { [weak self] in
             let activity = await Task.detached(priority: .utility) {
-                reader.read(now: Date())
+                let now = Date()
+                let analytics = attributionSource.read(now: now)
+                if let historicalReader = reader as? any CodexLocalActivityHistoricalAttributionReading {
+                    return historicalReader.read(now: now, threadOSAnalytics: analytics)
+                }
+                return reader.read(now: now).replacingThreadOSAnalytics(analytics)
             }.value
             await self?.acceptObservedLocalActivity(activity, generation: generation)
         }
@@ -547,7 +561,8 @@ actor CodexUsageConnector: AgentUsageConnector {
                 estimatedSevenDayUSD: estimate?.sevenDayUSD,
                 estimatedLifetimeUSD: estimate?.lifetimeUSD,
                 coveragePercent: coverage,
-                recognizedModelCount: estimate?.modelNames.count
+                recognizedModelCount: estimate?.modelNames.count,
+                threadOSAnalytics: activity.threadOSAnalytics
             ),
             safeFailure: nil
         )
