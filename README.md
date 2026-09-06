@@ -1,299 +1,218 @@
 <p align="center">
-  <img src="Assets/AppIcon.png" width="148" alt="UMA app icon">
+  <img src="Assets/AppIcon.png" width="128" alt="UMA app icon">
 </p>
-
 <h1 align="center">UMA</h1>
-
-<p align="center"><strong>Local-first usage and quota monitoring for AI coding agents on macOS.</strong></p>
+<p align="center"><strong>Keep your remaining AI coding quota in sight.</strong><br>原生 macOS AI 编程 Agent 用量与额度监控 · Local-first monitoring for Codex and Claude</p>
+<p align="center">
+  <a href="https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.14.0/UMA-0.14.0-build2026090504.zip"><strong>Download UMA 0.14.0</strong></a>
+  · macOS 14+ · Apple Silicon / arm64<br>
+  Developer ID signed · Apple notarized · build 2026090504
+</p>
+<p align="center"><a href="#中文">中文</a> · <a href="#english">English</a> · <a href="https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.14.0">Release notes</a></p>
 
 <p align="center">
-  <a href="https://github.com/ShaoJHe-SilkRoad/UMA/releases/latest"><strong>Download latest release</strong></a>
-  · macOS 14+
-  · Apple Silicon
-  · Developer ID signed & notarized
+  <img src="Documentation/Media/0.14/01-hero-main-quickpanel.png" width="1100" alt="UMA 0.14 Agents & Settings workspace alongside Quick Panel, showing remaining Codex and Claude quota">
 </p>
 
-<p align="center">
-  <img src="Assets/AgentLogos/codex.svg" width="44" alt="Codex logo">&nbsp;&nbsp;&nbsp;
-  <img src="Assets/AgentLogos/claude-code.svg" width="44" alt="Claude Code logo">
-</p>
+<p align="center"><sub>真实生产组件，脱敏示例数据 · Production components with sanitized example data</sub></p>
 
-<p align="center">
-  <a href="#中文">中文</a> · <a href="#english">English</a>
-</p>
+### 看见 UMA · Meet UMA
 
-> **Current release:** UMA 0.14.0 · build `2026090504` · tag [`v0.14.0`](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.14.0)
-
----
+<table>
+<tr>
+<td width="50%"><strong>Quick Panel · 快速查看与操作</strong><br><img src="Documentation/Media/0.14/03-quick-panel-light-dark.png" width="520" alt="Quick Panel in Light and Dark appearances with solid remaining-usage row fills"></td>
+<td width="50%"><strong>Desktop Wizard · 桌面常驻</strong><br><img src="Documentation/Media/0.14/02-desktop-wizard-light-dark.png" width="520" alt="Desktop Wizard Regular and Minimalist views in Light and Dark, with real agent logos and estimated percentages"></td>
+</tr>
+<tr>
+<td width="50%"><strong>Global Settings · 全局设置</strong><br><img src="Documentation/Media/0.14/04-global-settings.png" width="520" alt="Global Settings with General, Appearance, Desktop Wizard, and Privacy & Data sections"></td>
+<td width="50%"><strong>Agent Workspace · Agent 详情</strong><br><img src="Documentation/Media/0.14/05-agent-workspace.png" width="520" alt="Selected Agent workspace with quota windows, connection, source, freshness, and actions"></td>
+</tr>
+</table>
 
 ## 中文
 
-UMA 是一个原生 macOS AI Agent 用量监控应用。0.14 已从早期单一 Codex 菜单栏工具升级为一套统一产品界面：**Quick Panel、Agents & Settings、Global Settings 与 Desktop Wizard** 共用同一份 Provider 状态与偏好设置，当前正式支持 **Codex 与 Claude**。
+UMA 是原生 macOS AI 编程 Agent 用量与额度监控应用。它将**还剩多少、何时重置、数据是否新鲜**放在容易看到的位置，当前正式支持 **Codex 与 Claude**。需要快速确认时打开菜单栏；需要查看来源或连接设置时进入主窗口；也可以让 Desktop Wizard 常驻桌面。
 
-### 0.14 的核心变化
+### 0.14 带来了什么
 
-| 功能 | 现在的行为 |
+0.14 将早期菜单栏工具扩展为四个共享状态的界面：以 Agent 为中心的主窗口、紧凑 Quick Panel、独立全局设置，以及 Regular / Minimalist 桌面视图。真实 Agent Logo、整行剩余量填充与明暗外观，让额度与状态更容易区分。
+
+### 四个界面，一个操作模型
+
+| 界面 | 用途 |
 | --- | --- |
-| **Quick Panel** | 菜单栏快速查看当前可用 Agent、剩余额度、重置时间，并提供 Open UMA、Scan、Refresh、Wizard 与 Settings 快捷入口。 |
-| **Agents & Settings** | 主窗口以 Agent 为中心；查看额度窗口、来源、连接、freshness、最近更新时间，并执行该 Agent 对应的连接、刷新、修复或同步操作。 |
-| **Global Settings** | General、Appearance、Desktop Wizard、Privacy & Data 使用同一份 `ApplicationPreferences`；不再把 Provider 的连接表单塞进全局设置。 |
-| **Desktop Wizard** | 常驻桌面的小型用量视图，支持 Regular / Minimalist / Automatic、Always on Top、真实 Agent Logo 与 Light/Dark。 |
-| **统一状态模型** | Quick Panel、Main、Wizard 和菜单栏消费同一份 Provider product state，而不是各自启动一套连接或缓存。 |
-| **后台生命周期** | 窗口开关不再天然拥有 Provider 连接生命周期；默认关闭普通窗口后仍可继续监控，用户也可以明确改变这一行为。 |
-| **Wake refresh** | macOS 唤醒后由应用级单一 observer 触发受控刷新；不会因此自动启动 Claude Accuracy Sync。 |
+| **Quick Panel** | 快速查看当前可用 Agent 的剩余额度与重置时间；提供 **Open UMA、Scan、Refresh、Desktop Wizard、Settings**。这里用于快速查看和操作，完整连接设置在主窗口。 |
+| **Main · Agents & Settings** | 左侧选择 Agent，右侧查看额度窗口、重置时间、精确／估算／不可用状态、连接、来源、数据新鲜度与最近成功更新时间。可靠时显示计划信息，支持对应的刷新／连接／重新连接／断开操作；有真实来源时显示使用量、任务或费用数据。 |
+| **Global Settings** | **General、Appearance、Desktop Wizard、Privacy & Data** 管理全局行为。所有设置入口打开同一个窗口；Provider 专属设置在所选 Agent 的工作区。 |
+| **Desktop Wizard** | **Regular、Minimalist、Automatic** 密度、**Always on Top**、Light/Dark、真实 Agent Logo 与随状态变化的发光效果。紧凑数字布局保留 `≈`，包括 `≈100%`。 |
 
-### 剩余额度语义
+### 百分比始终表示「剩余」
 
-UMA 的百分比**永远表示剩余量（remaining）**，不是已使用量。
-
-- `77%`：精确剩余 77%。
-- `≈90%`：估算剩余约 90%。
-- `∞`：只有数据源明确报告无限量时才显示；`100%` 不等于无限量。
-- `—`：缺失、不可用或不支持；不会伪装成 `0%`。
-- Compact Agent row / Wizard pill 使用**整块实体填充**表达剩余比例，而不是底部一根细进度线。
-- 低剩余额度会按 Provider / plan 的既有规则进入红色警示；连接状态颜色与额度警示是两套独立语义。
-- 百分比额度与 credits 不做虚假的跨单位归一化。
-
-### 当前 Provider 行为
-
-#### Codex
-
-Codex 使用本机正式来源读取账户额度与相关使用信息，并复用现有登录状态。UMA 维持应用级连接生命周期；Quick Panel、Main Window、Settings 或 Wizard 的显示/关闭不会各自创建一套 Provider session。
-
-#### Claude
-
-Claude 在 UMA 中明确区分三个概念：
-
-1. **Claude Code statusLine** — 在支持的 Claude Code surface 上使用结构化本地状态。
-2. **Claude Desktop Local Smart** — 仅在能够合理成立时提供估算；`stale` / `unsupported` 是正常且可显示的结果。
-3. **Accuracy Sync** — 用户明确触发的一次性精确同步；它不是后台持续 Safari 监控。
-
-估算始终保留 `≈`，不会因为界面更紧凑而伪装成精确值。
-
-### 四个主要界面
-
-#### 1. Quick Panel
-
-从菜单栏快速打开。只展示当前符合产品准入条件的 Agent，不承担长期设置、onboarding 或复杂诊断。
-
-#### 2. Agents & Settings
-
-主窗口左侧选择 Agent，右侧查看：
-
-- quota windows / reset；
-- exact / estimated / unavailable；
-- connection、source、freshness；
-- refresh / connect / reconnect / disconnect；
-- Claude 可用时的本地来源与 Accuracy Sync 入口；
-- 已存在并经过准入的 usage / task / cost 信息。
-
-#### 3. Global Settings
-
-- **General**：启动与生命周期、刷新、语言等全局行为；
-- **Appearance**：System / Light / Dark 与显示偏好；
-- **Desktop Wizard**：启用、Always on Top、Regular / Minimalist / Automatic 等；
-- **Privacy & Data**：本地保留数据与受控清理/诊断操作。
-
-#### 4. Desktop Wizard
-
-Desktop Wizard 使用真实 Agent Logo 与状态发光效果。Minimalist 数值区域针对 `≈100%` 等最宽情况做稳定布局，不通过删除 `≈` 或动态缩小 Logo 来挤空间。
-
-### 操作逻辑
-
-```text
-Provider sources
-     │
-     ▼
-ProviderProductInventory / shared runtime state
-     │
-     ├── Menu bar / Quick Panel
-     ├── Main · Agents & Settings
-     ├── Global Settings
-     └── Desktop Wizard
-
-User action
-     │
-     ├── Refresh / Scan
-     ├── Connect / Repair
-     └── explicit one-shot Accuracy Sync (Claude, when available)
-```
-
-一个界面消失，不代表 Provider 必须被销毁；一个缓存值重新发布，也不代表它变成了新的实时数据。UMA 将 **precision、freshness、availability、connection 与 health** 分开表达。
-
-### 隐私原则
-
-UMA 是 local-first 工具。产品状态与诊断边界只允许与用量监控相关的最小信息。
-
-UMA 不应保留：
-
-- prompts / responses / chats；
-- credentials、cookies、tokens；
-- raw DOM；
-- 与用量监控无关的浏览器内容；
-- 不必要的账户身份或账单正文。
-
-Claude Accuracy Sync 是显式一次性操作；0.14 不把它变成持续 Safari polling。
-
-### 当前支持状态
-
-| 项目 | 0.14 状态 |
+| 显示 | 含义 |
 | --- | --- |
-| Codex | **Active support** |
-| Claude | **Active support** |
-| WorkBuddy | 资源/兼容代码可能存在，但当前 active runtime/UI 不重新启用 |
-| Google Antigravity | 未检测/未安装时不进入 active surfaces |
-| ThreadOS product page | 保留未来入口；0.14 中 runtime activity = **ZERO** |
+| `77%` | 精确剩余 77% |
+| `≈90%` | 估算剩余约 90% |
+| `∞` | 仅当数据源明确报告无限量 |
+| `—` | 缺失、不可用或不支持 |
+
+**缺失不等于 0%，100% 不等于无限量。** 紧凑 Agent 行与 Wizard 胶囊使用从左至右的全高度比例填充：填充越多，剩余越多；不是底部细线，也不是已使用比例。没有有效百分比时不虚构填充。详情工作区则保留常规额度条。
+
+低剩余额度可按已知 Provider／计划规则显示红色；**连接状态与额度警示是不同信息**。百分比与 credits 不做虚假的跨单位换算。
+
+### Codex 与 Claude
+
+**Codex** 复用本机已有登录环境，通过受支持的本地来源读取额度与允许的汇总使用元数据。连接由应用统一管理；打开、关闭不同界面不会各自创建或销毁一套连接。默认关闭普通窗口后仍继续监控，用户可以在设置中关闭这一行为。
+
+**Claude** 保持三个独立概念：
+
+1. **Claude Code statusLine**：在支持的 Claude Code 环境中读取结构化本地用量状态。
+2. **Claude Desktop Local Smart**：仅在来源满足条件时提供估算；过期或不支持是有效结果，估算始终保留 `≈`。
+3. **Accuracy Sync**：用户明确触发的一次性精度同步，**不是持续 Safari 轮询**。
+
+### 共享状态，诚实呈现新鲜度
+
+Quick Panel、主窗口与 Wizard 读取同一份应用状态，全局偏好也只有一个来源。关闭界面不自动等于断开连接，缓存重新显示也不等于刚获得实时数据。**连接是否正常、数据是否新鲜、数值是否精确**分别呈现。启用唤醒刷新后，由应用统一触发受控刷新，不会自动触发 Accuracy Sync。
+
+### 隐私
+
+UMA 优先在本机处理用量元数据。产品状态与诊断通过受限字段投影和清理边界，设计上不保留提示词、回复、聊天、凭据、cookies、认证 tokens、原始 DOM、无关浏览器内容，以及不必要的账户身份或账单正文。Accuracy Sync 需要显式操作，不引入持续浏览器监控。
+
+### 当前支持
+
+| 项目 | UMA 0.14 |
+| --- | --- |
+| Codex | **正式支持** |
+| Claude | **正式支持**，来源与精度按上述三种方式区分 |
+| WorkBuddy | **休眠／当前产品未启用**；Logo 或兼容资源不代表运行支持 |
+| Google Antigravity | **不属于当前正式支持集**；缺失或不可用时不显示为活动 Agent |
+| ThreadOS | 保留未来入口，0.14 中**没有运行活动** |
 
 ### 下载与安装
 
-下载当前正式版本：
+**[下载 UMA 0.14.0 · build 2026090504](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.14.0/UMA-0.14.0-build2026090504.zip)** · [版本说明](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.14.0)
 
-**[UMA 0.14.0 — build 2026090504](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.14.0)**
+需要 **macOS 14+ 与 Apple Silicon**，以及对应来源需要的本机应用／CLI 和登录状态。
 
-直接下载：
+1. 下载并解压 ZIP。
+2. 将 `UMA.app` 移入稳定的 Applications 位置。
+3. 正常启动 UMA，在所选 Agent 工作区完成可用的连接操作。
 
-**[UMA-0.14.0-build2026090504.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.14.0/UMA-0.14.0-build2026090504.zip)**
+发布包已完成 Developer ID 签名、Hardened Runtime、安全时间戳、Apple 公证、stapling 与 Gatekeeper 验证，无需关闭 macOS 安全保护。
 
-要求：
+### 开发
 
-- macOS 14 或更高；
-- Apple Silicon (`arm64`)；
-- 对应 Provider 需要其本机应用/CLI 与已登录状态才能提供相应数据。
-
-发布包使用 Developer ID 签名，并完成 Apple notarization、stapling 与 Gatekeeper 验证。解压后将 `UMA.app` 放入稳定的 Applications 位置再运行；不要通过关闭 macOS 安全机制来绕过正常安装流程。
-
-SHA-256 与延期验收说明与 Release 一同发布：[`HASHES.txt`](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.14.0/HASHES.txt) · [`DEFERRED-QA.md`](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.14.0/DEFERRED-QA.md)
-
-### 从源码开发
+安装带有 Swift 6 支持的 Xcode 后，可先编译而不启动应用：
 
 ```bash
-./script/build_and_run.sh
+swift build --product CodexUsageMonitor
 ```
 
-这是开发入口，不等于正式 Release 签名/公证流程。SwiftPM 当前目标为 macOS 14+；正式发布包使用独立的 release packaging、Developer ID 与 notarization 流程。
+这仅编译源码，不是已签名发布包的生成流程。应用界面、图标与辅助程序的完整打包另有专用流程；请勿将开发构建当作正式发行版。
 
-### 0.15 Roadmap
+### 0.15 计划
 
-0.15 正在拆成两条独立开发线；以下均为**计划中的工作，不属于当前 0.14 release**：
+以下是两条并行的**计划／开发方向，尚未随 0.14 发布**，没有承诺发布日期：
 
-- **Windows support** — 在原生 Windows 环境实现 UMA 的平台支持，同时保持共享 quota / freshness / privacy 语义。
-- **UMA × ThreadOS × Sectorium ecosystem** — 在 macOS 侧探索可操作的生态集合；状态、命令和生命周期必须通过明确接口集成，而不是让多个系统同时争夺同一任务的所有权。
+- **Windows 支持**：原生 Windows UMA。
+- **UMA × ThreadOS × Sectorium**：macOS 操作生态集成，具体能力仍待后续开发。
+
+### 发布完整性
+
+[SHA-256 校验值](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.14.0/HASHES.txt) · [延期兼容性 QA 说明](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.14.0/DEFERRED-QA.md)
+
+部分扩展兼容性验证由 Founder 决定延期至发布后／外部测试；这些项目仍记录为延期，不代表已经通过。
 
 ---
 
 ## English
 
-UMA is a native macOS usage and quota monitor for AI coding agents. Version 0.14 evolves the project from a Codex-only menu-bar utility into a shared product model across **Quick Panel, Agents & Settings, Global Settings, and Desktop Wizard**, with active support for **Codex and Claude**.
+UMA is a native macOS usage and quota monitor for AI coding agents. Keep **what remains, when it resets, and how fresh the data is** close at hand, with active support for **Codex and Claude**. Glance from the menu bar, open the Main window for sources and connection settings, or keep Desktop Wizard on your desktop.
 
 ### What changed in 0.14
 
-- **Quick Panel** for fast quota checks and actions from the menu bar.
-- **Agent-centered Main window** with quota windows, source, freshness, connection state, reset times, and provider-specific actions.
-- **Real global Settings** backed by one shared preference model.
-- **Desktop Wizard** with Regular / Minimalist / Automatic modes, real agent logos, always-on-top behavior, and stable Light/Dark presentation.
-- **Shared provider state** across menu bar, Quick Panel, Main, and Wizard instead of surface-owned connector lifecycles.
-- **Controlled wake refresh** with a single application-owned observer.
-- **Solid remaining-usage fills** on compact rows/pills; the filled area represents what is left, not what has been consumed.
+Version 0.14 expands the earlier menu-bar utility into four surfaces sharing the same state: an Agent-centered Main window, compact Quick Panel, dedicated global Settings, and Regular / Minimalist desktop views. Real agent logos, solid remaining-usage fills, and Light/Dark appearances make quota and connection status easier to distinguish.
 
-### Quota semantics
+### Four surfaces, one workflow
 
-Percentages always mean **remaining**:
+| Surface | Purpose |
+| --- | --- |
+| **Quick Panel** | Current eligible agents, remaining quota, and reset times, with **Open UMA, Scan, Refresh, Desktop Wizard, and Settings** actions. Built for quick checks and actions; full connection setup lives in Main. |
+| **Main · Agents & Settings** | Select an Agent on the left; inspect quota windows, resets, exact/estimated/unavailable values, connection, source, freshness, and last successful update on the right. Shows plan information when reliable, applicable refresh/connect/reconnect/disconnect actions, and usage/task/cost data only when genuinely available. |
+| **Global Settings** | **General, Appearance, Desktop Wizard, and Privacy & Data** control app-wide behavior. Every Settings entry opens the same window; provider-specific setup belongs in the selected Agent workspace. |
+| **Desktop Wizard** | **Regular, Minimalist, Automatic**, **Always on Top**, Light/Dark, real agent logos, and state-aware glow. Stable compact percentage layout preserves `≈`, including `≈100%`. |
 
-- `77%` — exact remaining percentage.
-- `≈90%` — estimated remaining percentage.
-- `∞` — only when an admitted source explicitly reports unlimited usage.
-- `—` — unavailable, missing, or unsupported; never converted to `0%`.
+### Percentages always mean remaining
 
-Low remaining levels use plan-aware alert coloring. Connection health and quota severity remain separate visual semantics. Percentage quotas and credit-based quotas are not falsely normalized into the same unit.
+| Display | Meaning |
+| --- | --- |
+| `77%` | Exactly 77% remaining |
+| `≈90%` | Approximately 90% remaining, estimated |
+| `∞` | Only when the source explicitly reports unlimited usage |
+| `—` | Missing, unavailable, or unsupported |
 
-### Provider model
+**Missing is not 0%; 100% is not infinity.** Compact Agent rows and Wizard pills use full-height proportional fill from left to right: more fill means more remaining. This is neither a thin bottom rail nor a used-percentage display. No valid percentage means no invented fill. Detailed workspace quota modules keep conventional progress bars.
 
-**Codex** uses admitted local account sources and an application-owned lifecycle so window visibility does not arbitrarily own the provider connection.
+Low remaining quota may turn red under known provider/plan rules. **Connection state and quota severity communicate different things.** Percentages and credits are not artificially converted into one unit.
 
-**Claude** keeps three concepts separate:
+### Codex and Claude
 
-1. **Claude Code statusLine** — structured local state where supported.
-2. **Claude Desktop Local Smart** — estimate-only when qualified; stale/unsupported is a valid outcome.
-3. **Accuracy Sync** — an explicit one-shot precision action, not continuous Safari monitoring.
+**Codex** reuses the existing local signed-in environment through supported local sources for quota and admitted aggregate usage metadata. One application-owned connection serves the UI; surfaces do not each create or destroy provider sessions. Monitoring continues after ordinary windows close by default, and users can explicitly disable that behavior in Settings.
 
-Estimated values remain visibly estimated with `≈`.
+**Claude** keeps three independent concepts:
 
-### Product surfaces
+1. **Claude Code statusLine** — structured local usage state in supported Claude Code environments.
+2. **Claude Desktop Local Smart** — estimates only when the source qualifies; stale or unsupported are valid outcomes, and estimates retain `≈`.
+3. **Accuracy Sync** — an explicit one-shot precision action, **not continuous Safari polling**.
 
-- **Quick Panel** — glanceable current agents, remaining quota, reset time, Scan, Refresh, Wizard, and Settings shortcuts.
-- **Agents & Settings** — detailed agent workspace for quota, source, freshness, connection, and provider-specific actions.
-- **Global Settings** — General, Appearance, Desktop Wizard, and Privacy & Data.
-- **Desktop Wizard** — compact always-available usage view with Regular / Minimalist / Automatic density and real agent-logo rendering.
+### Shared state, honest freshness
 
-### Runtime model
-
-```text
-Provider sources
-     │
-     ▼
-ProviderProductInventory / shared runtime state
-     │
-     ├── Menu bar / Quick Panel
-     ├── Main · Agents & Settings
-     ├── Global Settings
-     └── Desktop Wizard
-```
-
-Closing a surface is not the same thing as disconnecting a provider. Republishing cached data is not treated as a new successful observation. Precision, freshness, availability, connection, and health are modeled separately.
+Quick Panel, Main, and Wizard read the same application state, with one shared source of preferences. Closing a surface does not automatically mean disconnecting, and redisplaying a cache does not make it a fresh observation. **Connection, freshness, and precision** remain separate. When wake refresh is enabled, the application coordinates bounded refresh without automatically triggering Accuracy Sync.
 
 ### Privacy
 
-UMA is local-first and usage-metadata focused. It is designed not to retain prompts, responses, chats, credentials, cookies, tokens, raw DOM, unrelated browser content, or unnecessary billing/account payloads.
-
-Claude Accuracy Sync remains explicit and one-shot in 0.14; it does not enable continuous Safari polling.
+UMA processes usage metadata locally first. Product state and diagnostics pass through restricted field projections and sanitization boundaries. It is designed not to retain prompts, responses, chats, credentials, cookies, authentication tokens, raw DOM, unrelated browser content, or unnecessary account-identity and billing-history bodies. Accuracy Sync requires an explicit action and does not introduce continuous browser monitoring.
 
 ### Current support
 
-| Component | 0.14 status |
+| Component | UMA 0.14 |
 | --- | --- |
 | Codex | **Active support** |
-| Claude | **Active support** |
-| WorkBuddy | Dormant compatibility/assets only; active runtime is not re-enabled |
-| Google Antigravity | Hidden from active surfaces when absent/unavailable |
-| ThreadOS product page | Reserved future seam; runtime activity is **ZERO** in 0.14 |
+| Claude | **Active support**, with the three distinct source/precision paths above |
+| WorkBuddy | **Dormant / not active in the current product**; logos or compatibility assets do not imply runtime support |
+| Google Antigravity | **Outside the current active support set**; absent/unavailable installations do not appear as active agents |
+| ThreadOS | Reserved future destination; **zero runtime activity** in 0.14 |
 
-### Download
+### Download and install
 
-**[UMA 0.14.0 — build 2026090504](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.14.0)**
+**[Download UMA 0.14.0 · build 2026090504](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.14.0/UMA-0.14.0-build2026090504.zip)** · [Release notes](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.14.0)
 
-Direct download:
+Requires **macOS 14+ and Apple Silicon**, plus the local app/CLI and signed-in state required by the corresponding provider source.
 
-**[UMA-0.14.0-build2026090504.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.14.0/UMA-0.14.0-build2026090504.zip)**
+1. Download and extract the ZIP.
+2. Move `UMA.app` to a stable Applications location.
+3. Launch normally and use the available connection actions in the selected Agent workspace.
 
-Requirements:
-
-- macOS 14 or later;
-- Apple Silicon (`arm64`);
-- the relevant local provider app/CLI and signed-in state for provider data.
-
-The release is Developer ID signed, Apple-notarized, stapled, and Gatekeeper-validated. Move `UMA.app` to a stable Applications location before normal use.
-
-Release integrity and deferred qualification notes are published alongside the app: [`HASHES.txt`](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.14.0/HASHES.txt) · [`DEFERRED-QA.md`](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.14.0/DEFERRED-QA.md)
+The release is Developer ID signed with Hardened Runtime and a secure timestamp, Apple-notarized, stapled, and Gatekeeper-validated. There is no need to disable macOS security protections.
 
 ### Development
 
+With Xcode and Swift 6 support installed, compile without launching the app:
+
 ```bash
-./script/build_and_run.sh
+swift build --product CodexUsageMonitor
 ```
 
-This is a development entry point, not the Developer ID/notarized release pipeline. The current SwiftPM package targets macOS 14+.
+This compiles source; it does not produce the signed distribution. Full app resources and helpers require the dedicated packaging flow. A development build is not a release package.
 
 ### 0.15 roadmap
 
-Two development tracks are planned in parallel; neither is part of the current 0.14 release:
+Two parallel **planned / in-development directions, not shipped in 0.14**, with no promised release dates:
 
-- **Windows support** — native Windows development while preserving shared quota, freshness, and privacy semantics.
-- **UMA × ThreadOS × Sectorium ecosystem** — macOS operational integration through explicit interfaces and ownership boundaries rather than competing lifecycle controllers.
+- **Windows support** — native Windows UMA.
+- **UMA × ThreadOS × Sectorium** — macOS operational ecosystem integration, with capabilities to be developed in future work.
 
----
+### Release integrity
 
-## Security & release integrity
+[SHA-256 hashes](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.14.0/HASHES.txt) · [Deferred compatibility QA](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.14.0/DEFERRED-QA.md)
 
-Current public release: [`v0.14.0`](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.14.0), build `2026090504`.
-
-The GitHub Release publishes the app archive, SHA-256 manifest, and Founder-accepted deferred-QA disclosure. Deferred items are intentionally documented as deferred rather than being represented as completed validation.
+Some extended compatibility qualification was deferred by the Founder to post-release / external testing. Those items remain documented as deferred, not passed.
