@@ -152,7 +152,7 @@ struct UMA014M1NativeShellTests {
         #expect(result.passed)
     }
 
-    @Test("Native menus route shortcuts through shell actions and ThreadOS is inert")
+    @Test("Native menus route shortcuts through shell actions without ThreadOS runtime control")
     func nativeMenuContract() throws {
         let menu = try source("Sources/CodexUsageMonitor/App/ApplicationMenuController.swift")
         for required in [

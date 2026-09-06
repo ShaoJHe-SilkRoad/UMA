@@ -1,4 +1,5 @@
 .build/
+/.thread-os-runtime/
 dist/
 work/
 .DS_Store

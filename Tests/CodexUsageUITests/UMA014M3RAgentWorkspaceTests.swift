@@ -8,7 +8,7 @@ struct UMA014M3RAgentWorkspaceTests {
         .deletingLastPathComponent()
         .deletingLastPathComponent()
 
-    @Test("Main is exactly one two-column Agent workspace plus inert ThreadOS")
+    @Test("Main retains its two-column Agent workspace plus local ThreadOS settings")
     func mainUsesBoundedTwoLevelNavigation() throws {
         let source = try read("Sources/CodexUsageMonitor/App/NativeShellViews.swift")
 
@@ -20,7 +20,7 @@ struct UMA014M3RAgentWorkspaceTests {
         #expect(source.contains("AgentWorkspaceSurface("))
         #expect(source.contains("connectClaude: connectClaude"))
         #expect(source.contains("store.productInventory.agentWorkspaceProviders"))
-        #expect(source.contains("uma.threados.inert"))
+        #expect(source.contains("ThreadOSSettingsView(language: store.language)"))
         #expect(!source.contains("ThreadOSRuntime"))
         #expect(!source.contains("ThreadOSClient"))
     }

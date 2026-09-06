@@ -63,7 +63,8 @@ let package = Package(
                 "ClaudeBrowserNativeHostCore",
                 "ClaudeSafariHostIPC",
             ],
-            path: "Sources/CodexUsageUI"
+            path: "Sources/CodexUsageUI",
+            resources: [.process("Resources")]
         ),
         .executableTarget(
             name: "CodexUsageMonitor",
@@ -84,7 +85,8 @@ let package = Package(
                 "CodexUsageUI",
                 "CodexUsageMonitor",
             ],
-            path: "Tests/CodexUsageUITests"
+            path: "Tests/CodexUsageUITests",
+            resources: [.process("Fixtures/ThreadOS")]
         ),
         .testTarget(
             name: "ClaudeBrowserBridgeCoreTests",

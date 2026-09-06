@@ -31,7 +31,7 @@ struct MainWindowRootView: View {
             Divider()
             switch navigation.destination {
             case .agents: agentsWorkspace
-            case .threadOS: threadOSPlaceholder
+            case .threadOS: ThreadOSSettingsView(language: store.language)
             }
         }
         .frame(minWidth: 760, minHeight: 520)
@@ -129,19 +129,6 @@ struct MainWindowRootView: View {
     private var selectedProviderID: ProviderProductID {
         if workspaceProviders.contains(where: { $0.id == navigation.selectedAgent }) { return navigation.selectedAgent }
         return workspaceProviders.first?.id ?? .codex
-    }
-
-    private var threadOSPlaceholder: some View {
-        ContentUnavailableView(
-            "ThreadOS",
-            systemImage: "point.3.connected.trianglepath.dotted",
-            description: Text(localized(
-                "Reserved for a future release.",
-                "为未来版本预留。"
-            ))
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityIdentifier("uma.threados.inert")
     }
 
     private func destinationTitle(_ destination: MainSurfaceDestination) -> String {
