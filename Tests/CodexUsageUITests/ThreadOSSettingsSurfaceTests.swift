@@ -1,9 +1,53 @@
+import AppKit
 import CryptoKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import CodexUsageUI
 
 @MainActor struct ThreadOSSettingsSurfaceTests {
+    @Test func threadOSSettingsUsesVerticalReachabilityWithoutHorizontalOverflowAtMinimumWindowWidth() throws {
+        let preferences = ApplicationPreferences.inMemory()
+        var custom = ThreadOSSettingsDraft(project: "TU4_LAYOUT", preset: "custom")
+        custom.customRoles = ThreadOSSettingsDraft.defaultCustomRoles
+        ThreadOSSettingsPreferences.save(custom, to: preferences)
+
+        _ = NSApplication.shared
+        for view in [
+            ThreadOSSettingsView(language: .english, preferences: .inMemory()),
+            ThreadOSSettingsView(language: .english, preferences: preferences),
+        ] {
+            let host = NSHostingView(rootView: view)
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 760, height: 552),
+                styleMask: [.titled],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView = host
+            window.orderFront(nil)
+            defer { window.orderOut(nil) }
+
+            host.layoutSubtreeIfNeeded()
+            window.contentView?.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            host.layoutSubtreeIfNeeded()
+
+            let scrolls = descendants(of: host).compactMap { $0 as? NSScrollView }
+            let outerScroll = try #require(scrolls.first { scroll in
+                guard let document = scroll.documentView else { return false }
+                return scroll.hasVerticalScroller
+                    && document.frame.height > scroll.contentView.bounds.height
+                    && document.frame.width <= scroll.contentView.bounds.width + 1
+            })
+            #expect(!outerScroll.hasHorizontalScroller)
+        }
+    }
+
+    private func descendants(of view: NSView) -> [NSView] {
+        view.subviews + view.subviews.flatMap(descendants)
+    }
+
     @Test func preferencesRetainStableDraftIdentityAndConfiguration() {
         let preferences = ApplicationPreferences.inMemory()
         var draft = ThreadOSSettingsDraft(project: "TU1_FIXTURE", id: "cfg-001", revision: 1, preset: "custom", codingWorkers: 2, reviewWorkers: 4, tier: "priority", customRoles: customRoles)

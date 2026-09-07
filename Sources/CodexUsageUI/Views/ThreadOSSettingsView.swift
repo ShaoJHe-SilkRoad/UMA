@@ -319,28 +319,50 @@ public struct ThreadOSSettingsView: View {
         _form = StateObject(wrappedValue: ThreadOSSettingsFormState(preferences: preferences))
         _attributionBinding = StateObject(wrappedValue: ThreadOSAttributionBindingFormState(preferences: preferences))
     }
-    public var body: some View { Form {
-        Section(title("ThreadOS Usage Analytics", "ThreadOS 使用分析")) { analyticsSection }
-        Section(title("ThreadOS Settings", "ThreadOS 设置")) {
+    public var body: some View {
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 18) {
+                settingsSection(title("ThreadOS Usage Analytics", "ThreadOS 使用分析")) { analyticsSection }
+                settingsSection(title("ThreadOS Settings", "ThreadOS 设置")) {
             Text(title("Complete project Setup with Leader first. This local-only page saves and copies a next-wave request; it never sends work, switches models, or proves native model selection.", "请先由 Leader 完成项目 Setup。本地专用页面只保存和复制下一波请求；不会发送工作、切换模型，也不能证明原生模型选择。")).foregroundStyle(.secondary).accessibilityIdentifier("uma.threados.provenance")
             Picker(title("Project", "项目"), selection: Binding(get: { form.selectedProject }, set: { form.select(project: $0) })) { Text(title("No project selected", "未选择项目")).tag(""); ForEach(ThreadOSSettingsPreferences.projects(from: preferences), id: \.self) { Text($0).tag($0) } }.accessibilityIdentifier("uma.threados.project-selector")
             HStack { TextField(title("New project key", "新项目键"), text: $form.newProject).accessibilityIdentifier("uma.threados.new-project"); Button(title("Use project", "使用项目"), action: form.createProject).disabled(!ThreadOSSettingsDraft.isToken(form.newProject)).accessibilityIdentifier("uma.threados.use-project") }
             if form.draft.isValidProject { settingsFields } else { Text(title("No valid project is selected. Choose an existing project or enter a project key to create a local draft.", "尚未选择有效项目。请选择现有项目，或输入项目键以创建本地草稿。")).foregroundStyle(.orange).accessibilityIdentifier("uma.threados.no-project") }
+                }
+                settingsSection(title("Historical attribution binding", "历史归因绑定")) { attributionBindingFields }
+                settingsSection(title("Paste a ThreadOS receipt", "粘贴 ThreadOS 回执")) {
+                    TextEditor(text: Binding(get: { form.receipt }, set: form.receiveReceipt))
+                        .frame(minHeight: 90)
+                        .accessibilityIdentifier("uma.threados.receipt")
+                    Text(form.receiptStatus(catalog: catalog, language: language))
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("uma.threados.receipt-status")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
         }
-        Section(title("Historical attribution binding", "历史归因绑定")) { attributionBindingFields }
-        Section(title("Paste a ThreadOS receipt", "粘贴 ThreadOS 回执")) { TextEditor(text: Binding(get: { form.receipt }, set: form.receiveReceipt)).frame(minHeight: 90).accessibilityIdentifier("uma.threados.receipt"); Text(form.receiptStatus(catalog: catalog, language: language)).foregroundStyle(.secondary).accessibilityIdentifier("uma.threados.receipt-status") }
-    }.padding().accessibilityIdentifier("uma.threados.settings") }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .accessibilityIdentifier("uma.threados.settings")
+    }
+    @ViewBuilder private func settingsSection<Content: View>(_ heading: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(heading).font(.headline)
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
     @ViewBuilder private var analyticsSection: some View {
         let value = analytics ?? .sourceGap()
         Text(analyticsStatus(value)).foregroundStyle(.secondary).accessibilityIdentifier("uma.threados.analytics-status")
-        HStack {
-            TextField(title("Project filter", "项目筛选"), text: $projectFilter)
+        adaptiveFilterPair(
+            TextField(title("Project filter", "项目筛选"), text: $projectFilter),
             TextField(title("Task filter", "任务筛选"), text: $taskFilter)
-        }
-        HStack {
-            TextField(title("Role filter", "角色筛选"), text: $roleFilter)
+        )
+        adaptiveFilterPair(
+            TextField(title("Role filter", "角色筛选"), text: $roleFilter),
             TextField(title("Wave filter", "波次筛选"), text: $waveFilter)
-        }
+        )
         TextField(title("Model filter", "模型筛选"), text: $modelFilter)
             .accessibilityIdentifier("uma.threados.analytics-model-filter")
         LabeledContent(title("Observed interval range", "观察到的区间范围"), value: observedRange(value.rows))
@@ -380,6 +402,18 @@ public struct ThreadOSSettingsView: View {
         if value.unavailableCount > 0 {
             Text(title("Producer observations unavailable (separate from local-ledger remainder): \(value.unavailableCount)", "生产者观察不可用（与本地台账余量分开）：\(value.unavailableCount)"))
                 .foregroundStyle(.orange).accessibilityIdentifier("uma.threados.analytics-unattributed")
+        }
+    }
+    @ViewBuilder private func adaptiveFilterPair<First: View, Second: View>(_ first: First, _ second: Second) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                first.frame(minWidth: 220, maxWidth: .infinity)
+                second.frame(minWidth: 220, maxWidth: .infinity)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                first.frame(maxWidth: .infinity)
+                second.frame(maxWidth: .infinity)
+            }
         }
     }
     @ViewBuilder private var attributionBindingFields: some View {
