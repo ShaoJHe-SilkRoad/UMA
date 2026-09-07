@@ -54,9 +54,11 @@ def output_path(raw, parent, pattern):
     return path
 
 
-def source_state(root, commit, tree):
+def source_state(root, commit, tree, expected_branch):
     require(re.fullmatch(r'[0-9a-f]{40}', commit) and re.fullmatch(r'[0-9a-f]{40}', tree),
             'SOURCE_ID_INVALID')
+    require(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/-]*', expected_branch),
+            'SOURCE_BRANCH_ID_INVALID')
     def git(*args):
         return run(['git', '-C', root, *args]).stdout.decode().strip()
     require(git('rev-parse', 'HEAD') == commit, 'SOURCE_COMMIT_MISMATCH')
@@ -64,7 +66,7 @@ def source_state(root, commit, tree):
     require(not git('status', '--porcelain=v1', '--untracked-files=all'), 'SOURCE_NOT_CLEAN')
     require(not git('diff', '--cached', '--name-only'), 'INDEX_NOT_EMPTY')
     branch = git('branch', '--show-current')
-    require(branch == 'codex/uma-0.14-surface-rebuild', 'SOURCE_BRANCH_MISMATCH')
+    require(branch == expected_branch, 'SOURCE_BRANCH_MISMATCH')
     return branch
 
 
@@ -124,6 +126,27 @@ def manifest(root):
             raise Refusal('UNSUPPORTED_FILE_TYPE')
         records.append(record)
     return records
+
+
+def contains_symlink(root):
+    return root.is_symlink() or any(path.is_symlink() for path in root.rglob('*'))
+
+
+def copy_swiftpm_resource_bundle(bin_path, resources):
+    """Preserve SwiftPM's generated Bundle.module payload beside the app executable."""
+    bundle = bin_path / 'CodexUsageMonitor_CodexUsageUI.bundle'
+    catalog = bundle / 'Contents/Resources/models.v1.json'
+    require(bundle.is_dir() and catalog.is_file(), 'SWIFTPM_RESOURCE_BUNDLE_MISSING')
+    require(not contains_symlink(bundle), 'SWIFTPM_RESOURCE_BUNDLE_SYMLINK_REJECTED')
+    packaged = resources / bundle.name
+    require(not packaged.exists(), 'PACKAGED_RESOURCE_BUNDLE_ALREADY_EXISTS')
+    shutil.copytree(bundle, packaged, symlinks=False)
+    packaged_catalog = packaged / 'Contents/Resources/models.v1.json'
+    require(packaged_catalog.is_file(), 'PACKAGED_THREADOS_CATALOG_MISSING')
+    require(sha(catalog) == sha(packaged_catalog), 'PACKAGED_THREADOS_CATALOG_MISMATCH')
+    require(not contains_symlink(packaged), 'PACKAGED_RESOURCE_BUNDLE_SYMLINK_REJECTED')
+    return {'bundle': bundle.name, 'catalog': 'Contents/Resources/models.v1.json',
+            'catalog_sha256': sha(packaged_catalog), 'manifest': manifest(packaged)}
 
 
 def write_json(path, value):
@@ -219,13 +242,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--commit', required=True)
     parser.add_argument('--tree', required=True)
+    parser.add_argument('--branch', default='codex/threados-as3-setup',
+                        help='exact clean source branch expected for this candidate')
     parser.add_argument('--output', required=True)
     parser.add_argument('--build-root', required=True)
     args = parser.parse_args()
     # All guards run before any output directory or compiler process is created.
     output = output_path(args.output, PACKAGES, r'uma-0\.14-rc-\d{8}T\d{6}Z')
     build = output_path(args.build_root, BUILDS, r'rc-build-\d{8}T\d{6}Z')
-    branch = source_state(ROOT, args.commit, args.tree)
+    branch = source_state(ROOT, args.commit, args.tree, args.branch)
     authority, rc, version = version_metadata(ROOT)
     storage = verify_storage()
     require(DEVELOPER.is_dir(), 'XCODE_TOOLCHAIN_UNAVAILABLE')
@@ -277,6 +302,7 @@ def main():
     for target in executables.values():
         shutil.copyfile(bin_path / target.name, target)
         target.chmod(0o755)
+    swiftpm_resources = copy_swiftpm_resource_bundle(bin_path, app / 'Contents/Resources')
     shutil.copyfile(source / 'Assets/AppIcon.icns', app / 'Contents/Resources/AppIcon.icns')
     (app / 'Contents/Resources/AppIcon.icns').chmod(0o644)
     logos = app / 'Contents/Resources/AgentLogos'
@@ -305,7 +331,7 @@ def main():
         path, sdk_version, rc['MinimumSystemVersion'])) for name, path in executables.items()}
     write_json(output / 'linkage-report.json', reports)
     write_json(output / 'hash-manifest.json', manifest(app))
-    source_state(ROOT, args.commit, args.tree)
+    source_state(ROOT, args.commit, args.tree, args.branch)
     require(source_manifest == manifest(source), 'ARCHIVED_SOURCE_CHANGED_DURING_BUILD')
     toolchain = {'commands': commands, 'swift_version': run([swift, '--version'], env=env).stdout.decode(),
                  'xcode_version': run(['/usr/bin/xcodebuild', '-version'], env=env).stdout.decode(),
@@ -325,6 +351,7 @@ def main():
               'package': str(output), 'application': str(app),
               'package_script_sha256': sha(source / 'script/package_uma014_rc.py'),
               'version_authority_sha256': sha(source / 'Configuration/UMAProductVersion.plist'),
+              'swiftpm_resources': swiftpm_resources,
               'main_executable_sha256': sha(executables['main']),
               'relay_sha256': sha(executables['relay']), 'signing': 'NO_SIGNING_COMMAND',
               'notarization': 'NOT_RUN', 'runtime_development_dependency': 'NONE',

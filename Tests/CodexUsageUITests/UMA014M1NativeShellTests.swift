@@ -273,6 +273,24 @@ struct UMA014M1NativeShellTests {
         #expect(!script.contains("/Users/juliushe/Desktop/UMA_0.13.0.app"))
     }
 
+    @Test("Dev package preserves the built SwiftPM ThreadOS resource bundle")
+    func devPackageBundlesThreadOSCatalogWithoutCheckoutFallback() throws {
+        let script = try source("script/package_uma014_m1_dev.sh")
+
+        for required in [
+            "CodexUsageMonitor_CodexUsageUI.bundle",
+            "Contents/Resources/models.v1.json",
+            "UMA014_SWIFTPM_RESOURCE_BUNDLE_MISSING",
+            "UMA014_PACKAGED_THREADOS_CATALOG_MISSING",
+            "UMA014_PACKAGED_THREADOS_CATALOG_MISMATCH",
+            "/usr/bin/ditto \"$SWIFTPM_RESOURCE_BUNDLE\" \"$PACKAGED_RESOURCE_BUNDLE\"",
+            "/usr/bin/cmp \"$SWIFTPM_THREADOS_CATALOG\" \"$PACKAGED_RESOURCE_BUNDLE/Contents/Resources/models.v1.json\"",
+        ] {
+            #expect(script.contains(required))
+        }
+        #expect(!script.contains("Sources/CodexUsageUI/Resources/ThreadOS/models.v1.json"))
+    }
+
     private func source(_ relativePath: String) throws -> String {
         try String(
             contentsOf: repositoryRoot().appendingPathComponent(relativePath),

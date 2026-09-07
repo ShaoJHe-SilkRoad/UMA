@@ -88,6 +88,25 @@ BIN_PATH="$("$SWIFT_BIN" build --disable-sandbox --disable-keychain --disable-ne
 /usr/bin/install -m 755 \
   "$BIN_PATH/$STATUS_LINE_RELAY" \
   "$HELPERS/$STATUS_LINE_RELAY"
+
+# SwiftPM's generated Bundle.module accessor resolves this target resource
+# bundle next to the packaged executable. Copy the built bundle as bytes; do
+# not recreate its catalog from the checkout or patch a finished application.
+SWIFTPM_RESOURCE_BUNDLE="$BIN_PATH/CodexUsageMonitor_CodexUsageUI.bundle"
+SWIFTPM_THREADOS_CATALOG="$SWIFTPM_RESOURCE_BUNDLE/Contents/Resources/models.v1.json"
+[[ -d "$SWIFTPM_RESOURCE_BUNDLE" && -f "$SWIFTPM_THREADOS_CATALOG" ]] || \
+  fail_package UMA014_SWIFTPM_RESOURCE_BUNDLE_MISSING
+[[ -z "$(/usr/bin/find "$SWIFTPM_RESOURCE_BUNDLE" -type l -print -quit)" ]] || \
+  fail_package UMA014_SWIFTPM_RESOURCE_BUNDLE_SYMLINK_REJECTED
+PACKAGED_RESOURCE_BUNDLE="$RESOURCES/${SWIFTPM_RESOURCE_BUNDLE##*/}"
+/usr/bin/ditto "$SWIFTPM_RESOURCE_BUNDLE" "$PACKAGED_RESOURCE_BUNDLE"
+[[ -f "$PACKAGED_RESOURCE_BUNDLE/Contents/Resources/models.v1.json" ]] || \
+  fail_package UMA014_PACKAGED_THREADOS_CATALOG_MISSING
+/usr/bin/cmp "$SWIFTPM_THREADOS_CATALOG" "$PACKAGED_RESOURCE_BUNDLE/Contents/Resources/models.v1.json" || \
+  fail_package UMA014_PACKAGED_THREADOS_CATALOG_MISMATCH
+[[ -z "$(/usr/bin/find "$PACKAGED_RESOURCE_BUNDLE" -type l -print -quit)" ]] || \
+  fail_package UMA014_PACKAGED_RESOURCE_BUNDLE_SYMLINK_REJECTED
+
 mkdir -p "$RESOURCES/AgentLogos"
 for logo in codex claude-code workbuddy; do
   /usr/bin/install -m 644 "$ROOT_DIR/Assets/AgentLogos/$logo.svg" "$RESOURCES/AgentLogos/$logo.svg"

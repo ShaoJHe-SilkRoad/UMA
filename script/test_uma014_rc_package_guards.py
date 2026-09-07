@@ -75,7 +75,9 @@ class RCGuards(unittest.TestCase):
 
     def test_clean_source_and_archive_bound_to_commit(self):
         commit, tree = self.repository()
-        self.assertEqual(rc.source_state(self.root, commit, tree), 'codex/uma-0.14-surface-rebuild')
+        self.assertEqual(rc.source_state(self.root, commit, tree,
+                                         'codex/uma-0.14-surface-rebuild'),
+                         'codex/uma-0.14-surface-rebuild')
         destination = self.root.parent / (self.root.name + '-archive')
         self.addCleanup(lambda: __import__('shutil').rmtree(destination, ignore_errors=True))
         rc.extract_source(self.root, commit, destination)
@@ -87,27 +89,36 @@ class RCGuards(unittest.TestCase):
         original = self.root / 'file'
         original.write_text('dirty\n')
         with self.assertRaisesRegex(rc.Refusal, 'NOT_CLEAN'):
-            rc.source_state(self.root, commit, tree)
+            rc.source_state(self.root, commit, tree, 'codex/uma-0.14-surface-rebuild')
         original.write_text('accepted\n')
         untracked = self.root / 'untracked'
         untracked.write_text('wip\n')
         with self.assertRaisesRegex(rc.Refusal, 'NOT_CLEAN'):
-            rc.source_state(self.root, commit, tree)
+            rc.source_state(self.root, commit, tree, 'codex/uma-0.14-surface-rebuild')
         untracked.unlink()
         original.write_text('staged\n')
         self.git('add', '--', 'file')
         with self.assertRaisesRegex(rc.Refusal, 'NOT_CLEAN'):
-            rc.source_state(self.root, commit, tree)
+            rc.source_state(self.root, commit, tree, 'codex/uma-0.14-surface-rebuild')
 
     def test_commit_tree_and_branch_mismatch_refused(self):
         commit, tree = self.repository()
         for expected_commit, expected_tree, error in [('z'*40, tree, 'ID_INVALID'),
               ('0'*40, tree, 'COMMIT_MISMATCH'), (commit, '0'*40, 'TREE_MISMATCH')]:
             with self.subTest(error=error), self.assertRaisesRegex(rc.Refusal, error):
-                rc.source_state(self.root, expected_commit, expected_tree)
+                rc.source_state(self.root, expected_commit, expected_tree,
+                                'codex/uma-0.14-surface-rebuild')
         self.git('checkout', '-b', 'wrong-branch')
         with self.assertRaisesRegex(rc.Refusal, 'BRANCH_MISMATCH'):
-            rc.source_state(self.root, commit, tree)
+            rc.source_state(self.root, commit, tree, 'codex/uma-0.14-surface-rebuild')
+
+    def test_expected_branch_is_explicit_and_validated(self):
+        commit, tree = self.repository()
+        self.assertEqual(rc.source_state(self.root, commit, tree,
+                                         'codex/uma-0.14-surface-rebuild'),
+                         'codex/uma-0.14-surface-rebuild')
+        with self.assertRaisesRegex(rc.Refusal, 'BRANCH_ID_INVALID'):
+            rc.source_state(self.root, commit, tree, '../wrong')
 
     def test_archive_rejects_symlink(self):
         commit, _ = self.repository()
@@ -233,6 +244,40 @@ class RCGuards(unittest.TestCase):
         self.assertEqual(records[0]['mode'], '0o600')
         self.assertEqual(records[0]['sha256'], rc.sha(path))
         self.assertEqual(records[1]['target'], 'file')
+
+    def test_swiftpm_resource_bundle_is_copied_as_built_bytes(self):
+        bin_path = self.root / 'bin'
+        resources = self.root / 'UMA.app' / 'Contents' / 'Resources'
+        catalog = (bin_path / 'CodexUsageMonitor_CodexUsageUI.bundle' / 'Contents' /
+                   'Resources' / 'models.v1.json')
+        catalog.parent.mkdir(parents=True)
+        resources.mkdir(parents=True)
+        catalog.write_text('{"schema":"threados.models.v1"}\n')
+
+        report = rc.copy_swiftpm_resource_bundle(bin_path, resources)
+
+        packaged = (resources / 'CodexUsageMonitor_CodexUsageUI.bundle' / 'Contents' /
+                    'Resources' / 'models.v1.json')
+        self.assertEqual(packaged.read_bytes(), catalog.read_bytes())
+        self.assertEqual(report['bundle'], 'CodexUsageMonitor_CodexUsageUI.bundle')
+        self.assertEqual(report['catalog'], 'Contents/Resources/models.v1.json')
+        self.assertEqual(report['catalog_sha256'], rc.sha(catalog))
+
+    def test_swiftpm_resource_bundle_refuses_missing_or_symlinked_catalog(self):
+        bin_path = self.root / 'bin'
+        resources = self.root / 'Resources'
+        resources.mkdir()
+        with self.assertRaisesRegex(rc.Refusal, 'RESOURCE_BUNDLE_MISSING'):
+            rc.copy_swiftpm_resource_bundle(bin_path, resources)
+
+        catalog = (bin_path / 'CodexUsageMonitor_CodexUsageUI.bundle' / 'Contents' /
+                   'Resources' / 'models.v1.json')
+        catalog.parent.mkdir(parents=True)
+        target = self.root / 'catalog.json'
+        target.write_text('{}')
+        catalog.symlink_to(target)
+        with self.assertRaisesRegex(rc.Refusal, 'SYMLINK_REJECTED'):
+            rc.copy_swiftpm_resource_bundle(bin_path, resources)
 
 
 if __name__ == '__main__':
