@@ -175,6 +175,28 @@ struct UMA014M1NativeShellTests {
         }
     }
 
+    @Test("Native Edit commands use the first responder chain")
+    @MainActor
+    func nativeEditMenuUsesStandardResponderActions() throws {
+        let shell = AppShellCoordinator()
+        defer { shell.tearDown() }
+        shell.start(presentMainWindow: false)
+
+        let editMenu = try #require(NSApp.mainMenu?.item(withTitle: "Edit")?.submenu)
+        for (title, action, key) in [
+            ("Cut", #selector(NSText.cut(_:)), "x"),
+            ("Copy", #selector(NSText.copy(_:)), "c"),
+            ("Paste", #selector(NSText.paste(_:)), "v"),
+            ("Select All", #selector(NSText.selectAll(_:)), "a"),
+        ] {
+            let item = try #require(editMenu.item(withTitle: title))
+            #expect(item.target == nil)
+            #expect(item.action == action)
+            #expect(item.keyEquivalent == key)
+            #expect(item.keyEquivalentModifierMask == [.command])
+        }
+    }
+
     @Test("Quick Panel opens instantly and Assistant remains coordinator-owned")
     func quickPanelAndAssistantSurviveWindowClosure() throws {
         let status = try source("Sources/CodexUsageMonitor/App/StatusBarController.swift")

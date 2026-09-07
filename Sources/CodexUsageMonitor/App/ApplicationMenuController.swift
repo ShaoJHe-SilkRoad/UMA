@@ -18,6 +18,7 @@ final class ApplicationMenuController: NSObject, NSMenuItemValidation {
     func installMainMenu() {
         let mainMenu = NSMenu(title: "Main Menu")
         mainMenu.addItem(appMenuItem())
+        mainMenu.addItem(editMenuItem())
         mainMenu.addItem(refreshMenuItem())
         mainMenu.addItem(viewMenuItem())
         mainMenu.addItem(threadOSMenuItem())
@@ -85,6 +86,18 @@ final class ApplicationMenuController: NSObject, NSMenuItemValidation {
         return root
     }
 
+    private func editMenuItem() -> NSMenuItem {
+        let root = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+        let menu = NSMenu(title: "Edit")
+        menu.addItem(responderItem(title: "Cut", action: #selector(NSText.cut(_:)), key: "x"))
+        menu.addItem(responderItem(title: "Copy", action: #selector(NSText.copy(_:)), key: "c"))
+        menu.addItem(.separator())
+        menu.addItem(responderItem(title: "Paste", action: #selector(NSText.paste(_:)), key: "v"))
+        menu.addItem(responderItem(title: "Select All", action: #selector(NSText.selectAll(_:)), key: "a"))
+        root.submenu = menu
+        return root
+    }
+
     private func viewMenuItem() -> NSMenuItem {
         let root = NSMenuItem(title: "View", action: nil, keyEquivalent: "")
         let menu = NSMenu(title: "View")
@@ -115,6 +128,13 @@ final class ApplicationMenuController: NSObject, NSMenuItemValidation {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
         item.target = self
         item.keyEquivalentModifierMask = key.isEmpty ? [] : [.command]
+        return item
+    }
+
+    private func responderItem(title: String, action: Selector, key: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        item.target = nil
+        item.keyEquivalentModifierMask = [.command]
         return item
     }
 
