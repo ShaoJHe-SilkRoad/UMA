@@ -309,38 +309,33 @@ public struct ThreadOSSettingsView: View {
     private let preferences: ApplicationPreferences
     @StateObject private var form: ThreadOSSettingsFormState
     @StateObject private var attributionBinding: ThreadOSAttributionBindingFormState
+    @StateObject private var factoriumV2: FactoriumV2FormState
     @State private var projectFilter = ""
     @State private var taskFilter = ""
     @State private var roleFilter = ""
     @State private var waveFilter = ""
     @State private var modelFilter = ""
+    @State private var confirmLegacyFourWorkerConversion = false
     public init(language: AppLanguage, analytics: ThreadOSUsageAnalytics? = nil, preferences: ApplicationPreferences = .production) {
         self.language = language; self.analytics = analytics; self.preferences = preferences
         _form = StateObject(wrappedValue: ThreadOSSettingsFormState(preferences: preferences))
         _attributionBinding = StateObject(wrappedValue: ThreadOSAttributionBindingFormState(preferences: preferences))
+        _factoriumV2 = StateObject(wrappedValue: FactoriumV2FormState(preferences: preferences))
     }
     public var body: some View {
         ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 18) {
-                settingsSection(title("ThreadOS Usage Analytics", "ThreadOS 使用分析")) { analyticsSection }
-                settingsSection(title("ThreadOS Settings", "ThreadOS 设置")) {
-            Text(title("Complete project Setup with Leader first. This local-only page saves and copies a next-wave request; it never sends work, switches models, or proves native model selection.", "请先由 Leader 完成项目 Setup。本地专用页面只保存和复制下一波请求；不会发送工作、切换模型，也不能证明原生模型选择。")).foregroundStyle(.secondary).accessibilityIdentifier("uma.threados.provenance")
-            Picker(title("Project", "项目"), selection: Binding(get: { form.selectedProject }, set: { form.select(project: $0) })) { Text(title("No project selected", "未选择项目")).tag(""); ForEach(ThreadOSSettingsPreferences.projects(from: preferences), id: \.self) { Text($0).tag($0) } }.accessibilityIdentifier("uma.threados.project-selector")
-            HStack { TextField(title("New project key", "新项目键"), text: $form.newProject).accessibilityIdentifier("uma.threados.new-project"); Button(title("Use project", "使用项目"), action: form.createProject).disabled(!ThreadOSSettingsDraft.isToken(form.newProject)).accessibilityIdentifier("uma.threados.use-project") }
-            if form.draft.isValidProject { settingsFields } else { Text(title("No valid project is selected. Choose an existing project or enter a project key to create a local draft.", "尚未选择有效项目。请选择现有项目，或输入项目键以创建本地草稿。")).foregroundStyle(.orange).accessibilityIdentifier("uma.threados.no-project") }
-                }
-                settingsSection(title("Historical attribution binding", "历史归因绑定")) { attributionBindingFields }
-                settingsSection(title("Paste a ThreadOS receipt", "粘贴 ThreadOS 回执")) {
-                    TextEditor(text: Binding(get: { form.receipt }, set: form.receiveReceipt))
-                        .frame(minHeight: 90)
-                        .accessibilityIdentifier("uma.threados.receipt")
-                    Text(form.receiptStatus(catalog: catalog, language: language))
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("uma.threados.receipt-status")
-                }
-            }
+            VStack(alignment: .leading, spacing: 18) { factoriumV2Content }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
+        }
+        .safeAreaInset(edge: .bottom) {
+            Button(title("Generate and Copy for Leader", "生成并复制给 Leader"), action: copyFactoriumV2Request)
+                .buttonStyle(.borderedProminent)
+                .disabled(!factoriumV2.draft.isLocallyValid)
+                .accessibilityIdentifier("uma.threados.v2.generate-copy")
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .background(.bar)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .accessibilityIdentifier("uma.threados.settings")
@@ -351,6 +346,129 @@ public struct ThreadOSSettingsView: View {
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    @ViewBuilder private var factoriumV2Content: some View {
+        Text(title("Local request preferences only. Generate and copy for manual Leader transfer; nothing is sent or applied here.", "仅限本地请求偏好设置。生成并复制后请手动粘贴给 Leader；此处不会发送或应用。"))
+            .foregroundStyle(.secondary)
+            .accessibilityIdentifier("uma.threados.v2.provenance")
+        Picker(title("Project", "项目"), selection: Binding(get: { factoriumV2.selectedProject }, set: { factoriumV2.select(project: $0) })) {
+            Text(title("No project selected", "未选择项目")).tag("")
+            ForEach(factoriumV2.projects, id: \.self) { Text($0).tag($0) }
+        }
+        .accessibilityIdentifier("uma.threados.v2.project-selector")
+        HStack {
+            TextField(title("New project key", "新项目键"), text: $factoriumV2.newProject)
+                .accessibilityIdentifier("uma.threados.v2.new-project")
+            Button(title("Use project", "使用项目"), action: factoriumV2.createProject)
+                .disabled(!ThreadOSSettingsDraft.isToken(factoriumV2.newProject))
+        }
+        if let legacy = factoriumV2.selectedLegacyDraft {
+            settingsSection(title("V1 conversion", "V1 转换")) {
+                Text(FactoriumV2SettingsDraft.conversionPreview(language: language)).foregroundStyle(.secondary)
+                if legacy.codingWorkers == 4 || legacy.reviewWorkers == 4 {
+                    Toggle(title("I confirm that four legacy workers become three V2 slots", "我确认四个旧工作者将变为三个 V2 槽位"), isOn: $confirmLegacyFourWorkerConversion)
+                        .accessibilityIdentifier("uma.threados.v2.convert-four-confirmation")
+                }
+                Button(title("Create separate V2 request", "创建独立的 V2 请求"), action: {
+                    do { try factoriumV2.convert(legacy: legacy, confirmedFourWorkerConversion: confirmLegacyFourWorkerConversion) }
+                    catch { factoriumV2.reportConversionError(language: language) }
+                })
+                .disabled((legacy.codingWorkers == 4 || legacy.reviewWorkers == 4) && !confirmLegacyFourWorkerConversion)
+                .accessibilityIdentifier("uma.threados.v2.convert")
+            }
+        } else if factoriumV2.isShowingV2Draft {
+            ForEach(FactoriumV2Role.allCases, id: \.self) { role in roleCard(role) }
+            DisclosureGroup(title("Advanced details", "高级详情")) {
+                LabeledContent(title("Request ID", "请求 ID"), value: factoriumV2.draft.id)
+                LabeledContent(title("Revision", "修订版本"), value: "\(factoriumV2.draft.revision)")
+                LabeledContent(title("Catalog revision", "目录版本"), value: FactoriumV2SettingsDraft.catalogRevision)
+                Text(title("Raw acknowledgement preview", "原始回执预览"))
+                TextEditor(text: $factoriumV2.rawAcknowledgement)
+                    .frame(minHeight: 72)
+                    .accessibilityIdentifier("uma.threados.v2.raw-ack")
+                Button(title("Validate local receipt", "验证本地回执"), action: { factoriumV2.receiveReceipt(language: language) })
+                    .accessibilityIdentifier("uma.threados.v2.validate-receipt")
+                if factoriumV2.receiptInputIsInvalid { Text(title("Receipt does not match this local draft.", "回执与此本地草稿不匹配。")) .foregroundStyle(.orange) }
+                Text(title("Usage and historical binding: Coming soon.", "用量和历史绑定：即将推出。"))
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("uma.threados.v2.coming-soon")
+            }
+            if !factoriumV2.message.isEmpty { Text(factoriumV2.message).foregroundStyle(.secondary).accessibilityIdentifier("uma.threados.v2.status") }
+        } else {
+            Text(title("Choose or create a project to edit local settings.", "请选择或新建项目后编辑本地设置。"))
+                .foregroundStyle(.orange)
+        }
+    }
+    @ViewBuilder private func roleCard(_ role: FactoriumV2Role) -> some View {
+        let setting = factoriumV2.draft.roles[role] ?? FactoriumV2SettingsDraft.defaultRoles[role]!
+        VStack(alignment: .leading, spacing: 8) {
+            HStack { Text(role.title).font(.headline); Spacer(); Text(factoriumV2.roleStatus(language: language)).foregroundStyle(.secondary).font(.caption) }
+            if role == .leader {
+                Toggle(title("Preserve current Leader", "保留当前 Leader"), isOn: Binding(get: { setting.preserve }, set: { value in factoriumV2.edit { $0.roles[role]?.preserve = value } }))
+                    .accessibilityIdentifier("uma.threados.v2.leader.preserve")
+            }
+            if !setting.preserve { selectionFields(role: role, selection: setting.selection) }
+            if role.supportsWorkers { workerSlots(role: role) }
+            if setting.selection.speed == "fast" {
+                Text(title("Fast is a local preference. It requires supported Codex native selection; otherwise Standard is only a policy fallback, not observed activation.", "快速仅是本地偏好。它需要受支持的 Codex 原生选择；否则标准仅是策略回退，并非已观察到的激活。"))
+                    .foregroundStyle(.secondary).font(.caption)
+            }
+        }
+        .padding(12)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityIdentifier("uma.threados.v2.role.\(role.rawValue)")
+    }
+    @ViewBuilder private func selectionFields(role: FactoriumV2Role, selection: FactoriumV2Selection) -> some View {
+        Picker(title("Model", "模型"), selection: selectionBinding(role, \.model)) { ForEach(FactoriumV2SettingsDraft.availableModels(), id: \.self) { model in Text(model == "gpt-6-astra" ? "Astra" : "Terra").tag(model) } }
+        Picker(title("Reasoning", "推理深度"), selection: selectionBinding(role, \.effort)) { ForEach(FactoriumV2SettingsDraft.availableEfforts(model: selection.model, leader: role == .leader), id: \.self) { effort in Text(effortLabel(effort)).tag(effort) } }
+        Picker(title("Preference", "偏好"), selection: selectionBinding(role, \.speed)) { Text(title("Fast preference", "快速偏好")).tag("fast"); Text(title("Standard preference", "标准偏好")).tag("standard") }
+    }
+    @ViewBuilder private func workerSlots(role: FactoriumV2Role) -> some View {
+        DisclosureGroup(title("Child workers", "子工作者")) {
+            Text(title("Up to three positional worker slots are retained. All three may be disabled; this remains a direct-capacity request and does not remove independent QA or review.", "最多保留三个位置工作者槽位。三个都可关闭；这仍是直接容量请求，不会移除独立 QA 或审查。"))
+                .foregroundStyle(.secondary).font(.caption)
+            ForEach(Array(factoriumV2.draft.workers(for: role).enumerated()), id: \.offset) { index, slot in
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(title("Worker \(index + 1)", "工作者 \(index + 1)")).font(.subheadline)
+                    Toggle(title("Worker \(index + 1) enabled", "工作者 \(index + 1) 已启用"), isOn: slotEnabledBinding(role, index))
+                        .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).enabled")
+                    Toggle(title("Inherit parent settings", "继承父角色设置"), isOn: slotInheritanceBinding(role, index))
+                        .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).inherit")
+                    if !slot.inherits { slotSelectionFields(role: role, index: index, selection: slot.selection) }
+                }.padding(.vertical, 4)
+            }
+        }
+    }
+    @ViewBuilder private func slotSelectionFields(role: FactoriumV2Role, index: Int, selection: FactoriumV2Selection) -> some View {
+        Picker(title("Model", "模型"), selection: slotSelectionBinding(role, index, \.model)) { ForEach(FactoriumV2SettingsDraft.availableModels(), id: \.self) { model in Text(model == "gpt-6-astra" ? "Astra" : "Terra").tag(model) } }
+        Picker(title("Reasoning", "推理深度"), selection: slotSelectionBinding(role, index, \.effort)) { ForEach(FactoriumV2SettingsDraft.availableEfforts(model: selection.model, leader: false), id: \.self) { effort in Text(effortLabel(effort)).tag(effort) } }
+        Picker(title("Preference", "偏好"), selection: slotSelectionBinding(role, index, \.speed)) { Text(title("Fast preference", "快速偏好")).tag("fast"); Text(title("Standard preference", "标准偏好")).tag("standard") }
+    }
+    private func selectionBinding(_ role: FactoriumV2Role, _ keyPath: WritableKeyPath<FactoriumV2Selection, String>) -> Binding<String> {
+        Binding(get: { factoriumV2.draft.roles[role]?.selection[keyPath: keyPath] ?? "" }, set: { value in
+            if keyPath == \.model { factoriumV2.selectRoleModel(value, role: role) }
+            else { factoriumV2.edit { $0.roles[role]?.selection[keyPath: keyPath] = value } }
+        })
+    }
+    private func slotSelectionBinding(_ role: FactoriumV2Role, _ index: Int, _ keyPath: WritableKeyPath<FactoriumV2Selection, String>) -> Binding<String> {
+        Binding(get: { factoriumV2.draft.workers(for: role)[index].selection[keyPath: keyPath] }, set: { value in
+            if keyPath == \.model { factoriumV2.selectSlotModel(value, at: index, for: role) }
+            else { factoriumV2.edit { var selection = $0.workers(for: role)[index].selection; selection[keyPath: keyPath] = value; $0.setSlotSelection(selection, at: index, for: role) } }
+        })
+    }
+    private func slotEnabledBinding(_ role: FactoriumV2Role, _ index: Int) -> Binding<Bool> {
+        Binding(get: { factoriumV2.draft.workers(for: role)[index].enabled }, set: { value in factoriumV2.edit { var slots = $0.workers(for: role); slots[index].enabled = value; $0.setWorkers(slots, for: role) } })
+    }
+    private func slotInheritanceBinding(_ role: FactoriumV2Role, _ index: Int) -> Binding<Bool> {
+        Binding(get: { factoriumV2.draft.workers(for: role)[index].inherits }, set: { value in factoriumV2.edit { $0.setSlotInheritance(value, at: index, for: role) } })
+    }
+    private func copyFactoriumV2Request() {
+        guard let request = try? factoriumV2.generatedRequest() else { return }
+        factoriumV2.reportCopy(success: SystemThreadOSSettingsClipboard().write(request), language: language)
+    }
+    private func effortLabel(_ effort: String) -> String {
+        guard language == .simplifiedChinese else { return effort }
+        return ["low": "低", "medium": "中", "high": "高", "xhigh": "很高", "max": "最大", "ultra": "超高"][effort] ?? effort
     }
     @ViewBuilder private var analyticsSection: some View {
         let value = analytics ?? .sourceGap()

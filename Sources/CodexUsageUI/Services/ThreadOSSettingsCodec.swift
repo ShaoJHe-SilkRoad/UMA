@@ -198,7 +198,9 @@ public enum ThreadOSSettingsCodec {
     }
     private static func strictString(_ value: Any?) -> String? { value as? String }
     private static func strictInt(_ value: Any?) -> Int? { guard let value, type(of: value) == Int.self else { return nil }; return value as? Int }
-    private static func strictObject(_ json: String) throws -> [String: Any] {
+    /// Shared strict JSON entrypoint for local protocol decoders. It rejects
+    /// duplicate keys before Foundation can collapse them.
+    static func strictObject(_ json: String) throws -> [String: Any] {
         var parser = StrictJSON(bytes: Array(json.utf8))
         let value = try parser.value()
         parser.whitespace()

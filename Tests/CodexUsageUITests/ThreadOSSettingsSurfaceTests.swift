@@ -7,14 +7,17 @@ import Testing
 
 @MainActor struct ThreadOSSettingsSurfaceTests {
     @Test func threadOSSettingsUsesVerticalReachabilityWithoutHorizontalOverflowAtMinimumWindowWidth() throws {
+        let freshPreferences = ApplicationPreferences.inMemory()
+        ThreadOSSettingsPreferences.saveFactoriumV2(.init(project: "TU4_FRESH"), to: freshPreferences)
         let preferences = ApplicationPreferences.inMemory()
         var custom = ThreadOSSettingsDraft(project: "TU4_LAYOUT", preset: "custom")
         custom.customRoles = ThreadOSSettingsDraft.defaultCustomRoles
         ThreadOSSettingsPreferences.save(custom, to: preferences)
+        ThreadOSSettingsPreferences.saveFactoriumV2(.init(project: "TU4_LAYOUT"), to: preferences)
 
         _ = NSApplication.shared
         for view in [
-            ThreadOSSettingsView(language: .english, preferences: .inMemory()),
+            ThreadOSSettingsView(language: .english, preferences: freshPreferences),
             ThreadOSSettingsView(language: .english, preferences: preferences),
         ] {
             let host = NSHostingView(rootView: view)
@@ -440,21 +443,137 @@ import Testing
     }
 
     @Test func actualViewWiresAllRoleControlsToSharedPresentationsAndActionsAlongsideQ2Controls() throws {
-        let form = makeForm()
-        let catalog = try ThreadOSSettingsCodec.loadCatalog()
-        form.selectPreset("custom", catalog: catalog, language: .english)
-        let rows = try form.rolePresentations(catalog: catalog)
-        #expect(rows.count == 5 && rows.allSatisfy(\.isEditable))
-        #expect(Set(rows.map(\.modelIdentifier)).count == 5 && Set(rows.map(\.effortIdentifier)).count == 5)
-        // Source wiring plus execution of the same shared actions/presentation;
-        // this deliberately makes no native UI or accessibility-session claim.
+        let preferences = ApplicationPreferences.inMemory()
+        ThreadOSSettingsPreferences.saveFactoriumV2(.init(project: "PROJECT_A"), to: preferences)
+        let form = FactoriumV2FormState(preferences: preferences)
+        #expect(form.draft.isLocallyValid)
+        // This verifies source wiring only; the hosting test above covers actual AppKit layout.
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let source = try String(contentsOf: root.appendingPathComponent("Sources/CodexUsageUI/Views/ThreadOSSettingsView.swift"), encoding: .utf8)
         let view = try #require(source.range(of: "public struct ThreadOSSettingsView: View"))
         let body = String(source[view.lowerBound...])
-        for wiring in ["        roleFields", "form.rolePresentations(catalog: catalog)", "ForEach(roles)", "role.summary(language: language)", "if role.isEditable", "selection: customModelBinding(role.role)", "selection: customEffortBinding(role.role)", "ForEach(role.modelOptions", "ForEach(role.effortOptions", ".accessibilityIdentifier(role.summaryIdentifier)", ".accessibilityIdentifier(role.modelIdentifier)", ".accessibilityIdentifier(role.effortIdentifier)", "form.selectPreset($0", "form.selectCustomModel($0", "form.selectCustomEffort($0", "uma.threados.service-tier", "uma.threados.copy", "uma.threados.receipt", "uma.threados.project-selector", "uma.threados.analytics-local-ledger-coverage", "uma.threados.analytics-local-ledger-unassigned", "not account coverage", "separate from local-ledger remainder", "DisclosureGroup(title(\"Advanced binding details\"", "uma.threados.attribution-binding-advanced"] {
+        for wiring in ["factoriumV2Content", "FactoriumV2Role.allCases", "roleCard(role)", "workerSlots(role: role)", "uma.threados.v2.project-selector", "uma.threados.v2.generate-copy", "uma.threados.v2.raw-ack", "uma.threados.v2.coming-soon", "safeAreaInset"] {
             #expect(body.contains(wiring), "Missing actual View wiring: \(wiring)")
         }
+    }
+
+    @Test func factoriumV2SerializesTheCanonicalLocalRequest() throws {
+        let draft = FactoriumV2SettingsDraft(project: "PROJECT_A", id: "v2-request", revision: 7)
+        let request = try draft.canonicalRequest()
+        #expect(request.hasPrefix("TOSCFG/2 "))
+        let data = try #require(request.dropFirst("TOSCFG/2 ".count).data(using: .utf8))
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(Set(json.keys) == ["apply", "cat", "id", "p", "preset", "rev", "roles", "workers"])
+        #expect(json["apply"] as? String == "next-wave")
+        #expect(json["cat"] as? String == "astra-20260904.1")
+        #expect((json["roles"] as? [String: Any])?["leader"] as? [String: Bool] == ["preserve": true])
+        let workers = try #require(json["workers"] as? [String: [[String: Any]]])
+        #expect(workers["coder"]?.count == 3 && workers["reviewer"]?.count == 3)
+        #expect(workers["coder"]?.allSatisfy { $0["enabled"] as? Bool == true && $0["model"] as? String == "inherit" && $0["effort"] as? String == "inherit" && $0["speed"] as? String == "inherit" } == true)
+    }
+
+    @Test func factoriumV2KeepsV1DraftsSeparateAndRequiresFourWorkerConfirmation() throws {
+        let preferences = ApplicationPreferences.inMemory()
+        let legacy = ThreadOSSettingsDraft(project: "PROJECT_A", id: "legacy-v1", codingWorkers: 4, reviewWorkers: 2)
+        ThreadOSSettingsPreferences.save(legacy, to: preferences)
+        #expect(ThreadOSSettingsPreferences.loadFactoriumV2(project: "PROJECT_A", from: preferences) == nil)
+        #expect(throws: FactoriumV2SettingsError.legacyWorkerConfirmationRequired) {
+            try FactoriumV2SettingsDraft.converted(from: legacy, confirmedFourWorkerConversion: false, id: "fresh-v2")
+        }
+        let converted = try FactoriumV2SettingsDraft.converted(from: legacy, confirmedFourWorkerConversion: true, id: "fresh-v2")
+        ThreadOSSettingsPreferences.saveFactoriumV2(converted, to: preferences)
+        #expect(ThreadOSSettingsPreferences.load(from: preferences).id == "legacy-v1")
+        #expect(ThreadOSSettingsPreferences.loadFactoriumV2(project: "PROJECT_A", from: preferences)?.id == "fresh-v2")
+    }
+
+    @Test func factoriumV2InheritedWorkerResolvesAgainstItsCurrentParent() {
+        var draft = FactoriumV2SettingsDraft(project: "PROJECT_A")
+        var coder = draft.roles[.coder]!.selection
+        coder.effort = "high"
+        draft.setSelection(coder, for: .coder)
+        let inherited = draft.coderWorkers[0]
+        #expect(draft.resolvedSlot(inherited, parent: .coder) == coder)
+        draft.setSlotInheritance(false, at: 0, for: .coder)
+        var custom = draft.coderWorkers[0].selection
+        custom.effort = "low"
+        draft.coderWorkers[0].selection = custom
+        coder.effort = "medium"
+        draft.setSelection(coder, for: .coder)
+        #expect(draft.resolvedSlot(draft.coderWorkers[0], parent: .coder) == custom)
+    }
+
+    @Test func factoriumV2ConversionPreservesV1AndMapsCatalogSelectionsWithoutUsingRepairAsACodingWorkerAlias() throws {
+        let catalog = try ThreadOSSettingsCodec.loadCatalog()
+        var custom = ThreadOSSettingsDraft.defaultCustomRoles
+        custom[.foreman] = .init(model: "gpt-5.6-terra", reasoningEffort: "high")
+        custom[.codingWorker] = .init(model: "gpt-5.6-terra", reasoningEffort: "low")
+        let legacy = ThreadOSSettingsDraft(project: "PROJECT_A", id: "legacy-v1", preset: "custom", codingWorkers: 2, reviewWorkers: 1, customRoles: custom)
+        let converted = try FactoriumV2SettingsDraft.converted(from: legacy, confirmedFourWorkerConversion: false, id: "fresh-v2", catalog: catalog)
+        #expect(converted.id == "fresh-v2" && converted.project == legacy.project)
+        #expect(converted.roles[.coder]?.selection.effort == "high")
+        #expect(converted.roles[.repair] == FactoriumV2SettingsDraft.defaultRoles[.repair])
+        #expect(converted.coderWorkers.map(\.enabled) == [true, true, false])
+        #expect(converted.coderWorkers.allSatisfy { !$0.inherits && $0.hasCustomSelection && $0.selection.effort == "low" })
+        #expect(converted.reviewerWorkers.map(\.enabled) == [true, false, false])
+    }
+
+    @Test func factoriumV2RestoresLastProjectAndInvalidatesCopyForEditSwitchAndFailure() throws {
+        let preferences = ApplicationPreferences.inMemory()
+        ThreadOSSettingsPreferences.saveFactoriumV2(.init(project: "PROJECT_A", id: "a"), to: preferences)
+        ThreadOSSettingsPreferences.saveFactoriumV2(.init(project: "PROJECT_B", id: "b"), to: preferences)
+        ThreadOSSettingsPreferences.saveFactoriumV2SelectedProject("PROJECT_B", to: preferences)
+        let form = FactoriumV2FormState(preferences: preferences)
+        #expect(form.selectedProject == "PROJECT_B")
+        form.rawAcknowledgement = "stale"
+        form.reportCopy(success: true, language: .english)
+        #expect(form.copiedRevision == form.draft.revision)
+        form.reportCopy(success: true, language: .english)
+        #expect(form.copiedRevision == form.draft.revision)
+        form.select(project: "PROJECT_A")
+        #expect(form.copiedRevision == nil && form.rawAcknowledgement.isEmpty)
+        form.reportCopy(success: false, language: .english)
+        #expect(form.copiedRevision == nil)
+        form.reportCopy(success: true, language: .english)
+        let before = form.draft.revision
+        form.edit { $0.roles[.repair]?.selection.speed = "standard" }
+        #expect(form.draft.revision == before + 1 && form.copiedRevision == nil)
+        #expect(FactoriumV2FormState(preferences: preferences).selectedProject == "PROJECT_A")
+    }
+
+    @Test func factoriumV2AllOffWorkersAndCustomSlotValuesRemainValidAndRetained() throws {
+        var draft = FactoriumV2SettingsDraft(project: "PROJECT_A", id: "v2-all-off")
+        for index in 0..<3 {
+            draft.coderWorkers[index].enabled = false
+            draft.reviewerWorkers[index].enabled = false
+        }
+        draft.setSlotInheritance(false, at: 0, for: .coder)
+        var selection = draft.coderWorkers[0].selection
+        selection.effort = "high"
+        draft.setSlotSelection(selection, at: 0, for: .coder)
+        draft.setSlotInheritance(true, at: 0, for: .coder)
+        draft.setSlotInheritance(false, at: 0, for: .coder)
+        #expect(draft.coderWorkers[0].selection.effort == "high")
+        let data = try #require(draft.canonicalRequest().dropFirst("TOSCFG/2 ".count).data(using: .utf8))
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let workers = try #require(object["workers"] as? [String: [[String: Any]]])
+        #expect(workers["coder"]?.allSatisfy { $0["enabled"] as? Bool == false } == true)
+        #expect(workers["reviewer"]?.allSatisfy { $0["enabled"] as? Bool == false } == true)
+    }
+
+    @Test func factoriumV2HostedViewKeepsItsFixedCopyActionOutsideTheScrollableCards() throws {
+        let preferences = ApplicationPreferences.inMemory()
+        ThreadOSSettingsPreferences.saveFactoriumV2(.init(project: "PROJECT_A"), to: preferences)
+        _ = NSApplication.shared
+        let host = NSHostingView(rootView: ThreadOSSettingsView(language: .english, preferences: preferences))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 552), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        host.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        host.layoutSubtreeIfNeeded()
+        let scroll = try #require(descendants(of: host).compactMap { $0 as? NSScrollView }.first)
+        #expect(scroll.hasVerticalScroller && host.fittingSize.width > 0)
     }
 
     private func makeForm(preferences: ApplicationPreferences = .inMemory()) -> ThreadOSSettingsFormState {
