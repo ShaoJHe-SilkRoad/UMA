@@ -4,7 +4,7 @@ import Testing
 @testable import CodexUsageMonitor
 @testable import CodexUsageUI
 
-@Suite("UMA 0.14 M1 native shell")
+@Suite("UMA 0.14 M1 native shell", .serialized)
 struct UMA014M1NativeShellTests {
     @Test("Ordinary app is Dock eligible while machine verifiers remain accessory")
     func activationPolicyIsPurposeScoped() throws {
@@ -195,6 +195,76 @@ struct UMA014M1NativeShellTests {
             #expect(item.keyEquivalent == key)
             #expect(item.keyEquivalentModifierMask == [.command])
         }
+    }
+
+    @Test("Native Edit commands dispatch through the first responder into an AppKit editor")
+    @MainActor
+    func nativeEditMenuDispatchesCopyPasteAndSelectAllToFirstResponder() throws {
+        let shell = AppShellCoordinator()
+        defer { shell.tearDown() }
+        shell.start(presentMainWindow: false)
+
+        let pasteboard = NSPasteboard.general
+        let originalPasteboardItems = (pasteboard.pasteboardItems ?? []).map { item in
+            let preservedItem = NSPasteboardItem()
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    preservedItem.setData(data, forType: type)
+                }
+            }
+            return preservedItem
+        }
+        defer {
+            pasteboard.clearContents()
+            _ = pasteboard.writeObjects(originalPasteboardItems)
+        }
+
+        let editor = NSTextView(frame: NSRect(x: 0, y: 0, width: 480, height: 160))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 160),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = editor
+        let activationPolicy = NSApp.activationPolicy()
+        defer { NSApp.setActivationPolicy(activationPolicy) }
+        NSApp.setActivationPolicy(.regular)
+        window.makeKeyAndOrderFront(nil)
+        window.makeMain()
+        NSApp.activate(ignoringOtherApps: true)
+        let modalSession = NSApp.beginModalSession(for: window)
+        defer { NSApp.endModalSession(modalSession) }
+        let deadline = Date().addingTimeInterval(0.25)
+        while NSApp.keyWindow !== window, Date() < deadline {
+            _ = NSApp.runModalSession(modalSession)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        defer { window.orderOut(nil) }
+        #expect(window.makeFirstResponder(editor))
+        #expect(NSApp.modalWindow === window)
+        #expect(window.firstResponder === editor)
+
+        let editMenu = try #require(NSApp.mainMenu?.item(withTitle: "Edit")?.submenu)
+        func dispatch(_ title: String) throws {
+            let item = try #require(editMenu.item(withTitle: title))
+            let action = try #require(item.action)
+            #expect((NSApp.target(forAction: action, to: item.target, from: item) as AnyObject?) === editor)
+            #expect(NSApp.sendAction(action, to: item.target, from: item))
+        }
+
+        let request = "TOSCFG/1\n{\"project\":\"TOSUMA-TU4\"}"
+        editor.string = request
+        try dispatch("Select All")
+        #expect(editor.selectedRange() == NSRange(location: 0, length: (request as NSString).length))
+
+        try dispatch("Copy")
+        #expect(pasteboard.string(forType: .string) == request)
+
+        editor.string = ""
+        #expect(window.makeFirstResponder(editor))
+        try dispatch("Paste")
+        #expect(editor.string == request)
     }
 
     @Test("Quick Panel opens instantly and Assistant remains coordinator-owned")
