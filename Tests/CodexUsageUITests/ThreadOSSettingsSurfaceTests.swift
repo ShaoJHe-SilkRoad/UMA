@@ -36,6 +36,10 @@ import Testing
             RunLoop.main.run(until: Date().addingTimeInterval(0.05))
             host.layoutSubtreeIfNeeded()
 
+            // The attached host must not replace child control identifiers with
+            // a common container identifier in the native accessibility tree.
+            #expect(host.accessibilityIdentifier().isEmpty)
+
             let scrolls = descendants(of: host).compactMap { $0 as? NSScrollView }
             let outerScroll = try #require(scrolls.first { scroll in
                 guard let document = scroll.documentView else { return false }
@@ -452,9 +456,11 @@ import Testing
         let source = try String(contentsOf: root.appendingPathComponent("Sources/CodexUsageUI/Views/ThreadOSSettingsView.swift"), encoding: .utf8)
         let view = try #require(source.range(of: "public struct ThreadOSSettingsView: View"))
         let body = String(source[view.lowerBound...])
-        for wiring in ["factoriumV2Content", "FactoriumV2Role.allCases", "roleCard(role)", "workerSlots(role: role)", "uma.threados.v2.project-selector", "uma.threados.v2.generate-copy", "uma.threados.v2.raw-ack", "uma.threados.v2.coming-soon", "safeAreaInset"] {
+        for wiring in ["factoriumV2Content", "FactoriumV2Role.allCases", "roleCard(role)", "workerSlots(role: role)", "uma.threados.v2.project-selector", "uma.threados.v2.generate-copy", "uma.threados.v2.raw-ack", "uma.threados.v2.coming-soon", "safeAreaInset", "ViewThatFits(in: .horizontal)", "uma.threados.v2.role.\\(role.rawValue).model", "uma.threados.v2.role.\\(role.rawValue).effort", "uma.threados.v2.role.\\(role.rawValue).speed"] {
             #expect(body.contains(wiring), "Missing actual View wiring: \(wiring)")
         }
+        #expect(!body.contains(".accessibilityIdentifier(\"uma.threados.settings\")"))
+        #expect(!body.contains(".accessibilityIdentifier(\"uma.threados.v2.role.\\(role.rawValue)\")"))
     }
 
     @Test func factoriumV2SerializesTheCanonicalLocalRequest() throws {

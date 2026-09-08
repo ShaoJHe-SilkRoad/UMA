@@ -338,7 +338,6 @@ public struct ThreadOSSettingsView: View {
                 .background(.bar)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .accessibilityIdentifier("uma.threados.settings")
     }
     @ViewBuilder private func settingsSection<Content: View>(_ heading: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -348,7 +347,7 @@ public struct ThreadOSSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
     @ViewBuilder private var factoriumV2Content: some View {
-        Text(title("Local request preferences only. Generate and copy for manual Leader transfer; nothing is sent or applied here.", "仅限本地请求偏好设置。生成并复制后请手动粘贴给 Leader；此处不会发送或应用。"))
+        Text(title("Local draft only — copy it for manual Codex Leader transfer. Native status: UNKNOWN.", "仅限本地草稿——复制后手动交给 Codex Leader。原生状态：UNKNOWN。"))
             .foregroundStyle(.secondary)
             .accessibilityIdentifier("uma.threados.v2.provenance")
         Picker(title("Project", "项目"), selection: Binding(get: { factoriumV2.selectedProject }, set: { factoriumV2.select(project: $0) })) {
@@ -356,11 +355,14 @@ public struct ThreadOSSettingsView: View {
             ForEach(factoriumV2.projects, id: \.self) { Text($0).tag($0) }
         }
         .accessibilityIdentifier("uma.threados.v2.project-selector")
-        HStack {
-            TextField(title("New project key", "新项目键"), text: $factoriumV2.newProject)
-                .accessibilityIdentifier("uma.threados.v2.new-project")
-            Button(title("Use project", "使用项目"), action: factoriumV2.createProject)
-                .disabled(!ThreadOSSettingsDraft.isToken(factoriumV2.newProject))
+        DisclosureGroup(title("New project", "新项目")) {
+            HStack {
+                TextField(title("New project key", "新项目键"), text: $factoriumV2.newProject)
+                    .accessibilityIdentifier("uma.threados.v2.new-project")
+                Button(title("Use project", "使用项目"), action: factoriumV2.createProject)
+                    .disabled(!ThreadOSSettingsDraft.isToken(factoriumV2.newProject))
+                    .accessibilityIdentifier("uma.threados.v2.use-project")
+            }
         }
         if let legacy = factoriumV2.selectedLegacyDraft {
             settingsSection(title("V1 conversion", "V1 转换")) {
@@ -377,6 +379,8 @@ public struct ThreadOSSettingsView: View {
                 .accessibilityIdentifier("uma.threados.v2.convert")
             }
         } else if factoriumV2.isShowingV2Draft {
+            Text(title("Fast is a local preference; choose it manually in Codex. Effective setting: UNKNOWN.", "快速是本地偏好；请在 Codex 中手动选择。有效设置：UNKNOWN。"))
+                .foregroundStyle(.secondary).font(.caption)
             ForEach(FactoriumV2Role.allCases, id: \.self) { role in roleCard(role) }
             DisclosureGroup(title("Advanced details", "高级详情")) {
                 LabeledContent(title("Request ID", "请求 ID"), value: factoriumV2.draft.id)
@@ -401,7 +405,7 @@ public struct ThreadOSSettingsView: View {
     }
     @ViewBuilder private func roleCard(_ role: FactoriumV2Role) -> some View {
         let setting = factoriumV2.draft.roles[role] ?? FactoriumV2SettingsDraft.defaultRoles[role]!
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 5) {
             HStack { Text(role.title).font(.headline); Spacer(); Text(factoriumV2.roleStatus(language: language)).foregroundStyle(.secondary).font(.caption) }
             if role == .leader {
                 Toggle(title("Preserve current Leader", "保留当前 Leader"), isOn: Binding(get: { setting.preserve }, set: { value in factoriumV2.edit { $0.roles[role]?.preserve = value } }))
@@ -409,19 +413,23 @@ public struct ThreadOSSettingsView: View {
             }
             if !setting.preserve { selectionFields(role: role, selection: setting.selection) }
             if role.supportsWorkers { workerSlots(role: role) }
-            if setting.selection.speed == "fast" {
-                Text(title("Fast is a local preference. It requires supported Codex native selection; otherwise Standard is only a policy fallback, not observed activation.", "快速仅是本地偏好。它需要受支持的 Codex 原生选择；否则标准仅是策略回退，并非已观察到的激活。"))
-                    .foregroundStyle(.secondary).font(.caption)
-            }
         }
-        .padding(12)
+        .padding(8)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
-        .accessibilityIdentifier("uma.threados.v2.role.\(role.rawValue)")
     }
     @ViewBuilder private func selectionFields(role: FactoriumV2Role, selection: FactoriumV2Selection) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) { roleSelectionPickers(role: role, selection: selection) }
+            VStack(alignment: .leading, spacing: 8) { roleSelectionPickers(role: role, selection: selection) }
+        }
+    }
+    @ViewBuilder private func roleSelectionPickers(role: FactoriumV2Role, selection: FactoriumV2Selection) -> some View {
         Picker(title("Model", "模型"), selection: selectionBinding(role, \.model)) { ForEach(FactoriumV2SettingsDraft.availableModels(), id: \.self) { model in Text(model == "gpt-6-astra" ? "Astra" : "Terra").tag(model) } }
+            .accessibilityIdentifier("uma.threados.v2.role.\(role.rawValue).model")
         Picker(title("Reasoning", "推理深度"), selection: selectionBinding(role, \.effort)) { ForEach(FactoriumV2SettingsDraft.availableEfforts(model: selection.model, leader: role == .leader), id: \.self) { effort in Text(effortLabel(effort)).tag(effort) } }
-        Picker(title("Preference", "偏好"), selection: selectionBinding(role, \.speed)) { Text(title("Fast preference", "快速偏好")).tag("fast"); Text(title("Standard preference", "标准偏好")).tag("standard") }
+            .accessibilityIdentifier("uma.threados.v2.role.\(role.rawValue).effort")
+        Picker(title("Preference", "偏好"), selection: selectionBinding(role, \.speed)) { Text(title("Fast", "快速")).tag("fast"); Text(title("Standard", "标准")).tag("standard") }
+            .accessibilityIdentifier("uma.threados.v2.role.\(role.rawValue).speed")
     }
     @ViewBuilder private func workerSlots(role: FactoriumV2Role) -> some View {
         DisclosureGroup(title("Child workers", "子工作者")) {
@@ -441,8 +449,11 @@ public struct ThreadOSSettingsView: View {
     }
     @ViewBuilder private func slotSelectionFields(role: FactoriumV2Role, index: Int, selection: FactoriumV2Selection) -> some View {
         Picker(title("Model", "模型"), selection: slotSelectionBinding(role, index, \.model)) { ForEach(FactoriumV2SettingsDraft.availableModels(), id: \.self) { model in Text(model == "gpt-6-astra" ? "Astra" : "Terra").tag(model) } }
+            .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).model")
         Picker(title("Reasoning", "推理深度"), selection: slotSelectionBinding(role, index, \.effort)) { ForEach(FactoriumV2SettingsDraft.availableEfforts(model: selection.model, leader: false), id: \.self) { effort in Text(effortLabel(effort)).tag(effort) } }
-        Picker(title("Preference", "偏好"), selection: slotSelectionBinding(role, index, \.speed)) { Text(title("Fast preference", "快速偏好")).tag("fast"); Text(title("Standard preference", "标准偏好")).tag("standard") }
+            .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).effort")
+        Picker(title("Preference", "偏好"), selection: slotSelectionBinding(role, index, \.speed)) { Text(title("Fast", "快速")).tag("fast"); Text(title("Standard", "标准")).tag("standard") }
+            .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).speed")
     }
     private func selectionBinding(_ role: FactoriumV2Role, _ keyPath: WritableKeyPath<FactoriumV2Selection, String>) -> Binding<String> {
         Binding(get: { factoriumV2.draft.roles[role]?.selection[keyPath: keyPath] ?? "" }, set: { value in
