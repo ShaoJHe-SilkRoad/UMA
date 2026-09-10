@@ -150,6 +150,20 @@ import Testing
         }
     }
 
+    @Test func systemClipboardRestoresEveryPasteboardItemTypeWhenWriteFails() {
+        let customType = NSPasteboard.PasteboardType("com.silkrd.uma.test.custom")
+        let original = NSPasteboardItem()
+        original.setData(Data("plain text".utf8), forType: .string)
+        original.setData(Data([0x00, 0x01, 0x02]), forType: customType)
+        let board = FailingPasteboard(items: [original])
+
+        #expect(!SystemThreadOSSettingsClipboard(board: board).write("new request"))
+        let restored = try! #require(board.pasteboardItems?.first)
+        #expect(restored.types.contains(.string) && restored.types.contains(customType))
+        #expect(restored.data(forType: .string) == Data("plain text".utf8))
+        #expect(restored.data(forType: customType) == Data([0x00, 0x01, 0x02]))
+    }
+
     @Test func semanticEditsAdvanceExactlyOnceAndMaximumPreservesDraft() {
         var draft = ThreadOSSettingsDraft(project: "TU1_FIXTURE", id: "cfg-001", revision: 1_000_000)
         let original = draft
@@ -456,7 +470,7 @@ import Testing
         let source = try String(contentsOf: root.appendingPathComponent("Sources/CodexUsageUI/Views/ThreadOSSettingsView.swift"), encoding: .utf8)
         let view = try #require(source.range(of: "public struct ThreadOSSettingsView: View"))
         let body = String(source[view.lowerBound...])
-        for wiring in ["factoriumV2Content", "FactoriumV2Role.allCases", "roleCard(role)", "workerSlots(role: role)", "uma.threados.v2.project-selector", "uma.threados.v2.generate-copy", "uma.threados.v2.raw-ack", "uma.threados.v2.coming-soon", "safeAreaInset", "ViewThatFits(in: .horizontal)", "uma.threados.v2.role.\\(role.rawValue).model", "uma.threados.v2.role.\\(role.rawValue).effort", "uma.threados.v2.role.\\(role.rawValue).speed"] {
+        for wiring in ["factoriumV2Content", "FactoriumV2Role.allCases", "roleCard(role)", "workerSlots(role: role)", "workerSummary(for: role)", "selectionSummary", "Disabled slots retain this saved draft", "uma.threados.v2.project-selector", "uma.threados.v2.generate-copy", "uma.threados.v2.raw-ack", "uma.threados.v2.coming-soon", "uma.threados.v2.native-speed-warning", "safeAreaInset", "ViewThatFits(in: .horizontal)", ".pickerStyle(.segmented)", ".accessibilityLabel(title(\"Model for \\(role.title)\"", ".accessibilityLabel(title(\"Thinking for \\(role.title)\"", ".accessibilityLabel(title(\"Speed for \\(role.title)\"", "uma.threados.v2.role.\\(role.rawValue).model", "uma.threados.v2.role.\\(role.rawValue).effort", "uma.threados.v2.role.\\(role.rawValue).speed"] {
             #expect(body.contains(wiring), "Missing actual View wiring: \(wiring)")
         }
         #expect(!body.contains(".accessibilityIdentifier(\"uma.threados.settings\")"))
@@ -593,6 +607,21 @@ import Testing
     }
 
     @MainActor private final class FailingClipboard: ThreadOSSettingsClipboard { func write(_ string: String) -> Bool { false } }
+
+    @MainActor private final class FailingPasteboard: ThreadOSSettingsPasteboard {
+        var pasteboardItems: [NSPasteboardItem]?
+        init(items: [NSPasteboardItem]) { pasteboardItems = items }
+        @discardableResult func clearContents() -> Int { pasteboardItems = []; return 1 }
+        func setString(_ string: String, forType dataType: NSPasteboard.PasteboardType) -> Bool {
+            let partial = NSPasteboardItem(); partial.setString(string, forType: dataType)
+            pasteboardItems = [partial]
+            return false
+        }
+        func writeObjects(_ objects: [any NSPasteboardWriting]) -> Bool {
+            pasteboardItems = objects.compactMap { $0 as? NSPasteboardItem }
+            return true
+        }
+    }
 
     private var modeOnReceipt: String { "{\"schema\":\"threados.settings-receipt.v1\",\"protocol\":\"TOSACK/1\",\"authority\":\"settings_do_not_grant_authority\",\"status\":\"mode_updated\",\"mode\":\"on\",\"effective_from\":\"observed\"}" }
     private var fabricatedNativeModelReceipt: String { "{\"schema\":\"threados.settings-receipt.v1\",\"protocol\":\"TOSACK/1\",\"authority\":\"settings_do_not_grant_authority\",\"status\":\"pending_native_selection\",\"effective_from\":\"next-wave\",\"id\":\"cfg-001\",\"rev\":1,\"preset\":\"astra-balanced\",\"requested\":{},\"configured\":{},\"effective_observed\":\"gpt-6-astra\",\"pending_native\":[]}" }
