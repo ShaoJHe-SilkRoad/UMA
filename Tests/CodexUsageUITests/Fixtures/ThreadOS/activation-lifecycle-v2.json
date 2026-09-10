@@ -1,0 +1,83 @@
+{
+  "request": {
+    "apply": "next-wave",
+    "cat": "astra-20260904.1",
+    "id": "cfg-activation-test",
+    "p": "PROJECT_ACTIVATION",
+    "preset": "custom",
+    "rev": 1,
+    "roles": {
+      "coder": { "effort": "medium", "model": "gpt-5.6-terra", "speed": "fast" },
+      "leader": { "preserve": true },
+      "qa": { "effort": "high", "model": "gpt-6-astra", "speed": "standard" },
+      "repair": { "effort": "medium", "model": "gpt-5.6-terra", "speed": "fast" },
+      "reviewer": { "effort": "medium", "model": "gpt-5.6-terra", "speed": "fast" }
+    },
+    "workers": {
+      "coder": [
+        { "effort": "low", "enabled": true, "model": "gpt-5.6-terra", "speed": "fast" },
+        { "effort": "low", "enabled": true, "model": "gpt-5.6-terra", "speed": "fast" },
+        { "effort": "low", "enabled": true, "model": "gpt-5.6-terra", "speed": "fast" }
+      ],
+      "reviewer": [
+        { "effort": "inherit", "enabled": true, "model": "inherit", "speed": "inherit" },
+        { "effort": "inherit", "enabled": true, "model": "inherit", "speed": "inherit" },
+        { "effort": "inherit", "enabled": true, "model": "inherit", "speed": "inherit" }
+      ]
+    }
+  },
+  "receipt": {
+    "authority": "settings_do_not_grant_authority",
+    "configured": {
+      "apply": "next-wave",
+      "catalog_revision": "astra-20260904.1",
+      "coder_mode": "WORKERS",
+      "coding_workers": 3,
+      "effective_observed": "unknown",
+      "id": "cfg-activation-test",
+      "manual_required": true,
+      "p": "PROJECT_ACTIVATION",
+      "preset": "custom",
+      "protocol": "TOSCFG/2",
+      "requested": {
+        "apply": "next-wave", "cat": "astra-20260904.1", "id": "cfg-activation-test", "p": "PROJECT_ACTIVATION", "preset": "custom", "rev": 1,
+        "roles": {
+          "coder": { "effort": "medium", "model": "gpt-5.6-terra", "speed": "fast" }, "leader": { "preserve": true }, "qa": { "effort": "high", "model": "gpt-6-astra", "speed": "standard" }, "repair": { "effort": "medium", "model": "gpt-5.6-terra", "speed": "fast" }, "reviewer": { "effort": "medium", "model": "gpt-5.6-terra", "speed": "fast" }
+        },
+        "workers": {
+          "coder": [{ "effort": "low", "enabled": true, "model": "gpt-5.6-terra", "speed": "fast" }, { "effort": "low", "enabled": true, "model": "gpt-5.6-terra", "speed": "fast" }, { "effort": "low", "enabled": true, "model": "gpt-5.6-terra", "speed": "fast" }],
+          "reviewer": [{ "effort": "inherit", "enabled": true, "model": "inherit", "speed": "inherit" }, { "effort": "inherit", "enabled": true, "model": "inherit", "speed": "inherit" }, { "effort": "inherit", "enabled": true, "model": "inherit", "speed": "inherit" }]
+        }
+      },
+      "rev": 1,
+      "review_workers": 3,
+      "reviewer_mode": "WORKERS",
+      "roles": {
+        "coder": { "effort": "medium", "model": "gpt-5.6-terra", "speed": "fast" }, "leader": { "configured": "unchanged" }, "qa": { "effort": "high", "model": "gpt-6-astra", "speed": "standard" }, "repair": { "effort": "medium", "model": "gpt-5.6-terra", "speed": "fast" }, "reviewer": { "effort": "medium", "model": "gpt-5.6-terra", "speed": "fast" }
+      },
+      "workers": {
+        "coder": [{ "effort": "low", "enabled": true, "model": "gpt-5.6-terra", "speed": "fast" }, { "effort": "low", "enabled": true, "model": "gpt-5.6-terra", "speed": "fast" }, { "effort": "low", "enabled": true, "model": "gpt-5.6-terra", "speed": "fast" }],
+        "reviewer": [{ "effort": "medium", "enabled": true, "model": "gpt-5.6-terra", "speed": "fast" }, { "effort": "medium", "enabled": true, "model": "gpt-5.6-terra", "speed": "fast" }, { "effort": "medium", "enabled": true, "model": "gpt-5.6-terra", "speed": "fast" }]
+      }
+    },
+    "effective_from": "next-wave",
+    "effective_observed": "unknown",
+    "id": "cfg-activation-test",
+    "manual_required": true,
+    "p": "PROJECT_ACTIVATION",
+    "protocol": "TOSACK/2",
+    "requested": {
+      "apply": "next-wave", "cat": "astra-20260904.1", "id": "cfg-activation-test", "p": "PROJECT_ACTIVATION", "preset": "custom", "rev": 1,
+      "roles": {
+        "coder": { "effort": "medium", "model": "gpt-5.6-terra", "speed": "fast" }, "leader": { "preserve": true }, "qa": { "effort": "high", "model": "gpt-6-astra", "speed": "standard" }, "repair": { "effort": "medium", "model": "gpt-5.6-terra", "speed": "fast" }, "reviewer": { "effort": "medium", "model": "gpt-5.6-terra", "speed": "fast" }
+      },
+      "workers": {
+        "coder": [{ "effort": "low", "enabled": true, "model": "gpt-5.6-terra", "speed": "fast" }, { "effort": "low", "enabled": true, "model": "gpt-5.6-terra", "speed": "fast" }, { "effort": "low", "enabled": true, "model": "gpt-5.6-terra", "speed": "fast" }],
+        "reviewer": [{ "effort": "inherit", "enabled": true, "model": "inherit", "speed": "inherit" }, { "effort": "inherit", "enabled": true, "model": "inherit", "speed": "inherit" }, { "effort": "inherit", "enabled": true, "model": "inherit", "speed": "inherit" }]
+      }
+    },
+    "rev": 1,
+    "schema": "threados.settings-receipt.v2",
+    "status": "pending_native_selection"
+  }
+}
