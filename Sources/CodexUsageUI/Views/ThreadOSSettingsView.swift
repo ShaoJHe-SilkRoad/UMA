@@ -337,6 +337,8 @@ public struct ThreadOSSettingsView: View {
     public let language: AppLanguage
     let analytics: ThreadOSUsageAnalytics?
     private let preferences: ApplicationPreferences
+    private let layoutProbe: ThreadOSSchemeBLayoutProbe?
+    private let footerStatusOverride: String?
     @StateObject private var form: ThreadOSSettingsFormState
     @StateObject private var attributionBinding: ThreadOSAttributionBindingFormState
     @StateObject private var factoriumV2: FactoriumV2FormState
@@ -346,28 +348,62 @@ public struct ThreadOSSettingsView: View {
     @State private var waveFilter = ""
     @State private var modelFilter = ""
     @State private var confirmLegacyFourWorkerConversion = false
-    public init(language: AppLanguage, analytics: ThreadOSUsageAnalytics? = nil, preferences: ApplicationPreferences = .production) {
-        self.language = language; self.analytics = analytics; self.preferences = preferences
+    @State private var expandedWorkerGroups: Set<FactoriumV2Role> = []
+    public init(
+        language: AppLanguage,
+        analytics: ThreadOSUsageAnalytics? = nil,
+        preferences: ApplicationPreferences = .production,
+        initiallyExpandedWorkerGroups: Set<FactoriumV2Role> = [],
+        layoutProbe: ThreadOSSchemeBLayoutProbe? = nil,
+        footerStatusOverride: String? = nil
+    ) {
+        self.language = language; self.analytics = analytics; self.preferences = preferences; self.layoutProbe = layoutProbe; self.footerStatusOverride = footerStatusOverride
         _form = StateObject(wrappedValue: ThreadOSSettingsFormState(preferences: preferences))
         _attributionBinding = StateObject(wrappedValue: ThreadOSAttributionBindingFormState(preferences: preferences))
         _factoriumV2 = StateObject(wrappedValue: FactoriumV2FormState(preferences: preferences))
+        _expandedWorkerGroups = State(initialValue: initiallyExpandedWorkerGroups)
     }
     public var body: some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 18) { factoriumV2Content }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
+        VStack(spacing: 0) {
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 6) { factoriumV2Content }
+                    .frame(maxWidth: 1_080, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 6)
+                    .background(ThreadOSSchemeBGeometryReporter(identifier: "scroll.document", probe: layoutProbe))
+            }
+            .background(ThreadOSSchemeBGeometryReporter(identifier: "scroll.viewport", probe: layoutProbe))
+            footer
         }
-        .safeAreaInset(edge: .bottom) {
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .coordinateSpace(name: "uma.threados.scheme-b")
+        .background(Color(nsColor: .windowBackgroundColor))
+        .background(ThreadOSSchemeBGeometryReporter(identifier: "root", probe: layoutProbe))
+    }
+    private var footer: some View {
+        HStack(spacing: 12) {
+            Text(footerStatus)
+                .font(.caption)
+                .foregroundStyle(factoriumV2.message.isEmpty ? .secondary : .primary)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("uma.threados.v2.footer-status")
+                .background(ThreadOSSchemeBGeometryReporter(identifier: "footer.status", probe: layoutProbe))
             Button(title("Generate and Copy for Leader", "生成并复制给 Leader"), action: copyFactoriumV2Request)
                 .buttonStyle(.borderedProminent)
                 .disabled(!factoriumV2.draft.isLocallyValid)
                 .accessibilityIdentifier("uma.threados.v2.generate-copy")
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .background(.bar)
+                .frame(minHeight: 32)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.horizontal, 22)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .background(.bar)
+        .background(ThreadOSSchemeBGeometryReporter(identifier: "footer.generate-copy", probe: layoutProbe))
+    }
+    private var footerStatus: String {
+        footerStatusOverride ?? (factoriumV2.message.isEmpty ? factoriumV2.roleStatus(language: language) : factoriumV2.message)
     }
     @ViewBuilder private func settingsSection<Content: View>(_ heading: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -377,14 +413,19 @@ public struct ThreadOSSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
     @ViewBuilder private var factoriumV2Content: some View {
-        Text(title("Local draft only — copy it for manual Codex Leader transfer. Native status: UNKNOWN.", "仅限本地草稿——复制后手动交给 Codex Leader。原生状态：UNKNOWN。"))
-            .foregroundStyle(.secondary)
-            .accessibilityIdentifier("uma.threados.v2.provenance")
-        Picker(title("Project", "项目"), selection: Binding(get: { factoriumV2.selectedProject }, set: { factoriumV2.select(project: $0) })) {
-            Text(title("No project selected", "未选择项目")).tag("")
-            ForEach(factoriumV2.projects, id: \.self) { Text($0).tag($0) }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                Text(title("Role settings", "角色配置")).font(.headline)
+                projectPicker
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title("Role settings", "角色配置")).font(.headline)
+                projectPicker
+            }
         }
-        .accessibilityIdentifier("uma.threados.v2.project-selector")
+        Text(title("Local draft; manual Leader transfer; native status UNKNOWN.", "本地草稿；手动交给 Leader；原生状态未知。"))
+            .foregroundStyle(.secondary).font(.caption)
+            .accessibilityIdentifier("uma.threados.v2.provenance")
         DisclosureGroup(title("New project", "新项目")) {
             HStack {
                 TextField(title("New project key", "新项目键"), text: $factoriumV2.newProject)
@@ -409,14 +450,13 @@ public struct ThreadOSSettingsView: View {
                 .accessibilityIdentifier("uma.threados.v2.convert")
             }
         } else if factoriumV2.isShowingV2Draft {
-            Text(title("Fast is a saved preference. Native speed control is unavailable here; effective setting: UNKNOWN. Fast may use more credits.", "快速是已保存的偏好。此处无法控制原生速度；有效设置：未知。快速可能使用更多额度。"))
+            Text(title("Fast is a request preference; native effective state UNKNOWN.", "快速是请求偏好；原生有效状态未知。"))
                 .foregroundStyle(.secondary).font(.caption)
                 .accessibilityIdentifier("uma.threados.v2.native-speed-warning")
-            Text(factoriumV2.roleStatus(language: language))
-                .foregroundStyle(.secondary).font(.caption)
-                .accessibilityIdentifier("uma.threados.v2.status")
             roleColumnHeadings
-            ForEach(FactoriumV2Role.allCases, id: \.self) { role in roleCard(role) }
+            VStack(spacing: 8) {
+                ForEach(FactoriumV2Role.allCases, id: \.self) { role in roleCard(role) }
+            }
             DisclosureGroup(title("Advanced details", "高级详情")) {
                 LabeledContent(title("Request ID", "请求 ID"), value: factoriumV2.draft.id)
                 LabeledContent(title("Revision", "修订版本"), value: "\(factoriumV2.draft.revision)")
@@ -432,17 +472,34 @@ public struct ThreadOSSettingsView: View {
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("uma.threados.v2.coming-soon")
             }
-            if !factoriumV2.message.isEmpty { Text(factoriumV2.message).foregroundStyle(.secondary).accessibilityIdentifier("uma.threados.v2.feedback") }
+            .background(ThreadOSSchemeBGeometryReporter(identifier: "advanced.details", probe: layoutProbe))
         } else {
             Text(title("Choose or create a project to edit local settings.", "请选择或新建项目后编辑本地设置。"))
                 .foregroundStyle(.orange)
         }
     }
+    private var projectPicker: some View {
+        Picker(title("Project", "项目"), selection: Binding(get: { factoriumV2.selectedProject }, set: { factoriumV2.select(project: $0) })) {
+            Text(title("No project selected", "未选择项目")).tag("")
+            ForEach(factoriumV2.projects, id: \.self) { Text($0).tag($0) }
+        }
+        .accessibilityIdentifier("uma.threados.v2.project-selector")
+    }
     @ViewBuilder private func roleCard(_ role: FactoriumV2Role) -> some View {
         let setting = factoriumV2.draft.roles[role] ?? FactoriumV2SettingsDraft.defaultRoles[role]!
-        VStack(alignment: .leading, spacing: 5) {
+        ThreadOSSchemeBCard(identifier: "role.\(role.rawValue).card", layoutProbe: layoutProbe) {
+            VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .top, spacing: 10) {
-                Text(role.title).font(.headline).frame(width: 70, alignment: .leading)
+                Label {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(roleDisplayName(role)).font(.headline)
+                        if let subtitle = roleSubtitle(role) { Text(subtitle).font(.caption2).foregroundStyle(.secondary) }
+                    }
+                } icon: {
+                    Image(systemName: roleSymbol(role)).foregroundStyle(.purple)
+                }
+                .frame(width: 142, alignment: .leading)
+                .background(ThreadOSSchemeBGeometryReporter(identifier: "role.\(role.rawValue).header", probe: layoutProbe))
                 if role == .leader {
                     Toggle(title("Preserve current Leader", "保留当前 Leader"), isOn: Binding(get: { setting.preserve }, set: { value in factoriumV2.edit { $0.roles[role]?.preserve = value } }))
                         .accessibilityIdentifier("uma.threados.v2.leader.preserve")
@@ -453,17 +510,18 @@ public struct ThreadOSSettingsView: View {
             }
             if role == .leader && !setting.preserve {
                 HStack(alignment: .top, spacing: 10) {
-                    Color.clear.frame(width: 70)
+                    Color.clear.frame(width: 142)
                     selectionFields(role: role, selection: setting.selection)
                 }
             }
-            if role.supportsWorkers { workerSlots(role: role) }
+                if role.supportsWorkers { workerSlots(role: role) }
+            }
         }
-        .padding(.vertical, 5)
+        .accessibilityIdentifier("uma.threados.v2.role.\(role.rawValue).card")
     }
     private var roleColumnHeadings: some View {
         HStack(spacing: 10) {
-            Text(title("Role", "角色")).frame(width: 70, alignment: .leading)
+            Text(title("Role", "角色")).frame(width: 142, alignment: .leading)
             Text(title("Model", "模型")).frame(width: 118, alignment: .leading)
             Text(title("Thinking", "推理")).frame(width: 88, alignment: .leading)
             Text(title("Speed", "速度")).frame(width: 150, alignment: .leading)
@@ -494,42 +552,86 @@ public struct ThreadOSSettingsView: View {
             .accessibilityIdentifier("uma.threados.v2.role.\(role.rawValue).speed")
     }
     @ViewBuilder private func workerSlots(role: FactoriumV2Role) -> some View {
-        DisclosureGroup {
-            Text(title("Up to three positional worker slots are retained. All three may be disabled; this remains a direct-capacity request and does not remove independent QA or review.", "最多保留三个位置工作者槽位。三个都可关闭；这仍是直接容量请求，不会移除独立 QA 或审查。"))
-                .foregroundStyle(.secondary).font(.caption)
-            ForEach(Array(factoriumV2.draft.workers(for: role).enumerated()), id: \.offset) { index, slot in
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(title("Worker \(index + 1)", "工作者 \(index + 1)")).font(.subheadline)
-                    Toggle(title("Worker \(index + 1) enabled", "工作者 \(index + 1) 已启用"), isOn: slotEnabledBinding(role, index))
-                        .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).enabled")
-                    Toggle(title("Inherit parent settings", "继承父角色设置"), isOn: slotInheritanceBinding(role, index))
-                        .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).inherit")
-                    Text(slot.inherits
-                         ? title("Inherited: \(selectionSummary(factoriumV2.draft.resolvedSlot(slot, parent: role)))", "继承：\(selectionSummary(factoriumV2.draft.resolvedSlot(slot, parent: role)))")
-                         : title("Custom: \(selectionSummary(slot.selection))", "自定义：\(selectionSummary(slot.selection))"))
-                        .font(.caption).foregroundStyle(.secondary)
-                    if !slot.enabled {
-                        Text(title("Disabled slots retain this saved draft and are not scheduled.", "已停用的槽位会保留此草稿，且不会被调度。"))
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    if !slot.inherits { slotSelectionFields(role: role, index: index, selection: slot.selection) }
-                }.padding(.vertical, 4)
+        DisclosureGroup(isExpanded: workerExpansionBinding(role)) {
+            ThreadOSSchemeBChildPanel(identifier: "role.\(role.rawValue).workers", layoutProbe: layoutProbe) {
+                VStack(alignment: .leading, spacing: 7) {
+                Text(title("Three slots = configuration capacity, not live agents.", "三个槽位表示配置容量，不是实时代理数量。"))
+                    .foregroundStyle(.secondary).font(.caption)
+                    .help(title("Three stable slots are configuration capacity, not live-agent count. Disabled slots retain this saved draft and are not scheduled.", "三个稳定槽位表示配置容量，不是实时代理数量。已停用的槽位会保留此草稿，且不会被调度。"))
+                workerColumnHeadings
+                ForEach(Array(factoriumV2.draft.workers(for: role).enumerated()), id: \.offset) { index, slot in
+                    workerRow(role: role, index: index, slot: slot)
+                }
+                }
             }
         } label: {
             HStack {
-                Text(title("Child workers", "子工作者"))
+                Text(title("Child workers", "子工作者")).font(.subheadline.weight(.semibold))
                 Spacer()
                 Text(workerSummary(for: role)).foregroundStyle(.secondary)
             }
         }
+        .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).workers")
+    }
+    private var workerColumnHeadings: some View {
+        HStack(spacing: 8) {
+            Text(title("Slot", "槽位")).frame(width: 40, alignment: .leading)
+            Text(title("Enabled", "启用")).frame(width: 52, alignment: .leading)
+            Text(title("Mode", "模式")).frame(width: 112, alignment: .leading)
+            Text(title("Model · Thinking · Speed", "模型 · 推理 · 速度")).frame(minWidth: 260, alignment: .leading)
+            Spacer(minLength: 0)
+        }
+        .font(.caption2).foregroundStyle(.secondary).accessibilityHidden(true)
+    }
+    @ViewBuilder private func workerRow(role: FactoriumV2Role, index: Int, slot: FactoriumV2WorkerSlot) -> some View {
+        let resolved = factoriumV2.draft.resolvedSlot(slot, parent: role)
+        let workerName = title("\(roleDisplayName(role)) worker \(index + 1)", "\(roleDisplayName(role)) 工作者 \(index + 1)")
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                Text("\(index + 1)").frame(width: 40, alignment: .leading)
+                Toggle("", isOn: slotEnabledBinding(role, index)).labelsHidden().frame(width: 52)
+                    .accessibilityLabel(title("\(workerName) enabled", "\(workerName) 已启用"))
+                    .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).enabled")
+                Picker("", selection: slotInheritanceBinding(role, index)) {
+                    Text(title("Inherit", "继承")).tag(true)
+                    Text(title("Custom", "自定义")).tag(false)
+                }
+                .labelsHidden().pickerStyle(.segmented).frame(width: 112).disabled(!slot.enabled)
+                .accessibilityLabel(title("\(workerName) configuration", "\(workerName) 配置"))
+                .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).inherit")
+                if slot.inherits {
+                    Text(title("Inherited: \(selectionSummary(resolved))", "继承：\(selectionSummary(resolved))"))
+                        .font(.caption).foregroundStyle(.secondary).frame(minWidth: 260, alignment: .leading)
+                } else {
+                    slotSelectionFields(role: role, index: index, selection: slot.selection).disabled(!slot.enabled)
+                }
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack { Text(workerName).font(.subheadline); Spacer(); Toggle("", isOn: slotEnabledBinding(role, index)).labelsHidden().accessibilityLabel(title("\(workerName) enabled", "\(workerName) 已启用")) }
+                Picker(title("\(workerName) configuration", "\(workerName) 配置"), selection: slotInheritanceBinding(role, index)) { Text(title("Inherit", "继承")).tag(true); Text(title("Custom", "自定义")).tag(false) }.pickerStyle(.segmented).disabled(!slot.enabled)
+                if slot.inherits { Text(title("Inherited: \(selectionSummary(resolved))", "继承：\(selectionSummary(resolved))")).font(.caption).foregroundStyle(.secondary) }
+                else { slotSelectionFields(role: role, index: index, selection: slot.selection).disabled(!slot.enabled) }
+            }
+        }
+        .padding(.vertical, 2)
+        .frame(minHeight: 34)
+        .opacity(slot.enabled ? 1 : 0.62)
+        .background(ThreadOSSchemeBGeometryReporter(identifier: "role.\(role.rawValue).worker.\(index + 1)", probe: layoutProbe))
     }
     @ViewBuilder private func slotSelectionFields(role: FactoriumV2Role, index: Int, selection: FactoriumV2Selection) -> some View {
-        Picker(title("Model", "模型"), selection: slotSelectionBinding(role, index, \.model)) { ForEach(FactoriumV2SettingsDraft.availableModels(), id: \.self) { model in Text(model == "gpt-6-astra" ? "Astra" : "Terra").tag(model) } }
+        let workerName = title("\(roleDisplayName(role)) worker \(index + 1)", "\(roleDisplayName(role)) 工作者 \(index + 1)")
+        Picker("", selection: slotSelectionBinding(role, index, \.model)) { ForEach(FactoriumV2SettingsDraft.availableModels(), id: \.self) { model in Text(model == "gpt-6-astra" ? "Astra" : "Terra").tag(model) } }
+            .labelsHidden().frame(width: 118)
+            .accessibilityLabel(title("Model for \(workerName)", "\(workerName) 的模型"))
             .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).model")
-        Picker(title("Reasoning", "推理深度"), selection: slotSelectionBinding(role, index, \.effort)) { ForEach(FactoriumV2SettingsDraft.availableEfforts(model: selection.model, leader: false), id: \.self) { effort in Text(effortLabel(effort)).tag(effort) } }
+        Picker("", selection: slotSelectionBinding(role, index, \.effort)) { ForEach(FactoriumV2SettingsDraft.availableEfforts(model: selection.model, leader: false), id: \.self) { effort in Text(effortLabel(effort)).tag(effort) } }
+            .labelsHidden().frame(width: 88)
+            .accessibilityLabel(title("Thinking for \(workerName)", "\(workerName) 的推理"))
             .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).effort")
-        Picker(title("Speed", "速度"), selection: slotSelectionBinding(role, index, \.speed)) { Text(title("Standard", "标准")).tag("standard"); Text(title("Fast", "快速")).tag("fast") }
+        Picker("", selection: slotSelectionBinding(role, index, \.speed)) { Text(title("Standard", "标准")).tag("standard"); Text(title("Fast", "快速")).tag("fast") }
+            .labelsHidden().frame(width: 150)
             .pickerStyle(.segmented)
+            .accessibilityLabel(title("Speed for \(workerName)", "\(workerName) 的速度"))
             .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).speed")
     }
     private func workerSummary(for role: FactoriumV2Role) -> String {
@@ -542,6 +644,32 @@ public struct ThreadOSSettingsView: View {
         else if custom == slots.count { mode = title("custom", "自定义") }
         else { mode = title("mixed", "混合") }
         return title("\(enabled)/3 slots enabled · \(mode)", "已启用 \(enabled)/3 个槽位 · \(mode)")
+    }
+    private func workerExpansionBinding(_ role: FactoriumV2Role) -> Binding<Bool> {
+        Binding(get: { expandedWorkerGroups.contains(role) }, set: { isExpanded in
+            if isExpanded { expandedWorkerGroups.insert(role) }
+            else { expandedWorkerGroups.remove(role) }
+        })
+    }
+    private func roleDisplayName(_ role: FactoriumV2Role) -> String {
+        role == .repair ? title("Repair", "修复 Repair") : role.title
+    }
+    private func roleSubtitle(_ role: FactoriumV2Role) -> String? {
+        switch role {
+        case .qa: title("Quality synthesis", "质量综合")
+        case .repair: title("Fixes issues found during review", "处理检查发现的问题")
+        case .reviewer: title("Code inspection", "代码审查")
+        default: nil
+        }
+    }
+    private func roleSymbol(_ role: FactoriumV2Role) -> String {
+        switch role {
+        case .leader: "crown.fill"
+        case .qa: "checkmark.shield.fill"
+        case .coder: "chevron.left.forwardslash.chevron.right"
+        case .repair: "wrench.and.screwdriver.fill"
+        case .reviewer: "eye.fill"
+        }
     }
     private func selectionSummary(_ selection: FactoriumV2Selection) -> String {
         let model = selection.model == "gpt-6-astra" ? "Astra" : "Terra"

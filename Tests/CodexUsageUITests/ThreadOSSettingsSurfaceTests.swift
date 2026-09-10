@@ -17,8 +17,8 @@ import Testing
 
         _ = NSApplication.shared
         for view in [
-            ThreadOSSettingsView(language: .english, preferences: freshPreferences),
-            ThreadOSSettingsView(language: .english, preferences: preferences),
+            ThreadOSSettingsView(language: .english, preferences: freshPreferences, initiallyExpandedWorkerGroups: [.coder]),
+            ThreadOSSettingsView(language: .english, preferences: preferences, initiallyExpandedWorkerGroups: [.coder]),
         ] {
             let host = NSHostingView(rootView: view)
             let window = NSWindow(
@@ -470,7 +470,7 @@ import Testing
         let source = try String(contentsOf: root.appendingPathComponent("Sources/CodexUsageUI/Views/ThreadOSSettingsView.swift"), encoding: .utf8)
         let view = try #require(source.range(of: "public struct ThreadOSSettingsView: View"))
         let body = String(source[view.lowerBound...])
-        for wiring in ["factoriumV2Content", "FactoriumV2Role.allCases", "roleCard(role)", "workerSlots(role: role)", "workerSummary(for: role)", "selectionSummary", "Disabled slots retain this saved draft", "uma.threados.v2.project-selector", "uma.threados.v2.generate-copy", "uma.threados.v2.raw-ack", "uma.threados.v2.coming-soon", "uma.threados.v2.native-speed-warning", "safeAreaInset", "ViewThatFits(in: .horizontal)", ".pickerStyle(.segmented)", ".accessibilityLabel(title(\"Model for \\(role.title)\"", ".accessibilityLabel(title(\"Thinking for \\(role.title)\"", ".accessibilityLabel(title(\"Speed for \\(role.title)\"", "uma.threados.v2.role.\\(role.rawValue).model", "uma.threados.v2.role.\\(role.rawValue).effort", "uma.threados.v2.role.\\(role.rawValue).speed"] {
+        for wiring in ["factoriumV2Content", "FactoriumV2Role.allCases", "roleCard(role)", "workerSlots(role: role)", "workerSummary(for: role)", "roleColumnHeadings", "workerColumnHeadings", "workerRow(role: role, index: index, slot: slot)", "workerExpansionBinding(role)", "roleDisplayName(role)", "roleSymbol(role)", "Three stable slots are configuration capacity", "Disabled slots retain this saved draft", "uma.threados.v2.project-selector", "uma.threados.v2.generate-copy", "uma.threados.v2.footer-status", "footerStatus", "footerStatusOverride", "advanced.details", "Model · Thinking · Speed", "uma.threados.v2.raw-ack", "uma.threados.v2.coming-soon", "uma.threados.v2.native-speed-warning", "VStack(spacing: 0)", "ViewThatFits(in: .horizontal)", ".pickerStyle(.segmented)", "let workerName = title", ".accessibilityLabel(title(\"Model for \\(workerName)\"", ".accessibilityLabel(title(\"Thinking for \\(workerName)\"", ".accessibilityLabel(title(\"Speed for \\(workerName)\"", "uma.threados.v2.role.\\(role.rawValue).model", "uma.threados.v2.role.\\(role.rawValue).effort", "uma.threados.v2.role.\\(role.rawValue).speed"] {
             #expect(body.contains(wiring), "Missing actual View wiring: \(wiring)")
         }
         #expect(!body.contains(".accessibilityIdentifier(\"uma.threados.settings\")"))
@@ -553,7 +553,9 @@ import Testing
         #expect(form.copiedRevision == nil && form.rawAcknowledgement.isEmpty)
         form.reportCopy(success: false, language: .english)
         #expect(form.copiedRevision == nil)
+        #expect(form.message.contains("could not be written"))
         form.reportCopy(success: true, language: .english)
+        #expect(form.message.contains("Native selection remains unconfirmed"))
         let before = form.draft.revision
         form.edit { $0.roles[.repair]?.selection.speed = "standard" }
         #expect(form.draft.revision == before + 1 && form.copiedRevision == nil)
