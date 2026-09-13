@@ -34,17 +34,17 @@ struct UMA014M4RAgentDetailLayoutTests {
         }
     }
 
-    @Test("Agent detail remains modular and collapses activity and privacy diagnostics")
-    func modularDisclosureContract() throws {
+    @Test("Agent detail keeps safe activity and diagnostics directly visible")
+    func directSummaryContract() throws {
         let source = try sourceText()
 
         #expect(source.contains("LazyVGrid("))
         #expect(source.contains("usageModule"))
         #expect(source.contains("connectionModule"))
         #expect(source.contains("controlsModule"))
-        #expect(source.contains("DisclosureGroup(localized(\"Recent Activity\""))
-        #expect(source.contains("DisclosureGroup(localized(\"Local Smart & Accuracy\""))
-        #expect(source.contains("DisclosureGroup(localized(\"Privacy & Advanced Diagnostics\""))
+        #expect(source.contains("SharedBasicUsageSummaryView("))
+        #expect(source.contains("module(localized(\"Local Smart & Accuracy\""))
+        #expect(source.contains("module(localized(\"Privacy & Advanced Diagnostics\""))
     }
 
     @Test("Detailed quota surface shows admitted windows and reports an absent Codex 5H limit honestly")

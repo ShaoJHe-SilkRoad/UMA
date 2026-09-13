@@ -336,6 +336,8 @@ enum ThreadOSAnalyticsPresentation {
 public struct ThreadOSSettingsView: View {
     public let language: AppLanguage
     let analytics: ThreadOSUsageAnalytics?
+    let basicUsage: BasicSharedUsagePresentation?
+    let showCodexDetail: (() -> Void)?
     private let preferences: ApplicationPreferences
     private let layoutProbe: ThreadOSSchemeBLayoutProbe?
     private let footerStatusOverride: String?
@@ -352,12 +354,14 @@ public struct ThreadOSSettingsView: View {
     public init(
         language: AppLanguage,
         analytics: ThreadOSUsageAnalytics? = nil,
+        basicUsage: BasicSharedUsagePresentation? = nil,
+        showCodexDetail: (() -> Void)? = nil,
         preferences: ApplicationPreferences = .production,
         initiallyExpandedWorkerGroups: Set<FactoriumV2Role> = [],
         layoutProbe: ThreadOSSchemeBLayoutProbe? = nil,
         footerStatusOverride: String? = nil
     ) {
-        self.language = language; self.analytics = analytics; self.preferences = preferences; self.layoutProbe = layoutProbe; self.footerStatusOverride = footerStatusOverride
+        self.language = language; self.analytics = analytics; self.basicUsage = basicUsage; self.showCodexDetail = showCodexDetail; self.preferences = preferences; self.layoutProbe = layoutProbe; self.footerStatusOverride = footerStatusOverride
         _form = StateObject(wrappedValue: ThreadOSSettingsFormState(preferences: preferences))
         _attributionBinding = StateObject(wrappedValue: ThreadOSAttributionBindingFormState(preferences: preferences))
         _factoriumV2 = StateObject(wrappedValue: FactoriumV2FormState(preferences: preferences))
@@ -381,6 +385,7 @@ public struct ThreadOSSettingsView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .background(ThreadOSSchemeBGeometryReporter(identifier: "root", probe: layoutProbe))
     }
+    func showCodexDetailForTesting() { showCodexDetail?() }
     private var footer: some View {
         HStack(spacing: 12) {
             Text(footerStatus)
@@ -453,9 +458,26 @@ public struct ThreadOSSettingsView: View {
             Text(title("Fast is a request preference; native effective state UNKNOWN.", "快速是请求偏好；原生有效状态未知。"))
                 .foregroundStyle(.secondary).font(.caption)
                 .accessibilityIdentifier("uma.threados.v2.native-speed-warning")
-            roleColumnHeadings
-            VStack(spacing: 8) {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 8, alignment: .top)],
+                alignment: .leading,
+                spacing: 8
+            ) {
                 ForEach(FactoriumV2Role.allCases, id: \.self) { role in roleCard(role) }
+            }
+            .accessibilityIdentifier("uma.threados.v2.role-grid")
+            ForEach([FactoriumV2Role.coder, .reviewer], id: \.self) { role in
+                workerSlots(role: role)
+            }
+            if let basicUsage {
+                settingsSection(title("Codex account usage", "Codex 账户用量")) {
+                    SharedBasicUsageSummaryView(presentation: basicUsage, language: language)
+                    if let showCodexDetail {
+                        Button(title("Open Codex details", "打开 Codex 详情"), action: showCodexDetail)
+                            .accessibilityIdentifier("uma.threados.v2.codex-details")
+                    }
+                }
+                .accessibilityIdentifier("uma.threados.v2.codex-basic-usage")
             }
             DisclosureGroup(title("Advanced details", "高级详情")) {
                 LabeledContent(title("Request ID", "请求 ID"), value: factoriumV2.draft.id)
@@ -489,7 +511,7 @@ public struct ThreadOSSettingsView: View {
         let setting = factoriumV2.draft.roles[role] ?? FactoriumV2SettingsDraft.defaultRoles[role]!
         ThreadOSSchemeBCard(identifier: "role.\(role.rawValue).card", layoutProbe: layoutProbe) {
             VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 Label {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(roleDisplayName(role)).font(.headline)
@@ -498,7 +520,6 @@ public struct ThreadOSSettingsView: View {
                 } icon: {
                     Image(systemName: roleSymbol(role)).foregroundStyle(.purple)
                 }
-                .frame(width: 142, alignment: .leading)
                 .background(ThreadOSSchemeBGeometryReporter(identifier: "role.\(role.rawValue).header", probe: layoutProbe))
                 if role == .leader {
                     Toggle(title("Preserve current Leader", "保留当前 Leader"), isOn: Binding(get: { setting.preserve }, set: { value in factoriumV2.edit { $0.roles[role]?.preserve = value } }))
@@ -509,26 +530,11 @@ public struct ThreadOSSettingsView: View {
                 }
             }
             if role == .leader && !setting.preserve {
-                HStack(alignment: .top, spacing: 10) {
-                    Color.clear.frame(width: 142)
-                    selectionFields(role: role, selection: setting.selection)
-                }
+                selectionFields(role: role, selection: setting.selection)
             }
-                if role.supportsWorkers { workerSlots(role: role) }
             }
         }
         .accessibilityIdentifier("uma.threados.v2.role.\(role.rawValue).card")
-    }
-    private var roleColumnHeadings: some View {
-        HStack(spacing: 10) {
-            Text(title("Role", "角色")).frame(width: 142, alignment: .leading)
-            Text(title("Model", "模型")).frame(width: 118, alignment: .leading)
-            Text(title("Thinking", "推理")).frame(width: 88, alignment: .leading)
-            Text(title("Speed", "速度")).frame(width: 150, alignment: .leading)
-            Spacer(minLength: 0)
-        }
-        .font(.caption).foregroundStyle(.secondary)
-        .accessibilityHidden(true)
     }
     @ViewBuilder private func selectionFields(role: FactoriumV2Role, selection: FactoriumV2Selection) -> some View {
         ViewThatFits(in: .horizontal) {
@@ -566,7 +572,7 @@ public struct ThreadOSSettingsView: View {
             }
         } label: {
             HStack {
-                Text(title("Child workers", "子工作者")).font(.subheadline.weight(.semibold))
+                Text(title("\(roleDisplayName(role)) children", "\(roleDisplayName(role)) 子工作者")).font(.subheadline.weight(.semibold))
                 Spacer()
                 Text(workerSummary(for: role)).foregroundStyle(.secondary)
             }

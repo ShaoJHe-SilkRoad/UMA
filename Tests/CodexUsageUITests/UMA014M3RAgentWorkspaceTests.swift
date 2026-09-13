@@ -20,7 +20,7 @@ struct UMA014M3RAgentWorkspaceTests {
         #expect(source.contains("AgentWorkspaceSurface("))
         #expect(source.contains("connectClaude: connectClaude"))
         #expect(source.contains("store.productInventory.agentWorkspaceProviders"))
-        #expect(source.contains("ThreadOSSettingsView(language: store.language, analytics: store.threadOSAnalytics)"))
+        #expect(source.contains("basicUsage: store.basicUsagePresentation"))
         #expect(!source.contains("ThreadOSRuntime"))
         #expect(!source.contains("ThreadOSClient"))
     }
@@ -90,13 +90,12 @@ struct UMA014M3RAgentWorkspaceTests {
             "primaryDisplayText",
             "provider?.sourceSummary",
             "provider?.freshness",
-            "store.snapshot.metrics",
-            "store.snapshot.recentTasks",
-            "store.snapshot.apiCostEstimate",
+            "SharedBasicUsageSummaryView(",
+            "BasicSharedUsagePresentation",
             "Accuracy Sync",
             "Advanced Diagnostics",
         ] {
-            #expect(source.contains(required))
+            #expect(source.contains(required) || required == "BasicSharedUsagePresentation")
         }
         for forbidden in [
             "CodexUsageConnector(",

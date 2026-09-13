@@ -2,10 +2,68 @@ import AppKit
 import CodexUsageUI
 import SwiftUI
 
+enum MainWindowFramePolicy {
+    static let normalOuterSize = NSSize(width: 1_040, height: 760)
+    private static let visibleIntersection = NSSize(width: 120, height: 80)
+
+    static func initialFrame(visibleFrames: [NSRect]) -> NSRect {
+        guard let visibleFrame = visibleFrames.first else {
+            return NSRect(origin: .zero, size: normalOuterSize)
+        }
+
+        let size = NSSize(
+            width: min(normalOuterSize.width, visibleFrame.width),
+            height: min(normalOuterSize.height, visibleFrame.height)
+        )
+        return NSRect(
+            x: visibleFrame.midX - (size.width / 2),
+            y: visibleFrame.midY - (size.height / 2),
+            width: size.width,
+            height: size.height
+        )
+    }
+
+    /// Returns nil when the restored frame is already a valid user choice.
+    static func repairedFrame(for savedFrame: NSRect, visibleFrames: [NSRect]) -> NSRect? {
+        guard !visibleFrames.isEmpty else { return nil }
+        guard savedFrame.width > 0, savedFrame.height > 0 else {
+            return initialFrame(visibleFrames: visibleFrames)
+        }
+
+        let visibleFrame = visibleFrames.max { lhs, rhs in
+            intersectionArea(lhs, savedFrame) < intersectionArea(rhs, savedFrame)
+        }!
+        let intersection = savedFrame.intersection(visibleFrame)
+        let hasUsableIntersection = intersection.width >= visibleIntersection.width
+            && intersection.height >= visibleIntersection.height
+        let titlebar = NSRect(x: savedFrame.minX, y: savedFrame.maxY - 28, width: savedFrame.width, height: 28)
+        let hasReachableTitlebar = titlebar.intersection(visibleFrame).width >= visibleIntersection.width
+            && titlebar.intersection(visibleFrame).height >= 12
+        let isOversized = savedFrame.width > visibleFrame.width * 1.05
+            || savedFrame.height > visibleFrame.height * 1.05
+        guard !hasUsableIntersection || !hasReachableTitlebar || isOversized else { return nil }
+
+        let size = NSSize(
+            width: min(savedFrame.width, visibleFrame.width),
+            height: min(savedFrame.height, visibleFrame.height)
+        )
+        return NSRect(
+            x: min(max(savedFrame.minX, visibleFrame.minX), visibleFrame.maxX - size.width),
+            y: min(max(savedFrame.minY, visibleFrame.minY), visibleFrame.maxY - size.height),
+            width: size.width,
+            height: size.height
+        )
+    }
+
+    private static func intersectionArea(_ lhs: NSRect, _ rhs: NSRect) -> CGFloat {
+        let intersection = lhs.intersection(rhs)
+        return max(0, intersection.width) * max(0, intersection.height)
+    }
+}
+
 @MainActor
 final class MainWindowController: NSWindowController {
     private enum Layout {
-        static let defaultFrame = NSRect(x: 0, y: 0, width: 840, height: 590)
         static let minimumSize = NSSize(width: 760, height: 520)
         static let autosaveName = "UMA014.MainWindow"
     }
@@ -15,7 +73,7 @@ final class MainWindowController: NSWindowController {
 
     init() {
         let window = NSWindow(
-            contentRect: Layout.defaultFrame,
+            contentRect: NSRect(origin: .zero, size: Layout.minimumSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -24,8 +82,16 @@ final class MainWindowController: NSWindowController {
         window.minSize = Layout.minimumSize
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
-        window.setFrameUsingName(Layout.autosaveName)
+        let restoredSavedFrame = window.setFrameUsingName(Layout.autosaveName)
         window.setFrameAutosaveName(Layout.autosaveName)
+        if !restoredSavedFrame {
+            window.setFrame(
+                MainWindowFramePolicy.initialFrame(
+                    visibleFrames: NSScreen.screens.map(\.visibleFrame)
+                ),
+                display: false
+            )
+        }
         window.contentViewController = NSHostingController(
             rootView: NativeShellStartingView(title: "UMA")
         )
@@ -113,13 +179,11 @@ final class MainWindowController: NSWindowController {
     }
 
     private func repairFrameIfNeeded(_ window: NSWindow) {
-        let intersectsVisibleScreen = NSScreen.screens.contains { screen in
-            window.frame.intersection(screen.visibleFrame).width >= 120
-                && window.frame.intersection(screen.visibleFrame).height >= 80
-        }
-        guard !intersectsVisibleScreen else { return }
-        window.setFrame(Layout.defaultFrame, display: false)
-        window.center()
+        guard let repairedFrame = MainWindowFramePolicy.repairedFrame(
+            for: window.frame,
+            visibleFrames: NSScreen.screens.map(\.visibleFrame)
+        ) else { return }
+        window.setFrame(repairedFrame, display: false)
     }
 }
 

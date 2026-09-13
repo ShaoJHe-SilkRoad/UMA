@@ -14,6 +14,10 @@ public final class UsageStore: ObservableObject {
     @Published private(set) var providerSnapshots: [AgentUsageSnapshot] = []
     @Published public private(set) var presentationCards: [SharedUsageCardPresentation] = []
     @Published public private(set) var productInventory: ProviderProductInventory
+    /// Frozen read-only presentation projection. Reading it does not trigger collection or refresh.
+    public var basicUsagePresentation: BasicSharedUsagePresentation {
+        .make(snapshot: snapshot, provider: productInventory.provider(.codex))
+    }
     @Published private(set) var providerLoginOptions: [ProviderLoginOption] = []
     @Published private(set) var isRefreshing = false
     @Published public private(set) var lastError: String?

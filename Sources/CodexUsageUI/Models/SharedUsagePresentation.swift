@@ -1,5 +1,87 @@
 import Foundation
 
+/// A read-only, content-safe summary for reuse outside the primary provider
+/// surface. It intentionally projects only the already-normalized snapshot and
+/// product state; it does not start collection, access attribution, or expose
+/// task content beyond the allowlisted local activity labels already shown by
+/// the agent workspace.
+public struct BasicSharedUsagePresentation: Sendable {
+    struct Window: Identifiable, Equatable, Sendable {
+        let id: String
+        let title: String
+        let remainingText: String
+        let isEstimated: Bool
+        let resetText: String
+    }
+
+    struct Metric: Identifiable, Equatable, Sendable {
+        let id: String
+        let value: String
+        let label: String
+    }
+
+    struct Activity: Identifiable, Equatable, Sendable {
+        let id: String
+        let title: String
+        let timestamp: String
+        let tokenText: String
+    }
+
+    struct APIEquivalentEstimate: Equatable, Sendable {
+        let sevenDayUSD: Double
+        let lifetimeUSD: Double
+        let coveragePercent: Int
+        let isPartialCoverage: Bool
+    }
+
+    let providerName: String
+    let planLabel: String?
+    let windows: [Window]
+    let metrics: [Metric]
+    let recentActivity: [Activity]
+    let apiEquivalentEstimate: APIEquivalentEstimate?
+    let providerSource: UsageSourceStatus?
+    let localSource: UsageSourceStatus?
+    let updatedAt: Date
+
+    static func make(snapshot: UsageSnapshot, provider: ProviderProductState?) -> Self {
+        let windows = snapshot.periods.map {
+            Window(
+                id: $0.id,
+                title: $0.title,
+                remainingText: $0.isUnlimited ? "∞" : "\($0.remainingPercent)%",
+                isEstimated: $0.isEstimated == true,
+                resetText: $0.resetText
+            )
+        }
+        let metrics = snapshot.metrics
+            .filter { $0.value != "—" }
+            .map { Metric(id: $0.id, value: $0.value, label: $0.label) }
+        let activity = snapshot.recentTasks.map {
+            Activity(id: $0.id, title: $0.title, timestamp: $0.time, tokenText: $0.tokenText)
+        }
+        let estimate = snapshot.apiCostEstimate.map {
+            APIEquivalentEstimate(
+                sevenDayUSD: $0.sevenDayUSD,
+                lifetimeUSD: $0.lifetimeUSD,
+                coveragePercent: $0.coveragePercent,
+                isPartialCoverage: $0.coveragePercent < 100
+            )
+        }
+        return Self(
+            providerName: provider?.displayName ?? "Codex",
+            planLabel: provider?.planLabel ?? (snapshot.planLabel == "—" ? nil : snapshot.planLabel),
+            windows: windows,
+            metrics: metrics,
+            recentActivity: activity,
+            apiEquivalentEstimate: estimate,
+            providerSource: snapshot.providerSource,
+            localSource: snapshot.localSource,
+            updatedAt: snapshot.updatedAt
+        )
+    }
+}
+
 public enum SharedConnectionStatus: String, Codable, Sendable {
     case connected
     case transitional

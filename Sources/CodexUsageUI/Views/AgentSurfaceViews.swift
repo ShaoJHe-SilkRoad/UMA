@@ -773,87 +773,40 @@ public struct AgentWorkspaceSurface: View {
     }
 
     private var codexActivityModule: some View {
-        module {
-            DisclosureGroup(localized("Recent Activity", "最近活动")) {
-                VStack(alignment: .leading, spacing: 10) {
-                    let metrics = store.snapshot.metrics.filter { $0.value != "—" }
-                    if !metrics.isEmpty {
-                        HStack(spacing: 24) {
-                            ForEach(metrics) { metric in
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(metric.value).font(.headline).monospacedDigit()
-                                    Text(metric.label).font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                    if store.snapshot.recentTasks.isEmpty {
-                        Text(localized("No recent allowlisted local activity metadata.", "暂无允许范围内的本地活动元数据。"))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(store.snapshot.recentTasks) { task in
-                            HStack(spacing: 10) {
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(task.title).lineLimit(1)
-                                    Text(task.time).font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Text(task.tokenText).monospacedDigit().foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    if let estimate = store.snapshot.apiCostEstimate {
-                        HStack {
-                            Text(localized("API-equivalent estimate", "API 等效估算"))
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text(estimate.sevenDayUSD, format: .currency(code: "USD"))
-                                .monospacedDigit()
-                            Text(localized("7 days", "7 天"))
-                                .foregroundStyle(.secondary)
-                        }
-                        .font(.callout)
-                    }
-                }
-                .padding(.top, 10)
-            }
-            .font(.callout)
+        module(localized("Recent Local Activity", "最近本地活动"), systemImage: "clock.arrow.circlepath") {
+            SharedBasicUsageSummaryView(
+                presentation: .make(snapshot: store.snapshot, provider: provider),
+                language: store.language,
+                showsQuotaWindows: false
+            )
         }
     }
 
     private var claudeSmartModule: some View {
-        module {
-            DisclosureGroup(localized("Local Smart & Accuracy", "本地智能与精确同步")) {
-                VStack(alignment: .leading, spacing: 7) {
-                    Label(claudeSmartLabel, systemImage: "lock.shield")
-                        .font(.callout.weight(.medium))
-                    Text(localized(
-                        "Local Smart and one-shot Accuracy Sync retain only approved usage metadata. Prompts, responses, credentials, and raw page content do not enter UMA.",
-                        "本地智能和一次性精确同步仅保留已批准的用量元数据；提示、回复、凭据和原始页面内容不会进入 UMA。"
-                    ))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.top, 10)
+        module(localized("Local Smart & Accuracy", "本地智能与精确同步"), systemImage: "lock.shield") {
+            VStack(alignment: .leading, spacing: 7) {
+                Label(claudeSmartLabel, systemImage: "lock.shield")
+                    .font(.callout.weight(.medium))
+                Text(localized(
+                    "Local Smart and one-shot Accuracy Sync retain only approved usage metadata. Prompts, responses, credentials, and raw page content do not enter UMA.",
+                    "本地智能和一次性精确同步仅保留已批准的用量元数据；提示、回复、凭据和原始页面内容不会进入 UMA。"
+                ))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .font(.callout)
         }
     }
 
     private var diagnosticsModule: some View {
-        module {
-            DisclosureGroup(localized("Privacy & Advanced Diagnostics", "隐私与高级诊断")) {
-                VStack(alignment: .leading, spacing: 6) {
-                    factRow(localized("Connection", "连接"), connectionLabel)
-                    factRow(localized("Source health", "来源健康状态"), diagnosticLabel)
-                    Text(localized("Diagnostics use bounded status classifications only.", "诊断仅使用有界状态分类。"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.top, 8)
+        module(localized("Privacy & Advanced Diagnostics", "隐私与高级诊断"), systemImage: "checkmark.shield") {
+            VStack(alignment: .leading, spacing: 6) {
+                factRow(localized("Connection", "连接"), connectionLabel)
+                factRow(localized("Source health", "来源健康状态"), diagnosticLabel)
+                Text(localized("Diagnostics use bounded status classifications only.", "诊断仅使用有界状态分类。"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            .font(.callout)
         }
     }
 
