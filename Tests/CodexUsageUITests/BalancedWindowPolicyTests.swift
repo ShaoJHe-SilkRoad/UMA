@@ -2,7 +2,7 @@ import AppKit
 import Testing
 @testable import CodexUsageMonitor
 
-@Suite("Balanced main-window frame policy")
+@Suite("Balanced main-window frame policy", .serialized)
 struct BalancedWindowPolicyTests {
     private let display = NSRect(x: 100, y: 50, width: 1_440, height: 900)
 
@@ -61,5 +61,55 @@ struct BalancedWindowPolicyTests {
             MainWindowFramePolicy.repairedFrame(for: moderatelyOversized, visibleFrames: [display])
         )
         #expect(repairedModerate == display)
+    }
+
+    @Test("The default frame survives both hosted main-surface installations")
+    @MainActor func defaultFrameSurvivesFullHostingSequence() throws {
+        let controller = MainWindowController(restoresSavedFrame: false)
+        defer { controller.tearDown() }
+
+        let expected = MainWindowFramePolicy.initialFrame(
+            visibleFrames: NSScreen.screens.map(\.visibleFrame)
+        )
+        let frameAfterStartingHost = try #require(controller.frameForTesting)
+        #expect(frameAfterStartingHost.size == expected.size)
+        attachPreviewStore(to: controller)
+        #expect(controller.frameForTesting == frameAfterStartingHost)
+    }
+
+    @Test("A saved frame survives both hosted main-surface installations")
+    @MainActor func savedFrameSurvivesFullHostingSequence() throws {
+        let autosaveName = "UMA.BalancedWindowPolicyTests.\(UUID().uuidString)"
+        let expected = NSRect(x: 100, y: 80, width: 1_040, height: 760)
+        let seedWindow = NSWindow(
+            contentRect: expected,
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        seedWindow.setFrame(expected, display: false)
+        seedWindow.saveFrame(usingName: autosaveName)
+        defer { seedWindow.close() }
+
+        let controller = MainWindowController(autosaveName: autosaveName)
+        defer { controller.tearDown() }
+
+        #expect(try #require(controller.frameForTesting) == expected)
+        attachPreviewStore(to: controller)
+        #expect(controller.frameForTesting == expected)
+    }
+
+    @MainActor private func attachPreviewStore(to controller: MainWindowController) {
+        controller.attach(
+            store: .preview(language: .english),
+            openSettings: {},
+            scanAll: {},
+            refreshAll: {},
+            connectCodex: {},
+            disconnectCodex: {},
+            claudeControlState: { .consentRequired },
+            connectClaude: {},
+            accuracySyncClaude: {}
+        )
     }
 }

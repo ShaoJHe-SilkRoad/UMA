@@ -71,7 +71,10 @@ final class MainWindowController: NSWindowController {
     private var attachedStore: UsageStore?
     private let navigation = MainSurfaceNavigationState()
 
-    init() {
+    init(
+        autosaveName: String = Layout.autosaveName,
+        restoresSavedFrame: Bool = true
+    ) {
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: Layout.minimumSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -82,8 +85,10 @@ final class MainWindowController: NSWindowController {
         window.minSize = Layout.minimumSize
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
-        let restoredSavedFrame = window.setFrameUsingName(Layout.autosaveName)
-        window.setFrameAutosaveName(Layout.autosaveName)
+        let restoredSavedFrame = restoresSavedFrame && window.setFrameUsingName(autosaveName)
+        if restoresSavedFrame {
+            window.setFrameAutosaveName(autosaveName)
+        }
         if !restoredSavedFrame {
             window.setFrame(
                 MainWindowFramePolicy.initialFrame(
@@ -92,9 +97,14 @@ final class MainWindowController: NSWindowController {
                 display: false
             )
         }
+        // The starting host may negotiate its minimum content size as it is
+        // installed. Keep the selected default or restored outer frame intact
+        // before the ready host replaces it during attachment.
+        let frameBeforeStartingHost = window.frame
         window.contentViewController = NSHostingController(
             rootView: NativeShellStartingView(title: "UMA")
         )
+        window.setFrame(frameBeforeStartingHost, display: false)
         super.init(window: window)
     }
 
@@ -113,6 +123,10 @@ final class MainWindowController: NSWindowController {
         accuracySyncClaude: @escaping () -> Void
     ) {
         guard attachedStore == nil else { return }
+        // NSHostingController may negotiate its minimum content size while it
+        // is installed. Preserve a restored/user-resized outer frame across
+        // that hosting transition rather than letting it collapse to minimum.
+        let frameBeforeHosting = window?.frame
         attachedStore = store
         window?.contentViewController = NSHostingController(
             rootView: MainWindowRootView(
@@ -128,6 +142,9 @@ final class MainWindowController: NSWindowController {
                 accuracySyncClaude: accuracySyncClaude
             )
         )
+        if let frameBeforeHosting {
+            window?.setFrame(frameBeforeHosting, display: false)
+        }
     }
 
     func showAgent(_ providerID: ProviderProductID) {
@@ -177,6 +194,8 @@ final class MainWindowController: NSWindowController {
         attachedStore != nil
             && window?.contentViewController is NSHostingController<MainWindowRootView>
     }
+
+    var frameForTesting: NSRect? { window?.frame }
 
     private func repairFrameIfNeeded(_ window: NSWindow) {
         guard let repairedFrame = MainWindowFramePolicy.repairedFrame(
