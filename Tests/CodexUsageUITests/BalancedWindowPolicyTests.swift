@@ -104,6 +104,7 @@ struct BalancedWindowPolicyTests {
             backing: .buffered,
             defer: false
         )
+        seedWindow.isReleasedWhenClosed = false
         seedWindow.setFrame(expected, display: false)
         seedWindow.saveFrame(usingName: autosaveName)
         defer { seedWindow.close() }
@@ -131,6 +132,68 @@ struct BalancedWindowPolicyTests {
         let object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(receipt)) as? [String: Any])
         #expect(Set(object.keys).isDisjoint(with: ["prompt", "source", "credential", "task", "providerPayload"]))
         #expect(object["mainWindowContentRect"] as? String == "{{0, 0}, {1040, 760}}")
+    }
+
+    @Test("Titlebar zoom toggles recommended outer frame and usable screen without fullscreen")
+    func titlebarZoomUsesNativeDelegatePolicy() {
+        let visible = NSRect(x: 40, y: 30, width: 1_600, height: 1_000)
+        let arbitrary = NSRect(x: 90, y: 70, width: 1_091, height: 669)
+        let recommended = MainWindowFramePolicy.initialFrame(visibleFrames: [visible], outerSize: MainWindowFramePolicy.titlebarRecommendedOuterSize)
+        #expect(MainWindowFramePolicy.titlebarToggleFrame(currentFrame: arbitrary, visibleFrame: visible) == recommended)
+        #expect(MainWindowFramePolicy.titlebarToggleFrame(currentFrame: recommended, visibleFrame: visible) == visible)
+        #expect(recommended.size == NSSize(width: 1_040, height: 762))
+        let trafficLight = NSRect(x: 12, y: 716, width: 14, height: 14)
+        #expect(MainWindowTitlebarDoubleClickPolicy.shouldHandle(clickCount: 2, isFullScreen: false, point: NSPoint(x: 400, y: 730), contentLayoutRect: NSRect(x: 0, y: 0, width: 1_040, height: 700), excludedControlFrames: [trafficLight]))
+        #expect(!MainWindowTitlebarDoubleClickPolicy.shouldHandle(clickCount: 1, isFullScreen: false, point: NSPoint(x: 400, y: 730), contentLayoutRect: NSRect(x: 0, y: 0, width: 1_040, height: 700), excludedControlFrames: [trafficLight]))
+        #expect(!MainWindowTitlebarDoubleClickPolicy.shouldHandle(clickCount: 2, isFullScreen: false, point: NSPoint(x: 100, y: 650), contentLayoutRect: NSRect(x: 0, y: 0, width: 1_040, height: 700), excludedControlFrames: [trafficLight]))
+        #expect(!MainWindowTitlebarDoubleClickPolicy.shouldHandle(clickCount: 2, isFullScreen: false, point: NSPoint(x: 19, y: 723), contentLayoutRect: NSRect(x: 0, y: 0, width: 1_040, height: 700), excludedControlFrames: [trafficLight]))
+        #expect(!MainWindowTitlebarDoubleClickPolicy.shouldHandle(clickCount: 2, isFullScreen: true, point: NSPoint(x: 400, y: 730), contentLayoutRect: NSRect(x: 0, y: 0, width: 1_040, height: 700), excludedControlFrames: [trafficLight]))
+    }
+
+    @Test("Actual main window consumes titlebar-background double-click once and delegates exclusions")
+    @MainActor func actualTitlebarEventRoute() throws {
+        let window = MainWindow(contentRect: NSRect(x: 100, y: 100, width: 1_040, height: 760), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.orderFrontRegardless()
+        defer { window.titlebarBackgroundDoubleClick = nil; window.delegatedEventObserver = nil; window.orderOut(nil) }
+        let original = window.frame
+        var callbacks = 0
+        window.titlebarBackgroundDoubleClick = { [weak window] in
+            guard let window else { return }
+            callbacks += 1
+            window.setFrame(MainWindowFramePolicy.titlebarToggleFrame(currentFrame: window.frame, visibleFrame: NSRect(x: 0, y: 0, width: 1_600, height: 1_000)), display: false)
+        }
+        var delegated = 0
+        window.delegatedEventObserver = { _ in delegated += 1 }
+        func titlebarBackgroundLocation() -> NSPoint { NSPoint(x: window.contentLayoutRect.midX, y: window.contentLayoutRect.maxY + 8) }
+        let background = titlebarBackgroundLocation()
+        window.sendEvent(try mouseUp(at: background, in: window, clickCount: 2, number: 1))
+        #expect(window.frame != original)
+        #expect(callbacks == 1)
+        #expect(delegated == 0)
+        #expect(!window.styleMask.contains(.fullScreen))
+
+        let afterOne = window.frame
+        window.sendEvent(try mouseUp(at: titlebarBackgroundLocation(), in: window, clickCount: 2, number: 2))
+        #expect(window.frame != afterOne)
+        #expect(callbacks == 2)
+        #expect(delegated == 0)
+
+        let traffic = try #require(window.standardWindowButton(.closeButton))
+        traffic.isEnabled = false
+        defer { traffic.isEnabled = true }
+        let trafficFrame = traffic.convert(traffic.bounds, to: nil)
+        let trafficPoint = NSPoint(x: trafficFrame.midX, y: trafficFrame.midY)
+        window.sendEvent(try mouseUp(at: trafficPoint, in: window, clickCount: 2, number: 3))
+        #expect(delegated == 1)
+
+        let contentPoint = NSPoint(x: window.contentLayoutRect.midX, y: window.contentLayoutRect.midY)
+        window.sendEvent(try mouseUp(at: contentPoint, in: window, clickCount: 2, number: 4))
+        #expect(delegated == 2)
+    }
+
+    @MainActor private func mouseUp(at location: NSPoint, in window: NSWindow, clickCount: Int, number: Int) throws -> NSEvent {
+        try #require(NSEvent.mouseEvent(with: .leftMouseUp, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: number, clickCount: clickCount, pressure: 1))
     }
 
     @MainActor private func attachPreviewStore(to controller: MainWindowController) {

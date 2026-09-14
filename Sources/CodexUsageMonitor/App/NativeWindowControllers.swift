@@ -6,6 +6,7 @@ enum MainWindowFramePolicy {
     /// The recommended working area.  This is content size, not the frame
     /// reported by AppKit (which also includes title-bar chrome).
     static let normalContentSize = NSSize(width: 1_040, height: 760)
+    static let titlebarRecommendedOuterSize = NSSize(width: 1_040, height: 762)
     private static let visibleIntersection = NSSize(width: 120, height: 80)
 
     static func initialFrame(visibleFrames: [NSRect], outerSize: NSSize) -> NSRect {
@@ -23,6 +24,11 @@ enum MainWindowFramePolicy {
             width: size.width,
             height: size.height
         )
+    }
+
+    static func titlebarToggleFrame(currentFrame: NSRect, visibleFrame: NSRect) -> NSRect {
+        let recommended = initialFrame(visibleFrames: [visibleFrame], outerSize: titlebarRecommendedOuterSize)
+        return currentFrame == recommended ? visibleFrame : recommended
     }
 
     /// Returns nil when the restored frame is already a valid user choice.
@@ -67,6 +73,48 @@ enum MainWindowFramePolicy {
     }
 }
 
+enum MainWindowTitlebarDoubleClickPolicy {
+    static func shouldHandle(
+        clickCount: Int,
+        isFullScreen: Bool,
+        point: NSPoint,
+        contentLayoutRect: NSRect,
+        excludedControlFrames: [NSRect]
+    ) -> Bool {
+        clickCount == 2
+            && !isFullScreen
+            && point.y >= contentLayoutRect.maxY
+            && !excludedControlFrames.contains(where: { $0.contains(point) })
+    }
+}
+
+@MainActor
+final class MainWindow: NSWindow {
+    var titlebarBackgroundDoubleClick: (() -> Void)?
+    var delegatedEventObserver: ((NSEvent) -> Void)?
+
+    override func sendEvent(_ event: NSEvent) {
+        guard event.type == .leftMouseUp,
+              event.window === self,
+              MainWindowTitlebarDoubleClickPolicy.shouldHandle(
+                clickCount: event.clickCount,
+                isFullScreen: styleMask.contains(.fullScreen),
+                point: event.locationInWindow,
+                contentLayoutRect: contentLayoutRect,
+                excludedControlFrames: standardWindowButtons.map { $0.convert($0.bounds, to: nil) }
+        ) else {
+            delegatedEventObserver?(event)
+            super.sendEvent(event)
+            return
+        }
+        titlebarBackgroundDoubleClick?()
+    }
+
+    private var standardWindowButtons: [NSButton] {
+        [.closeButton, .miniaturizeButton, .zoomButton].compactMap { standardWindowButton($0) }
+    }
+}
+
 struct MainWindowGeometrySnapshot: Equatable {
     let frame: NSRect
     let contentRect: NSRect
@@ -90,7 +138,7 @@ final class MainWindowController: NSWindowController {
         autosaveName: String = Layout.autosaveName,
         restoresSavedFrame: Bool = true
     ) {
-        let window = NSWindow(
+        let window = MainWindow(
             contentRect: NSRect(origin: .zero, size: MainWindowFramePolicy.normalContentSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
@@ -127,6 +175,10 @@ final class MainWindowController: NSWindowController {
         )
         window.setFrame(frameBeforeStartingHost, display: false)
         super.init(window: window)
+        window.titlebarBackgroundDoubleClick = { [weak self, weak window] in
+            guard let self, let window else { return }
+            self.toggleTitlebarFrame(window)
+        }
     }
 
     @available(*, unavailable)
@@ -217,6 +269,11 @@ final class MainWindowController: NSWindowController {
     }
 
     var frameForTesting: NSRect? { window?.frame }
+
+    private func toggleTitlebarFrame(_ window: NSWindow) {
+        let visibleFrame = window.screen?.visibleFrame ?? window.frame
+        window.setFrame(MainWindowFramePolicy.titlebarToggleFrame(currentFrame: window.frame, visibleFrame: visibleFrame), display: true)
+    }
 
     /// Read-only native-window facts for focused lifecycle tests and bounded
     /// diagnostics.  It does not alter frame autosave or user preferences.
