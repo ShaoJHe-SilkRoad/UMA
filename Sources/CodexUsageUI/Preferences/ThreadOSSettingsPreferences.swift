@@ -7,6 +7,7 @@ import Foundation
     private static let legacyDraftKey = ApplicationPreferenceKey<Data?>(optionalData: "threados.settings.draft.v1")
     private static let factoriumV2DraftsKey = ApplicationPreferenceKey<Data?>(optionalData: "threados.factorium.v2.drafts.v1")
     private static let factoriumV2SelectedProjectKey = ApplicationPreferenceKey<String?>(optional: "threados.factorium.v2.selected-project.v1")
+    private static let factoriumV2ExpandedGroupsKey = ApplicationPreferenceKey<Data?>(optionalData: "threados.factorium.v2.expanded-groups.v1")
 
     public static func projects(from preferences: ApplicationPreferences) -> [String] { drafts(from: preferences).keys.sorted() }
     public static func load(project: String, from preferences: ApplicationPreferences) -> ThreadOSSettingsDraft? { drafts(from: preferences)[project] }
@@ -37,6 +38,24 @@ import Foundation
 
     public static func saveFactoriumV2SelectedProject(_ project: String?, to preferences: ApplicationPreferences) {
         preferences.set(project, for: factoriumV2SelectedProjectKey)
+    }
+
+    public static func factoriumV2ExpandedGroups(project: String, from preferences: ApplicationPreferences) -> Set<FactoriumV2Role>? {
+        guard let data = preferences.value(for: factoriumV2ExpandedGroupsKey),
+              let stored = try? JSONDecoder().decode([String: [String]].self, from: data),
+              let values = stored[project]
+        else { return nil }
+        return Set(values.compactMap(FactoriumV2Role.init(rawValue:)))
+    }
+
+    public static func saveFactoriumV2ExpandedGroups(_ groups: Set<FactoriumV2Role>, project: String, to preferences: ApplicationPreferences) {
+        guard ThreadOSSettingsDraft.isToken(project) else { return }
+        var stored: [String: [String]] = [:]
+        if let data = preferences.value(for: factoriumV2ExpandedGroupsKey) {
+            stored = (try? JSONDecoder().decode([String: [String]].self, from: data)) ?? [:]
+        }
+        stored[project] = groups.map(\.rawValue).sorted()
+        preferences.set(try? JSONEncoder().encode(stored), for: factoriumV2ExpandedGroupsKey)
     }
 
     public static func saveFactoriumV2(_ draft: FactoriumV2SettingsDraft, to preferences: ApplicationPreferences) {

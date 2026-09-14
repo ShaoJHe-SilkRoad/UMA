@@ -25,6 +25,7 @@ enum AppShellDiagnosticStage: String, Codable, Sendable {
     case shellTornDown
     case runtimeAttached
     case runtimeAttachmentFailed
+    case mainWindowGeometryObserved
 }
 
 struct AppShellDiagnosticReceipt: Codable, Sendable {
@@ -44,6 +45,13 @@ struct AppShellDiagnosticReceipt: Codable, Sendable {
     let panelAlpha: Double?
     let panelFrame: String?
     let panelIgnoresMouseEvents: Bool?
+    /// Bounded native-window facts for installed-runtime geometry evidence.
+    /// They contain no screen image, content, provider, or task data.
+    let mainWindowFrame: String?
+    let mainWindowContentRect: String?
+    let mainWindowBackingScale: Double?
+    let mainWindowIsZoomed: Bool?
+    let mainWindowIsFullScreen: Bool?
     let detail: String?
     let timestamp: Date
 }
@@ -133,6 +141,40 @@ final class AppShellDiagnosticRecorder: @unchecked Sendable {
                 // Diagnostics must never impede the product shell.
             }
         }
+    }
+
+    @MainActor
+    func recordMainWindowGeometry(
+        lifecycleGeneration: UUID,
+        geometry: MainWindowGeometrySnapshot
+    ) {
+        record(
+            AppShellDiagnosticReceipt(
+                stage: .mainWindowGeometryObserved,
+                reached: true,
+                lifecycleGeneration: lifecycleGeneration.uuidString,
+                statusItemCount: 0,
+                panelWindowCount: 0,
+                eventMonitorCount: 0,
+                mainThreadStallMilliseconds: 0,
+                activeModalWindow: NSApp.modalWindow != nil,
+                activeSheetWindow: NSApp.windows.contains { $0.attachedSheet != nil },
+                eventMonitorOwners: [],
+                applicationIsHidden: NSApp.isHidden,
+                frontmostApplicationBundleIdentifier: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+                panelLevel: nil,
+                panelAlpha: nil,
+                panelFrame: nil,
+                panelIgnoresMouseEvents: nil,
+                mainWindowFrame: NSStringFromRect(geometry.frame),
+                mainWindowContentRect: NSStringFromRect(geometry.contentRect),
+                mainWindowBackingScale: geometry.backingScaleFactor,
+                mainWindowIsZoomed: geometry.isZoomed,
+                mainWindowIsFullScreen: geometry.isFullScreen,
+                detail: "main-window read-only geometry",
+                timestamp: Date()
+            )
+        )
     }
 }
 
@@ -398,24 +440,32 @@ final class AppShellCoordinator {
         guard !isTornDown else { return }
         resumeMonitoringForWindowPresentation()
         mainWindowController.showCanonicalWindow()
+        recordMainWindowGeometry()
     }
 
     func showAgent(_ providerID: ProviderProductID) {
         guard !isTornDown else { return }
         resumeMonitoringForWindowPresentation()
         mainWindowController.showAgent(providerID)
+        recordMainWindowGeometry()
     }
 
     func showMainWindow(destination: MainSurfaceDestination) {
         guard !isTornDown else { return }
         resumeMonitoringForWindowPresentation()
         mainWindowController.showDestination(destination)
+        recordMainWindowGeometry()
     }
 
     func showSettingsWindow() {
         guard !isTornDown else { return }
         resumeMonitoringForWindowPresentation()
         settingsWindowController.showCanonicalWindow()
+    }
+
+    private func recordMainWindowGeometry() {
+        guard let geometry = mainWindowController.geometryForTesting else { return }
+        diagnostics.recordMainWindowGeometry(lifecycleGeneration: lifecycleGeneration, geometry: geometry)
     }
 
     func showQuickPanel() {

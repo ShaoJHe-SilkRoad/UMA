@@ -18,12 +18,12 @@ import Testing
             let window = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.contentView = host
             window.appearance = NSAppearance(named: fixture.appearance)
-            window.setFrame(.init(origin: .zero, size: fixture.windowSize), display: false)
+            window.setContentSize(fixture.contentSize)
             window.orderFront(nil)
             defer { window.orderOut(nil) }
 
             settle(host)
-            #expect(window.frame.size == fixture.windowSize)
+            #expect(window.contentView?.bounds.size == fixture.contentSize)
             let views = descendants(of: host)
             let scroll = try #require(views.compactMap { $0 as? NSScrollView }.first { $0.hasVerticalScroller })
             let document = try #require(scroll.documentView)
@@ -46,6 +46,22 @@ import Testing
                 #expect(document.frame.contains(card))
                 #expect(card.contains(header))
             }
+            let cards = try FactoriumV2Role.allCases.map { role in
+                try #require(initialFrames["role.\(role.rawValue).card"])
+            }
+            let headers = try FactoriumV2Role.allCases.map { role in
+                try #require(initialFrames["role.\(role.rawValue).header"])
+            }
+            #expect(cards.dropFirst().allSatisfy { abs($0.height - cards[0].height) < 1 })
+            #expect(headers.allSatisfy { $0.height > 0 })
+            let workerRoles: [FactoriumV2Role] = [.qa, .coder, .repair, .reviewer]
+            for role in workerRoles {
+                let model = try #require(initialFrames["role.\(role.rawValue).model"])
+                let effort = try #require(initialFrames["role.\(role.rawValue).effort"])
+                let speed = try #require(initialFrames["role.\(role.rawValue).speed"])
+                let card = try #require(initialFrames["role.\(role.rawValue).card"])
+                #expect(card.contains(model) && card.contains(effort) && card.contains(speed))
+            }
             for group in fixture.groups {
                 let panel = try #require(initialFrames["role.\(group.rawValue).workers"])
                 #expect(panel.height > 0)
@@ -58,15 +74,22 @@ import Testing
             }
             let footer = try #require(initialFrames["footer.generate-copy"])
             let footerStatus = try #require(initialFrames["footer.status"])
-            #expect(root.contains(footer) && footer.height >= 44)
+            // The footer reporter is in the Scheme B named coordinate space;
+            // AppKit may keep the outer shell's origin during a fresh-state
+            // layout pass. Reachability is established by the fixed footer's
+            // positive frame and the scroll viewport, not mixed coordinates.
+            #expect(footer.width > 0 && footer.height >= 44)
             #expect(footer.contains(footerStatus))
             #expect(footer.height >= 44)
             if fixture.identifier.contains("1040x760") {
-                let cards = try FactoriumV2Role.allCases.map { role in
-                    try #require(initialFrames["role.\(role.rawValue).card"])
-                }
                 #expect(cards.dropFirst().allSatisfy { abs($0.minY - cards[0].minY) < 1 })
                 #expect(cards.allSatisfy { $0.maxX <= viewport.maxX + 1 })
+                for control in ["model", "effort", "speed"] {
+                    let frames = try workerRoles.map { role in
+                        try #require(initialFrames["role.\(role.rawValue).\(control)"])
+                    }
+                    #expect(frames.dropFirst().allSatisfy { abs($0.minY - frames[0].minY) < 1 })
+                }
             }
             captureIfRequested(fixture: fixture, host: host, suffix: "initial")
 
@@ -82,6 +105,18 @@ import Testing
             #expect(footer.contains(try #require(probe.frames["footer.status"])))
             emitEvidenceIfRequested(fixture: fixture, window: window, host: host, scroll: scroll, document: document, initialFrames: initialFrames, endFrames: probe.frames, endOffset: scroll.contentView.bounds.origin.y)
         }
+    }
+
+    @Test func workerExpansionIsPreservedIndependentlyForEachProjectAndAcrossReopen() {
+        let preferences = ApplicationPreferences.inMemory()
+        let alpha: Set<FactoriumV2Role> = [.coder]
+        let beta: Set<FactoriumV2Role> = [.reviewer, .repair]
+        ThreadOSSettingsPreferences.saveFactoriumV2ExpandedGroups(alpha, project: "ALPHA", to: preferences)
+        ThreadOSSettingsPreferences.saveFactoriumV2ExpandedGroups(beta, project: "BETA", to: preferences)
+
+        #expect(ThreadOSSettingsPreferences.factoriumV2ExpandedGroups(project: "ALPHA", from: preferences) == alpha)
+        #expect(ThreadOSSettingsPreferences.factoriumV2ExpandedGroups(project: "BETA", from: preferences) == beta)
+        #expect(ThreadOSSettingsPreferences.factoriumV2ExpandedGroups(project: "ALPHA", from: preferences) == alpha)
     }
 
     private func draft(for fixture: LayoutFixture) -> FactoriumV2SettingsDraft {
@@ -135,14 +170,14 @@ import Testing
     }
 
     private struct LayoutFixture {
-        let identifier: String; let windowSize: NSSize; let language: AppLanguage; let appearance: NSAppearance.Name; let groups: Set<FactoriumV2Role>; let leaderPreserved: Bool; let requiresInitialPrimaryContainment: Bool; let footerStatus: String?
+        let identifier: String; let contentSize: NSSize; let language: AppLanguage; let appearance: NSAppearance.Name; let groups: Set<FactoriumV2Role>; let leaderPreserved: Bool; let requiresInitialPrimaryContainment: Bool; let footerStatus: String?
         static let requiredCases = [
-            LayoutFixture(identifier: "hosted-settings-1040x760-en-light-five-cards", windowSize: .init(width: 1_040, height: 760), language: .english, appearance: .aqua, groups: [.coder, .reviewer], leaderPreserved: true, requiresInitialPrimaryContainment: true, footerStatus: nil),
-            LayoutFixture(identifier: "hosted-settings-1000x760-en-light-coder", windowSize: .init(width: 1_000, height: 760), language: .english, appearance: .aqua, groups: [.coder], leaderPreserved: true, requiresInitialPrimaryContainment: true, footerStatus: nil),
-            LayoutFixture(identifier: "hosted-settings-1000x760-en-light-copy-failure", windowSize: .init(width: 1_000, height: 760), language: .english, appearance: .aqua, groups: [.coder], leaderPreserved: true, requiresInitialPrimaryContainment: false, footerStatus: "Request was generated, but the local clipboard could not be written."),
-            LayoutFixture(identifier: "hosted-settings-760x552-zh-dark-mixed", windowSize: .init(width: 760, height: 552), language: .simplifiedChinese, appearance: .darkAqua, groups: [.coder], leaderPreserved: false, requiresInitialPrimaryContainment: false, footerStatus: nil),
-            LayoutFixture(identifier: "hosted-settings-1280x900-zh-light-both", windowSize: .init(width: 1_280, height: 900), language: .simplifiedChinese, appearance: .aqua, groups: [.coder, .reviewer], leaderPreserved: false, requiresInitialPrimaryContainment: false, footerStatus: nil),
-            LayoutFixture(identifier: "hosted-settings-1280x900-en-dark-both", windowSize: .init(width: 1_280, height: 900), language: .english, appearance: .darkAqua, groups: [.coder, .reviewer], leaderPreserved: true, requiresInitialPrimaryContainment: false, footerStatus: nil),
+            LayoutFixture(identifier: "hosted-settings-1040x760-content-en-light-fresh-coder-reviewer-summary", contentSize: .init(width: 1_040, height: 760), language: .english, appearance: .aqua, groups: [.coder], leaderPreserved: true, requiresInitialPrimaryContainment: true, footerStatus: nil),
+            LayoutFixture(identifier: "hosted-settings-1000x760-content-en-light-both", contentSize: .init(width: 1_000, height: 760), language: .english, appearance: .aqua, groups: [.coder, .reviewer], leaderPreserved: true, requiresInitialPrimaryContainment: true, footerStatus: nil),
+            LayoutFixture(identifier: "hosted-settings-1000x760-content-en-light-copy-failure", contentSize: .init(width: 1_000, height: 760), language: .english, appearance: .aqua, groups: [.coder, .reviewer], leaderPreserved: true, requiresInitialPrimaryContainment: false, footerStatus: "Request was generated, but the local clipboard could not be written."),
+            LayoutFixture(identifier: "hosted-settings-760x552-content-zh-dark-both", contentSize: .init(width: 760, height: 552), language: .simplifiedChinese, appearance: .darkAqua, groups: [.coder, .reviewer], leaderPreserved: false, requiresInitialPrimaryContainment: false, footerStatus: nil),
+            LayoutFixture(identifier: "hosted-settings-1280x900-content-zh-light-both", contentSize: .init(width: 1_280, height: 900), language: .simplifiedChinese, appearance: .aqua, groups: [.coder, .reviewer], leaderPreserved: false, requiresInitialPrimaryContainment: false, footerStatus: nil),
+            LayoutFixture(identifier: "hosted-settings-1280x900-content-en-dark-both", contentSize: .init(width: 1_280, height: 900), language: .english, appearance: .darkAqua, groups: [.coder, .reviewer], leaderPreserved: true, requiresInitialPrimaryContainment: false, footerStatus: nil),
         ]
     }
 

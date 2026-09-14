@@ -4,6 +4,116 @@ import Testing
 
 @Suite(.timeLimit(.minutes(1)))
 struct M1AG1DualSourceConnectorTests {
+    @Test func admittedDailyBucketsRejectInvalidConflictAndOverflowWithoutInventingTotals() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        let today = try #require(formatter.date(from: "2026-09-13"))
+        let cutoff = try #require(calendar.date(byAdding: .day, value: -6, to: today))
+        let normalized = CodexUsageConnector.normalizedAccountDailyUsage([
+            .init(startDate: "2026-09-07", tokens: 0),
+            .init(startDate: "2026-09-08", tokens: 11),
+            .init(startDate: "2026-09-08", tokens: 11),
+            .init(startDate: "2026-09-09", tokens: 12),
+            .init(startDate: "2026-09-09", tokens: 13),
+            .init(startDate: "2026-09-10", tokens: -1),
+            .init(startDate: "2026-09-14", tokens: 99),
+            .init(startDate: "not-a-day", tokens: 99)
+        ], formatter: formatter, cutoff: cutoff, startOfToday: today)
+        #expect(normalized.days == [
+            AgentAccountUsageDay(day: "2026-09-07", tokens: 0),
+            AgentAccountUsageDay(day: "2026-09-08", tokens: 11)
+        ])
+        #expect(normalized.coverageNote?.contains("conflicting") == true)
+
+    }
+
+    @Test
+    func accountChannelFailsClosedForAnOverflowingProviderAggregate() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let capturedAt = try #require(calendar.date(from: .init(year: 2026, month: 9, day: 13, hour: 12)))
+        let usage = CodexLiveUsage(
+            rateLimits: .init(planType: "pro", windows: []),
+            availableResetCount: nil,
+            lifetimeTokens: nil,
+            dailyUsage: [
+                .init(startDate: "2026-09-12", tokens: Int64.max),
+                .init(startDate: "2026-09-13", tokens: 1)
+            ],
+            recentActivityCount: 0,
+            apiCostEstimate: nil,
+            providerCapturedAt: capturedAt
+        )
+
+        let channel = CodexUsageConnector.accountChannel(
+            from: usage,
+            freshness: .fresh,
+            safeFailure: nil,
+            calendar: calendar
+        )
+
+        #expect(channel.accountMetrics?.sevenDayTokens == nil)
+        #expect(channel.accountMetrics?.dailyUsage == [
+            AgentAccountUsageDay(day: "2026-09-12", tokens: Int64.max),
+            AgentAccountUsageDay(day: "2026-09-13", tokens: 1)
+        ])
+    }
+
+    @Test
+    func accountChannelAdmitsProviderDaysAcrossLocalDSTAndCalendarYearRollover() throws {
+        var halifax = Calendar(identifier: .gregorian)
+        halifax.timeZone = try #require(TimeZone(identifier: "America/Halifax"))
+        let dstCapturedAt = try #require(halifax.date(from: .init(year: 2026, month: 3, day: 9, hour: 12)))
+        let dstUsage = CodexLiveUsage(
+            rateLimits: .init(planType: "pro", windows: []),
+            availableResetCount: nil,
+            lifetimeTokens: nil,
+            dailyUsage: [
+                .init(startDate: "2026-03-03", tokens: 3),
+                .init(startDate: "2026-03-09", tokens: 9),
+                .init(startDate: "2026-03-02", tokens: 2)
+            ],
+            recentActivityCount: 0,
+            apiCostEstimate: nil,
+            providerCapturedAt: dstCapturedAt
+        )
+        let dstChannel = CodexUsageConnector.accountChannel(
+            from: dstUsage,
+            freshness: .fresh,
+            safeFailure: nil,
+            calendar: halifax
+        )
+        #expect(dstChannel.accountMetrics?.sevenDayTokens == 12)
+        #expect(dstChannel.accountMetrics?.dailyUsage.map(\.day) == ["2026-03-03", "2026-03-09"])
+
+        let yearCapturedAt = try #require(halifax.date(from: .init(year: 2026, month: 1, day: 1, hour: 12)))
+        let yearUsage = CodexLiveUsage(
+            rateLimits: .init(planType: "pro", windows: []),
+            availableResetCount: nil,
+            lifetimeTokens: nil,
+            dailyUsage: [
+                .init(startDate: "2025-12-26", tokens: 26),
+                .init(startDate: "2026-01-01", tokens: 1),
+                .init(startDate: "2025-12-25", tokens: 25)
+            ],
+            recentActivityCount: 0,
+            apiCostEstimate: nil,
+            providerCapturedAt: yearCapturedAt
+        )
+        let yearChannel = CodexUsageConnector.accountChannel(
+            from: yearUsage,
+            freshness: .fresh,
+            safeFailure: nil,
+            calendar: halifax
+        )
+        #expect(yearChannel.accountMetrics?.sevenDayTokens == 27)
+        #expect(yearChannel.accountMetrics?.dailyUsage.map(\.day) == ["2025-12-26", "2026-01-01"])
+    }
     @Test
     func panelBudgetIncludesBothSourceRowsWithoutClippingTheExistingFooter() {
         #expect(

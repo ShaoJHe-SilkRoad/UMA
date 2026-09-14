@@ -128,7 +128,19 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
             }
         }
 
-        let interval = max(0, date.timeIntervalSince(now))
+        let signedInterval = date.timeIntervalSince(now)
+        if signedInterval < -60 {
+            let formatter = DateFormatter()
+            formatter.locale = locale
+            formatter.dateFormat = self == .simplifiedChinese ? "M月d日 HH:mm" : "MMM d, HH:mm"
+            return self == .simplifiedChinese
+                ? "重置时间已过（\(formatter.string(from: date))）；需要刷新"
+                : "Reset time passed (\(formatter.string(from: date))); refresh needed"
+        }
+        if abs(signedInterval) <= 60 {
+            return self == .simplifiedChinese ? "即将重置" : "Resets just now"
+        }
+        let interval = signedInterval
         let relative: String
         if interval < 3_600 {
             let minutes = max(1, Int(ceil(interval / 60)))

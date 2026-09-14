@@ -3,17 +3,19 @@ import CodexUsageUI
 import SwiftUI
 
 enum MainWindowFramePolicy {
-    static let normalOuterSize = NSSize(width: 1_040, height: 760)
+    /// The recommended working area.  This is content size, not the frame
+    /// reported by AppKit (which also includes title-bar chrome).
+    static let normalContentSize = NSSize(width: 1_040, height: 760)
     private static let visibleIntersection = NSSize(width: 120, height: 80)
 
-    static func initialFrame(visibleFrames: [NSRect]) -> NSRect {
+    static func initialFrame(visibleFrames: [NSRect], outerSize: NSSize) -> NSRect {
         guard let visibleFrame = visibleFrames.first else {
-            return NSRect(origin: .zero, size: normalOuterSize)
+            return NSRect(origin: .zero, size: outerSize)
         }
 
         let size = NSSize(
-            width: min(normalOuterSize.width, visibleFrame.width),
-            height: min(normalOuterSize.height, visibleFrame.height)
+            width: min(outerSize.width, visibleFrame.width),
+            height: min(outerSize.height, visibleFrame.height)
         )
         return NSRect(
             x: visibleFrame.midX - (size.width / 2),
@@ -24,10 +26,14 @@ enum MainWindowFramePolicy {
     }
 
     /// Returns nil when the restored frame is already a valid user choice.
-    static func repairedFrame(for savedFrame: NSRect, visibleFrames: [NSRect]) -> NSRect? {
+    static func repairedFrame(
+        for savedFrame: NSRect,
+        visibleFrames: [NSRect],
+        fallbackOuterSize: NSSize = normalContentSize
+    ) -> NSRect? {
         guard !visibleFrames.isEmpty else { return nil }
         guard savedFrame.width > 0, savedFrame.height > 0 else {
-            return initialFrame(visibleFrames: visibleFrames)
+            return initialFrame(visibleFrames: visibleFrames, outerSize: fallbackOuterSize)
         }
 
         let visibleFrame = visibleFrames.max { lhs, rhs in
@@ -61,10 +67,19 @@ enum MainWindowFramePolicy {
     }
 }
 
+struct MainWindowGeometrySnapshot: Equatable {
+    let frame: NSRect
+    let contentRect: NSRect
+    let minimumOuterSize: NSSize
+    let isZoomed: Bool
+    let isFullScreen: Bool
+    let backingScaleFactor: Double
+}
+
 @MainActor
 final class MainWindowController: NSWindowController {
     private enum Layout {
-        static let minimumSize = NSSize(width: 760, height: 520)
+        static let minimumOuterSize = NSSize(width: 760, height: 520)
         static let autosaveName = "UMA014.MainWindow"
     }
 
@@ -76,13 +91,13 @@ final class MainWindowController: NSWindowController {
         restoresSavedFrame: Bool = true
     ) {
         let window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: Layout.minimumSize),
+            contentRect: NSRect(origin: .zero, size: MainWindowFramePolicy.normalContentSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "UMA"
-        window.minSize = Layout.minimumSize
+        window.minSize = Layout.minimumOuterSize
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
         let restoredSavedFrame = restoresSavedFrame && window.setFrameUsingName(autosaveName)
@@ -92,7 +107,13 @@ final class MainWindowController: NSWindowController {
         if !restoredSavedFrame {
             window.setFrame(
                 MainWindowFramePolicy.initialFrame(
-                    visibleFrames: NSScreen.screens.map(\.visibleFrame)
+                    visibleFrames: NSScreen.screens.map(\.visibleFrame),
+                    outerSize: window.frameRect(
+                        forContentRect: NSRect(
+                            origin: .zero,
+                            size: MainWindowFramePolicy.normalContentSize
+                        )
+                    ).size
                 ),
                 display: false
             )
@@ -197,10 +218,30 @@ final class MainWindowController: NSWindowController {
 
     var frameForTesting: NSRect? { window?.frame }
 
+    /// Read-only native-window facts for focused lifecycle tests and bounded
+    /// diagnostics.  It does not alter frame autosave or user preferences.
+    var geometryForTesting: MainWindowGeometrySnapshot? {
+        guard let window else { return nil }
+        return MainWindowGeometrySnapshot(
+            frame: window.frame,
+            contentRect: window.contentRect(forFrameRect: window.frame),
+            minimumOuterSize: window.minSize,
+            isZoomed: window.isZoomed,
+            isFullScreen: window.styleMask.contains(.fullScreen),
+            backingScaleFactor: window.backingScaleFactor
+        )
+    }
+
     private func repairFrameIfNeeded(_ window: NSWindow) {
         guard let repairedFrame = MainWindowFramePolicy.repairedFrame(
             for: window.frame,
-            visibleFrames: NSScreen.screens.map(\.visibleFrame)
+            visibleFrames: NSScreen.screens.map(\.visibleFrame),
+            fallbackOuterSize: window.frameRect(
+                forContentRect: NSRect(
+                    origin: .zero,
+                    size: MainWindowFramePolicy.normalContentSize
+                )
+            ).size
         ) else { return }
         window.setFrame(repairedFrame, display: false)
     }

@@ -468,10 +468,11 @@ actor CodexUsageConnector: AgentUsageConnector {
     private func publish() { continuation?.yield(makeSnapshot()) }
     private func clearContinuation() { continuation = nil }
 
-    private static func accountChannel(
+    static func accountChannel(
         from usage: CodexLiveUsage,
         freshness: AgentConnectorFreshness,
-        safeFailure: AgentSafeFailure?
+        safeFailure: AgentSafeFailure?,
+        calendar: Calendar = .current
     ) -> AgentUsageChannel {
         var windows = usage.rateLimits.displayWindows.map { window in
             AgentRateLimitWindow(
@@ -501,18 +502,28 @@ actor CodexUsageConnector: AgentUsageConnector {
                 at: 0
             )
         }
-        let calendar = Calendar.current
-        let cutoff = calendar.date(byAdding: .day, value: -6, to: calendar.startOfDay(for: usage.providerCapturedAt)) ?? usage.providerCapturedAt
+        let startOfToday = calendar.startOfDay(for: usage.providerCapturedAt)
+        let cutoff = calendar.date(byAdding: .day, value: -6, to: startOfToday) ?? startOfToday
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = calendar.timeZone
+        formatter.isLenient = false
         formatter.dateFormat = "yyyy-MM-dd"
-        let sevenDayTokens = usage.dailyUsage.map { buckets in
-            buckets.reduce(Int64(0)) { total, bucket in
-                guard let day = formatter.date(from: bucket.startDate), day >= cutoff else { return total }
-                return total + bucket.tokens
-            }
+        let normalizedDailyUsage = normalizedAccountDailyUsage(
+            usage.dailyUsage,
+            formatter: formatter,
+            cutoff: cutoff,
+            startOfToday: startOfToday
+        )
+        let aggregate = normalizedDailyUsage.days.reduce(into: Optional<Int64>.some(0)) { total, bucket in
+            guard let running = total else { return }
+            let (sum, overflow) = running.addingReportingOverflow(bucket.tokens)
+            total = overflow ? nil : sum
         }
+        // A chart can still show each admitted day, but an overflowing account
+        // aggregate must be unavailable rather than silently under-reported.
+        let sevenDayTokens = normalizedDailyUsage.days.isEmpty ? nil : aggregate
         return AgentUsageChannel(
             id: .account,
             sourceTier: .officialLocalService,
@@ -521,17 +532,64 @@ actor CodexUsageConnector: AgentUsageConnector {
             provenance: .providerReported,
             freshness: freshness,
             capturedAt: usage.providerCapturedAt,
-            coverageNote: nil,
+            coverageNote: normalizedDailyUsage.coverageNote,
             rateLimitWindows: windows,
             accountMetrics: AgentAccountMetrics(
                 planLabel: usage.rateLimits.planType,
                 availableResets: usage.availableResetCount,
                 lifetimeTokens: usage.lifetimeTokens,
-                sevenDayTokens: sevenDayTokens
+                sevenDayTokens: sevenDayTokens,
+                dailyUsage: normalizedDailyUsage.days
             ),
             localActivityMetrics: nil,
             safeFailure: safeFailure
         )
+    }
+
+    /// Accept only explicit provider day keys and non-negative daily totals.
+    /// Duplicate keys are combined so the presentation never renders two bars
+    /// for the same reported calendar day. This does not derive deltas from
+    /// cumulative ledger imports.
+    struct NormalizedAccountDailyUsage {
+        let days: [AgentAccountUsageDay]
+        let coverageNote: String?
+    }
+
+    static func normalizedAccountDailyUsage(
+        _ buckets: [CodexDailyUsage]?,
+        formatter: DateFormatter,
+        cutoff: Date,
+        startOfToday: Date
+    ) -> NormalizedAccountDailyUsage {
+        guard let buckets else { return .init(days: [], coverageNote: nil) }
+        var totals: [String: Int64] = [:]
+        var conflictingDays = Set<String>()
+        for bucket in buckets {
+            guard bucket.tokens >= 0,
+                  let date = formatter.date(from: bucket.startDate),
+                  formatter.string(from: date) == bucket.startDate,
+                  date >= cutoff, date <= startOfToday else { continue }
+            if let prior = totals[bucket.startDate], prior != bucket.tokens {
+                // Provider values are day totals, not deltas. A conflicting
+                // duplicate is unknown, never a sum; omit the day entirely.
+                totals.removeValue(forKey: bucket.startDate)
+                conflictingDays.insert(bucket.startDate)
+            } else if !conflictingDays.contains(bucket.startDate) {
+                totals[bucket.startDate] = bucket.tokens
+            }
+        }
+        let days = totals.keys.sorted().compactMap { day in
+            totals[day].map { AgentAccountUsageDay(day: day, tokens: $0) }
+        }
+        let coverageNote: String?
+        if !conflictingDays.isEmpty {
+            coverageNote = "provider calendar-day totals; conflicting duplicate days omitted"
+        } else if !days.isEmpty {
+            coverageNote = "provider calendar-day totals; missing days are unknown"
+        } else {
+            coverageNote = nil
+        }
+        return .init(days: days, coverageNote: coverageNote)
     }
 
     private static func localChannel(

@@ -357,11 +357,67 @@ struct AgentRateLimitWindow: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+/// A provider-reported calendar-day aggregate. The day key remains an
+/// unambiguous `yyyy-MM-dd` provider value; it is not reconstructed from the
+/// local ledger or inferred from a cumulative counter.
+public struct AgentAccountUsageDay: Codable, Sendable, Equatable, Identifiable {
+    public let day: String
+    public let tokens: Int64
+
+    public var id: String { day }
+
+    public init(day: String, tokens: Int64) {
+        self.day = day
+        self.tokens = tokens
+    }
+}
+
 struct AgentAccountMetrics: Codable, Sendable, Equatable {
     let planLabel: String?
     let availableResets: Int?
     let lifetimeTokens: Int64?
     let sevenDayTokens: Int64?
+    /// Optional because only the Codex account route currently admits a
+    /// timestamped daily aggregate. Empty means no daily chart is authorized.
+    let dailyUsage: [AgentAccountUsageDay]
+
+    init(
+        planLabel: String?,
+        availableResets: Int?,
+        lifetimeTokens: Int64?,
+        sevenDayTokens: Int64?,
+        dailyUsage: [AgentAccountUsageDay] = []
+    ) {
+        self.planLabel = planLabel
+        self.availableResets = availableResets
+        self.lifetimeTokens = lifetimeTokens
+        self.sevenDayTokens = sevenDayTokens
+        self.dailyUsage = dailyUsage
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case planLabel, availableResets, lifetimeTokens, sevenDayTokens
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        planLabel = try container.decodeIfPresent(String.self, forKey: .planLabel)
+        availableResets = try container.decodeIfPresent(Int.self, forKey: .availableResets)
+        lifetimeTokens = try container.decodeIfPresent(Int64.self, forKey: .lifetimeTokens)
+        sevenDayTokens = try container.decodeIfPresent(Int64.self, forKey: .sevenDayTokens)
+        // Day buckets are runtime-only. Existing persisted schema-1 entries
+        // decode without this key, and restoring a cache never fabricates a
+        // chart from historical aggregate values.
+        dailyUsage = []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(planLabel, forKey: .planLabel)
+        try container.encodeIfPresent(availableResets, forKey: .availableResets)
+        try container.encodeIfPresent(lifetimeTokens, forKey: .lifetimeTokens)
+        try container.encodeIfPresent(sevenDayTokens, forKey: .sevenDayTokens)
+    }
 }
 
 struct AgentLocalActivityMetrics: Codable, Sendable, Equatable {

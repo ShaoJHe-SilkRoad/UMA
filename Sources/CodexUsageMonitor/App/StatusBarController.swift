@@ -426,6 +426,11 @@ final class StatusBarController: NSObject {
                 panelAlpha: panel?.alpha,
                 panelFrame: panel?.frame,
                 panelIgnoresMouseEvents: panel?.ignoresMouseEvents,
+                mainWindowFrame: nil,
+                mainWindowContentRect: nil,
+                mainWindowBackingScale: nil,
+                mainWindowIsZoomed: nil,
+                mainWindowIsFullScreen: nil,
                 detail: detail,
                 timestamp: Date()
             )

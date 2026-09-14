@@ -150,6 +150,24 @@ import Testing
         }
     }
 
+    @Test func copyPayloadIsConfigurationOnlyAndAChangedDraftInvalidatesLocalProof() throws {
+        let preferences = ApplicationPreferences.inMemory()
+        let form = ThreadOSSettingsFormState(preferences: preferences)
+        form.newProject = "SAFE_PROJECT"; form.createProject()
+        let clipboard = TestClipboard()
+        form.copy(to: clipboard, language: .english)
+        let payload = try #require(clipboard.value)
+        #expect(payload.hasPrefix("TOSCFG/1 "))
+        for forbidden in ["prompt", "credential", "secret", "/Users/", "source code"] {
+            #expect(!payload.localizedCaseInsensitiveContains(forbidden))
+        }
+        #expect(form.copiedRevision == form.draft.revision)
+        form.semanticEdit({ $0.tier = "priority" }, language: .english)
+        #expect(form.copiedRevision == nil)
+        #expect(form.receipt.isEmpty)
+        #expect(form.acceptedReceipt == nil)
+    }
+
     @Test func systemClipboardRestoresEveryPasteboardItemTypeWhenWriteFails() {
         let customType = NSPasteboard.PasteboardType("com.silkrd.uma.test.custom")
         let original = NSPasteboardItem()

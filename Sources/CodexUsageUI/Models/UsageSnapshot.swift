@@ -1,5 +1,9 @@
 import Foundation
 
+enum UsagePeriodKind: String, Codable, Sendable {
+    case fiveHour, sevenDay, other, credits
+}
+
 struct UsagePeriod: Identifiable, Codable, Sendable {
     let id: String
     let title: String
@@ -7,6 +11,9 @@ struct UsagePeriod: Identifiable, Codable, Sendable {
     /// Optional for compatibility with snapshots encoded before G2 recorded
     /// the provider window kind in this presentation model.
     var isFiveHour: Bool? = nil
+    /// Retains the admitted kind without relying on a two-value compatibility
+    /// flag. `nil` remains valid for snapshots written before this field.
+    var kind: UsagePeriodKind? = nil
     /// A special provider-granted five-hour credit window. The bar remains
     /// visible, but the numeric status must not imply an ordinary quota.
     var isUnlimited = false
@@ -74,6 +81,10 @@ struct UsageSnapshot: Codable, Sendable {
     var metrics: [UsageMetric]
     var recentTasks: [RecentTask]
     var apiCostEstimate: APICostEstimateSnapshot?
+    /// Optional account-reported calendar-day aggregates. These remain distinct
+    /// from local-ledger day keys and are absent when the account route did not
+    /// admit timestamped buckets.
+    var accountDailyUsage: [AgentAccountUsageDay]? = nil
     var threadOSAnalytics: ThreadOSUsageAnalytics? = nil
     /// `nil` means the provider did not supply reset-credit information. It
     /// must remain unavailable rather than being rendered as a fabricated 0.
@@ -112,6 +123,7 @@ struct UsageSnapshot: Codable, Sendable {
                     title: language.quotaTitle(durationMinutes: 300, index: 0),
                     remainingPercent: 78,
                     isFiveHour: true,
+                    kind: .fiveHour,
                     resetText: language == .simplifiedChinese
                         ? "重置 3 小时后 (7月12日 18:41)"
                         : "Resets in 3 hr (Jul 12, 18:41)"
@@ -121,6 +133,7 @@ struct UsageSnapshot: Codable, Sendable {
                     title: language.quotaTitle(durationMinutes: 10_080, index: 1),
                     remainingPercent: 72,
                     isFiveHour: false,
+                    kind: .sevenDay,
                     resetText: language == .simplifiedChinese
                         ? "重置 5 天后 (7月18日 14:45)"
                         : "Resets in 5 days (Jul 18, 14:45)"
@@ -189,6 +202,7 @@ extension UsageSnapshot {
                 title: language.quotaTitle(durationMinutes: window.kind == .fiveHour ? 300 : (window.kind == .sevenDay ? 10_080 : nil), index: index),
                 remainingPercent: remainingPercent,
                 isFiveHour: window.kind == .fiveHour,
+                kind: UsagePeriodKind(rawValue: window.kind == .fiveHour ? "fiveHour" : window.kind == .sevenDay ? "sevenDay" : "other"),
                 isUnlimited: window.isUnlimited,
                 isEstimated: window.isEstimated == true,
                 resetText: language.resetDescription(for: window.resetsAt, now: now)
@@ -221,6 +235,7 @@ extension UsageSnapshot {
                 guard let sevenDay = local.estimatedSevenDayUSD, let lifetime = local.estimatedLifetimeUSD else { return nil }
                 return APICostEstimateSnapshot(sevenDayUSD: sevenDay, lifetimeUSD: lifetime, coveragePercent: local.coveragePercent ?? 0, modelNames: [])
             },
+            accountDailyUsage: account?.accountMetrics?.dailyUsage,
             threadOSAnalytics: localMetrics?.threadOSAnalytics,
             availableResets: account?.accountMetrics?.availableResets,
             updatedAt: agentSnapshot.capturedAt,

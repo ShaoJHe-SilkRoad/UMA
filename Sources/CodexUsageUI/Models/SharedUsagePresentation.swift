@@ -10,8 +10,22 @@ public struct BasicSharedUsagePresentation: Sendable {
         let id: String
         let title: String
         let remainingText: String
+        let remainingPercent: Int?
+        let isUnlimited: Bool
         let isEstimated: Bool
         let resetText: String
+        /// The admitted provider kind, retained so compact consumers do not
+        /// guess a quota's period from its display order or localized title.
+        let isFiveHour: Bool?
+        let kind: UsagePeriodKind?
+    }
+
+    enum AccountStripQuotaState: Equatable, Sendable {
+        case finite(Int)
+        case unlimited
+        case stale(Int?)
+        case estimated(Int?)
+        case unavailable
     }
 
     struct Metric: Identifiable, Equatable, Sendable {
@@ -50,8 +64,12 @@ public struct BasicSharedUsagePresentation: Sendable {
                 id: $0.id,
                 title: $0.title,
                 remainingText: $0.isUnlimited ? "∞" : "\($0.remainingPercent)%",
+                remainingPercent: $0.isUnlimited ? nil : $0.remainingPercent,
+                isUnlimited: $0.isUnlimited,
                 isEstimated: $0.isEstimated == true,
-                resetText: $0.resetText
+                resetText: $0.resetText,
+                isFiveHour: $0.isFiveHour,
+                kind: $0.kind
             )
         }
         let metrics = snapshot.metrics
@@ -79,6 +97,35 @@ public struct BasicSharedUsagePresentation: Sendable {
             localSource: snapshot.localSource,
             updatedAt: snapshot.updatedAt
         )
+    }
+
+    /// The ThreadOS strip has exactly two semantic slots. Extra provider
+    /// windows never become a positional fallback for either quota.
+    static func accountStripWindows(from windows: [Window]) -> [Window] {
+        [.fiveHour, .sevenDay].map { kind in
+            windows.first(where: { $0.kind == kind }) ?? Window(
+                id: "missing-\(kind.rawValue)",
+                title: kind == .fiveHour ? "5H remaining" : "7D remaining",
+                remainingText: "—",
+                remainingPercent: nil,
+                isUnlimited: false,
+                isEstimated: false,
+                resetText: "Unavailable",
+                isFiveHour: kind == .fiveHour,
+                kind: kind
+            )
+        }
+    }
+
+    static func accountStripQuotaState(_ window: Window, source: UsageSourceStatus?) -> AccountStripQuotaState {
+        guard let source, source.freshness != .unavailable else {
+            return .unavailable
+        }
+        if window.isUnlimited { return source.freshness == .stale ? .stale(nil) : .unlimited }
+        guard let percent = window.remainingPercent, (0...100).contains(percent) else { return .unavailable }
+        if source.freshness == .stale { return .stale(percent) }
+        if window.isEstimated { return .estimated(window.isUnlimited ? nil : percent) }
+        return .finite(percent)
     }
 }
 

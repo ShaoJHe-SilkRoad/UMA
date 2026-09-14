@@ -102,6 +102,7 @@ public final class UsageStore: ObservableObject {
         scenario: CodexPreviewScenario = .ready,
         language: AppLanguage = .simplifiedChinese,
         presentationCards: [SharedUsageCardPresentation] = [],
+        accountDailyUsage: [AgentAccountUsageDay] = [],
         chineseLoginProviderName: String? = nil,
         includesAgentSettings: Bool = false
     ) -> UsageStore {
@@ -119,7 +120,7 @@ public final class UsageStore: ObservableObject {
         } else {
             loginOptions = []
         }
-        return UsageStore(
+        let store = UsageStore(
             autoRefresh: false,
             previewOnly: true,
             language: language,
@@ -140,6 +141,12 @@ public final class UsageStore: ObservableObject {
             previewPresentationCards: presentationCards,
             previewLoginOptions: loginOptions
         )
+        // Test/preview-only fixture data stays inside the existing preview
+        // renderer path. Production snapshots are populated by connectors.
+        if !accountDailyUsage.isEmpty {
+            store.snapshot.accountDailyUsage = accountDailyUsage
+        }
+        return store
     }
 
     init(

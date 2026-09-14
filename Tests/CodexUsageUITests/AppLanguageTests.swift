@@ -41,4 +41,13 @@ struct AppLanguageTests {
         #expect(snapshot.metrics.map(\.label) == ["Current Task", "Last 7 Days", "Lifetime"])
         #expect(snapshot.recentTasks.first?.tokenText == "Hidden")
     }
+
+    @Test
+    func resetWordingDistinguishesElapsedNowAndFuture() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        #expect(AppLanguage.english.resetDescription(for: now.addingTimeInterval(-61), now: now).contains("passed"))
+        #expect(AppLanguage.english.resetDescription(for: now, now: now).contains("just now"))
+        #expect(AppLanguage.english.resetDescription(for: now.addingTimeInterval(30), now: now).contains("just now"))
+        #expect(AppLanguage.english.resetDescription(for: now.addingTimeInterval(61), now: now).contains("in 2 min"))
+    }
 }

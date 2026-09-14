@@ -527,20 +527,10 @@ public struct AgentWorkspaceSurface: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     header
-                    LazyVGrid(
-                        columns: workspaceColumns(for: geometry.size.width),
-                        alignment: .leading,
-                        spacing: AgentWorkspaceLayoutPolicy.moduleSpacing
-                    ) {
-                        usageModule
-                        connectionModule
-                        controlsModule
-                        if providerID == .codex {
-                            codexActivityModule
-                        } else if providerID == .claude {
-                            claudeSmartModule
-                        }
-                        diagnosticsModule
+                    if providerID == .codex {
+                        codexDashboard
+                    } else {
+                        standardWorkspace(for: geometry.size.width)
                     }
                 }
                 .padding(.horizontal, AgentWorkspaceLayoutPolicy.horizontalPadding)
@@ -564,6 +554,257 @@ public struct AgentWorkspaceSurface: View {
     }
 
     private var provider: ProviderProductState? { store.productInventory.provider(providerID) }
+
+    private var codexProjection: CodexDashboardProjection {
+        CodexDashboardProjection(snapshot: store.snapshot, provider: provider)
+    }
+
+    @ViewBuilder private func standardWorkspace(for width: CGFloat) -> some View {
+        LazyVGrid(
+            columns: workspaceColumns(for: width),
+            alignment: .leading,
+            spacing: AgentWorkspaceLayoutPolicy.moduleSpacing
+        ) {
+            usageModule
+            connectionModule
+            controlsModule
+            if providerID == .claude { claudeSmartModule }
+            diagnosticsModule
+        }
+    }
+
+    /// Codex keeps the first-level sidebar bars intact; this is the distinct
+    /// second-level dashboard hierarchy. It consumes only the frozen store
+    /// projection and never starts a collector or manufactures daily history.
+    private var codexDashboard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 12) {
+                    quotaRingCard(kind: .sevenDay, fallbackTitle: localized("7D remaining", "7天剩余"))
+                    quotaRingCard(kind: .fiveHour, fallbackTitle: localized("5H remaining", "5小时剩余"))
+                    trendGapCard.frame(maxWidth: .infinity, alignment: .leading)
+                }
+                VStack(spacing: 12) {
+                    HStack(spacing: 12) {
+                        quotaRingCard(kind: .sevenDay, fallbackTitle: localized("7D remaining", "7天剩余"))
+                        quotaRingCard(kind: .fiveHour, fallbackTitle: localized("5H remaining", "5小时剩余"))
+                    }
+                    trendGapCard
+                }
+            }
+            metricRow
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 12) {
+                    activityDashboardCard.frame(maxWidth: .infinity, alignment: .leading)
+                    connectionModule.frame(maxWidth: .infinity, alignment: .leading)
+                }
+                VStack(spacing: 12) { activityDashboardCard; connectionModule }
+            }
+        }
+        .accessibilityIdentifier("uma.agent.codex.dashboard")
+    }
+
+    private var codexHeaderActions: some View {
+        HStack(spacing: 8) {
+            Button(localized("Refresh", "刷新"), action: refresh)
+                .disabled(!store.allowsManualRefresh)
+            if provider?.connection == .connected || provider?.connection == .transitional {
+                Button(localized("Disconnect", "断开连接"), action: disconnectCodex)
+            } else {
+                Button(localized("Connect", "连接"), action: connectCodex)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .controlSize(.small)
+        .accessibilityIdentifier("uma.agent.codex.header-actions")
+    }
+
+    private func quotaRingCard(kind: ProviderProductQuotaKind, fallbackTitle: String) -> some View {
+        let quota = kind == .fiveHour ? codexProjection.fiveHour : codexProjection.sevenDay
+        return VStack(spacing: 8) {
+            ZStack {
+                Circle().stroke(.primary.opacity(0.10), lineWidth: 9)
+                if let value = quota.state.ringFraction {
+                    Circle()
+                        .trim(from: 0, to: value)
+                        .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 9, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+                Text(quotaDisplayText(quota.state))
+                    .font(.title3.weight(.bold)).monospacedDigit()
+            }
+            .frame(width: 86, height: 86)
+            Text(quota.id.hasPrefix("missing-") ? fallbackTitle : quota.title).font(.headline)
+            Text(quotaResetText(quota))
+                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        }
+        .frame(minWidth: 118, minHeight: 146)
+        .moduleSurface()
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("uma.agent.codex.ring.\(quotaKindIdentifier(kind))")
+    }
+
+    private func quotaKindIdentifier(_ kind: ProviderProductQuotaKind) -> String {
+        switch kind {
+        case .fiveHour: "five-hour"
+        case .sevenDay: "seven-day"
+        case .other: "other"
+        case .credits: "credits"
+        }
+    }
+
+    private func quotaDisplayText(_ state: CodexDashboardProjection.QuotaState) -> String {
+        switch state {
+        case let .finite(value): "\(Int(value.rounded()))%"
+        case .unlimited: "∞"
+        case .unavailable, .invalid, .stale: "—"
+        }
+    }
+
+    private func quotaResetText(_ quota: CodexDashboardProjection.Quota) -> String {
+        switch quota.state {
+        case .stale:
+            localized("Last quota observation is stale", "上次限额观测已过期")
+        case .invalid:
+            localized("Quota value was rejected", "限额值已被拒绝")
+        case .unavailable:
+            localized("Limit not reported", "未报告限额")
+        case .finite, .unlimited:
+            resetLabel(quota.resetAt)
+        }
+    }
+
+    private var trendGapCard: some View {
+        module(historyModuleTitle, systemImage: "chart.bar") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(historyHeading)
+                    .font(.callout.weight(.medium))
+                if case let .accountDailyBuckets(buckets, _) = codexProjection.historyAvailability {
+                    accountDailyBars(buckets)
+                } else {
+                    Text(historyDetail)
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Divider()
+                Text(historyFootnote)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .frame(minHeight: 82, alignment: .topLeading)
+        }
+    }
+
+    private var historyHeading: String {
+        switch codexProjection.historyAvailability {
+        case .accountDailyBuckets:
+            localized("Account daily token history", "账户每日令牌历史")
+        case .aggregateOnly:
+            localized("Daily history is not projected for this snapshot.", "此快照未投影每日历史。")
+        case .staleWithoutDailyBuckets:
+            localized("The retained local history is stale.", "保留的本地历史已过期。")
+        case .unavailable:
+            localized("Local history is unavailable.", "本地历史不可用。")
+        }
+    }
+
+    private var historyModuleTitle: String {
+        if case .accountDailyBuckets = codexProjection.historyAvailability {
+            return localized("Account daily token trend", "账户每日令牌趋势")
+        }
+        return localized("Local daily token trend", "本地每日令牌趋势")
+    }
+
+    private var historyFootnote: String {
+        switch codexProjection.historyAvailability {
+        case .accountDailyBuckets:
+            localized("Period: local calendar days; provider timezone unavailable · Unit: tokens · missing days unknown; zero means provider-reported zero · no UMA day reallocation", "周期：本地日历日；提供方时区未知 · 单位：令牌 · 缺失日期未知；零表示提供方报告为零 · UMA 不重新分配日期")
+        case .aggregateOnly, .staleWithoutDailyBuckets, .unavailable:
+            localized("Period: aggregate local snapshot · Unit: tokens", "周期：本地汇总快照 · 单位：令牌")
+        }
+    }
+
+    private func accountDailyBars(_ buckets: [AgentAccountUsageDay]) -> some View {
+        let shown = codexProjection.dailySlots()
+        let maximum = max(Int64(1), shown.compactMap(\.tokens).max() ?? 1)
+        return HStack(alignment: .bottom, spacing: 7) {
+            ForEach(shown) { bucket in
+                VStack(spacing: 4) {
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(bucket.tokens == nil ? Color.secondary.opacity(0.22) : Color.accentColor.opacity(0.78))
+                        .frame(height: bucket.tokens == 0 ? 0 : max(4, 54 * CGFloat(Double(bucket.tokens ?? 0) / Double(maximum))))
+                    Text(String(bucket.day.suffix(2)))
+                        .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .bottom)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(bucket.tokens.map { "\(bucket.day): \($0) tokens" } ?? "\(bucket.day): unknown tokens")
+            }
+        }
+        .frame(height: 86, alignment: .bottom)
+    }
+
+    private var historyDetail: String {
+        localized(
+            "UMA keeps known aggregates separate rather than dividing cumulative imports into invented daily usage.",
+            "UMA 会保留已知汇总值，而不会把累计导入数据拆分为虚构的每日用量。"
+        )
+    }
+
+    private var metricRow: some View {
+        let metrics = codexProjection.metrics
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                dashboardMetric(metrics.first(where: { $0.id == "week" }), title: localized("Account 7D tokens", "账户7天令牌"))
+                dashboardMetric(metrics.first(where: { $0.id == "total" }), title: localized("Account lifetime tokens", "账户累计令牌"))
+                dashboardMetric(metrics.first(where: { $0.id == "api-cost-seven-days" }), title: localized("Local ledger API-equivalent · 7D", "本地账本 API 等效估算 · 7天"))
+            }
+            VStack(spacing: 12) {
+                dashboardMetric(metrics.first(where: { $0.id == "week" }), title: localized("Account 7D tokens", "账户7天令牌"))
+                dashboardMetric(metrics.first(where: { $0.id == "total" }), title: localized("Account lifetime tokens", "账户累计令牌"))
+                dashboardMetric(metrics.first(where: { $0.id == "api-cost-seven-days" }), title: localized("Local ledger API-equivalent · 7D", "本地账本 API 等效估算 · 7天"))
+            }
+        }
+    }
+
+    private func dashboardMetric(_ metric: CodexDashboardProjection.Metric?, title: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(provider?.freshness == .unavailable ? "—" : (metric?.value ?? "—"))
+                .font(.title3.weight(.semibold)).monospacedDigit()
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            if provider?.freshness == .unavailable {
+                Text(localized("Current source unavailable", "当前来源不可用"))
+                    .font(.caption2).foregroundStyle(.secondary)
+            } else if metric?.id == "api-cost-seven-days", let coverage = metric?.coveragePercent {
+                Text(localized("Lifetime priced-token coverage \(coverage)% · 7D may include a partial current day", "累计已定价令牌覆盖率 \(coverage)% · 7天可能包含当天的部分数据"))
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
+        .moduleSurface()
+    }
+
+    private var activityDashboardCard: some View {
+        module(localized("Recent local activity", "最近本地活动"), systemImage: "clock.arrow.circlepath") {
+            let activity = store.snapshot.recentTasks
+            if provider?.freshness == .unavailable {
+                Text(localized("Current source unavailable.", "当前来源不可用。"))
+                    .font(.callout).foregroundStyle(.secondary)
+            } else if activity.isEmpty {
+                Text(localized("No recent allowlisted local activity metadata.", "暂无允许范围内的本地活动元数据。"))
+                    .font(.callout).foregroundStyle(.secondary)
+            } else {
+                ForEach(activity.prefix(4)) { item in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.title).lineLimit(1)
+                            Text(item.time).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 12)
+                        Text(item.tokenText).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
 
     private func workspaceColumns(for width: CGFloat) -> [GridItem] {
         let usableWidth = max(0, width - (AgentWorkspaceLayoutPolicy.horizontalPadding * 2))
@@ -596,13 +837,16 @@ public struct AgentWorkspaceSurface: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            VStack(alignment: .trailing, spacing: 1) {
-                Text(provider?.primaryDisplayText ?? "—")
-                    .font(.system(size: 28, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                Text(provider?.primaryQuota?.compactLabel ?? localized("No current usage", "暂无当前用量"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if providerID == .codex { codexHeaderActions }
+            if providerID != .codex {
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(provider?.primaryDisplayText ?? "—")
+                        .font(.system(size: 28, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                    Text(provider?.primaryQuota?.compactLabel ?? localized("No current usage", "暂无当前用量"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(.bottom, 3)
@@ -855,6 +1099,7 @@ public struct AgentWorkspaceSurface: View {
     }
 
     private var planLabel: String? {
+        guard provider?.freshness != .unavailable else { return nil }
         if let plan = provider?.planLabel, !plan.isEmpty { return plan }
         if providerID == .codex, store.snapshot.planLabel != "—" {
             return store.snapshot.planLabel
@@ -863,6 +1108,9 @@ public struct AgentWorkspaceSurface: View {
     }
 
     private var sourceLabel: String {
+        guard provider?.freshness != .unavailable else {
+            return localized("Unavailable", "不可用")
+        }
         guard let source = provider?.sourceSummary else {
             return localized("Unavailable", "不可用")
         }
@@ -947,6 +1195,12 @@ public struct AgentWorkspaceSurface: View {
     private var displayNow: Date { referenceDate ?? Date() }
 
     private func relativeUpdateDescription(since date: Date) -> String {
+        let interval = date.timeIntervalSince(displayNow)
+        if interval > 60 {
+            let formatter = DateFormatter(); formatter.locale = store.language.locale; formatter.dateStyle = .medium; formatter.timeStyle = .short
+            return localized("Future observation (\(formatter.string(from: date)))", "未来观测（\(formatter.string(from: date))）")
+        }
+        if abs(interval) <= 60 { return localized("just now", "刚刚") }
         let formatter = RelativeDateTimeFormatter()
         formatter.locale = store.language.locale
         formatter.unitsStyle = .short

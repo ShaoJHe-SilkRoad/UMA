@@ -341,6 +341,7 @@ public struct ThreadOSSettingsView: View {
     private let preferences: ApplicationPreferences
     private let layoutProbe: ThreadOSSchemeBLayoutProbe?
     private let footerStatusOverride: String?
+    private let defaultExpandedWorkerGroups: Set<FactoriumV2Role>
     @StateObject private var form: ThreadOSSettingsFormState
     @StateObject private var attributionBinding: ThreadOSAttributionBindingFormState
     @StateObject private var factoriumV2: FactoriumV2FormState
@@ -357,11 +358,11 @@ public struct ThreadOSSettingsView: View {
         basicUsage: BasicSharedUsagePresentation? = nil,
         showCodexDetail: (() -> Void)? = nil,
         preferences: ApplicationPreferences = .production,
-        initiallyExpandedWorkerGroups: Set<FactoriumV2Role> = [],
+        initiallyExpandedWorkerGroups: Set<FactoriumV2Role> = [.coder],
         layoutProbe: ThreadOSSchemeBLayoutProbe? = nil,
         footerStatusOverride: String? = nil
     ) {
-        self.language = language; self.analytics = analytics; self.basicUsage = basicUsage; self.showCodexDetail = showCodexDetail; self.preferences = preferences; self.layoutProbe = layoutProbe; self.footerStatusOverride = footerStatusOverride
+        self.language = language; self.analytics = analytics; self.basicUsage = basicUsage; self.showCodexDetail = showCodexDetail; self.preferences = preferences; self.layoutProbe = layoutProbe; self.footerStatusOverride = footerStatusOverride; self.defaultExpandedWorkerGroups = initiallyExpandedWorkerGroups
         _form = StateObject(wrappedValue: ThreadOSSettingsFormState(preferences: preferences))
         _attributionBinding = StateObject(wrappedValue: ThreadOSAttributionBindingFormState(preferences: preferences))
         _factoriumV2 = StateObject(wrappedValue: FactoriumV2FormState(preferences: preferences))
@@ -384,6 +385,8 @@ public struct ThreadOSSettingsView: View {
         .coordinateSpace(name: "uma.threados.scheme-b")
         .background(Color(nsColor: .windowBackgroundColor))
         .background(ThreadOSSchemeBGeometryReporter(identifier: "root", probe: layoutProbe))
+        .onAppear { restoreWorkerExpansion() }
+        .onChange(of: factoriumV2.selectedProject) { _, _ in restoreWorkerExpansion() }
     }
     func showCodexDetailForTesting() { showCodexDetail?() }
     private var footer: some View {
@@ -471,7 +474,7 @@ public struct ThreadOSSettingsView: View {
             }
             if let basicUsage {
                 settingsSection(title("Codex account usage", "Codex 账户用量")) {
-                    SharedBasicUsageSummaryView(presentation: basicUsage, language: language)
+                    compactAccountStrip(basicUsage)
                     if let showCodexDetail {
                         Button(title("Open Codex details", "打开 Codex 详情"), action: showCodexDetail)
                             .accessibilityIdentifier("uma.threados.v2.codex-details")
@@ -500,6 +503,76 @@ public struct ThreadOSSettingsView: View {
                 .foregroundStyle(.orange)
         }
     }
+    @ViewBuilder private func compactAccountStrip(_ usage: BasicSharedUsagePresentation) -> some View {
+        let windows = BasicSharedUsagePresentation.accountStripWindows(from: usage.windows)
+        let metrics = usage.metrics.filter { $0.id == "week" || $0.id == "total" }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                ForEach(windows) { window in accountStripQuota(window, source: usage.providerSource) }
+                ForEach(metrics) { metric in accountStripFact(metric.value, metric.label, title("Account · not project", "账户 · 非项目")) }
+                if let estimate = usage.apiEquivalentEstimate {
+                    accountStripFact(estimate.sevenDayUSD.formatted(.currency(code: "USD")), title("Local API eq · 7D", "本地 API 等效 · 7天"), coverageText(estimate.coveragePercent), accessibility: coverageAccessibilityText(estimate.coveragePercent, value: estimate.sevenDayUSD.formatted(.currency(code: "USD"))))
+                }
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], spacing: 8) {
+                ForEach(windows) { window in accountStripQuota(window, source: usage.providerSource) }
+                ForEach(metrics) { metric in accountStripFact(metric.value, metric.label, title("Account · not project", "账户 · 非项目")) }
+                if let estimate = usage.apiEquivalentEstimate {
+                    accountStripFact(estimate.sevenDayUSD.formatted(.currency(code: "USD")), title("Local API eq · 7D", "本地 API 等效 · 7天"), coverageText(estimate.coveragePercent), accessibility: coverageAccessibilityText(estimate.coveragePercent, value: estimate.sevenDayUSD.formatted(.currency(code: "USD"))))
+                }
+            }
+        }
+        .accessibilityIdentifier("uma.threados.v2.codex-account-strip")
+    }
+    private func accountStripQuota(_ window: BasicSharedUsagePresentation.Window, source: UsageSourceStatus?) -> some View {
+        let state = BasicSharedUsagePresentation.accountStripQuotaState(window, source: source)
+        return HStack(spacing: 7) {
+            ZStack {
+                Circle().stroke(.primary.opacity(0.12), lineWidth: 5)
+                if case let .finite(percent) = state {
+                    Circle().trim(from: 0, to: CGFloat(percent) / 100).stroke(Color.accentColor, style: StrokeStyle(lineWidth: 5, lineCap: .round)).rotationEffect(.degrees(-90))
+                }
+                Text(accountStripRemainingText(state)).font(.caption.weight(.bold)).monospacedDigit()
+            }.frame(width: 34, height: 34)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(window.title).font(.caption.weight(.medium)).lineLimit(1)
+                Text(accountStripResetText(state, original: window.resetText)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading).padding(8)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(.quaternary, lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accountStripAccessibilityText(state, title: window.title, reset: window.resetText))
+    }
+    private func accountStripFact(_ value: String, _ label: String, _ detail: String, accessibility: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(value).font(.headline.monospacedDigit())
+            Text(label).font(.caption.weight(.medium)).lineLimit(1)
+            Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+        .padding(8)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(.quaternary, lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibility ?? "\(value), \(label), \(detail)")
+    }
+    private func coverageText(_ coverage: Int) -> String {
+        localized(language, "Priced coverage \(coverage)%", "计价覆盖 \(coverage)%")
+    }
+    private func coverageAccessibilityText(_ coverage: Int, value: String) -> String {
+        localized(language, "\(value), Local API equivalent, 7D. Lifetime local-ledger priced-token coverage \(coverage)%. Priced tokens divided by observed ledger tokens; not account or 7D coverage.", "\(value)，本地 API 等效，7天。累计本地账本计价令牌覆盖 \(coverage)%；计价令牌除以已观察到账本令牌，不是账户或 7 天覆盖。")
+    }
+    private func accountStripRemainingText(_ state: BasicSharedUsagePresentation.AccountStripQuotaState) -> String {
+        switch state { case let .finite(value): "\(value)%"; case .unlimited: "∞"; case let .stale(value), let .estimated(value): value.map { "\($0)%" } ?? "—"; case .unavailable: "—" }
+    }
+    private func accountStripResetText(_ state: BasicSharedUsagePresentation.AccountStripQuotaState, original: String) -> String {
+        switch state { case .finite, .unlimited: original; case .stale: title("Stale retained data", "已过期保留数据"); case .estimated: title("Estimated quota", "估算配额"); case .unavailable: title("Unavailable", "不可用") }
+    }
+    private func accountStripAccessibilityText(_ state: BasicSharedUsagePresentation.AccountStripQuotaState, title: String, reset: String) -> String {
+        switch state { case .finite, .unlimited: "\(title), \(accountStripRemainingText(state)), \(reset)"; case .stale: "\(title), \(accountStripRemainingText(state)), \(localized(language, "stale retained account quota", "已过期保留账户配额"))"; case .estimated: "\(title), \(accountStripRemainingText(state)), \(localized(language, "estimated account quota", "估算账户配额"))"; case .unavailable: "\(title), \(localized(language, "account quota unavailable", "账户配额不可用"))" }
+    }
     private var projectPicker: some View {
         Picker(title("Project", "项目"), selection: Binding(get: { factoriumV2.selectedProject }, set: { factoriumV2.select(project: $0) })) {
             Text(title("No project selected", "未选择项目")).tag("")
@@ -510,7 +583,6 @@ public struct ThreadOSSettingsView: View {
     @ViewBuilder private func roleCard(_ role: FactoriumV2Role) -> some View {
         let setting = factoriumV2.draft.roles[role] ?? FactoriumV2SettingsDraft.defaultRoles[role]!
         ThreadOSSchemeBCard(identifier: "role.\(role.rawValue).card", layoutProbe: layoutProbe) {
-            VStack(alignment: .leading, spacing: 6) {
             VStack(alignment: .leading, spacing: 8) {
                 Label {
                     VStack(alignment: .leading, spacing: 1) {
@@ -521,17 +593,17 @@ public struct ThreadOSSettingsView: View {
                     Image(systemName: roleSymbol(role)).foregroundStyle(.purple)
                 }
                 .background(ThreadOSSchemeBGeometryReporter(identifier: "role.\(role.rawValue).header", probe: layoutProbe))
+                .frame(minHeight: 34, alignment: .topLeading)
                 if role == .leader {
+                    Text(title("Current Leader is retained by this local draft.", "当前 Leader 由此本地草稿保留。"))
+                        .font(.caption).foregroundStyle(.secondary)
                     Toggle(title("Preserve current Leader", "保留当前 Leader"), isOn: Binding(get: { setting.preserve }, set: { value in factoriumV2.edit { $0.roles[role]?.preserve = value } }))
                         .accessibilityIdentifier("uma.threados.v2.leader.preserve")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
+                    Spacer(minLength: 0)
                     selectionFields(role: role, selection: setting.selection)
                 }
-            }
-            if role == .leader && !setting.preserve {
-                selectionFields(role: role, selection: setting.selection)
-            }
             }
         }
         .accessibilityIdentifier("uma.threados.v2.role.\(role.rawValue).card")
@@ -547,15 +619,18 @@ public struct ThreadOSSettingsView: View {
             .labelsHidden().frame(width: 118)
             .accessibilityLabel(title("Model for \(role.title)", "\(role.title) 的模型"))
             .accessibilityIdentifier("uma.threados.v2.role.\(role.rawValue).model")
+            .background(ThreadOSSchemeBGeometryReporter(identifier: "role.\(role.rawValue).model", probe: layoutProbe))
         Picker("", selection: selectionBinding(role, \.effort)) { ForEach(FactoriumV2SettingsDraft.availableEfforts(model: selection.model, leader: role == .leader), id: \.self) { effort in Text(effortLabel(effort)).tag(effort) } }
             .labelsHidden().frame(width: 88)
             .accessibilityLabel(title("Thinking for \(role.title)", "\(role.title) 的推理"))
             .accessibilityIdentifier("uma.threados.v2.role.\(role.rawValue).effort")
+            .background(ThreadOSSchemeBGeometryReporter(identifier: "role.\(role.rawValue).effort", probe: layoutProbe))
         Picker("", selection: selectionBinding(role, \.speed)) { Text(title("Standard", "标准")).tag("standard"); Text(title("Fast", "快速")).tag("fast") }
             .labelsHidden().frame(width: 150)
             .pickerStyle(.segmented)
             .accessibilityLabel(title("Speed for \(role.title)", "\(role.title) 的速度"))
             .accessibilityIdentifier("uma.threados.v2.role.\(role.rawValue).speed")
+            .background(ThreadOSSchemeBGeometryReporter(identifier: "role.\(role.rawValue).speed", probe: layoutProbe))
     }
     @ViewBuilder private func workerSlots(role: FactoriumV2Role) -> some View {
         DisclosureGroup(isExpanded: workerExpansionBinding(role)) {
@@ -655,7 +730,11 @@ public struct ThreadOSSettingsView: View {
         Binding(get: { expandedWorkerGroups.contains(role) }, set: { isExpanded in
             if isExpanded { expandedWorkerGroups.insert(role) }
             else { expandedWorkerGroups.remove(role) }
+            ThreadOSSettingsPreferences.saveFactoriumV2ExpandedGroups(expandedWorkerGroups, project: factoriumV2.selectedProject, to: preferences)
         })
+    }
+    private func restoreWorkerExpansion() {
+        expandedWorkerGroups = ThreadOSSettingsPreferences.factoriumV2ExpandedGroups(project: factoriumV2.selectedProject, from: preferences) ?? defaultExpandedWorkerGroups
     }
     private func roleDisplayName(_ role: FactoriumV2Role) -> String {
         role == .repair ? title("Repair", "修复 Repair") : role.title

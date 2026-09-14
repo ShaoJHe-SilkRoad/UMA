@@ -47,7 +47,7 @@ struct ThreadOSSchemeBCard<Content: View>: View {
         content
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 176, alignment: .topLeading)
             .background(.background, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(.quaternary, lineWidth: 1))
             .overlay {
