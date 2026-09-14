@@ -150,6 +150,23 @@ struct BalancedWindowPolicyTests {
         #expect(!MainWindowTitlebarDoubleClickPolicy.shouldHandle(clickCount: 2, isFullScreen: true, point: NSPoint(x: 400, y: 730), contentLayoutRect: NSRect(x: 0, y: 0, width: 1_040, height: 700), excludedControlFrames: [trafficLight]))
     }
 
+    @Test("Titlebar zoom recognizes AppKit's half-point centered-frame rounding")
+    func titlebarZoomRoundTripsOddUsableFrame() {
+        let oddVisible = NSRect(x: 0, y: 0, width: 1_470, height: 923)
+        let recommended = MainWindowFramePolicy.initialFrame(
+            visibleFrames: [oddVisible],
+            outerSize: MainWindowFramePolicy.titlebarRecommendedOuterSize
+        )
+        #expect(recommended == NSRect(x: 215, y: 80.5, width: 1_040, height: 762))
+
+        let appKitRounded = NSRect(x: 215, y: 80, width: 1_040, height: 762)
+        #expect(MainWindowFramePolicy.titlebarToggleFrame(currentFrame: appKitRounded, visibleFrame: oddVisible) == oddVisible)
+        #expect(MainWindowFramePolicy.titlebarToggleFrame(currentFrame: oddVisible, visibleFrame: oddVisible) == recommended)
+
+        let nearbyButDifferent = NSRect(x: 215, y: 79.49, width: 1_040, height: 762)
+        #expect(MainWindowFramePolicy.titlebarToggleFrame(currentFrame: nearbyButDifferent, visibleFrame: oddVisible) == recommended)
+    }
+
     @Test("Actual main window consumes titlebar-background double-click once and delegates exclusions")
     @MainActor func actualTitlebarEventRoute() throws {
         let window = MainWindow(contentRect: NSRect(x: 100, y: 100, width: 1_040, height: 760), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)

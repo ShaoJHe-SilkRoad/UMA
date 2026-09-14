@@ -28,7 +28,19 @@ enum MainWindowFramePolicy {
 
     static func titlebarToggleFrame(currentFrame: NSRect, visibleFrame: NSRect) -> NSRect {
         let recommended = initialFrame(visibleFrames: [visibleFrame], outerSize: titlebarRecommendedOuterSize)
-        return currentFrame == recommended ? visibleFrame : recommended
+        return isAppKitRoundedRecommendedFrame(currentFrame, recommended: recommended) ? visibleFrame : recommended
+    }
+
+    /// AppKit may round a half-point centered origin to the nearest rendered
+    /// window coordinate. Treat only that bounded representation difference as
+    /// the recommended frame, so the next titlebar double-click can fill the
+    /// usable screen rather than repeating the recommendation.
+    private static func isAppKitRoundedRecommendedFrame(_ frame: NSRect, recommended: NSRect) -> Bool {
+        let roundingTolerance: CGFloat = 0.5
+        return abs(frame.origin.x - recommended.origin.x) <= roundingTolerance
+            && abs(frame.origin.y - recommended.origin.y) <= roundingTolerance
+            && abs(frame.size.width - recommended.size.width) <= roundingTolerance
+            && abs(frame.size.height - recommended.size.height) <= roundingTolerance
     }
 
     /// Returns nil when the restored frame is already a valid user choice.
