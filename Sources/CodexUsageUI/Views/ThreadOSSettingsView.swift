@@ -655,9 +655,9 @@ public struct ThreadOSSettingsView: View {
     private var workerColumnHeadings: some View {
         HStack(spacing: 8) {
             Text(title("Slot", "槽位")).frame(width: 28, alignment: .leading)
-            Text(title("Enabled", "启用")).frame(width: 32, alignment: .leading)
-            Text(title("Mode", "模式")).frame(width: 92, alignment: .leading)
-            Text(title("Model · Thinking", "模型 · 推理")).frame(minWidth: 180, alignment: .leading)
+            Text(title("Enabled", "启用")).frame(width: 54, alignment: .leading)
+            Text(title("Mode", "模式")).frame(width: 128, alignment: .leading)
+            Text(title("Model · Thinking", "模型 · 推理")).frame(minWidth: 200, alignment: .leading)
             Spacer(minLength: 0)
         }
         .font(.caption2).foregroundStyle(.secondary).accessibilityHidden(true)
@@ -668,19 +668,19 @@ public struct ThreadOSSettingsView: View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
                 Text("\(index + 1)").frame(width: 28, alignment: .leading)
-                Toggle("", isOn: slotEnabledBinding(role, index)).labelsHidden().frame(width: 32)
+                Toggle("", isOn: slotEnabledBinding(role, index)).labelsHidden().frame(width: 54)
                     .accessibilityLabel(title("\(workerName) enabled", "\(workerName) 已启用"))
                     .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).enabled")
                 Picker("", selection: slotInheritanceBinding(role, index)) {
                     Text(title("Inherit", "继承")).tag(true)
                     Text(title("Custom", "自定义")).tag(false)
                 }
-                .labelsHidden().pickerStyle(.segmented).frame(width: 92).disabled(!slot.enabled)
+                .labelsHidden().pickerStyle(.segmented).frame(width: 128).disabled(!slot.enabled)
                 .accessibilityLabel(title("\(workerName) configuration", "\(workerName) 配置"))
                 .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).inherit")
                 if slot.inherits {
                     Text(title("Inherited: \(selectionSummary(resolved))", "继承：\(selectionSummary(resolved))"))
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1).frame(minWidth: 180, alignment: .leading)
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1).frame(minWidth: 200, alignment: .leading)
                 } else {
                     slotSelectionFields(role: role, index: index, selection: slot.selection).disabled(!slot.enabled)
                 }
@@ -700,11 +700,11 @@ public struct ThreadOSSettingsView: View {
     @ViewBuilder private func slotSelectionFields(role: FactoriumV2Role, index: Int, selection: FactoriumV2Selection) -> some View {
         let workerName = title("\(roleDisplayName(role)) worker \(index + 1)", "\(roleDisplayName(role)) 工作者 \(index + 1)")
         Picker("", selection: slotSelectionBinding(role, index, \.model)) { ForEach(FactoriumV2SettingsDraft.availableModels(), id: \.self) { model in Text(model == "gpt-6-astra" ? "Astra" : "Terra").tag(model) } }
-            .labelsHidden().frame(width: 104)
+            .labelsHidden().frame(width: 110)
             .accessibilityLabel(title("Model for \(workerName)", "\(workerName) 的模型"))
             .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).model")
         Picker("", selection: slotSelectionBinding(role, index, \.effort)) { ForEach(FactoriumV2SettingsDraft.availableEfforts(model: selection.model, leader: false), id: \.self) { effort in Text(effortLabel(effort)).tag(effort) } }
-            .labelsHidden().frame(width: 76)
+            .labelsHidden().frame(width: 90)
             .accessibilityLabel(title("Thinking for \(workerName)", "\(workerName) 的推理"))
             .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).effort")
     }
@@ -735,7 +735,7 @@ public struct ThreadOSSettingsView: View {
     private func roleSubtitle(_ role: FactoriumV2Role) -> String? {
         switch role {
         case .qa: title("Quality synthesis", "质量综合")
-        case .repair: title("Fixes issues found during review", "处理检查发现的问题")
+        case .repair: title("Review fixes", "审查修复")
         case .reviewer: title("Code inspection", "代码审查")
         default: nil
         }
