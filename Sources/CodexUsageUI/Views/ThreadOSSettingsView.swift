@@ -398,9 +398,11 @@ public struct ThreadOSSettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityIdentifier("uma.threados.v2.footer-status")
                 .background(ThreadOSSchemeBGeometryReporter(identifier: "footer.status", probe: layoutProbe))
+            Button(title("New request", "新建请求"), action: factoriumV2.beginNewComposition)
+                .accessibilityIdentifier("uma.threados.v2.new-request")
             Button(title("Generate and Copy for Leader", "生成并复制给 Leader"), action: copyFactoriumV2Request)
                 .buttonStyle(.borderedProminent)
-                .disabled(!factoriumV2.draft.isLocallyValid)
+                .disabled(!factoriumV2.draft.isLocallyValid || factoriumV2.requiresStandardConversion || (factoriumV2.includesProjectStandardReset && !factoriumV2.canIncludeProjectStandardReset))
                 .accessibilityIdentifier("uma.threados.v2.generate-copy")
                 .frame(minHeight: 32)
         }
@@ -458,8 +460,33 @@ public struct ThreadOSSettingsView: View {
                 .accessibilityIdentifier("uma.threados.v2.convert")
             }
         } else if factoriumV2.isShowingV2Draft {
-            Text(title("Fast is a request preference; native effective state UNKNOWN.", "快速是请求偏好；原生有效状态未知。"))
-                .foregroundStyle(.secondary).font(.caption)
+        if factoriumV2.requiresStandardConversion {
+            settingsSection(title("Standard conversion required", "需要转换为标准速度")) {
+                Text(title("This retained Fast-bearing draft is not copied unchanged. Create a new Standard V2 revision before transfer.", "此保留的含快速速度草稿不会原样复制。请先创建新的标准速度 V2 修订版本。"))
+                    .foregroundStyle(.secondary)
+                Button(title("Create Standard V2 revision", "创建标准速度 V2 修订版本"), action: factoriumV2.convertSelectedFastDraftToStandard)
+                    .accessibilityIdentifier("uma.threados.v2.convert-standard")
+            }
+        }
+        Text(title("New outgoing requests use Standard. Native effective state remains UNKNOWN.", "新的传出请求使用标准速度。原生有效状态仍未知。"))
+            .foregroundStyle(.secondary).font(.caption)
+        settingsSection(title("Project Standard reset", "项目标准速度恢复")) {
+            TextField(title("Receiving Leader binding", "接收 Leader 绑定"), text: Binding(
+                get: { factoriumV2.leaderRecipientInput },
+                set: factoriumV2.setLeaderRecipient
+            ))
+            .accessibilityIdentifier("uma.threados.v2.reset.recipient")
+            Text(title("This is a locally requested project binding, not runtime authentication or authorization.", "这是本地请求的项目绑定，不是运行时认证或授权。"))
+                .font(.caption).foregroundStyle(.secondary)
+            Toggle(title("Reset to Standard in this request", "恢复标准速度（本次请求）"), isOn: Binding(
+                get: { factoriumV2.includesProjectStandardReset },
+                set: factoriumV2.setProjectStandardResetIncluded
+            ))
+            .disabled(!factoriumV2.includesProjectStandardReset && !factoriumV2.canIncludeProjectStandardReset)
+            .accessibilityIdentifier("uma.threados.v2.reset.standard")
+            Text(title("Off by default. It adds a separate, bounded Leader instruction beside the unchanged TOSCFG/2 line; it does not reset any host setting.", "默认关闭。它在未更改的 TOSCFG/2 行旁添加受限的 Leader 指令；不会重置任何主机设置。"))
+                .font(.caption).foregroundStyle(.secondary)
+        }
                 .accessibilityIdentifier("uma.threados.v2.native-speed-warning")
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 8, alignment: .top)],
@@ -625,11 +652,11 @@ public struct ThreadOSSettingsView: View {
             .accessibilityLabel(title("Thinking for \(role.title)", "\(role.title) 的推理"))
             .accessibilityIdentifier("uma.threados.v2.role.\(role.rawValue).effort")
             .background(ThreadOSSchemeBGeometryReporter(identifier: "role.\(role.rawValue).effort", probe: layoutProbe))
-        Picker("", selection: selectionBinding(role, \.speed)) { Text(title("Standard", "标准")).tag("standard"); Text(title("Fast", "快速")).tag("fast") }
-            .labelsHidden().frame(width: 150)
-            .pickerStyle(.segmented)
+        Text(title("Standard request", "标准请求"))
+            .frame(width: 150, alignment: .leading)
+            .foregroundStyle(.secondary)
             .accessibilityLabel(title("Speed for \(role.title)", "\(role.title) 的速度"))
-            .accessibilityIdentifier("uma.threados.v2.role.\(role.rawValue).speed")
+            .accessibilityIdentifier("uma.threados.v2.role.\(role.rawValue).speed.standard")
             .background(ThreadOSSchemeBGeometryReporter(identifier: "role.\(role.rawValue).speed", probe: layoutProbe))
     }
     @ViewBuilder private func workerSlots(role: FactoriumV2Role) -> some View {
@@ -709,11 +736,11 @@ public struct ThreadOSSettingsView: View {
             .labelsHidden().frame(width: 88)
             .accessibilityLabel(title("Thinking for \(workerName)", "\(workerName) 的推理"))
             .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).effort")
-        Picker("", selection: slotSelectionBinding(role, index, \.speed)) { Text(title("Standard", "标准")).tag("standard"); Text(title("Fast", "快速")).tag("fast") }
-            .labelsHidden().frame(width: 150)
-            .pickerStyle(.segmented)
+        Text(title("Standard request", "标准请求"))
+            .frame(width: 150, alignment: .leading)
+            .foregroundStyle(.secondary)
             .accessibilityLabel(title("Speed for \(workerName)", "\(workerName) 的速度"))
-            .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).speed")
+            .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).speed.standard")
     }
     private func workerSummary(for role: FactoriumV2Role) -> String {
         let slots = factoriumV2.draft.workers(for: role)
@@ -781,7 +808,7 @@ public struct ThreadOSSettingsView: View {
     }
     private func copyFactoriumV2Request() {
         guard let request = try? factoriumV2.generatedRequest() else { return }
-        factoriumV2.reportCopy(success: SystemThreadOSSettingsClipboard().write(request), language: language)
+        factoriumV2.reportCopy(request, success: SystemThreadOSSettingsClipboard().write(request.text), language: language)
     }
     private func effortLabel(_ effort: String) -> String {
         guard language == .simplifiedChinese else { return effort }

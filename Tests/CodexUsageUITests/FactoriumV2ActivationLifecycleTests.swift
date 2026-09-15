@@ -39,11 +39,14 @@ struct FactoriumV2ActivationLifecycleTests {
         form.reportCopy(success: true, language: .english)
         form.edit { $0.roles[.coder]?.selection.speed = "fast" }
         #expect(form.draft.revision == 2)
-        #expect(try form.generatedRequest() == fast)
+        #expect(form.requiresStandardConversion)
+        #expect(throws: FactoriumV2SettingsError.legacyFastConversionRequired) { try form.generatedRequest() }
         #expect(form.copiedRevision == nil && form.receipt == nil && form.rawAcknowledgement.isEmpty)
-        form.edit { $0.roles[.coder]?.selection.speed = "standard" }
+        form.convertSelectedFastDraftToStandard()
         #expect(form.draft.revision == 3)
-        #expect(try form.generatedRequest() == standardAgain)
+        #expect(!form.requiresStandardConversion)
+        #expect(try form.draft.canonicalRequest().contains("\"fast\"") == false)
+        #expect(try ThreadOSSettingsPreferences.loadFactoriumV2LegacySnapshot(project: standardDraft.project, from: preferences)?.canonicalRequest() == fast)
     }
 
     @Test @MainActor func matchingPendingReceiptIsInvalidatedByEditAndCannotBeReused() throws {

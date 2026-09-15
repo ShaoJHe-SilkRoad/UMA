@@ -1,4 +1,5 @@
 import Combine
+import CryptoKit
 import Foundation
 
 public enum FactoriumV2Role: String, CaseIterable, Codable, Sendable {
@@ -56,6 +57,17 @@ public struct FactoriumV2WorkerSlot: Codable, Equatable, Sendable {
 public enum FactoriumV2SettingsError: Error, Equatable {
     case invalidProject, invalidID, invalidRevision, invalidRole, invalidWorkerSlots, invalidSelection
     case legacyWorkerConfirmationRequired
+    case invalidLeaderRecipient, legacyFastConversionRequired
+}
+
+/// A copied local artifact. `artifactSHA256` identifies the completed bytes and is deliberately not embedded in them.
+public struct FactoriumV2GeneratedRequest: Equatable, Sendable {
+    public let settingsLine: String
+    public let text: String
+    public let intentSHA256: String?
+    public let artifactSHA256: String
+
+    public var includesProjectStandardReset: Bool { intentSHA256 != nil }
 }
 
 /// Local V2 request data only. It is not a native role selection or task control state.
@@ -92,9 +104,9 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
     public static let defaultRoles: [FactoriumV2Role: FactoriumV2RoleSetting] = [
         .leader: .init(preserve: true, selection: .init(model: "gpt-6-astra", effort: "high", speed: "standard")),
         .qa: .init(selection: .init(model: "gpt-6-astra", effort: "medium", speed: "standard")),
-        .coder: .init(selection: .init(model: "gpt-5.6-terra", effort: "medium", speed: "fast")),
-        .repair: .init(selection: .init(model: "gpt-5.6-terra", effort: "medium", speed: "fast")),
-        .reviewer: .init(selection: .init(model: "gpt-5.6-terra", effort: "low", speed: "fast")),
+        .coder: .init(selection: .init(model: "gpt-5.6-terra", effort: "medium", speed: "standard")),
+        .repair: .init(selection: .init(model: "gpt-5.6-terra", effort: "medium", speed: "standard")),
+        .reviewer: .init(selection: .init(model: "gpt-5.6-terra", effort: "low", speed: "standard")),
     ]
 
     public var isValidProject: Bool { ThreadOSSettingsDraft.isToken(project) }
@@ -161,10 +173,10 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
             return try ThreadOSSettingsCodec.resolvedSelection(choice, role: role, catalog: catalog)
         }
         let qa = try resolved(.qa), foreman = try resolved(.foreman), codingWorker = try resolved(.codingWorker), reviewer = try resolved(.reviewer)
-        draft.setSelection(.init(model: qa.model, effort: qa.reasoningEffort, speed: speed(for: qa.model)), for: .qa)
-        draft.setSelection(.init(model: foreman.model, effort: foreman.reasoningEffort, speed: speed(for: foreman.model)), for: .coder)
-        draft.setSelection(.init(model: reviewer.model, effort: reviewer.reasoningEffort, speed: speed(for: reviewer.model)), for: .reviewer)
-        draft.coderWorkers = (0..<3).map { index in .init(enabled: index < legacy.codingWorkers, inherits: false, selection: .init(model: codingWorker.model, effort: codingWorker.reasoningEffort, speed: speed(for: codingWorker.model)), hasCustomSelection: true) }
+        draft.setSelection(.init(model: qa.model, effort: qa.reasoningEffort, speed: "standard"), for: .qa)
+        draft.setSelection(.init(model: foreman.model, effort: foreman.reasoningEffort, speed: "standard"), for: .coder)
+        draft.setSelection(.init(model: reviewer.model, effort: reviewer.reasoningEffort, speed: "standard"), for: .reviewer)
+        draft.coderWorkers = (0..<3).map { index in .init(enabled: index < legacy.codingWorkers, inherits: false, selection: .init(model: codingWorker.model, effort: codingWorker.reasoningEffort, speed: "standard"), hasCustomSelection: true) }
         draft.reviewerWorkers = (0..<3).map { index in .init(enabled: index < legacy.reviewWorkers, inherits: true, selection: draft.roles[.reviewer]!.selection) }
         return draft
     }
@@ -206,8 +218,6 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
         guard let values = catalog?.models[model]?.reasoningEfforts else { return [] }
         return model == "gpt-6-astra" && !leader ? values.filter(["low", "medium", "high"].contains) : values
     }
-
-    private static func speed(for model: String) -> String { model == "gpt-5.6-terra" ? "fast" : "standard" }
 
     private struct Request: Encodable {
         let apply: String
@@ -271,8 +281,12 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
     @Published public var rawAcknowledgement = ""
     @Published public private(set) var message = ""
     @Published public private(set) var copiedRevision: Int?
+    @Published public private(set) var copiedArtifactSHA256: String?
     @Published public private(set) var receipt: FactoriumV2ReceiptProjection?
     @Published public private(set) var receiptInputIsInvalid = false
+    @Published public private(set) var leaderRecipient = ""
+    @Published public private(set) var leaderRecipientInput = ""
+    @Published public private(set) var includesProjectStandardReset = false
     private let preferences: ApplicationPreferences
 
     public init(preferences: ApplicationPreferences = .production) {
@@ -295,6 +309,9 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
     public func select(project: String) {
         selectedProject = project
         draft = ThreadOSSettingsPreferences.loadFactoriumV2(project: project, from: preferences) ?? .init()
+        leaderRecipient = ""
+        leaderRecipientInput = ""
+        includesProjectStandardReset = false
         invalidateTransferState()
         ThreadOSSettingsPreferences.saveFactoriumV2SelectedProject(project.isEmpty ? nil : project, to: preferences)
     }
@@ -308,6 +325,9 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
         }
         selectedProject = project
         draft = ThreadOSSettingsPreferences.loadFactoriumV2(project: project, from: preferences) ?? .init(project: project)
+        leaderRecipient = ""
+        leaderRecipientInput = ""
+        includesProjectStandardReset = false
         newProject = ""
         saveCurrent()
         ThreadOSSettingsPreferences.saveFactoriumV2SelectedProject(project, to: preferences)
@@ -332,6 +352,9 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
         let converted = try FactoriumV2SettingsDraft.converted(from: legacy, confirmedFourWorkerConversion: confirmedFourWorkerConversion)
         draft = converted
         selectedProject = converted.project
+        leaderRecipient = ""
+        leaderRecipientInput = ""
+        includesProjectStandardReset = false
         saveCurrent()
         ThreadOSSettingsPreferences.saveFactoriumV2SelectedProject(converted.project, to: preferences)
         invalidateTransferState()
@@ -360,16 +383,91 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
         }
     }
 
-    public func generatedRequest() throws -> String {
-        guard draft.isValidProject else { throw FactoriumV2SettingsError.invalidProject }
-        return try draft.canonicalRequest()
+    public var canIncludeProjectStandardReset: Bool { isValidLeaderRecipient(leaderRecipientInput) }
+
+    public var requiresStandardConversion: Bool {
+        draft.roles.values.contains { !$0.preserve && $0.selection.speed == "fast" }
+            || (draft.coderWorkers + draft.reviewerWorkers).contains { !$0.inherits && $0.selection.speed == "fast" }
     }
 
-    public func reportCopy(success: Bool, language: AppLanguage) {
+    public func setLeaderRecipient(_ recipient: String) {
+        let trimmed = recipient.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != leaderRecipientInput, draft.revision < 1_000_000 else { return }
+        leaderRecipientInput = trimmed
+        leaderRecipient = isValidLeaderRecipient(trimmed) ? trimmed : ""
+        includesProjectStandardReset = false
+        advanceCompositionRevision()
+    }
+
+    public func setProjectStandardResetIncluded(_ included: Bool) {
+        guard included != includesProjectStandardReset, !included || canIncludeProjectStandardReset, draft.revision < 1_000_000 else { return }
+        includesProjectStandardReset = included
+        advanceCompositionRevision()
+    }
+
+    public func beginNewComposition() {
+        guard draft.revision < 1_000_000 else { return }
+        includesProjectStandardReset = false
+        leaderRecipient = ""
+        leaderRecipientInput = ""
+        advanceCompositionRevision()
+    }
+
+    public func generatedRequest() throws -> FactoriumV2GeneratedRequest {
+        guard draft.isValidProject else { throw FactoriumV2SettingsError.invalidProject }
+        guard !requiresStandardConversion else { throw FactoriumV2SettingsError.legacyFastConversionRequired }
+        let settingsLine = try draft.canonicalRequest()
+        guard includesProjectStandardReset else {
+            return .init(settingsLine: settingsLine, text: settingsLine, intentSHA256: nil, artifactSHA256: sha256(settingsLine))
+        }
+        guard canIncludeProjectStandardReset else { throw FactoriumV2SettingsError.invalidLeaderRecipient }
+        let intentInput = ["TOSUMA-PROJECT-STANDARD-RESET/1", settingsLine, draft.project, leaderRecipientInput, draft.id, String(draft.revision)].joined(separator: "\n")
+        let intentSHA256 = sha256(intentInput)
+        let resetBlock = [
+            "--- TOSUMA PROJECT STANDARD RESET v1 ---",
+            "Project: \(draft.project)",
+            "Recipient: \(leaderRecipientInput)",
+            "Request: \(draft.id) rev \(draft.revision)",
+            "Intent SHA-256: \(intentSHA256)",
+            "Scope: one-shot project and receiving-Leader-group attempt only.",
+            "Fast-off: attempt only after the receiving Leader resolves current functional members; never infer scope from names, cwd, or historical IDs.",
+            "Membership: recheck current target membership before an attempt; mismatch returns SCOPE_UNRESOLVED.",
+            "Configuration: reject inherited, global, or shared configuration; no fallback.",
+            "Override: after manual submission, prefer a proven targeted setter; otherwise only a verified isolated project override after load-path, impact, and inherited-Fast checks; global-only remains unchanged and unsupported.",
+            "Project default: report unchanged, not-attempted, or cleared-runtime-unverified with evidence separately from native acceptance and effective observation.",
+            "Prohibitions: no ~/.codex/config.toml, shared/parent/system/managed/profile, model, reasoning, trust, permission, account, billing, unrelated change, /fast prompt, or denied-UI retry.",
+            "Boundary: no global fallback; no running-turn interruption; no model or reasoning change; no generated /fast command.",
+            "Disposition: if no proven target-isolated primitive exists, return UNSUPPORTED_TARGETED_RESET without host mutation.",
+            "Replay: completed or denied request identity replays its recorded result; historical records are not authority.",
+            "Counts and timing: separately report requested, resolved, attempted, accepted, observed, deferred, unresolved, and scoped counts with verification time; effective outcome stays unknown without native readback.",
+            "Report: separately record requested, resolved, accepted, observed, deferred, scoped counts, verification time, and unknown outcome; historical completion or denial is not current proof.",
+            "--- END TOSUMA PROJECT STANDARD RESET v1 ---",
+        ].joined(separator: "\n")
+        let text = settingsLine + "\n\n" + resetBlock
+        return .init(settingsLine: settingsLine, text: text, intentSHA256: intentSHA256, artifactSHA256: sha256(text))
+    }
+
+    public func reportCopy(_ generated: FactoriumV2GeneratedRequest, success: Bool, language: AppLanguage) {
+        guard generated == (try? generatedRequest()) else {
+            copiedRevision = nil
+            copiedArtifactSHA256 = nil
+            message = localized(language, "A stale generated request was not recorded as copied.", "过期的生成请求未被记录为已复制。")
+            return
+        }
         copiedRevision = success ? draft.revision : nil
+        copiedArtifactSHA256 = success ? generated.artifactSHA256 : nil
         message = success
             ? localized(language, "Generated and copied a local request for manual Leader transfer. Native selection remains unconfirmed.", "已生成并复制本地请求，供手动粘贴给 Leader。原生选择仍未确认。")
             : localized(language, "Request was generated, but the local clipboard could not be written.", "请求已生成，但无法写入本地剪贴板。")
+    }
+
+    public func reportCopy(success: Bool, language: AppLanguage) {
+        guard let generated = try? generatedRequest() else {
+            copiedRevision = nil
+            copiedArtifactSHA256 = nil
+            return
+        }
+        reportCopy(generated, success: success, language: language)
     }
 
     public func receiveReceipt(language: AppLanguage) {
@@ -393,6 +491,25 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
         message = localized(language, "V2 conversion was not created. The V1 draft remains unchanged.", "未创建 V2 转换。V1 草稿保持不变。")
     }
 
+    public func convertSelectedFastDraftToStandard() {
+        guard requiresStandardConversion, draft.revision < 1_000_000 else { return }
+        let original = draft
+        var converted = draft
+        for role in FactoriumV2Role.allCases where !(converted.roles[role]?.preserve ?? false) {
+            converted.roles[role]?.selection.speed = "standard"
+        }
+        for role in [FactoriumV2Role.coder, .reviewer] {
+            var slots = converted.workers(for: role)
+            for index in slots.indices where !slots[index].inherits { slots[index].selection.speed = "standard" }
+            converted.setWorkers(slots, for: role)
+        }
+        converted.revision += 1
+        ThreadOSSettingsPreferences.saveFactoriumV2LegacySnapshot(original, to: preferences)
+        draft = converted
+        saveCurrent()
+        invalidateTransferState()
+    }
+
     private func saveCurrent() {
         guard draft.isValidProject else { return }
         ThreadOSSettingsPreferences.saveFactoriumV2(draft, to: preferences)
@@ -400,10 +517,27 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
 
     private func invalidateTransferState() {
         copiedRevision = nil
+        copiedArtifactSHA256 = nil
         receipt = nil
         receiptInputIsInvalid = false
         rawAcknowledgement = ""
         message = ""
+    }
+
+    private func advanceCompositionRevision() {
+        draft.revision += 1
+        saveCurrent()
+        invalidateTransferState()
+    }
+
+    private func sha256(_ value: String) -> String {
+        SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func isValidLeaderRecipient(_ value: String) -> Bool {
+        if ThreadOSSettingsDraft.isToken(value) { return true }
+        guard let uuid = UUID(uuidString: value) else { return false }
+        return uuid.uuidString.lowercased() == value.lowercased()
     }
 
     private func localized(_ language: AppLanguage, _ english: String, _ chinese: String) -> String {

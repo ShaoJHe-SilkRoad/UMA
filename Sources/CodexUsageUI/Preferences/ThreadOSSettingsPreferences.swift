@@ -6,6 +6,7 @@ import Foundation
     private static let draftsKey = ApplicationPreferenceKey<Data?>(optionalData: "threados.settings.drafts.v2")
     private static let legacyDraftKey = ApplicationPreferenceKey<Data?>(optionalData: "threados.settings.draft.v1")
     private static let factoriumV2DraftsKey = ApplicationPreferenceKey<Data?>(optionalData: "threados.factorium.v2.drafts.v1")
+    private static let factoriumV2LegacySnapshotsKey = ApplicationPreferenceKey<Data?>(optionalData: "threados.factorium.v2.legacy-snapshots.v1")
     private static let factoriumV2SelectedProjectKey = ApplicationPreferenceKey<String?>(optional: "threados.factorium.v2.selected-project.v1")
     private static let factoriumV2ExpandedGroupsKey = ApplicationPreferenceKey<Data?>(optionalData: "threados.factorium.v2.expanded-groups.v1")
 
@@ -64,6 +65,15 @@ import Foundation
         values[draft.project] = draft
         preferences.set(try? JSONEncoder().encode(values), for: factoriumV2DraftsKey)
     }
+    /// Retains the selected Fast-bearing V2 source before an explicit Standard conversion.
+    public static func loadFactoriumV2LegacySnapshot(project: String, from preferences: ApplicationPreferences) -> FactoriumV2SettingsDraft? {
+        factoriumV2LegacySnapshots(from: preferences)[project]
+    }
+    public static func saveFactoriumV2LegacySnapshot(_ draft: FactoriumV2SettingsDraft, to preferences: ApplicationPreferences) {
+        guard draft.isLocallyValid else { return }
+        var values = factoriumV2LegacySnapshots(from: preferences); values[draft.project] = draft
+        preferences.set(try? JSONEncoder().encode(values), for: factoriumV2LegacySnapshotsKey)
+    }
     private static func drafts(from preferences: ApplicationPreferences) -> [String: ThreadOSSettingsDraft] {
         guard let data = preferences.value(for: draftsKey), let values = try? JSONDecoder().decode([String: ThreadOSSettingsDraft].self, from: data) else { return [:] }
         // A corrupted or incomplete record must never become a selectable
@@ -73,6 +83,10 @@ import Foundation
 
     private static func factoriumV2Drafts(from preferences: ApplicationPreferences) -> [String: FactoriumV2SettingsDraft] {
         guard let data = preferences.value(for: factoriumV2DraftsKey), let values = try? JSONDecoder().decode([String: FactoriumV2SettingsDraft].self, from: data) else { return [:] }
+        return values.filter { $0.key == $0.value.project && $0.value.isLocallyValid }
+    }
+    private static func factoriumV2LegacySnapshots(from preferences: ApplicationPreferences) -> [String: FactoriumV2SettingsDraft] {
+        guard let data = preferences.value(for: factoriumV2LegacySnapshotsKey), let values = try? JSONDecoder().decode([String: FactoriumV2SettingsDraft].self, from: data) else { return [:] }
         return values.filter { $0.key == $0.value.project && $0.value.isLocallyValid }
     }
 }
