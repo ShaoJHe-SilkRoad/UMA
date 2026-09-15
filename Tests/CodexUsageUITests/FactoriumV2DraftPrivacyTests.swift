@@ -5,49 +5,29 @@ import Testing
 @Suite("Factorium V2 local draft privacy")
 @MainActor
 struct FactoriumV2DraftPrivacyTests {
-    @Test func standardResetArtifactIsBoundDeterministicAndClearedAcrossCompositions() throws {
+    @Test func outgoingArtifactIsOneCanonicalConfigurationLine() throws {
         let preferences = ApplicationPreferences.inMemory()
         let draft = FactoriumV2SettingsDraft(project: "RESET_ALPHA", id: "cfg-reset-alpha")
         #expect(FactoriumV2Role.allCases.allSatisfy { draft.roles[$0]?.selection.speed == "standard" })
         ThreadOSSettingsPreferences.saveFactoriumV2(draft, to: preferences)
         let form = FactoriumV2FormState(preferences: preferences)
 
-        #expect(!form.includesProjectStandardReset && !form.canIncludeProjectStandardReset)
-        form.setLeaderRecipient("01a07317-57f9-7283-8cb2-81357a899560")
-        form.setProjectStandardResetIncluded(true)
         let first = try form.generatedRequest()
         let second = try form.generatedRequest()
         #expect(first == second)
         #expect(first.settingsLine.hasPrefix("TOSCFG/2 "))
-        #expect(first.text.hasPrefix(first.settingsLine + "\n\n--- TOSUMA PROJECT STANDARD RESET v1 ---"))
-        #expect(first.text.contains("Recipient: 01a07317-57f9-7283-8cb2-81357a899560"))
-        #expect(first.text.contains("Disposition: if no proven target-isolated primitive exists, return UNSUPPORTED_TARGETED_RESET without host mutation."))
-        #expect(first.intentSHA256 != nil && first.artifactSHA256.count == 64)
+        #expect(first.text == first.settingsLine && first.artifactSHA256.count == 64)
 
         form.reportCopy(first, success: true, language: .english)
         #expect(form.copiedArtifactSHA256 == first.artifactSHA256)
-        form.setLeaderRecipient("LEADER_CHANGED")
-        #expect(!form.includesProjectStandardReset && form.copiedRevision == nil)
+        form.edit { $0.roles[.repair]?.selection.effort = "low" }
+        #expect(form.copiedRevision == nil)
         form.reportCopy(first, success: true, language: .english)
         #expect(form.copiedRevision == nil && form.message.contains("stale"))
-        form.setProjectStandardResetIncluded(true)
-        form.edit { $0.roles[.repair]?.selection.effort = "low" }
-        #expect(form.copiedRevision == nil && form.copiedArtifactSHA256 == nil)
-        form.select(project: "")
-        #expect(!form.includesProjectStandardReset && form.leaderRecipient.isEmpty)
+        #expect(form.copiedArtifactSHA256 == nil)
     }
 
-    @Test func partialNumericUUIDCanBeEditedButCannotEnableResetUntilComplete() {
-        let preferences = ApplicationPreferences.inMemory()
-        ThreadOSSettingsPreferences.saveFactoriumV2(.init(project: "UUID_ALPHA", id: "cfg-uuid-alpha"), to: preferences)
-        let form = FactoriumV2FormState(preferences: preferences)
-        form.setLeaderRecipient("01a0")
-        #expect(form.leaderRecipientInput == "01a0" && !form.canIncludeProjectStandardReset && form.leaderRecipient.isEmpty)
-        form.setLeaderRecipient("01a07317-57f9-7283-8cb2-81357a899560")
-        #expect(form.canIncludeProjectStandardReset && form.leaderRecipient == "01a07317-57f9-7283-8cb2-81357a899560")
-    }
-
-    @Test func newCompositionClearsResetAndRejectsSameLineForgedCopy() throws {
+    @Test func staleOrForgedSingleLineCopyIsRejected() throws {
         let preferences = ApplicationPreferences.inMemory()
         ThreadOSSettingsPreferences.saveFactoriumV2(.init(project: "COMPOSE_ALPHA", id: "cfg-compose-alpha"), to: preferences)
         let form = FactoriumV2FormState(preferences: preferences)
@@ -55,11 +35,10 @@ struct FactoriumV2DraftPrivacyTests {
         form.reportCopy(first, success: true, language: .english)
         form.reportCopy(first, success: true, language: .english)
         #expect(form.copiedArtifactSHA256 == first.artifactSHA256)
-        let forged = FactoriumV2GeneratedRequest(settingsLine: first.settingsLine, text: first.text + "\nforged", intentSHA256: first.intentSHA256, artifactSHA256: first.artifactSHA256)
+        let forged = FactoriumV2GeneratedRequest(settingsLine: first.settingsLine, text: first.text + "\nforged", artifactSHA256: first.artifactSHA256)
         form.reportCopy(forged, success: true, language: .english)
         #expect(form.copiedRevision == nil)
-        form.beginNewComposition()
-        #expect(!form.includesProjectStandardReset && form.leaderRecipientInput.isEmpty && form.draft.revision == 2)
+        #expect(form.draft.revision == 1)
     }
 
     @Test func generatedV2RequestUsesOnlyTheConfigurationAllowlistAndCopyStateIsLocal() throws {

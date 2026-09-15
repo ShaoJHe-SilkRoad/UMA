@@ -42,9 +42,10 @@ struct FactoriumV2ActivationLifecycleTests {
         #expect(form.requiresStandardConversion)
         #expect(throws: FactoriumV2SettingsError.legacyFastConversionRequired) { try form.generatedRequest() }
         #expect(form.copiedRevision == nil && form.receipt == nil && form.rawAcknowledgement.isEmpty)
-        form.convertSelectedFastDraftToStandard()
+        let generated = try form.generatedRequestForTransfer()
         #expect(form.draft.revision == 3)
         #expect(!form.requiresStandardConversion)
+        #expect(generated.text == generated.settingsLine)
         #expect(try form.draft.canonicalRequest().contains("\"fast\"") == false)
         #expect(try ThreadOSSettingsPreferences.loadFactoriumV2LegacySnapshot(project: standardDraft.project, from: preferences)?.canonicalRequest() == fast)
     }
@@ -83,6 +84,48 @@ struct FactoriumV2ActivationLifecycleTests {
         #expect(receiptBeforeEdit != nil && form.receipt == nil && form.receiptInputIsInvalid)
         #expect(form.draft == edited)
         #expect(form.roleStatus(language: .english).contains("Local draft"))
+    }
+
+    @Test @MainActor func transferArchivesDistinctFastDraftsWithoutOverwritingHistoryOrReplayingConversion() throws {
+        let preferences = ApplicationPreferences.inMemory()
+        var historical = FactoriumV2SettingsDraft(project: "ARCHIVE_ALPHA", id: "cfg-history")
+        historical.roles[.coder]?.selection.speed = "fast"
+        var current = FactoriumV2SettingsDraft(project: "ARCHIVE_ALPHA", id: "cfg-current")
+        current.roles[.repair]?.selection.speed = "fast"
+        let v1Key = ApplicationPreferenceKey<Data?>(optionalData: "threados.factorium.v2.legacy-snapshots.v1")
+        let v2Key = ApplicationPreferenceKey<Data?>(optionalData: "threados.factorium.v2.legacy-snapshots.v2")
+        preferences.set(try JSONEncoder().encode(["ARCHIVE_ALPHA": historical]), for: v1Key)
+        ThreadOSSettingsPreferences.saveFactoriumV2(current, to: preferences)
+
+        let form = FactoriumV2FormState(preferences: preferences)
+        let previewRevision = form.draft.revision
+        #expect(throws: FactoriumV2SettingsError.legacyFastConversionRequired) { try form.generatedRequest() }
+        #expect(form.draft == current && form.draft.revision == previewRevision)
+
+        let first = try form.generatedRequestForTransfer()
+        #expect(first.text == first.settingsLine && form.draft.revision == previewRevision + 1)
+        #expect(ThreadOSSettingsPreferences.loadFactoriumV2LegacySnapshots(project: "ARCHIVE_ALPHA", from: preferences) == [historical, current])
+
+        let persistedHistory = preferences.value(for: v2Key)
+        ThreadOSSettingsPreferences.saveFactoriumV2LegacySnapshot(current, to: preferences)
+        #expect(preferences.value(for: v2Key) == persistedHistory)
+        #expect(ThreadOSSettingsPreferences.loadFactoriumV2LegacySnapshots(project: "ARCHIVE_ALPHA", from: preferences) == [historical, current])
+
+        let repeatRequest = try form.generatedRequestForTransfer()
+        #expect(repeatRequest == first && form.draft.revision == previewRevision + 1)
+        #expect(ThreadOSSettingsPreferences.loadFactoriumV2LegacySnapshots(project: "ARCHIVE_ALPHA", from: preferences) == [historical, current])
+    }
+
+    @Test @MainActor func transferAtRevisionLimitDoesNotArchiveOrMutate() throws {
+        let preferences = ApplicationPreferences.inMemory()
+        var draft = FactoriumV2SettingsDraft(project: "LIMIT_ALPHA", id: "cfg-limit", revision: 1_000_000)
+        draft.roles[.coder]?.selection.speed = "fast"
+        ThreadOSSettingsPreferences.saveFactoriumV2(draft, to: preferences)
+        let form = FactoriumV2FormState(preferences: preferences)
+
+        #expect(throws: FactoriumV2SettingsError.invalidRevision) { try form.generatedRequestForTransfer() }
+        #expect(form.draft == draft)
+        #expect(ThreadOSSettingsPreferences.loadFactoriumV2LegacySnapshots(project: "LIMIT_ALPHA", from: preferences).isEmpty)
     }
 
     private func fixture() throws -> [String: Any] {

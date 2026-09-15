@@ -58,9 +58,8 @@ import Testing
             for role in workerRoles {
                 let model = try #require(initialFrames["role.\(role.rawValue).model"])
                 let effort = try #require(initialFrames["role.\(role.rawValue).effort"])
-                let speed = try #require(initialFrames["role.\(role.rawValue).speed"])
                 let card = try #require(initialFrames["role.\(role.rawValue).card"])
-                #expect(card.contains(model) && card.contains(effort) && card.contains(speed))
+                #expect(card.contains(model) && card.contains(effort))
             }
             for group in fixture.groups {
                 let panel = try #require(initialFrames["role.\(group.rawValue).workers"])
@@ -84,7 +83,7 @@ import Testing
             if fixture.identifier.contains("1040x760") {
                 #expect(cards.dropFirst().allSatisfy { abs($0.minY - cards[0].minY) < 1 })
                 #expect(cards.allSatisfy { $0.maxX <= viewport.maxX + 1 })
-                for control in ["model", "effort", "speed"] {
+                for control in ["model", "effort"] {
                     let frames = try workerRoles.map { role in
                         try #require(initialFrames["role.\(role.rawValue).\(control)"])
                     }
