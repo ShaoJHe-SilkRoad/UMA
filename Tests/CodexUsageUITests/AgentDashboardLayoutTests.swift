@@ -6,10 +6,11 @@ import Testing
 @MainActor
 @Suite("Codex detail dashboard layout", .serialized)
 struct AgentDashboardLayoutTests {
-    @Test("fixture hosts keep the two-ring dashboard inside each content size")
+    @Test("fixture hosts keep the compact quota dashboard inside each content size")
     func dashboardFitsFixtureContentSizes() throws {
         _ = NSApplication.shared
         for fixture in Fixture.all {
+            let probe = AgentDashboardLayoutProbe()
             let store = UsageStore.preview(
                 language: fixture.language,
                 presentationCards: fixture.presentationCards,
@@ -21,7 +22,7 @@ struct AgentDashboardLayoutTests {
                 refresh: {}, connectCodex: {}, disconnectCodex: {},
                 claudeControlState: { .consentRequired },
                 connectClaude: {}, claudeAccuracySync: {},
-                referenceDate: Date(timeIntervalSince1970: 1_800_000_000)
+                referenceDate: Date(timeIntervalSince1970: 1_800_000_000), layoutProbe: probe
             )
             let host = NSHostingView(rootView: view)
             let window = NSWindow(
@@ -36,6 +37,7 @@ struct AgentDashboardLayoutTests {
             settle(host)
             #expect(host.bounds.size == fixture.contentSize)
             #expect(host.fittingSize.width <= fixture.contentSize.width)
+            if fixture.identifier.contains("1040x762") { assertFirstScreen(probe) }
             capture(host: host, fixture: fixture)
         }
     }
@@ -50,18 +52,19 @@ struct AgentDashboardLayoutTests {
             accountDailyUsage: fixture.accountDailyUsage
         )
         let provider = try #require(store.productInventory.provider(.codex))
+        let probe = AgentDashboardLayoutProbe()
         let root = HSplitView {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Agents").font(.headline).padding(.horizontal, 10).padding(.top, 12)
                 AgentGlanceRow(provider: provider, style: .mainList, selected: true, language: .english)
                 Spacer()
             }
-            .frame(minWidth: 210, idealWidth: 240, maxWidth: 285)
-            .frame(width: 230)
+            .frame(minWidth: 190, idealWidth: 210, maxWidth: 285)
+            .frame(width: 210)
             AgentWorkspaceSurface(
                 store: store, providerID: .codex,
                 refresh: {}, connectCodex: {}, disconnectCodex: {},
-                claudeControlState: { .consentRequired }, connectClaude: {}, claudeAccuracySync: {}
+                claudeControlState: { .consentRequired }, connectClaude: {}, claudeAccuracySync: {}, layoutProbe: probe
             )
             .frame(minWidth: 500)
         }
@@ -77,6 +80,7 @@ struct AgentDashboardLayoutTests {
 
         settle(host)
         #expect(host.bounds.size == fixture.contentSize)
+        assertFirstScreen(probe)
         capture(host: host, fixture: fixture, suffix: "sidebar-aware")
     }
 
@@ -85,6 +89,18 @@ struct AgentDashboardLayoutTests {
             host.layoutSubtreeIfNeeded()
             RunLoop.main.run(until: Date().addingTimeInterval(0.08))
         }
+    }
+
+    private func assertFirstScreen(_ probe: AgentDashboardLayoutProbe) {
+        let viewport = try! #require(probe.frames["scroll.viewport"])
+        let quotas = ["quota.seven-day", "quota.five-hour"].map { try! #require(probe.frames[$0]) }
+        let metrics = ["metric.week", "metric.total", "metric.api-cost-seven-days"].map { try! #require(probe.frames[$0]) }
+        let trend = try! #require(probe.frames["trend"])
+        #expect(quotas.allSatisfy(viewport.contains))
+        #expect(metrics.allSatisfy(viewport.contains))
+        #expect(viewport.contains(trend))
+        #expect(quotas.allSatisfy { $0.minY < metrics[0].minY })
+        #expect(metrics.allSatisfy { $0.minY < trend.minY })
     }
 
     private func capture(host: NSView, fixture: Fixture, suffix: String = "") {
@@ -107,7 +123,7 @@ struct AgentDashboardLayoutTests {
         let accountDailyUsage: [AgentAccountUsageDay]
 
         static let all = [
-            Fixture(identifier: "fixture-agent-1040x760-content-en-light-healthy", contentSize: .init(width: 1_040, height: 760), language: .english, appearance: .aqua, presentationCards: [healthyCodexCard], accountDailyUsage: []),
+            Fixture(identifier: "fixture-agent-1040x762-content-en-light-healthy", contentSize: .init(width: 1_040, height: 762), language: .english, appearance: .aqua, presentationCards: [healthyCodexCard], accountDailyUsage: []),
             Fixture(identifier: "fixture-agent-1280x800-content-en-light-healthy-daily-account", contentSize: .init(width: 1_280, height: 800), language: .english, appearance: .aqua, presentationCards: [healthyCodexCard], accountDailyUsage: dailyAccountUsage),
             Fixture(identifier: "fixture-agent-760x552-content-zh-dark-unavailable", contentSize: .init(width: 760, height: 552), language: .simplifiedChinese, appearance: .darkAqua, presentationCards: [unavailableCodexCard], accountDailyUsage: []),
         ]

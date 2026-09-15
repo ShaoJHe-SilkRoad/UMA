@@ -96,6 +96,24 @@ enum AgentWorkspaceLayoutPolicy {
     }
 }
 
+@MainActor final class AgentDashboardLayoutProbe: ObservableObject {
+    @Published private(set) var frames: [String: CGRect] = [:]
+    init() {}
+    func record(_ frame: CGRect, for identifier: String) { if frame.width > 0 && frame.height > 0 { frames[identifier] = frame } }
+}
+
+private struct AgentDashboardGeometryReporter: View {
+    let identifier: String; let probe: AgentDashboardLayoutProbe?
+    var body: some View {
+        GeometryReader { geometry in
+            Color.clear
+                .onAppear { record(geometry.frame(in: .named("uma.agent.dashboard"))) }
+                .onChange(of: geometry.frame(in: .named("uma.agent.dashboard"))) { _, frame in record(frame) }
+        }.allowsHitTesting(false)
+    }
+    private func record(_ frame: CGRect) { probe?.record(frame, for: identifier) }
+}
+
 private struct AgentWorkspaceModuleSurface: ViewModifier {
     func body(content: Content) -> some View {
         content
@@ -498,6 +516,7 @@ public struct AgentWorkspaceSurface: View {
     private let connectClaude: () -> Void
     private let claudeAccuracySync: () -> Void
     private let referenceDate: Date?
+    private let layoutProbe: AgentDashboardLayoutProbe?
     @State private var showingClaudeConsent = false
 
     public init(
@@ -520,6 +539,19 @@ public struct AgentWorkspaceSurface: View {
         self.connectClaude = connectClaude
         self.claudeAccuracySync = claudeAccuracySync
         self.referenceDate = referenceDate
+        self.layoutProbe = nil
+    }
+
+    init(
+        store: UsageStore, providerID: ProviderProductID, refresh: @escaping () -> Void,
+        connectCodex: @escaping () -> Void, disconnectCodex: @escaping () -> Void,
+        claudeControlState: @escaping () -> ClaudeAgentControlState, connectClaude: @escaping () -> Void,
+        claudeAccuracySync: @escaping () -> Void, referenceDate: Date? = nil,
+        layoutProbe: AgentDashboardLayoutProbe?
+    ) {
+        self.store = store; self.providerID = providerID; self.refresh = refresh; self.connectCodex = connectCodex
+        self.disconnectCodex = disconnectCodex; self.claudeControlState = claudeControlState; self.connectClaude = connectClaude
+        self.claudeAccuracySync = claudeAccuracySync; self.referenceDate = referenceDate; self.layoutProbe = layoutProbe
     }
 
     public var body: some View {
@@ -535,10 +567,13 @@ public struct AgentWorkspaceSurface: View {
                 }
                 .padding(.horizontal, AgentWorkspaceLayoutPolicy.horizontalPadding)
                 .padding(.vertical, 18)
+                .background(AgentDashboardGeometryReporter(identifier: "scroll.document", probe: layoutProbe))
             }
+            .background(AgentDashboardGeometryReporter(identifier: "scroll.viewport", probe: layoutProbe))
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .accessibilityIdentifier("uma.agent.workspace.\(providerID.rawValue)")
+        .coordinateSpace(name: "uma.agent.dashboard")
         .alert(
             localized("Enable Claude Local Smart?", "启用 Claude 本地智能？"),
             isPresented: $showingClaudeConsent
@@ -579,20 +614,17 @@ public struct AgentWorkspaceSurface: View {
     private var codexDashboard: some View {
         VStack(alignment: .leading, spacing: 12) {
             ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 12) {
-                    quotaRingCard(kind: .sevenDay, fallbackTitle: localized("7D remaining", "7天剩余"))
-                    quotaRingCard(kind: .fiveHour, fallbackTitle: localized("5H remaining", "5小时剩余"))
-                    trendGapCard.frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 12) {
+                    quotaBarCard(kind: .sevenDay, fallbackTitle: localized("7D remaining", "7天剩余"))
+                    quotaBarCard(kind: .fiveHour, fallbackTitle: localized("5H remaining", "5小时剩余"))
                 }
                 VStack(spacing: 12) {
-                    HStack(spacing: 12) {
-                        quotaRingCard(kind: .sevenDay, fallbackTitle: localized("7D remaining", "7天剩余"))
-                        quotaRingCard(kind: .fiveHour, fallbackTitle: localized("5H remaining", "5小时剩余"))
-                    }
-                    trendGapCard
+                    quotaBarCard(kind: .sevenDay, fallbackTitle: localized("7D remaining", "7天剩余"))
+                    quotaBarCard(kind: .fiveHour, fallbackTitle: localized("5H remaining", "5小时剩余"))
                 }
             }
             metricRow
+            trendGapCard
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 12) {
                     activityDashboardCard.frame(maxWidth: .infinity, alignment: .leading)
@@ -602,6 +634,7 @@ public struct AgentWorkspaceSurface: View {
             }
         }
         .accessibilityIdentifier("uma.agent.codex.dashboard")
+        .background(AgentDashboardGeometryReporter(identifier: "dashboard", probe: layoutProbe))
     }
 
     private var codexHeaderActions: some View {
@@ -609,7 +642,11 @@ public struct AgentWorkspaceSurface: View {
             Button(localized("Refresh", "刷新"), action: refresh)
                 .disabled(!store.allowsManualRefresh)
             if provider?.connection == .connected || provider?.connection == .transitional {
-                Button(localized("Disconnect", "断开连接"), action: disconnectCodex)
+                Menu {
+                    Button(localized("Disconnect", "断开连接"), action: disconnectCodex)
+                } label: {
+                    Label(localized("More", "更多"), systemImage: "ellipsis.circle")
+                }
             } else {
                 Button(localized("Connect", "连接"), action: connectCodex)
                     .buttonStyle(.borderedProminent)
@@ -619,29 +656,32 @@ public struct AgentWorkspaceSurface: View {
         .accessibilityIdentifier("uma.agent.codex.header-actions")
     }
 
-    private func quotaRingCard(kind: ProviderProductQuotaKind, fallbackTitle: String) -> some View {
+    private func quotaBarCard(kind: ProviderProductQuotaKind, fallbackTitle: String) -> some View {
         let quota = kind == .fiveHour ? codexProjection.fiveHour : codexProjection.sevenDay
-        return VStack(spacing: 8) {
-            ZStack {
-                Circle().stroke(.primary.opacity(0.10), lineWidth: 9)
-                if let value = quota.state.ringFraction {
-                    Circle()
-                        .trim(from: 0, to: value)
-                        .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 9, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                }
-                Text(quotaDisplayText(quota.state))
-                    .font(.title3.weight(.bold)).monospacedDigit()
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(quota.id.hasPrefix("missing-") ? fallbackTitle : quota.title).font(.headline)
+                Spacer(minLength: 8)
+                Text(quotaDisplayText(quota.state)).font(.headline.weight(.bold)).monospacedDigit()
             }
-            .frame(width: 86, height: 86)
-            Text(quota.id.hasPrefix("missing-") ? fallbackTitle : quota.title).font(.headline)
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.primary.opacity(0.10))
+                    if let value = quota.state.ringFraction {
+                        Capsule().fill(Color.accentColor)
+                            .frame(width: proxy.size.width * value)
+                    }
+                }
+            }
+            .frame(height: 8)
             Text(quotaResetText(quota))
-                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
         }
-        .frame(minWidth: 118, minHeight: 146)
+        .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
         .moduleSurface()
         .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("uma.agent.codex.ring.\(quotaKindIdentifier(kind))")
+        .accessibilityIdentifier("uma.agent.codex.quota.\(quotaKindIdentifier(kind))")
+        .background(AgentDashboardGeometryReporter(identifier: "quota.\(quotaKindIdentifier(kind))", probe: layoutProbe))
     }
 
     private func quotaKindIdentifier(_ kind: ProviderProductQuotaKind) -> String {
@@ -677,8 +717,6 @@ public struct AgentWorkspaceSurface: View {
     private var trendGapCard: some View {
         module(historyModuleTitle, systemImage: "chart.bar") {
             VStack(alignment: .leading, spacing: 8) {
-                Text(historyHeading)
-                    .font(.callout.weight(.medium))
                 if case let .accountDailyBuckets(buckets, _) = codexProjection.historyAvailability {
                     accountDailyBars(buckets)
                 } else {
@@ -691,19 +729,7 @@ public struct AgentWorkspaceSurface: View {
             }
             .frame(minHeight: 82, alignment: .topLeading)
         }
-    }
-
-    private var historyHeading: String {
-        switch codexProjection.historyAvailability {
-        case .accountDailyBuckets:
-            localized("Account daily token history", "账户每日令牌历史")
-        case .aggregateOnly:
-            localized("Daily history is not projected for this snapshot.", "此快照未投影每日历史。")
-        case .staleWithoutDailyBuckets:
-            localized("The retained local history is stale.", "保留的本地历史已过期。")
-        case .unavailable:
-            localized("Local history is unavailable.", "本地历史不可用。")
-        }
+        .background(AgentDashboardGeometryReporter(identifier: "trend", probe: layoutProbe))
     }
 
     private var historyModuleTitle: String {
@@ -737,16 +763,19 @@ public struct AgentWorkspaceSurface: View {
                 .frame(maxWidth: .infinity, alignment: .bottom)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(bucket.tokens.map { "\(bucket.day): \($0) tokens" } ?? "\(bucket.day): unknown tokens")
+                .help(bucket.tokens.map { "\(bucket.day): \($0) tokens" } ?? "\(bucket.day): unknown tokens")
             }
         }
-        .frame(height: 86, alignment: .bottom)
+        .frame(height: 68, alignment: .bottom)
     }
 
     private var historyDetail: String {
-        localized(
-            "UMA keeps known aggregates separate rather than dividing cumulative imports into invented daily usage.",
-            "UMA 会保留已知汇总值，而不会把累计导入数据拆分为虚构的每日用量。"
-        )
+        switch codexProjection.historyAvailability {
+        case .aggregateOnly: localized("Daily history is not projected; UMA keeps aggregates separate rather than inventing daily usage.", "未投影每日历史；UMA 保留汇总值，不虚构每日用量。")
+        case .staleWithoutDailyBuckets: localized("Retained local history is stale; UMA does not invent daily usage from aggregates.", "保留的本地历史已过期；UMA 不会从汇总值虚构每日用量。")
+        case .unavailable: localized("Local daily history is unavailable; UMA does not invent daily usage from aggregates.", "本地每日历史不可用；UMA 不会从汇总值虚构每日用量。")
+        case .accountDailyBuckets: ""
+        }
     }
 
     private var metricRow: some View {
@@ -778,8 +807,9 @@ public struct AgentWorkspaceSurface: View {
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 66, alignment: .leading)
         .moduleSurface()
+        .background(AgentDashboardGeometryReporter(identifier: "metric.\(metric?.id ?? "unknown")", probe: layoutProbe))
     }
 
     private var activityDashboardCard: some View {
@@ -832,9 +862,9 @@ public struct AgentWorkspaceSurface: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(providerID.displayName)
                     .font(.title2.weight(.semibold))
-                Text(connectionLabel)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                Text(connectionStatusSummary)
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
             if providerID == .codex { codexHeaderActions }
@@ -850,6 +880,12 @@ public struct AgentWorkspaceSurface: View {
             }
         }
         .padding(.bottom, 3)
+        .background(AgentDashboardGeometryReporter(identifier: "header", probe: layoutProbe))
+    }
+
+    private var connectionStatusSummary: String {
+        let update = provider?.capturedAt.map { relativeUpdateDescription(since: $0) } ?? localized("Update time unknown", "更新时间未知")
+        return "\(connectionLabel) · \(freshnessLabel) · \(update)"
     }
 
     @ViewBuilder private var usageModule: some View {

@@ -370,6 +370,13 @@ public struct ThreadOSSettingsView: View {
     }
     public var body: some View {
         VStack(spacing: 0) {
+            factoriumV2Header
+                .frame(maxWidth: 1_080, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 6)
+                .background(ThreadOSSchemeBGeometryReporter(identifier: "project-draft-header", probe: layoutProbe))
+            Divider()
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 6) { factoriumV2Content }
                     .frame(maxWidth: 1_080, alignment: .leading)
@@ -413,6 +420,15 @@ public struct ThreadOSSettingsView: View {
     private var footerStatus: String {
         footerStatusOverride ?? (factoriumV2.message.isEmpty ? factoriumV2.roleStatus(language: language) : factoriumV2.message)
     }
+    @ViewBuilder private var factoriumV2Header: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) { Text(title("Role settings", "角色配置")).font(.headline); projectPicker }
+            VStack(alignment: .leading, spacing: 2) { Text(title("Role settings", "角色配置")).font(.headline); projectPicker }
+        }
+        Text(title("Local draft; manual Leader transfer; native status UNKNOWN.", "本地草稿；手动交给 Leader；原生状态未知。"))
+            .foregroundStyle(.secondary).font(.caption)
+            .accessibilityIdentifier("uma.threados.v2.provenance")
+    }
     @ViewBuilder private func settingsSection<Content: View>(_ heading: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(heading).font(.headline)
@@ -421,19 +437,6 @@ public struct ThreadOSSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
     @ViewBuilder private var factoriumV2Content: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) {
-                Text(title("Role settings", "角色配置")).font(.headline)
-                projectPicker
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title("Role settings", "角色配置")).font(.headline)
-                projectPicker
-            }
-        }
-        Text(title("Local draft; manual Leader transfer; native status UNKNOWN.", "本地草稿；手动交给 Leader；原生状态未知。"))
-            .foregroundStyle(.secondary).font(.caption)
-            .accessibilityIdentifier("uma.threados.v2.provenance")
         DisclosureGroup(title("New project", "新项目")) {
             HStack {
                 TextField(title("New project key", "新项目键"), text: $factoriumV2.newProject)
@@ -443,6 +446,7 @@ public struct ThreadOSSettingsView: View {
                     .accessibilityIdentifier("uma.threados.v2.use-project")
             }
         }
+        .controlSize(.small)
         if let legacy = factoriumV2.selectedLegacyDraft {
             settingsSection(title("V1 conversion", "V1 转换")) {
                 Text(FactoriumV2SettingsDraft.conversionPreview(language: language)).foregroundStyle(.secondary)
@@ -461,17 +465,12 @@ public struct ThreadOSSettingsView: View {
         Text(title("This page generates configuration requests; it does not control Codex execution speed.", "此页面生成配置请求，不控制 Codex 的运行速度。"))
             .foregroundStyle(.secondary).font(.caption)
             .accessibilityIdentifier("uma.threados.v2.speed-boundary")
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 8, alignment: .top)],
-                alignment: .leading,
-                spacing: 8
-            ) {
+            RoleGridLayout {
                 ForEach(FactoriumV2Role.allCases, id: \.self) { role in roleCard(role) }
             }
             .accessibilityIdentifier("uma.threados.v2.role-grid")
-            ForEach([FactoriumV2Role.coder, .reviewer], id: \.self) { role in
-                workerSlots(role: role)
-            }
+            workerCapacityNote
+            workerGroups
             if let basicUsage {
                 settingsSection(title("Codex account usage", "Codex 账户用量")) {
                     compactAccountStrip(basicUsage)
@@ -593,7 +592,7 @@ public struct ThreadOSSettingsView: View {
                     Image(systemName: roleSymbol(role)).foregroundStyle(.purple)
                 }
                 .background(ThreadOSSchemeBGeometryReporter(identifier: "role.\(role.rawValue).header", probe: layoutProbe))
-                .frame(minHeight: 34, alignment: .topLeading)
+                .frame(height: 34, alignment: .topLeading)
                 if role == .leader {
                     Text(title("Current Leader is retained by this local draft.", "当前 Leader 由此本地草稿保留。"))
                         .font(.caption).foregroundStyle(.secondary)
@@ -601,7 +600,6 @@ public struct ThreadOSSettingsView: View {
                         .accessibilityIdentifier("uma.threados.v2.leader.preserve")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    Spacer(minLength: 0)
                     selectionFields(role: role, selection: setting.selection)
                 }
             }
@@ -630,9 +628,6 @@ public struct ThreadOSSettingsView: View {
         DisclosureGroup(isExpanded: workerExpansionBinding(role)) {
             ThreadOSSchemeBChildPanel(identifier: "role.\(role.rawValue).workers", layoutProbe: layoutProbe) {
                 VStack(alignment: .leading, spacing: 7) {
-                Text(title("Three slots = configuration capacity, not live agents.", "三个槽位表示配置容量，不是实时代理数量。"))
-                    .foregroundStyle(.secondary).font(.caption)
-                    .help(title("Three stable slots are configuration capacity, not live-agent count. Disabled slots retain this saved draft and are not scheduled.", "三个稳定槽位表示配置容量，不是实时代理数量。已停用的槽位会保留此草稿，且不会被调度。"))
                 workerColumnHeadings
                 ForEach(Array(factoriumV2.draft.workers(for: role).enumerated()), id: \.offset) { index, slot in
                     workerRow(role: role, index: index, slot: slot)
@@ -648,12 +643,21 @@ public struct ThreadOSSettingsView: View {
         }
         .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).workers")
     }
+    private var workerCapacityNote: some View {
+        Text(title("Three slots = configuration capacity, not live agents.", "三个槽位表示配置容量，不是实时代理数量。"))
+            .foregroundStyle(.secondary).font(.caption)
+            .help(title("Three stable slots are configuration capacity, not live-agent count. Disabled slots retain this saved draft and are not scheduled.", "三个稳定槽位表示配置容量，不是实时代理数量。已停用的槽位会保留此草稿，且不会被调度。"))
+    }
+    @ViewBuilder private var workerGroups: some View {
+        WorkerGroupsLayout() { workerSlots(role: .coder); workerSlots(role: .reviewer) }
+        .accessibilityIdentifier("uma.threados.v2.worker-groups")
+    }
     private var workerColumnHeadings: some View {
         HStack(spacing: 8) {
-            Text(title("Slot", "槽位")).frame(width: 40, alignment: .leading)
-            Text(title("Enabled", "启用")).frame(width: 52, alignment: .leading)
-            Text(title("Mode", "模式")).frame(width: 112, alignment: .leading)
-            Text(title("Model · Thinking", "模型 · 推理")).frame(minWidth: 220, alignment: .leading)
+            Text(title("Slot", "槽位")).frame(width: 28, alignment: .leading)
+            Text(title("Enabled", "启用")).frame(width: 32, alignment: .leading)
+            Text(title("Mode", "模式")).frame(width: 92, alignment: .leading)
+            Text(title("Model · Thinking", "模型 · 推理")).frame(minWidth: 180, alignment: .leading)
             Spacer(minLength: 0)
         }
         .font(.caption2).foregroundStyle(.secondary).accessibilityHidden(true)
@@ -663,20 +667,20 @@ public struct ThreadOSSettingsView: View {
         let workerName = title("\(roleDisplayName(role)) worker \(index + 1)", "\(roleDisplayName(role)) 工作者 \(index + 1)")
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
-                Text("\(index + 1)").frame(width: 40, alignment: .leading)
-                Toggle("", isOn: slotEnabledBinding(role, index)).labelsHidden().frame(width: 52)
+                Text("\(index + 1)").frame(width: 28, alignment: .leading)
+                Toggle("", isOn: slotEnabledBinding(role, index)).labelsHidden().frame(width: 32)
                     .accessibilityLabel(title("\(workerName) enabled", "\(workerName) 已启用"))
                     .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).enabled")
                 Picker("", selection: slotInheritanceBinding(role, index)) {
                     Text(title("Inherit", "继承")).tag(true)
                     Text(title("Custom", "自定义")).tag(false)
                 }
-                .labelsHidden().pickerStyle(.segmented).frame(width: 112).disabled(!slot.enabled)
+                .labelsHidden().pickerStyle(.segmented).frame(width: 92).disabled(!slot.enabled)
                 .accessibilityLabel(title("\(workerName) configuration", "\(workerName) 配置"))
                 .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).inherit")
                 if slot.inherits {
                     Text(title("Inherited: \(selectionSummary(resolved))", "继承：\(selectionSummary(resolved))"))
-                        .font(.caption).foregroundStyle(.secondary).frame(minWidth: 260, alignment: .leading)
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1).frame(minWidth: 180, alignment: .leading)
                 } else {
                     slotSelectionFields(role: role, index: index, selection: slot.selection).disabled(!slot.enabled)
                 }
@@ -696,11 +700,11 @@ public struct ThreadOSSettingsView: View {
     @ViewBuilder private func slotSelectionFields(role: FactoriumV2Role, index: Int, selection: FactoriumV2Selection) -> some View {
         let workerName = title("\(roleDisplayName(role)) worker \(index + 1)", "\(roleDisplayName(role)) 工作者 \(index + 1)")
         Picker("", selection: slotSelectionBinding(role, index, \.model)) { ForEach(FactoriumV2SettingsDraft.availableModels(), id: \.self) { model in Text(model == "gpt-6-astra" ? "Astra" : "Terra").tag(model) } }
-            .labelsHidden().frame(width: 118)
+            .labelsHidden().frame(width: 104)
             .accessibilityLabel(title("Model for \(workerName)", "\(workerName) 的模型"))
             .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).model")
         Picker("", selection: slotSelectionBinding(role, index, \.effort)) { ForEach(FactoriumV2SettingsDraft.availableEfforts(model: selection.model, leader: false), id: \.self) { effort in Text(effortLabel(effort)).tag(effort) } }
-            .labelsHidden().frame(width: 88)
+            .labelsHidden().frame(width: 76)
             .accessibilityLabel(title("Thinking for \(workerName)", "\(workerName) 的推理"))
             .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).effort")
     }

@@ -113,7 +113,7 @@ struct MainWindowRootView: View {
                     }
                 }
             }
-            .frame(minWidth: 210, idealWidth: 240, maxWidth: 285)
+            .frame(minWidth: 190, idealWidth: 210, maxWidth: 285)
             .background(Color(nsColor: .windowBackgroundColor))
 
             AgentWorkspaceSurface(

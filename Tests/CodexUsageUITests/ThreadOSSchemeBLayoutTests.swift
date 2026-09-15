@@ -4,6 +4,23 @@ import Testing
 @testable import CodexUsageUI
 
 @MainActor struct ThreadOSSchemeBLayoutTests {
+    @Test func workerGroupsUseActual959And960PointBoundary() throws {
+        _ = NSApplication.shared
+        for width in [CGFloat(959), 960] {
+            let probe = ThreadOSSchemeBLayoutProbe()
+            let host = NSHostingView(rootView: WorkerGroupsLayout {
+                ThreadOSSchemeBChildPanel(identifier: "boundary.a", layoutProbe: probe) { Text("Enabled · Inherit · Custom · Medium") }
+                ThreadOSSchemeBChildPanel(identifier: "boundary.b", layoutProbe: probe) { Text("Enabled · Inherit · Custom · Medium") }
+            }.coordinateSpace(name: "uma.threados.scheme-b"))
+            let window = NSWindow(contentRect: .init(x: 0, y: 0, width: width, height: 240), styleMask: [.titled], backing: .buffered, defer: false)
+            window.contentView = host; window.orderFront(nil); defer { window.orderOut(nil) }
+            settle(host)
+            let a = try #require(probe.frames["boundary.a"]); let b = try #require(probe.frames["boundary.b"])
+            #expect(host.bounds.contains(a) && host.bounds.contains(b))
+            if width == 959 { #expect(b.minY > a.minY) }
+            else { #expect(abs(a.minY - b.minY) < 1 && a.maxX <= b.minX) }
+        }
+    }
     @Test func schemeBMeasuresWholeWindowsAndReachableRoleChildAndFooterGeometry() throws {
         _ = NSApplication.shared
         for fixture in LayoutFixture.requiredCases {
@@ -83,12 +100,20 @@ import Testing
             if fixture.identifier.contains("1040x760") {
                 #expect(cards.dropFirst().allSatisfy { abs($0.minY - cards[0].minY) < 1 })
                 #expect(cards.allSatisfy { $0.maxX <= viewport.maxX + 1 })
+                let coderWorkers = try #require(initialFrames["role.coder.workers"])
+                let reviewerWorkers = try #require(initialFrames["role.reviewer.workers"])
+                #expect(abs(coderWorkers.minY - reviewerWorkers.minY) < 1)
+                #expect(coderWorkers.maxX <= reviewerWorkers.minX || reviewerWorkers.maxX <= coderWorkers.minX)
                 for control in ["model", "effort"] {
                     let frames = try workerRoles.map { role in
                         try #require(initialFrames["role.\(role.rawValue).\(control)"])
                     }
                     #expect(frames.dropFirst().allSatisfy { abs($0.minY - frames[0].minY) < 1 })
                 }
+            }
+            if fixture.identifier.contains("840x760") || fixture.identifier.contains("760x552") {
+                #expect(cards[0].minY == cards[1].minY && cards[1].minY == cards[2].minY)
+                #expect(cards[3].minY > cards[0].minY && cards[4].minY == cards[3].minY)
             }
             captureIfRequested(fixture: fixture, host: host, suffix: "initial")
 
@@ -171,9 +196,10 @@ import Testing
     private struct LayoutFixture {
         let identifier: String; let contentSize: NSSize; let language: AppLanguage; let appearance: NSAppearance.Name; let groups: Set<FactoriumV2Role>; let leaderPreserved: Bool; let requiresInitialPrimaryContainment: Bool; let footerStatus: String?
         static let requiredCases = [
-            LayoutFixture(identifier: "hosted-settings-1040x760-content-en-light-fresh-coder-reviewer-summary", contentSize: .init(width: 1_040, height: 760), language: .english, appearance: .aqua, groups: [.coder], leaderPreserved: true, requiresInitialPrimaryContainment: true, footerStatus: nil),
+            LayoutFixture(identifier: "hosted-settings-1040x760-content-en-light-fresh-coder-reviewer-summary", contentSize: .init(width: 1_040, height: 760), language: .english, appearance: .aqua, groups: [.coder, .reviewer], leaderPreserved: true, requiresInitialPrimaryContainment: true, footerStatus: nil),
             LayoutFixture(identifier: "hosted-settings-1000x760-content-en-light-both", contentSize: .init(width: 1_000, height: 760), language: .english, appearance: .aqua, groups: [.coder, .reviewer], leaderPreserved: true, requiresInitialPrimaryContainment: true, footerStatus: nil),
             LayoutFixture(identifier: "hosted-settings-1000x760-content-en-light-copy-failure", contentSize: .init(width: 1_000, height: 760), language: .english, appearance: .aqua, groups: [.coder, .reviewer], leaderPreserved: true, requiresInitialPrimaryContainment: false, footerStatus: "Request was generated, but the local clipboard could not be written."),
+            LayoutFixture(identifier: "hosted-settings-840x760-content-en-light-both", contentSize: .init(width: 840, height: 760), language: .english, appearance: .aqua, groups: [.coder, .reviewer], leaderPreserved: true, requiresInitialPrimaryContainment: false, footerStatus: nil),
             LayoutFixture(identifier: "hosted-settings-760x552-content-zh-dark-both", contentSize: .init(width: 760, height: 552), language: .simplifiedChinese, appearance: .darkAqua, groups: [.coder, .reviewer], leaderPreserved: false, requiresInitialPrimaryContainment: false, footerStatus: nil),
             LayoutFixture(identifier: "hosted-settings-1280x900-content-zh-light-both", contentSize: .init(width: 1_280, height: 900), language: .simplifiedChinese, appearance: .aqua, groups: [.coder, .reviewer], leaderPreserved: false, requiresInitialPrimaryContainment: false, footerStatus: nil),
             LayoutFixture(identifier: "hosted-settings-1280x900-content-en-dark-both", contentSize: .init(width: 1_280, height: 900), language: .english, appearance: .darkAqua, groups: [.coder, .reviewer], leaderPreserved: true, requiresInitialPrimaryContainment: false, footerStatus: nil),
