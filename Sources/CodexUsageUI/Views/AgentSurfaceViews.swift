@@ -98,20 +98,36 @@ enum AgentWorkspaceLayoutPolicy {
 
 @MainActor final class AgentDashboardLayoutProbe: ObservableObject {
     @Published private(set) var frames: [String: CGRect] = [:]
+    @Published private(set) var revision = 0
     init() {}
     func record(_ frame: CGRect, for identifier: String) { if frame.width > 0 && frame.height > 0 { frames[identifier] = frame } }
+    func clearFrame(for identifier: String) { frames.removeValue(forKey: identifier) }
+    func requestCurrentFrames() { revision &+= 1 }
 }
 
 private struct AgentDashboardGeometryReporter: View {
     let identifier: String; let probe: AgentDashboardLayoutProbe?
     var body: some View {
+        if let probe {
+            AgentDashboardGeometryProbeContent(identifier: identifier, probe: probe)
+        } else {
+            Color.clear
+        }
+    }
+}
+
+private struct AgentDashboardGeometryProbeContent: View {
+    let identifier: String
+    @ObservedObject var probe: AgentDashboardLayoutProbe
+    var body: some View {
         GeometryReader { geometry in
             Color.clear
                 .onAppear { record(geometry.frame(in: .named("uma.agent.dashboard"))) }
                 .onChange(of: geometry.frame(in: .named("uma.agent.dashboard"))) { _, frame in record(frame) }
+                .onChange(of: probe.revision) { _, _ in record(geometry.frame(in: .named("uma.agent.dashboard"))) }
         }.allowsHitTesting(false)
     }
-    private func record(_ frame: CGRect) { probe?.record(frame, for: identifier) }
+    private func record(_ frame: CGRect) { probe.record(frame, for: identifier) }
 }
 
 private struct AgentWorkspaceModuleSurface: ViewModifier {
@@ -515,6 +531,67 @@ private final class QuickPanelDisplayPreferences: ObservableObject {
     }
 }
 
+/// One measured font and one layout decision for the entire metric region.
+/// Values are never split, independently scaled or silently truncated.
+@MainActor enum CodexDashboardMetricTypography {
+    enum Layout: Equatable { case columns, rows }
+    static let pointSize: CGFloat = 18
+    static let lineHeight: CGFloat = 26
+    static let columnSpacing: CGFloat = 12
+    static var nativeFont: NSFont { .monospacedDigitSystemFont(ofSize: pointSize, weight: .medium) }
+    static var font: Font { Font(nativeFont) }
+
+    static func measuredWidth(_ value: String) -> CGFloat {
+        (value as NSString).size(withAttributes: [.font: nativeFont]).width
+    }
+
+    static func layout(values: [String], availableWidth: CGFloat) -> Layout {
+        let width = (availableWidth - columnSpacing * CGFloat(max(0, values.count - 1))) / CGFloat(max(1, values.count))
+        return values.allSatisfy { measuredWidth($0) <= width - 2 } ? .columns : .rows
+    }
+
+    static func displayValue(_ metric: CodexDashboardProjection.Metric, fullWidth: CGFloat) -> String {
+        let original = metric.value ?? ""
+        // Ordinary long values use the entire row in their original format.
+        // Only extreme amounts exceeding the whole region use an explicit
+        // approximate scientific label; the original is still the AX value/help.
+        if measuredWidth(original) > fullWidth - 2, let compact = metric.compactValue { return compact }
+        return original
+    }
+}
+
+@MainActor enum CodexDashboardAxisTicks {
+    struct Tick: Equatable {
+        let visualText: String
+        let accessibilityText: String
+    }
+
+    static func ticks(maximumTokens: Int64) -> [Tick] {
+        guard maximumTokens > 0 else {
+            return Array(repeating: tick(for: 0), count: 3)
+        }
+        let maximum = Double(maximumTokens)
+        return [tick(for: maximum), tick(for: maximum / 2), tick(for: 0)]
+    }
+
+    private static func tick(for value: Double) -> Tick {
+        let text: String
+        if value >= 1_000_000_000_000 {
+            text = String(format: "%.1E", value).replacingOccurrences(of: "E+", with: "E")
+        } else if value >= 1_000_000_000 {
+            text = (value / 1_000_000_000).formatted(.number.precision(.fractionLength(1))) + "B"
+        } else if value >= 1_000_000 {
+            text = (value / 1_000_000).formatted(.number.precision(.fractionLength(1))) + "M"
+        } else if value >= 1_000 {
+            text = (value / 1_000).formatted(.number.precision(.fractionLength(1))) + "K"
+        } else {
+            let fractionLength = value.rounded() == value ? 0 : 1
+            text = value.formatted(.number.precision(.fractionLength(fractionLength)))
+        }
+        return Tick(visualText: text, accessibilityText: text)
+    }
+}
+
 public struct AgentWorkspaceSurface: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var store: UsageStore
@@ -527,7 +604,12 @@ public struct AgentWorkspaceSurface: View {
     private let claudeAccuracySync: () -> Void
     private let referenceDate: Date?
     private let layoutProbe: AgentDashboardLayoutProbe?
+    // Supplied only by the internal fixture initializer; production always projects its store.
+    private let fixtureProjection: CodexDashboardProjection?
     @State private var showingClaudeConsent = false
+    @State private var selectedDay: String?
+    @State private var showingRecentActivity = false
+    @FocusState private var focusedDay: String?
 
     public init(
         store: UsageStore,
@@ -550,6 +632,7 @@ public struct AgentWorkspaceSurface: View {
         self.claudeAccuracySync = claudeAccuracySync
         self.referenceDate = referenceDate
         self.layoutProbe = nil
+        self.fixtureProjection = nil
     }
 
     init(
@@ -557,11 +640,12 @@ public struct AgentWorkspaceSurface: View {
         connectCodex: @escaping () -> Void, disconnectCodex: @escaping () -> Void,
         claudeControlState: @escaping () -> ClaudeAgentControlState, connectClaude: @escaping () -> Void,
         claudeAccuracySync: @escaping () -> Void, referenceDate: Date? = nil,
-        layoutProbe: AgentDashboardLayoutProbe?
+        layoutProbe: AgentDashboardLayoutProbe?, fixtureProjection: CodexDashboardProjection? = nil
     ) {
         self.store = store; self.providerID = providerID; self.refresh = refresh; self.connectCodex = connectCodex
         self.disconnectCodex = disconnectCodex; self.claudeControlState = claudeControlState; self.connectClaude = connectClaude
         self.claudeAccuracySync = claudeAccuracySync; self.referenceDate = referenceDate; self.layoutProbe = layoutProbe
+        self.fixtureProjection = fixtureProjection
     }
 
     public var body: some View {
@@ -570,7 +654,7 @@ public struct AgentWorkspaceSurface: View {
                 VStack(alignment: .leading, spacing: 12) {
                     header
                     if providerID == .codex {
-                        codexDashboard
+                        codexDashboard(availableWidth: geometry.size.width - 32)
                     } else {
                         standardWorkspace(for: geometry.size.width)
                     }
@@ -582,7 +666,6 @@ public struct AgentWorkspaceSurface: View {
             .background(AgentDashboardGeometryReporter(identifier: "scroll.viewport", probe: layoutProbe))
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .accessibilityIdentifier("uma.agent.workspace.\(providerID.rawValue)")
         .coordinateSpace(name: "uma.agent.dashboard")
         .alert(
             localized("Enable Claude Local Smart?", "启用 Claude 本地智能？"),
@@ -601,7 +684,7 @@ public struct AgentWorkspaceSurface: View {
     private var provider: ProviderProductState? { store.productInventory.provider(providerID) }
 
     private var codexProjection: CodexDashboardProjection {
-        CodexDashboardProjection(snapshot: store.snapshot, provider: provider)
+        fixtureProjection ?? CodexDashboardProjection(snapshot: store.snapshot, provider: provider)
     }
 
     @ViewBuilder private func standardWorkspace(for width: CGFloat) -> some View {
@@ -621,21 +704,65 @@ public struct AgentWorkspaceSurface: View {
     /// Codex keeps the first-level sidebar bars intact; this is the distinct
     /// second-level dashboard hierarchy. It consumes only the frozen store
     /// projection and never starts a collector or manufactures daily history.
-    private var codexDashboard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func codexDashboard(availableWidth: CGFloat) -> some View {
+        let sectionSpacing: CGFloat = availableWidth < 900 ? 8 : 10
+        return VStack(alignment: .leading, spacing: sectionSpacing) {
             HStack(alignment: .top, spacing: 10) {
                 quotaBarCard(kind: .sevenDay, fallbackTitle: localized("7D remaining", "7天剩余"))
-                quotaBarCard(kind: .fiveHour, fallbackTitle: localized("5H remaining", "5小时剩余"))
+                quotaBarCard(kind: .fiveHour, fallbackTitle: localized("5H", "5小时"))
             }
-            metricRow
-            estimateAndTrendCard
-            if provider?.freshness != .unavailable {
-                if !store.snapshot.recentTasks.isEmpty { activityDashboardCard }
-                connectionModule
+            metricRow(availableWidth: availableWidth)
+            if hasKnownDailyUsage {
+                if availableWidth >= 900 {
+                    HStack(alignment: .top, spacing: 16) {
+                        dailyChart.frame(maxWidth: .infinity)
+                        dailyDetails.frame(maxWidth: .infinity)
+                    }
+                } else {
+                    dailyChart
+                    dailyDetails
+                }
+            } else if provider?.freshness != .unavailable, !store.snapshot.recentTasks.isEmpty {
+                activityDashboardCard
+            }
+            sourceFooter
+        }
+        .background(AgentDashboardGeometryReporter(identifier: "dashboard", probe: layoutProbe))
+        .onChange(of: focusedDay) { _, day in selectedDay = day }
+        .onChange(of: codexProjection.dailySlots()) { _, _ in
+            selectedDay = nil
+            focusedDay = nil
+        }
+        .onChange(of: showingRecentActivity) { _, _ in
+            selectedDay = nil
+            focusedDay = nil
+        }
+    }
+
+    private var sourceFooter: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("\(sourceLabel) · \(freshnessLabel) · \(connectionLabel)")
+            if let date = store.snapshot.providerSource?.capturedAt {
+                Text(localized("Account updated ", "账户更新于 ") + date.formatted(date: .numeric, time: .shortened))
+            }
+            if let reason = codexProjection.dailyAnalysis().unavailabilityReason,
+               hasKnownDailyUsage || reason != .missingDays {
+                Text(localized(reason.message(isChinese: false), reason.message(isChinese: true)))
+                    .accessibilityIdentifier("uma.agent.codex.analysis-status.\(reason.rawValue)")
+                    .background(AgentDashboardGeometryReporter(identifier: "analysis-status.\(reason.rawValue)", probe: layoutProbe))
+            }
+            if knownMetric("api-cost-seven-days") != nil {
+                Text(localized("API-equivalent is a local estimate, not a bill or subscription fee.", "API 等效金额为本地估算，并非账单或订阅费。"))
+                if let date = store.snapshot.localSource?.capturedAt {
+                    Text(localized("Local ledger updated ", "本地账本更新于 ") + date.formatted(date: .numeric, time: .shortened))
+                }
+                if let status = store.snapshot.localSource, status.freshness != .fresh {
+                    Text(localized("Local ledger is stale or unavailable.", "本地账本已过期或不可用。"))
+                }
             }
         }
-        .accessibilityIdentifier("uma.agent.codex.dashboard")
-        .background(AgentDashboardGeometryReporter(identifier: "dashboard", probe: layoutProbe))
+        .font(.caption).foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var codexHeaderActions: some View {
@@ -662,10 +789,11 @@ public struct AgentWorkspaceSurface: View {
         if quota.state.ringPercent != nil || quota.state == .unlimited || quota.state == .stale || quota.state == .invalid {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(quota.id.hasPrefix("missing-") ? fallbackTitle : quota.title).font(.headline)
+                    Text(fallbackTitle).font(.system(size: 13, weight: .medium))
+                        .background(AgentDashboardGeometryReporter(identifier: "quota-title.\(quotaKindIdentifier(kind))", probe: layoutProbe))
                     Spacer(minLength: 8)
                     if quota.state.ringPercent != nil || quota.state == .unlimited {
-                        Text(quotaDisplayText(quota.state)).font(.headline.weight(.bold)).monospacedDigit()
+                        Text(quotaDisplayText(quota.state)).font(.system(size: 13, weight: .medium)).monospacedDigit()
                     }
                 }
                 if quota.state == .stale || quota.state == .invalid {
@@ -685,14 +813,22 @@ public struct AgentWorkspaceSurface: View {
                         }
                     }
                     .frame(height: 8)
-                    if let resetAt = quota.resetAt {
+                    .background(AgentDashboardGeometryReporter(identifier: "quota-rail.\(quotaKindIdentifier(kind))", probe: layoutProbe))
+                    if quota.state != .unlimited, let resetAt = quota.resetAt {
                         Text(resetLabel(resetAt))
                             .font(.caption).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
+                if kind == .fiveHour, quota.state == .unlimited,
+                   codexProjection.fiveHourObservationState == .stale || codexProjection.fiveHourObservationState == .invalid {
+                    Text(codexProjection.fiveHourObservationState == .stale
+                         ? localized("Quota observation is stale", "额度数据已过期")
+                         : localized("Quota value was rejected", "额度数值未通过校验"))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
-            .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .topLeading)
             .moduleSurface()
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("uma.agent.codex.quota.\(quotaKindIdentifier(kind))")
@@ -712,7 +848,7 @@ public struct AgentWorkspaceSurface: View {
     private func quotaDisplayText(_ state: CodexDashboardProjection.QuotaState) -> String {
         switch state {
         case let .finite(value): "\(Int(value.rounded()))%"
-        case .unlimited: "∞"
+        case .unlimited: localized("♾️ Unlimited", "♾️ 无限")
         case .unavailable, .invalid, .stale: "—"
         }
     }
@@ -726,91 +862,253 @@ public struct AgentWorkspaceSurface: View {
         return codexProjection.metrics.first { $0.id == id && $0.value != nil }
     }
 
-    @ViewBuilder private var estimateAndTrendCard: some View {
-        let estimate = knownMetric("api-cost-seven-days")
-        if estimate != nil || hasKnownDailyUsage {
-            HStack(alignment: .top, spacing: 14) {
-                if let estimate {
-                    metricContent(estimate, title: localized("Local ledger API-equivalent · 7D", "本地账本 API 等效估算 · 7天"))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(AgentDashboardGeometryReporter(identifier: "metric.api-cost-seven-days", probe: layoutProbe))
-                }
-                if estimate != nil && hasKnownDailyUsage { Divider().accessibilityHidden(true) }
-                if hasKnownDailyUsage {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(localized("Account daily token trend", "账户每日令牌趋势"))
-                            .font(.headline).fixedSize(horizontal: false, vertical: true)
-                        accountDailyBars
-                        Text(localized("Local calendar days · Tokens", "本地日历日 · 令牌"))
-                            .font(.caption).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(AgentDashboardGeometryReporter(identifier: "trend", probe: layoutProbe))
-                }
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            .moduleSurface()
-            .background(AgentDashboardGeometryReporter(identifier: "estimate-trend", probe: layoutProbe))
-        }
-    }
-
-    private var accountDailyBars: some View {
-        let shown = codexProjection.dailySlots()
-        let maximum = max(Int64(1), shown.compactMap(\.tokens).max() ?? 1)
-        return HStack(alignment: .bottom, spacing: 5) {
-            ForEach(shown) { bucket in
-                if let tokens = bucket.tokens {
-                    VStack(spacing: 4) {
-                        RoundedRectangle(cornerRadius: 3, style: .continuous)
-                            .fill(Color.accentColor.opacity(0.78))
-                            .frame(height: tokens == 0 ? 0 : max(4, 54 * CGFloat(Double(tokens) / Double(maximum))))
-                        Text(String(bucket.day.suffix(2)))
-                            .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .bottom)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(bucket.day): \(tokens) tokens")
-                    .help("\(bucket.day): \(tokens) tokens")
-                    .background(AgentDashboardGeometryReporter(identifier: "day.\(bucket.day)", probe: layoutProbe))
+    private var dailyChart: some View {
+        let analysis = codexProjection.dailyAnalysis()
+        let selected = analysis.selected(selectedDay)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(localized("Account daily tokens", "账户每日令牌"))
+                .font(.system(size: 13, weight: .medium))
+            accountDailyBars(analysis)
+            HStack(alignment: .firstTextBaseline) {
+                if let selected, let tokens = selected.tokens {
+                    Text("\(selected.day) · \(tokens.formatted()) " + localized("tokens", "令牌"))
+                } else if let summary = analysis.summary {
+                    Text(localized("Mean ", "日均 ") + summary.mean.formatted(.number.precision(.fractionLength(1))))
+                        .accessibilityIdentifier("uma.agent.codex.mean")
+                        .background(AgentDashboardGeometryReporter(identifier: "analysis.mean", probe: layoutProbe))
+                    Spacer(minLength: 4)
+                    Text(localized("Peak ", "峰值 ") + "\(summary.peak.tokens!.formatted()) · \(summary.peak.day)")
+                        .accessibilityIdentifier("uma.agent.codex.peak")
+                        .background(AgentDashboardGeometryReporter(identifier: "analysis.peak", probe: layoutProbe))
                 } else {
-                    // Keep the calendar position; missing observations have no mark or tooltip.
-                    Color.clear.frame(maxWidth: .infinity).accessibilityHidden(true)
+                    Text(localized("Focus a known day to inspect its value", "聚焦已知日期可读取数值"))
                 }
             }
+            .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+            .frame(height: 20, alignment: .leading)
+            .background(AgentDashboardGeometryReporter(identifier: "day-detail", probe: layoutProbe))
         }
-        .frame(height: 68, alignment: .bottom)
+        .background(AgentDashboardGeometryReporter(identifier: "trend", probe: layoutProbe))
     }
 
-    private var metricRow: some View {
-        HStack(alignment: .top, spacing: 10) {
-            dashboardMetric(knownMetric("week"), title: localized("Account 7D tokens", "账户7天令牌"))
-            dashboardMetric(knownMetric("total"), title: localized("Account lifetime tokens", "账户累计令牌"))
-        }
-    }
-
-    @ViewBuilder private func dashboardMetric(_ metric: CodexDashboardProjection.Metric?, title: String) -> some View {
-        if let metric {
-            metricContent(metric, title: title)
-                .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
-                .moduleSurface()
-                .background(AgentDashboardGeometryReporter(identifier: "metric.\(metric.id)", probe: layoutProbe))
-        }
-    }
-
-    private func metricContent(_ metric: CodexDashboardProjection.Metric, title: String) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            if let value = metric.value {
-                Text(value).font(.title3.weight(.semibold)).monospacedDigit()
-                    .fixedSize(horizontal: false, vertical: true)
+    private func accountDailyBars(_ analysis: CodexDashboardProjection.DailyAnalysis) -> some View {
+        let maximumTokens = analysis.knownSlots.compactMap(\.tokens).max() ?? 0
+        let maximum = max(1, Double(maximumTokens))
+        let ticks = CodexDashboardAxisTicks.ticks(maximumTokens: maximumTokens)
+        return HStack(alignment: .top, spacing: 6) {
+            VStack(alignment: .trailing, spacing: 0) {
+                Text(ticks[0].visualText)
+                    .accessibilityLabel(axisAccessibilityValue(ticks[0].accessibilityText))
+                Spacer(minLength: 0)
+                Text(ticks[1].visualText)
+                    .accessibilityLabel(axisAccessibilityValue(ticks[1].accessibilityText))
+                Spacer(minLength: 0)
+                Text(ticks[2].visualText).accessibilityLabel(axisAccessibilityValue(ticks[2].accessibilityText))
             }
-            Text(title).font(.caption).foregroundStyle(.secondary)
+            .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+            .frame(width: 48, height: 112)
+            GeometryReader { geometry in
+                let plotHeight: CGFloat = 104
+                ZStack(alignment: .topLeading) {
+                    ForEach(0..<3) { tick in
+                        Rectangle().fill(.secondary.opacity(tick == 2 ? 0.55 : 0.16))
+                            .frame(height: 1)
+                            .offset(y: 4 + CGFloat(tick) * plotHeight / 2)
+                            .accessibilityHidden(true)
+                    }
+                    if let mean = analysis.summary?.mean {
+                        Path { path in
+                            let y = 4 + plotHeight * (1 - mean / maximum)
+                            path.move(to: CGPoint(x: 0, y: y))
+                            path.addLine(to: CGPoint(x: geometry.size.width, y: y))
+                        }
+                        .stroke(Color.secondary, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                        .background(AgentDashboardGeometryReporter(identifier: "analysis.mean-line", probe: layoutProbe))
+                        .accessibilityHidden(true)
+                    }
+                    HStack(alignment: .top, spacing: 4) {
+                        ForEach(analysis.slots) { bucket in
+                            if let tokens = bucket.tokens {
+                                dayButton(bucket, tokens: tokens, maximum: maximum, plotHeight: plotHeight)
+                            } else {
+                                // Calendar position is retained without a datum, label or focus target.
+                                Color.clear.frame(maxWidth: .infinity, minHeight: 132).accessibilityHidden(true)
+                            }
+                        }
+                    }
+                }
+            }
+            .frame(height: 136)
+        }
+    }
+
+    private func axisAccessibilityValue(_ text: String) -> String {
+        "\(text) " + localized("tokens", "令牌")
+    }
+
+    private func dayButton(_ bucket: CodexDashboardProjection.DailySlot, tokens: Int64,
+                           maximum: Double, plotHeight: CGFloat) -> some View {
+        Button { selectedDay = bucket.day } label: {
+            VStack(spacing: 4) {
+                ZStack(alignment: .bottom) {
+                    Color.clear
+                    Rectangle().fill(Color.accentColor.opacity(selectedDay == bucket.day ? 1 : 0.7))
+                        .frame(height: plotHeight * CGFloat(Double(tokens) / maximum))
+                }
+                .frame(height: plotHeight + 4)
+                Text(String(bucket.day.suffix(5)))
+                    .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusable(true)
+        .focused($focusedDay, equals: bucket.day)
+        .onHover { inside in selectedDay = inside ? bucket.day : focusedDay }
+        .overlay(RoundedRectangle(cornerRadius: 3).stroke(
+            focusedDay == bucket.day ? Color.accentColor : Color.clear, lineWidth: 2))
+        .accessibilityLabel(bucket.day)
+        .accessibilityValue("\(tokens.formatted()) " + localized("tokens", "令牌"))
+        .accessibilityHint(localized("Select to show daily details", "选择以显示当日明细"))
+        .accessibilityIdentifier("uma.agent.codex.day.\(bucket.day)")
+        .background(AgentDashboardGeometryReporter(identifier: "day.\(bucket.day)", probe: layoutProbe))
+    }
+
+    private var dailyDetails: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Picker(localized("Analysis details", "分析明细"), selection: $showingRecentActivity) {
+                Text(localized("Daily details", "逐日明细")).tag(false)
+                Text(localized("Recent activity", "最近活动")).tag(true)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("uma.agent.codex.detail-tabs")
+            if showingRecentActivity {
+                activityDashboardCard
+            } else {
+                dailyTable
+            }
+        }
+        .background(AgentDashboardGeometryReporter(identifier: "details", probe: layoutProbe))
+    }
+
+    private var dailyTable: some View {
+        let analysis = codexProjection.dailyAnalysis()
+        return Grid(alignment: .trailing, horizontalSpacing: 8, verticalSpacing: 1) {
+            GridRow {
+                Text(localized("Date", "日期")).frame(maxWidth: .infinity, alignment: .leading)
+                Text(localized("Tokens", "令牌")).frame(maxWidth: .infinity, alignment: .trailing)
+                if let summary = analysis.summary {
+                    if summary.total > 0 {
+                        Text(localized("Share", "占比"))
+                            .background(AgentDashboardGeometryReporter(identifier: "table.share-header", probe: layoutProbe))
+                    }
+                    Text(localized("Interval total", "区间累计"))
+                        .background(AgentDashboardGeometryReporter(identifier: "table.cumulative-header", probe: layoutProbe))
+                }
+            }
+            .foregroundStyle(.secondary)
+            .background(AgentDashboardGeometryReporter(identifier: "table.header", probe: layoutProbe))
+            ForEach(analysis.knownSlots) { slot in
+                GridRow {
+                    Text(slot.day).frame(maxWidth: .infinity, alignment: .leading)
+                    Text(slot.tokens!.formatted()).frame(maxWidth: .infinity, alignment: .trailing)
+                    if let summary = analysis.summary {
+                        if let share = summary.shares[slot.day] {
+                            Text((share * 100).formatted(.number.precision(.fractionLength(1))) + "%")
+                        }
+                        if let cumulative = summary.cumulative[slot.day] { Text(cumulative.formatted()) }
+                    }
+                }
+                .frame(height: 15)
+                .background(selectedDay == slot.day ? Color.accentColor.opacity(0.1) : Color.clear)
+                .background(AgentDashboardGeometryReporter(identifier: "table-row.\(slot.day)", probe: layoutProbe))
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .font(.system(size: 12)).monospacedDigit()
+        .background(AgentDashboardGeometryReporter(identifier: "daily-table", probe: layoutProbe))
+    }
+
+    private func metricRow(availableWidth: CGFloat) -> some View {
+        let titles = [localized("Account 7D tokens", "账户7天令牌"),
+                      localized("Lifetime tokens", "账户累计令牌"),
+                      localized("Local API equivalent · 7D", "本地 API 等效 · 7天")]
+        let metrics = [knownMetric("week"), knownMetric("total"), knownMetric("api-cost-seven-days")]
+        let visible = metrics.enumerated().compactMap { index, metric in
+            metric.map { (metric: $0, title: titles[index]) }
+        }
+        let spacing = CodexDashboardMetricTypography.columnSpacing
+        let layout = CodexDashboardMetricTypography.layout(values: visible.map { $0.metric.value ?? "" }, availableWidth: availableWidth)
+        let columnWidth = max(1, (availableWidth - spacing * CGFloat(max(0, visible.count - 1))) / CGFloat(max(1, visible.count)))
+        let valueWidth = visible.map {
+            CodexDashboardMetricTypography.measuredWidth(CodexDashboardMetricTypography.displayValue($0.metric, fullWidth: availableWidth)) + 2
+        }.max() ?? 0
+        let titleWidth = visible.map {
+            ($0.title as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)]).width
+        }.max() ?? 0
+        let stackLabels = valueWidth + titleWidth + spacing > availableWidth
+        return Group {
+            if layout == .columns {
+                HStack(alignment: .top, spacing: spacing) {
+                    ForEach(visible, id: \.metric.id) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.title).font(.system(size: 12)).foregroundStyle(.secondary)
+                                .frame(height: 30, alignment: .topLeading)
+                            metricValue(item.metric, fullWidth: availableWidth)
+                                .frame(width: columnWidth, alignment: .leading)
+                            metricCoverage(item.metric)
+                        }
+                        .frame(width: columnWidth, alignment: .topLeading)
+                        .background(AgentDashboardGeometryReporter(identifier: "metric.\(item.metric.id)", probe: layoutProbe))
+                    }
+                }
+                .background(AgentDashboardGeometryReporter(identifier: "metrics.columns", probe: layoutProbe))
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(visible, id: \.metric.id) { item in
+                        VStack(alignment: .leading, spacing: 2) {
+                            if stackLabels {
+                                Text(item.title).font(.system(size: 12)).foregroundStyle(.secondary)
+                                metricValue(item.metric, fullWidth: availableWidth)
+                                    .frame(maxWidth: .infinity, alignment: .trailing)
+                            } else {
+                                HStack(alignment: .firstTextBaseline, spacing: spacing) {
+                                    Text(item.title).font(.system(size: 12)).foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    metricValue(item.metric, fullWidth: availableWidth)
+                                        .frame(width: valueWidth, alignment: .trailing)
+                                }
+                            }
+                            metricCoverage(item.metric)
+                        }
+                        .frame(width: availableWidth, alignment: .leading)
+                        .background(AgentDashboardGeometryReporter(identifier: "metric.\(item.metric.id)", probe: layoutProbe))
+                    }
+                }
+                .background(AgentDashboardGeometryReporter(identifier: "metrics.rows", probe: layoutProbe))
+            }
+        }
+    }
+
+    private func metricValue(_ metric: CodexDashboardProjection.Metric, fullWidth: CGFloat) -> some View {
+        let original = metric.value ?? ""
+        let display = CodexDashboardMetricTypography.displayValue(metric, fullWidth: fullWidth)
+        return Text(display).font(CodexDashboardMetricTypography.font)
+            .fixedSize(horizontal: true, vertical: true)
+            .frame(height: CodexDashboardMetricTypography.lineHeight, alignment: .leading)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(original)
+            .accessibilityIdentifier("uma.agent.codex.metric-value.\(metric.id)")
+            .help(original)
+            .background(AgentDashboardGeometryReporter(identifier: "metric-value.\(metric.id)", probe: layoutProbe))
+    }
+
+    @ViewBuilder private func metricCoverage(_ metric: CodexDashboardProjection.Metric) -> some View {
+        if let coverage = metric.coveragePercent {
+            Text(localized("Lifetime priced tokens \(coverage)%", "累计已定价令牌 \(coverage)%"))
+                .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            if metric.id == "api-cost-seven-days", let coverage = metric.coveragePercent {
-                Text(localized("Lifetime priced-token coverage \(coverage)%", "累计已定价令牌覆盖率 \(coverage)%"))
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
     }
 
@@ -862,8 +1160,8 @@ public struct AgentWorkspaceSurface: View {
                              tint: workspaceLogoColor, diameter: 32)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(providerID.displayName)
-                    .font(.title2.weight(.semibold))
+                Text(providerID == .codex ? [providerID.displayName, planLabel].compactMap { $0 }.joined(separator: " · ") : providerID.displayName)
+                    .font(providerID == .codex ? .system(size: 16, weight: .medium) : .title2.weight(.semibold))
                 if !connectionStatusSummary.isEmpty {
                     Text(connectionStatusSummary)
                         .font(.subheadline).foregroundStyle(.secondary)

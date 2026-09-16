@@ -93,6 +93,198 @@ struct CodexDashboardProjectionTests {
         #expect(!String(decoding: encoded, as: UTF8.self).contains("dailyUsage"))
     }
 
+    @Test("complete daily statistics use exact sums and earliest tied peak")
+    func completeDailyStatistics() throws {
+        let values: [Int64?] = [0, 100, 200, 200, 0, 0, 0]
+        let analysis = analysis(values)
+        let summary = try #require(analysis.summary)
+        #expect(analysis.unavailabilityReason == nil)
+        #expect(summary.total == 500)
+        #expect(summary.mean == 500.0 / 7)
+        #expect(summary.peak.day == "2027-01-12")
+        #expect(summary.cumulative["2027-01-12"] == 300)
+        #expect(summary.cumulative["2027-01-16"] == 500)
+        #expect(summary.shares["2027-01-12"] == 0.4)
+        #expect(analysis.selected("2027-01-10")?.tokens == 0)
+        #expect(analysis.selected(nil) == nil)
+        let reversed = CodexDashboardProjection.DailyAnalysis(slots: analysis.slots.reversed())
+        #expect(reversed.summary == summary)
+    }
+
+    @Test("partial series never yields statistics but retains known zero selection")
+    func partialDailyStatistics() {
+        for missing in 0..<7 {
+            var values: [Int64?] = [0, 10, 20, 30, 40, 50, 60]
+            values[missing] = nil
+            let result = analysis(values)
+            #expect(result.summary == nil)
+            #expect(result.unavailabilityReason == .missingDays)
+            #expect(result.knownSlots.count == 6)
+            #expect(result.selected(result.slots[missing].day) == nil)
+        }
+        #expect(analysis(Array(repeating: nil, count: 7)).knownSlots.isEmpty)
+        #expect(analysis([0]).summary == nil)
+    }
+
+    @Test("all zero daily series has zero sums and no undefined shares")
+    func zeroDailyStatistics() throws {
+        let result = analysis(Array(repeating: 0, count: 7))
+        let summary = try #require(result.summary)
+        #expect(result.unavailabilityReason == nil)
+        #expect(summary.total == 0)
+        #expect(summary.mean == 0)
+        #expect(summary.shares.isEmpty)
+        #expect(summary.cumulative.values.allSatisfy { $0 == 0 })
+        #expect(summary.peak.day == "2027-01-10")
+        #expect(result.knownSlots.count == 7)
+    }
+
+    @Test("overflow negative duplicate and noncontiguous series suppress all derived values")
+    func invalidDailyStatistics() {
+        let overflowing = analysis([Int64.max, 1, 0, 0, 0, 0, 0])
+        #expect(overflowing.summary == nil)
+        #expect(overflowing.unavailabilityReason == .overflow)
+        #expect(overflowing.knownSlots.count == 7)
+        #expect(overflowing.selected("2027-01-10")?.tokens == Int64.max)
+        let negative = analysis([0, -1, 0, 0, 0, 0, 0])
+        #expect(negative.summary == nil)
+        #expect(negative.unavailabilityReason == .invalidSequence)
+        #expect(negative.selected("2027-01-11") == nil)
+        #expect(analysis([Int64.max, 0, 0, 0, 0, 0, 0]).summary?.total == Int64.max)
+        var slots = analysis(Array(repeating: 1, count: 7)).slots
+        slots[6] = slots[0]
+        #expect(CodexDashboardProjection.DailyAnalysis(slots: slots).summary == nil)
+        #expect(CodexDashboardProjection.DailyAnalysis(slots: slots).unavailabilityReason == .invalidSequence)
+        slots[6] = .init(day: "2027-01-18", tokens: 1)
+        #expect(CodexDashboardProjection.DailyAnalysis(slots: slots).summary == nil)
+        #expect(CodexDashboardProjection.DailyAnalysis(slots: slots).unavailabilityReason == .invalidSequence)
+    }
+
+    @Test("conflicting duplicates remain unknown while identical duplicates count once")
+    func duplicateAdmissionDefense() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let days = [AgentAccountUsageDay(day: "2027-01-13", tokens: 0),
+                    AgentAccountUsageDay(day: "2027-01-13", tokens: 0),
+                    AgentAccountUsageDay(day: "2027-01-14", tokens: 20),
+                    AgentAccountUsageDay(day: "2027-01-14", tokens: 30),
+                    AgentAccountUsageDay(day: "2027-01-14", tokens: 20),
+                    AgentAccountUsageDay(day: "2027-01-15", tokens: -1)]
+        let result = CodexDashboardProjection(
+            snapshot: snapshot(localFreshness: .fresh, capturedAt: Date(timeIntervalSince1970: 1_800_000_000), accountDailyUsage: days),
+            provider: provider(quotas: [])).dailyAnalysis(calendar: calendar)
+        #expect(result.selected("2027-01-13")?.tokens == 0)
+        #expect(result.selected("2027-01-14") == nil)
+        #expect(result.selected("2027-01-15") == nil)
+        #expect(result.summary == nil)
+    }
+
+    @Test("only admitted Codex pro gets presentation infinity and raw quota is unchanged")
+    func proPresentationMapping() {
+        let raw = ProviderProductQuotaState(id: "5h", kind: .fiveHour, compactLabel: "5H",
+            value: .remainingPercent(42), precision: .exact, freshness: .fresh,
+            comparison: .ineligible(.missing), resetsAt: Date(timeIntervalSince1970: 1_800_003_600))
+        let cases: [(ProviderProductID, String?, Bool)] = [
+            (.codex, "pro", true), (.codex, "plus", false), (.claude, "pro", false),
+            (.claude, "max", false), (.codex, "unknown", false), (.codex, nil, false),
+            (.codex, "", false), (.codex, "pro max", false), (.codex, "PRO", false)
+        ]
+        for (id, plan, infinity) in cases {
+            let state = ProviderProductState(id: id, planLabel: plan, quotas: [raw],
+                freshness: .fresh, availability: .available, connection: .connected, health: .healthy,
+                inventory: .init(overview: true, assistant: true, agentWorkspace: true), isActive: true)
+            let result = CodexDashboardProjection(snapshot: snapshot(localFreshness: .fresh, capturedAt: Date()), provider: state)
+            #expect(result.fiveHour.state == (infinity ? .unlimited : .finite(42)))
+            #expect(result.fiveHour.resetAt == (infinity ? nil : raw.resetsAt))
+            #expect(state.quotas == [raw])
+            #expect(state.planLabel == plan)
+        }
+        #expect(CodexDashboardProjection(snapshot: snapshot(localFreshness: .fresh, capturedAt: Date()), provider: nil).fiveHour.state == .unavailable)
+    }
+
+    @Test("Pro presentation retains stale and invalid observation state")
+    func proObservationWarnings() {
+        for raw in [quota(id: "5h", kind: .fiveHour, value: .remainingPercent(42), freshness: .stale),
+                    quota(id: "5h", kind: .fiveHour, value: .remainingPercent(.nan))] {
+            let state = ProviderProductState(id: .codex, planLabel: "pro", quotas: [raw],
+                freshness: .stale, availability: .available, connection: .failed, health: .healthy,
+                inventory: .init(overview: true, assistant: true, agentWorkspace: true), isActive: true)
+            let result = CodexDashboardProjection(snapshot: snapshot(localFreshness: .fresh, capturedAt: Date()), provider: state)
+            #expect(result.fiveHour.state == .unlimited)
+            #expect(result.fiveHourObservationState == (raw.freshness == .stale ? .stale : .invalid))
+            #expect(result.fiveHour.resetAt == nil)
+        }
+    }
+
+    @Test("missing invalid and overflow diagnostics are distinct in both languages")
+    func distinctAnalysisDiagnostics() {
+        typealias Reason = CodexDashboardProjection.DailyAnalysis.UnavailabilityReason
+        let missing = analysis([0, nil, 0, 0, 0, 0, 0])
+        let invalid = analysis([0, -1, 0, 0, 0, 0, 0])
+        let overflow = analysis([Int64.max, 1, 0, 0, 0, 0, 0])
+        #expect(missing.unavailabilityReason == .missingDays)
+        #expect(invalid.unavailabilityReason == .invalidSequence)
+        #expect(overflow.unavailabilityReason == .overflow)
+        for chinese in [false, true] {
+            let messages = [Reason.missingDays, .invalidSequence, .overflow].map { $0.message(isChinese: chinese) }
+            #expect(Set(messages).count == 3)
+            #expect(!Reason.overflow.message(isChinese: chinese).contains(chinese ? "覆盖不完整" : "Incomplete"))
+        }
+        var slots = analysis(Array(repeating: 0, count: 7)).slots
+        slots[0] = .init(day: "2027-02-30", tokens: 0)
+        #expect(CodexDashboardProjection.DailyAnalysis(slots: slots).unavailabilityReason == .invalidSequence)
+    }
+
+    @Test("source conflicts and invalid values retain their diagnostic after unknown slot projection")
+    func invalidInputProvenance() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let captured = Date(timeIntervalSince1970: 1_800_000_000)
+        for extras in [
+            [AgentAccountUsageDay(day: "2027-01-13", tokens: 1)],
+            [AgentAccountUsageDay(day: "2027-01-14", tokens: -1)],
+            [AgentAccountUsageDay(day: "2027-02-30", tokens: 3)]
+        ] {
+            let days = [AgentAccountUsageDay(day: "2027-01-13", tokens: 0)] + extras
+            let result = CodexDashboardProjection(
+                snapshot: snapshot(localFreshness: .fresh, capturedAt: captured, accountDailyUsage: days),
+                provider: provider(quotas: [])).dailyAnalysis(calendar: calendar)
+            #expect(result.summary == nil)
+            #expect(result.unavailabilityReason == .invalidSequence)
+        }
+    }
+
+    @Test("Pro with no raw 5H window keeps the specified infinity presentation")
+    func proWithoutRawFiveHour() {
+        let state = ProviderProductState(id: .codex, planLabel: "pro", quotas: [],
+            freshness: .fresh, availability: .available, connection: .connected, health: .healthy,
+            inventory: .init(overview: true, assistant: true, agentWorkspace: true), isActive: true)
+        let result = CodexDashboardProjection(snapshot: snapshot(localFreshness: .fresh, capturedAt: Date()), provider: state)
+        #expect(result.fiveHour.state == .unlimited)
+        #expect(result.fiveHour.resetAt == nil)
+        #expect(result.fiveHourObservationState == .unavailable)
+        #expect(state.quotas.isEmpty)
+    }
+
+    @Test("extreme currency compact presentation is explicit and retains the full formatted amount")
+    func compactCurrencyKeepsOriginal() throws {
+        var source = snapshot(localFreshness: .fresh, capturedAt: Date())
+        source.apiCostEstimate = APICostEstimateSnapshot(sevenDayUSD: Double.greatestFiniteMagnitude,
+            lifetimeUSD: Double.greatestFiniteMagnitude, coveragePercent: 89, modelNames: [])
+        let result = CodexDashboardProjection(snapshot: source, provider: provider(quotas: []))
+        let cost = try #require(result.metrics.first { $0.id == "api-cost-seven-days" })
+        #expect(cost.value == Double.greatestFiniteMagnitude.formatted(.currency(code: "USD")))
+        #expect(cost.compactValue?.hasPrefix("≈ USD ") == true)
+        #expect(cost.value != cost.compactValue)
+        #expect(source.apiCostEstimate?.sevenDayUSD == Double.greatestFiniteMagnitude)
+    }
+
+    private func analysis(_ values: [Int64?]) -> CodexDashboardProjection.DailyAnalysis {
+        CodexDashboardProjection.DailyAnalysis(slots: values.enumerated().map {
+            .init(day: "2027-01-\(10 + $0.offset)", tokens: $0.element)
+        })
+    }
+
     private func makeProjection(fiveHour: ProviderProductQuotaState, sevenDay: ProviderProductQuotaState) -> CodexDashboardProjection {
         CodexDashboardProjection(snapshot: snapshot(localFreshness: .fresh, capturedAt: Date(timeIntervalSince1970: 1_800_000_000)), provider: provider(quotas: [fiveHour, sevenDay]))
     }
