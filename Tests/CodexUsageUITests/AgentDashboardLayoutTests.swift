@@ -42,46 +42,136 @@ struct AgentDashboardLayoutTests {
         }
     }
 
-    @Test("sidebar-aware fixture reserves the production sidebar width at 1040 by 760 content")
+    @Test("outer windows reserve sidebar and toolbar space for compact and wide dashboards")
     func sidebarAwareFixtureFitsRecommendedContentSize() throws {
         _ = NSApplication.shared
-        let fixture = Fixture.all[0]
-        let store = UsageStore.preview(
-            language: .english,
-            presentationCards: fixture.presentationCards,
-            accountDailyUsage: fixture.accountDailyUsage
-        )
-        let provider = try #require(store.productInventory.provider(.codex))
-        let probe = AgentDashboardLayoutProbe()
-        let root = HSplitView {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Agents").font(.headline).padding(.horizontal, 10).padding(.top, 12)
-                AgentGlanceRow(provider: provider, style: .mainList, selected: true, language: .english)
-                Spacer()
+        for width: CGFloat in [760, 823, 1040] {
+            for language: AppLanguage in [.simplifiedChinese, .english] {
+                for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+                    let fixture = Fixture(
+                        identifier: "outer-\(Int(width))-\(language)-\(appearance.rawValue)",
+                        contentSize: .init(width: width, height: 714), language: language,
+                        appearance: appearance, presentationCards: [Fixture.healthyCodexCard],
+                        accountDailyUsage: Fixture.dailyAccountUsage
+                    )
+                    let store = UsageStore.preview(language: language, presentationCards: fixture.presentationCards,
+                                                   accountDailyUsage: fixture.accountDailyUsage)
+                    let provider = try #require(store.productInventory.provider(.codex))
+                    let probe = AgentDashboardLayoutProbe()
+                    let root = VStack(spacing: 0) {
+                        Color.clear.frame(height: 49) // Production toolbar and divider.
+                        HSplitView {
+                            VStack {
+                                AgentGlanceRow(provider: provider, style: .mainList, selected: true, language: language)
+                                Spacer()
+                            }.frame(minWidth: 190, idealWidth: 210, maxWidth: 285)
+                            AgentWorkspaceSurface(store: store, providerID: .codex,
+                                refresh: {}, connectCodex: {}, disconnectCodex: {},
+                                claudeControlState: { .consentRequired }, connectClaude: {}, claudeAccuracySync: {},
+                                layoutProbe: probe).frame(minWidth: 550)
+                        }
+                    }
+                    let host = NSHostingView(rootView: root)
+                    let window = NSWindow(contentRect: .init(origin: .zero, size: fixture.contentSize),
+                                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
+                    window.contentView = host
+                    window.setFrame(.init(origin: .zero, size: fixture.contentSize), display: false)
+                    window.appearance = NSAppearance(named: appearance)
+                    window.orderFront(nil)
+                    defer { window.orderOut(nil) }
+                    settle(host)
+                    #expect(window.frame.width == width)
+                    #expect(window.frame.height == 714)
+                    #expect(host.fittingSize.width <= width)
+                    assertFirstScreen(probe)
+                    capture(host: host, fixture: fixture)
+                }
             }
-            .frame(minWidth: 190, idealWidth: 210, maxWidth: 285)
-            .frame(width: 210)
-            AgentWorkspaceSurface(
-                store: store, providerID: .codex,
-                refresh: {}, connectCodex: {}, disconnectCodex: {},
-                claudeControlState: { .consentRequired }, connectClaude: {}, claudeAccuracySync: {}, layoutProbe: probe
-            )
-            .frame(minWidth: 500)
         }
-        let host = NSHostingView(rootView: root)
-        let window = NSWindow(
-            contentRect: .init(origin: .zero, size: fixture.contentSize),
-            styleMask: [.titled, .closable], backing: .buffered, defer: false
-        )
+    }
+
+    @Test("unavailable data omits quota, metric, and chart placeholders")
+    func unavailableValuesDoNotProduceCards() throws {
+        let store = UsageStore.preview(presentationCards: [Fixture.unavailableCodexCard])
+        let probe = AgentDashboardLayoutProbe()
+        let host = NSHostingView(rootView: AgentWorkspaceSurface(store: store, providerID: .codex,
+            refresh: {}, connectCodex: {}, disconnectCodex: {}, claudeControlState: { .consentRequired },
+            connectClaude: {}, claudeAccuracySync: {}, layoutProbe: probe))
+        let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 550, height: 620),
+                              styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = host
-        window.appearance = NSAppearance(named: fixture.appearance)
         window.orderFront(nil)
         defer { window.orderOut(nil) }
-
         settle(host)
-        #expect(host.bounds.size == fixture.contentSize)
-        assertFirstScreen(probe)
-        capture(host: host, fixture: fixture, suffix: "sidebar-aware")
+        #expect(probe.frames.keys.allSatisfy { !$0.hasPrefix("quota.") && !$0.hasPrefix("metric.") })
+        #expect(probe.frames["trend"] == nil)
+        #expect(probe.frames["estimate-trend"] == nil)
+    }
+
+    @Test("known stale quota warnings remain visible without a fabricated current value")
+    func staleQuotaStateRemainsVisible() throws {
+        let store = UsageStore.preview(presentationCards: [Fixture.staleCodexCard])
+        let probe = AgentDashboardLayoutProbe()
+        let host = NSHostingView(rootView: AgentWorkspaceSurface(store: store, providerID: .codex,
+            refresh: {}, connectCodex: {}, disconnectCodex: {}, claudeControlState: { .consentRequired },
+            connectClaude: {}, claudeAccuracySync: {}, layoutProbe: probe))
+        let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 550, height: 620),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        settle(host)
+        let viewport = try #require(probe.frames["scroll.viewport"])
+        let warning = try #require(probe.frames["quota-state.seven-day"])
+        #expect(viewport.contains(warning))
+        #expect(probe.frames["quota.seven-day"] != nil)
+        #expect(probe.frames["quota.five-hour"] == nil)
+        let projection = CodexDashboardProjection(snapshot: store.snapshot, provider: store.productInventory.provider(.codex))
+        #expect(projection.sevenDay.state == .stale)
+        #expect(projection.sevenDay.state.ringFraction == nil)
+    }
+
+    @Test("Codex main sidebar omits unknown usage but retains known zero and quick-panel behavior")
+    func sidebarUnknownAndZero() throws {
+        for (name, card, expected) in [
+            ("unavailable", Fixture.unavailableCodexCard, Optional<String>.none),
+            ("zero", Fixture.zeroCodexCard, Optional("0%"))
+        ] {
+            let store = UsageStore.preview(presentationCards: [card])
+            let provider = try #require(store.productInventory.provider(.codex))
+            let row = AgentGlanceRow(provider: provider, style: .mainList, selected: true, language: .simplifiedChinese)
+            #expect(row.mainListUsageDisplayText == expected)
+            if expected == nil {
+                #expect(AgentGlanceRow(provider: provider, style: .quickPanel).mainListUsageDisplayText == "—")
+            }
+            let root = VStack(spacing: 0) {
+                Color.clear.frame(height: 49)
+                HSplitView {
+                    VStack(alignment: .leading) {
+                        Text("智能体").font(.headline).padding(.horizontal, 10).padding(.top, 12)
+                        row.padding(.horizontal, 6)
+                        Spacer()
+                    }.frame(minWidth: 190, idealWidth: 210, maxWidth: 285)
+                    AgentWorkspaceSurface(store: store, providerID: .codex,
+                        refresh: {}, connectCodex: {}, disconnectCodex: {},
+                        claudeControlState: { .consentRequired }, connectClaude: {}, claudeAccuracySync: {})
+                        .frame(minWidth: 550)
+                }
+            }
+            let host = NSHostingView(rootView: root)
+            let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 760, height: 714),
+                                  styleMask: [.titled], backing: .buffered, defer: false)
+            window.contentView = host
+            window.setFrame(.init(x: 0, y: 0, width: 760, height: 714), display: false)
+            window.appearance = NSAppearance(named: .darkAqua)
+            window.orderFront(nil)
+            defer { window.orderOut(nil) }
+            settle(host)
+            #expect(host.fittingSize.width <= 760)
+            capture(host: host, fixture: Fixture(identifier: "sidebar-760-\(name)",
+                contentSize: host.bounds.size, language: .simplifiedChinese, appearance: .darkAqua,
+                presentationCards: [card], accountDailyUsage: []))
+        }
     }
 
     private func settle(_ host: NSView) {
@@ -100,7 +190,11 @@ struct AgentDashboardLayoutTests {
         #expect(metrics.allSatisfy(viewport.contains))
         #expect(viewport.contains(trend))
         #expect(quotas.allSatisfy { $0.minY < metrics[0].minY })
-        #expect(metrics.allSatisfy { $0.minY < trend.minY })
+        #expect(metrics.prefix(2).allSatisfy { $0.maxY <= trend.minY })
+        #expect(metrics[2].maxX < trend.minX)
+        #expect(abs(metrics[2].minY - trend.minY) < 1)
+        let visibleDays = probe.frames.keys.filter { $0.hasPrefix("day.") }
+        #expect(visibleDays.count == 6) // One missing day stays blank; reported zero remains present.
     }
 
     private func capture(host: NSView, fixture: Fixture, suffix: String = "") {
@@ -123,22 +217,26 @@ struct AgentDashboardLayoutTests {
         let accountDailyUsage: [AgentAccountUsageDay]
 
         static let all = [
-            Fixture(identifier: "fixture-agent-1040x762-content-en-light-healthy", contentSize: .init(width: 1_040, height: 762), language: .english, appearance: .aqua, presentationCards: [healthyCodexCard], accountDailyUsage: []),
+            Fixture(identifier: "fixture-agent-1040x762-content-en-light-healthy", contentSize: .init(width: 1_040, height: 762), language: .english, appearance: .aqua, presentationCards: [healthyCodexCard], accountDailyUsage: dailyAccountUsage),
             Fixture(identifier: "fixture-agent-1280x800-content-en-light-healthy-daily-account", contentSize: .init(width: 1_280, height: 800), language: .english, appearance: .aqua, presentationCards: [healthyCodexCard], accountDailyUsage: dailyAccountUsage),
             Fixture(identifier: "fixture-agent-760x552-content-zh-dark-unavailable", contentSize: .init(width: 760, height: 552), language: .simplifiedChinese, appearance: .darkAqua, presentationCards: [unavailableCodexCard], accountDailyUsage: []),
         ]
 
-        private static let dailyAccountUsage = [
-            AgentAccountUsageDay(day: "2026-09-07", tokens: 12),
-            AgentAccountUsageDay(day: "2026-09-08", tokens: 18),
-            AgentAccountUsageDay(day: "2026-09-09", tokens: 0),
-            AgentAccountUsageDay(day: "2026-09-10", tokens: 24),
-            AgentAccountUsageDay(day: "2026-09-11", tokens: 16),
-            AgentAccountUsageDay(day: "2026-09-12", tokens: 20),
-            AgentAccountUsageDay(day: "2026-09-13", tokens: 28),
-        ]
+        static var dailyAccountUsage: [AgentAccountUsageDay] {
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: Date())
+            let formatter = DateFormatter()
+            formatter.calendar = calendar
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = calendar.timeZone
+            formatter.dateFormat = "yyyy-MM-dd"
+            return (-6...0).filter { $0 != -5 }.map { offset in
+                AgentAccountUsageDay(day: formatter.string(from: calendar.date(byAdding: .day, value: offset, to: today)!),
+                                     tokens: offset == -4 ? 0 : Int64((offset + 7) * 10))
+            }
+        }
 
-        private static let healthyCodexCard = card(
+        static let healthyCodexCard = card(
             windows: [
                 window(id: "five-hour", kind: .fiveHour, label: "5H", remaining: .finite(0)),
                 window(id: "seven-day", kind: .sevenDay, label: "7D", remaining: .finite(74))
@@ -148,7 +246,17 @@ struct AgentDashboardLayoutTests {
             freshness: .fresh
         )
 
-        private static let unavailableCodexCard = card(
+        static let staleCodexCard = card(
+            windows: [window(id: "seven-day", kind: .sevenDay, label: "7D", remaining: .finite(74))],
+            selected: "seven-day", remaining: .finite(74), freshness: .stale
+        )
+
+        static let zeroCodexCard = card(
+            windows: [window(id: "seven-day", kind: .sevenDay, label: "7D", remaining: .finite(0))],
+            selected: "seven-day", remaining: .finite(0), freshness: .fresh
+        )
+
+        static let unavailableCodexCard = card(
             windows: [], selected: nil, remaining: .unavailable, freshness: .unavailable
         )
 

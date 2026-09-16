@@ -5,7 +5,7 @@ import SwiftUI
 enum MainWindowFramePolicy {
     /// The recommended working area.  This is content size, not the frame
     /// reported by AppKit (which also includes title-bar chrome).
-    static let normalContentSize = NSSize(width: 1_040, height: 760)
+    static let normalContentSize = NSSize(width: 760, height: 760)
     static let titlebarRecommendedOuterSize = NSSize(width: 1_040, height: 762)
     private static let visibleIntersection = NSSize(width: 120, height: 80)
 

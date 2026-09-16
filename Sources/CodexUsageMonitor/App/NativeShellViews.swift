@@ -126,7 +126,7 @@ struct MainWindowRootView: View {
                 connectClaude: connectClaude,
                 claudeAccuracySync: accuracySyncClaude
             )
-            .frame(minWidth: 500)
+            .frame(minWidth: 550)
         }
     }
 

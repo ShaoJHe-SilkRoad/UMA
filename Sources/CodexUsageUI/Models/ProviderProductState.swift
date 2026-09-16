@@ -414,14 +414,14 @@ enum ProviderProductStatePolicy {
                     isActive: false
                 )
             }
-            let quotas = makeQuotas(card: card, freshness: .fresh)
-            let primaryQuotaID = primaryQuotaID(card: card, quotas: quotas)
             let freshness: ProviderProductFreshness = switch card.freshness {
             case .fresh: .fresh
             case .cached: .cached
             case .stale: .stale
             case .unavailable: .unavailable
             }
+            let quotas = makeQuotas(card: card, freshness: freshness)
+            let primaryQuotaID = primaryQuotaID(card: card, quotas: quotas)
             // Preview fixtures must exercise the same visible state language as
             // live product state. A retained stale observation remains a
             // connected source with explicitly stale freshness, matching the

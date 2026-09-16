@@ -72,6 +72,7 @@ struct BalancedWindowPolicyTests {
 
     @Test("The default frame survives both hosted main-surface installations")
     @MainActor func defaultFrameSurvivesFullHostingSequence() throws {
+        #expect(MainWindowFramePolicy.normalContentSize.width == 760)
         let controller = MainWindowController(restoresSavedFrame: false)
         defer { controller.tearDown() }
 
