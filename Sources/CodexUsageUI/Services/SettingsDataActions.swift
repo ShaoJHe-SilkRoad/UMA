@@ -37,7 +37,9 @@ actor SettingsRetainedDataService {
 }
 
 struct SanitizedSettingsDiagnostics: Codable, Equatable, Sendable {
-    static let schemaVersion = 1
+    /// Schema 2 adds the content-free Grok Bot presence classification.
+    /// Percentages, account identity, paths, and meter payloads stay excluded.
+    static let schemaVersion = 2
 
     let schemaVersion: Int
     let applicationVersion: String
@@ -46,6 +48,7 @@ struct SanitizedSettingsDiagnostics: Codable, Equatable, Sendable {
     let automaticBackgroundRefresh: Bool
     let refreshOnWake: Bool
     let keepMonitoringWhenWindowsClose: Bool
+    let grokBotPresence: GrokBotPresenceClassification
 }
 
 enum SettingsDiagnosticsExporter {
@@ -53,6 +56,7 @@ enum SettingsDiagnosticsExporter {
     static func data(
         activeProviderCount: Int,
         preferences: ApplicationPreferences,
+        grokBotPresence: GrokBotPresenceClassification,
         bundle: Bundle = .main
     ) throws -> Data {
         let receipt = SanitizedSettingsDiagnostics(
@@ -72,7 +76,8 @@ enum SettingsDiagnosticsExporter {
             ),
             keepMonitoringWhenWindowsClose: preferences.value(
                 for: UMAApplicationPreferenceKeys.keepMonitoringWhenWindowsClose
-            )
+            ),
+            grokBotPresence: grokBotPresence
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
