@@ -1,0 +1,4 @@
+{
+  "name": "UMA · Codex Usage Monitor",
+  "install": "bash .cursor/install.sh"
+}

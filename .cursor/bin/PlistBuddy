@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""Linux stand-in for macOS /usr/libexec/PlistBuddy.
+
+The UMA version-authority script (`script/read_uma_product_version.sh`) reads
+values from `Configuration/UMAProductVersion.plist` via PlistBuddy `Print`
+commands. This shim reimplements the `Print` verb (and a few common mutators)
+on top of the Python standard library so those reads work in a Linux Cloud
+Agent environment. Only the behavior the repository relies on is emulated.
+
+Usage:
+  PlistBuddy -c "Print[ :Key:SubKey]" FILE
+  PlistBuddy -c "Set :Key:SubKey VALUE" FILE
+  PlistBuddy -c "Add :Key:SubKey <type> VALUE" FILE
+  PlistBuddy -c "Delete :Key:SubKey" FILE
+"""
+import plistlib
+import sys
+
+
+def die(message: str, code: int = 1) -> "None":
+    sys.stderr.write(message.rstrip("\n") + "\n")
+    raise SystemExit(code)
+
+
+def load(path: str):
+    with open(path, "rb") as handle:
+        return plistlib.load(handle)
+
+
+def save(obj, path: str) -> None:
+    with open(path, "wb") as handle:
+        plistlib.dump(obj, handle, fmt=plistlib.FMT_XML, sort_keys=False)
+
+
+def parse_path(entry: str):
+    entry = entry.strip()
+    if entry == "" or entry == ":":
+        return []
+    if entry.startswith(":"):
+        entry = entry[1:]
+    return entry.split(":")
+
+
+def resolve(root, keys):
+    cursor = root
+    for key in keys:
+        if isinstance(cursor, dict):
+            if key not in cursor:
+                raise KeyError(key)
+            cursor = cursor[key]
+        elif isinstance(cursor, list):
+            cursor = cursor[int(key)]
+        else:
+            raise KeyError(key)
+    return cursor
+
+
+def render(value) -> str:
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if isinstance(value, dict):
+        lines = ["Dict {"]
+        for key, sub in value.items():
+            lines.append("    %s = %s" % (key, _inline(sub)))
+        lines.append("}")
+        return "\n".join(lines)
+    if isinstance(value, list):
+        lines = ["Array {"]
+        for sub in value:
+            lines.append("    %s" % _inline(sub))
+        lines.append("}")
+        return "\n".join(lines)
+    return str(value)
+
+
+def _inline(value) -> str:
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if isinstance(value, dict):
+        return "Dict"
+    if isinstance(value, list):
+        return "Array"
+    return str(value)
+
+
+def coerce(type_name: str, raw: str):
+    type_name = type_name.lower()
+    if type_name == "string":
+        return raw
+    if type_name == "integer":
+        return int(raw)
+    if type_name == "real":
+        return float(raw)
+    if type_name == "bool":
+        return raw.strip().lower() in ("1", "true", "yes")
+    die("PlistBuddy: unsupported type %r" % type_name)
+
+
+def run_command(command: str, path: str) -> int:
+    tokens = command.strip().split(None, 1)
+    if not tokens:
+        die("PlistBuddy: empty command")
+    verb = tokens[0]
+    remainder = tokens[1] if len(tokens) > 1 else ""
+
+    if verb == "Print":
+        keys = parse_path(remainder)
+        try:
+            value = resolve(load(path), keys)
+        except (KeyError, IndexError, ValueError):
+            die('Print: Entry, ":%s", Does Not Exist' % ":".join(keys))
+        sys.stdout.write(render(value) + "\n")
+        return 0
+
+    if verb == "Set":
+        entry, _, raw = remainder.partition(" ")
+        keys = parse_path(entry)
+        data = load(path)
+        parent = resolve(data, keys[:-1]) if keys[:-1] else data
+        existing = parent.get(keys[-1]) if isinstance(parent, dict) else None
+        if isinstance(existing, bool):
+            parent[keys[-1]] = raw.strip().lower() in ("1", "true", "yes")
+        elif isinstance(existing, int) and not isinstance(existing, bool):
+            parent[keys[-1]] = int(raw)
+        elif isinstance(existing, float):
+            parent[keys[-1]] = float(raw)
+        else:
+            parent[keys[-1]] = raw
+        save(data, path)
+        return 0
+
+    if verb == "Add":
+        entry, _, rest = remainder.partition(" ")
+        type_name, _, raw = rest.partition(" ")
+        keys = parse_path(entry)
+        data = load(path)
+        parent = data
+        for key in keys[:-1]:
+            parent = parent.setdefault(key, {})
+        parent[keys[-1]] = coerce(type_name, raw)
+        save(data, path)
+        return 0
+
+    if verb == "Delete":
+        keys = parse_path(remainder)
+        data = load(path)
+        parent = resolve(data, keys[:-1]) if keys[:-1] else data
+        del parent[keys[-1]]
+        save(data, path)
+        return 0
+
+    if verb in ("Save", "Clear"):
+        return 0
+
+    die("PlistBuddy: unsupported verb %r" % verb)
+    return 1
+
+
+def main(argv) -> int:
+    command = None
+    files = []
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token == "-c":
+            command = argv[index + 1]
+            index += 2
+            continue
+        if token == "-x":
+            index += 1
+            continue
+        files.append(token)
+        index += 1
+
+    if not files:
+        die("PlistBuddy: no plist file given")
+    if command is None:
+        die("PlistBuddy: interactive mode is not supported in this shim")
+    return run_command(command, files[0])
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
