@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+"""Linux stand-in for macOS /usr/bin/plutil.
+
+The UMA repository is a macOS application, but its portable packaging-guard
+test suites and version-authority scripts shell out to `plutil`. This shim
+reimplements the small subset those scripts rely on so the checks can run in a
+Linux Cloud Agent environment. It uses only the Python standard library
+(`plistlib`) and mirrors plutil's exit codes: 0 on success, 1 on error.
+
+Supported invocations:
+  plutil -lint [-s] FILE...
+  plutil -create (xml1|binary1) FILE
+  plutil -convert (xml1|binary1) [-o OUT] FILE
+  plutil -insert  KEYPATH -string|-integer|-bool|-float VALUE FILE
+  plutil -replace KEYPATH -string|-integer|-bool|-float VALUE FILE
+  plutil -remove  KEYPATH FILE
+  plutil -extract KEYPATH (raw|xml1) [-o OUT] FILE
+  plutil -p FILE
+"""
+import plistlib
+import sys
+
+
+def die(message: str, code: int = 1) -> "None":
+    sys.stderr.write(message.rstrip("\n") + "\n")
+    raise SystemExit(code)
+
+
+def load(path: str):
+    with open(path, "rb") as handle:
+        return plistlib.load(handle)
+
+
+def dump(obj, path: str, fmt) -> None:
+    with open(path, "wb") as handle:
+        plistlib.dump(obj, handle, fmt=fmt, sort_keys=False)
+
+
+def fmt_for(name: str):
+    if name == "xml1":
+        return plistlib.FMT_XML
+    if name == "binary1":
+        return plistlib.FMT_BINARY
+    die("plutil: unsupported format %r" % name)
+
+
+def split_keypath(keypath: str):
+    # plutil keypaths are dotted; the repo only uses simple top-level keys.
+    return [part for part in keypath.split(".") if part != ""]
+
+
+def coerce(kind: str, raw: str):
+    if kind == "-string":
+        return raw
+    if kind == "-integer":
+        return int(raw)
+    if kind == "-float":
+        return float(raw)
+    if kind == "-bool":
+        return raw.strip().lower() in ("1", "true", "yes")
+    die("plutil: unsupported value type %r" % kind)
+
+
+def set_at(root, keypath, value, *, must_exist: bool) -> None:
+    parts = split_keypath(keypath)
+    if not parts:
+        die("plutil: empty keypath")
+    cursor = root
+    for part in parts[:-1]:
+        cursor = cursor.setdefault(part, {})
+    leaf = parts[-1]
+    if must_exist and leaf not in cursor:
+        die("plutil: keypath %r does not exist" % keypath)
+    cursor[leaf] = value
+
+
+def remove_at(root, keypath) -> None:
+    parts = split_keypath(keypath)
+    cursor = root
+    for part in parts[:-1]:
+        cursor = cursor[part]
+    del cursor[parts[-1]]
+
+
+def extract_at(root, keypath):
+    cursor = root
+    for part in split_keypath(keypath):
+        cursor = cursor[part]
+    return cursor
+
+
+def main(argv) -> int:
+    if not argv:
+        die("plutil: no command given", 1)
+
+    command = argv[0]
+
+    if command == "-lint":
+        args = [a for a in argv[1:] if a != "-s"]
+        if not args:
+            die("plutil: -lint requires a file")
+        ok = True
+        for path in args:
+            try:
+                load(path)
+                sys.stdout.write("%s: OK\n" % path)
+            except Exception as error:  # noqa: BLE001 - mirror plutil reporting
+                ok = False
+                sys.stderr.write("%s: %s\n" % (path, error))
+        return 0 if ok else 1
+
+    if command == "-create":
+        fmt_name, path = argv[1], argv[2]
+        dump({}, path, fmt_for(fmt_name))
+        return 0
+
+    if command == "-convert":
+        rest = argv[1:]
+        fmt_name = rest[0]
+        out = None
+        files = []
+        index = 1
+        while index < len(rest):
+            token = rest[index]
+            if token == "-o":
+                out = rest[index + 1]
+                index += 2
+                continue
+            files.append(token)
+            index += 1
+        for path in files:
+            data = load(path)
+            dump(data, out or path, fmt_for(fmt_name))
+        return 0
+
+    if command in ("-insert", "-replace"):
+        keypath = argv[1]
+        kind = argv[2]
+        raw = argv[3]
+        path = argv[4]
+        data = load(path)
+        set_at(data, keypath, coerce(kind, raw), must_exist=(command == "-replace"))
+        dump(data, path, plistlib.FMT_XML)
+        return 0
+
+    if command == "-remove":
+        keypath, path = argv[1], argv[2]
+        data = load(path)
+        remove_at(data, keypath)
+        dump(data, path, plistlib.FMT_XML)
+        return 0
+
+    if command == "-extract":
+        keypath = argv[1]
+        out_fmt = argv[2]
+        rest = argv[3:]
+        out = None
+        files = []
+        index = 0
+        while index < len(rest):
+            token = rest[index]
+            if token == "-o":
+                out = rest[index + 1]
+                index += 2
+                continue
+            files.append(token)
+            index += 1
+        value = extract_at(load(files[0]), keypath)
+        if out_fmt == "raw":
+            text = "true" if value is True else "false" if value is False else str(value)
+            if out:
+                with open(out, "w", encoding="utf-8") as handle:
+                    handle.write(text + "\n")
+            else:
+                sys.stdout.write(text + "\n")
+            return 0
+        dump(value, out or "/dev/stdout", fmt_for(out_fmt))
+        return 0
+
+    if command == "-p":
+        import pprint
+
+        pprint.pprint(load(argv[1]))
+        return 0
+
+    die("plutil: unsupported command %r" % command)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
