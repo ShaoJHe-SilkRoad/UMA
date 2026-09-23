@@ -51,6 +51,58 @@ import Testing
         }
     }
 
+    @Test func selectedExtraHighEffortPickersHaveRoomInNormalAndCompactLayouts() throws {
+        _ = NSApplication.shared
+        for width in [760.0, 1_520.0] {
+            for language in [AppLanguage.english, .simplifiedChinese] {
+                var draft = FactoriumV2SettingsDraft(project: "EXTRA_HIGH_LAYOUT")
+                draft.roles[.qa]?.selection.effort = "xhigh"
+                draft.roles[.coder]?.selection.effort = "xhigh"
+                let preferences = ApplicationPreferences.inMemory()
+                ThreadOSSettingsPreferences.saveFactoriumV2(draft, to: preferences)
+
+                let layoutProbe = ThreadOSSchemeBLayoutProbe()
+                let host = NSHostingView(rootView: ThreadOSSettingsView(language: language, preferences: preferences, layoutProbe: layoutProbe))
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 552), styleMask: [.titled], backing: .buffered, defer: false)
+                window.contentView = host
+                window.orderFront(nil)
+                defer { window.orderOut(nil) }
+                host.layoutSubtreeIfNeeded()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+                host.layoutSubtreeIfNeeded()
+
+                let selectedLabel = language == .english ? "Extra High" : "额外高"
+                let referencePicker = NSPopUpButton(frame: .zero, pullsDown: false)
+                referencePicker.addItem(withTitle: selectedLabel)
+                referencePicker.sizeToFit()
+                let cell = try #require(referencePicker.cell)
+                let requiredControlWidth = referencePicker.frame.width
+                let font = cell.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+                let labelWidth = (selectedLabel as NSString).size(withAttributes: [.font: font]).width
+                if language == .english {
+                    #expect(referencePicker.frame.width > 88, "the old 88pt control cannot fit the measured English label")
+                }
+
+                for role in ["qa", "coder"] {
+                    let frame = try #require(layoutProbe.frames["role.\(role).effort"], "missing measured effort picker for \(role)")
+                    referencePicker.setFrameSize(NSSize(width: frame.width, height: referencePicker.frame.height))
+                    let availableTitleWidth = cell.titleRect(forBounds: referencePicker.bounds).width
+                    #expect(frame.width + 0.5 >= requiredControlWidth, "picker frame is narrower than the native control's measured fit for \(selectedLabel)")
+                    #expect(availableTitleWidth + 0.5 >= labelWidth, "picker title area clips \(selectedLabel) at \(width)pt")
+                }
+
+                if width == 760 {
+                    let outerScroll = try #require(descendants(of: host).compactMap { $0 as? NSScrollView }.first { scroll in
+                        guard let document = scroll.documentView else { return false }
+                        return scroll.hasVerticalScroller && document.frame.height > scroll.contentView.bounds.height
+                    })
+                    #expect(!outerScroll.hasHorizontalScroller)
+                    #expect(outerScroll.documentView!.frame.width <= outerScroll.contentView.bounds.width + 1)
+                }
+            }
+        }
+    }
+
     private func descendants(of view: NSView) -> [NSView] {
         view.subviews + view.subviews.flatMap(descendants)
     }

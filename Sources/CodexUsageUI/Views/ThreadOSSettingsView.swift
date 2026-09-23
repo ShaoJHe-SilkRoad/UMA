@@ -648,7 +648,7 @@ public struct ThreadOSSettingsView: View {
             if selection.effort.isEmpty { Text(title("Choose effort", "请选择推理强度")).tag("") }
             ForEach(FactoriumV2SettingsDraft.availableEfforts(model: selection.model, leader: role == .leader, catalog: catalog), id: \.self) { effort in Text(effortLabel(effort)).tag(effort) }
         }
-            .labelsHidden().frame(width: 88)
+            .labelsHidden().frame(width: 112)
             .accessibilityLabel(title("Thinking for \(role.title)", "\(role.title) 的推理"))
             .accessibilityIdentifier("uma.threados.v2.role.\(role.rawValue).effort")
             .background(ThreadOSSchemeBGeometryReporter(identifier: "role.\(role.rawValue).effort", probe: layoutProbe))
