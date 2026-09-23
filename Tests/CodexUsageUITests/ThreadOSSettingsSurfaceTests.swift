@@ -103,6 +103,69 @@ import Testing
         }
     }
 
+    @Test func customCoderWorkerExtraHighFitsMeasuredAppKitTitleAtMinimumAndWideWindowWidths() throws {
+        _ = NSApplication.shared
+        let selectedLabelByLanguage: [(AppLanguage, String)] = [(.english, "Extra High"), (.simplifiedChinese, "额外高")]
+
+        for width in [760.0, 1_520.0] {
+            for (language, selectedLabel) in selectedLabelByLanguage {
+                var draft = FactoriumV2SettingsDraft(project: "EXTRA_HIGH_WORKER_LAYOUT")
+                draft.roles[.coder]?.selection.effort = "xhigh"
+                let customSelection = FactoriumV2Selection(model: "gpt-6-luna", effort: "xhigh", speed: "standard")
+                draft.coderWorkers = [
+                    FactoriumV2WorkerSlot(inherits: false, selection: customSelection, hasCustomSelection: true),
+                    FactoriumV2WorkerSlot(inherits: true, selection: customSelection),
+                    FactoriumV2WorkerSlot(enabled: false, inherits: true, selection: customSelection),
+                ]
+                let preferences = ApplicationPreferences.inMemory()
+                ThreadOSSettingsPreferences.saveFactoriumV2(draft, to: preferences)
+
+                let layoutProbe = ThreadOSSchemeBLayoutProbe()
+                let host = NSHostingView(rootView: ThreadOSSettingsView(
+                    language: language,
+                    preferences: preferences,
+                    initiallyExpandedWorkerGroups: [.coder],
+                    layoutProbe: layoutProbe
+                ))
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 552), styleMask: [.titled], backing: .buffered, defer: false)
+                window.contentView = host
+                window.orderFront(nil)
+                defer { window.orderOut(nil) }
+                host.layoutSubtreeIfNeeded()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+                host.layoutSubtreeIfNeeded()
+
+                let actualPickerFrame = try #require(layoutProbe.frames["role.coder.worker.1.effort"], "the attached custom worker picker must be laid out")
+                let referencePicker = NSPopUpButton(frame: .zero, pullsDown: false)
+                referencePicker.addItem(withTitle: selectedLabel)
+                referencePicker.sizeToFit()
+                let appKitCell = try #require(referencePicker.cell)
+                let requiredControlWidth = referencePicker.frame.width
+                referencePicker.setFrameSize(NSSize(width: actualPickerFrame.width, height: referencePicker.frame.height))
+                #expect(actualPickerFrame.width + 0.5 >= requiredControlWidth, "the actual attached worker picker frame is narrower than AppKit's measured control fit")
+
+                let availableTitleWidth = appKitCell.titleRect(forBounds: referencePicker.bounds).width
+                let font = appKitCell.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+                let labelWidth = (selectedLabel as NSString).size(withAttributes: [.font: font]).width
+                #expect(availableTitleWidth + 0.5 >= labelWidth, "the actual worker popup title area clips \(selectedLabel) at \(width)pt")
+
+                let inheritanceFrame = try #require(layoutProbe.frames["role.coder.worker.2.inherit"], "missing inherited/custom segment measurement")
+                let inheritedSummaryFrame = try #require(layoutProbe.frames["role.coder.worker.2.inherited-summary"], "missing inherited summary measurement")
+                #expect(!inheritanceFrame.intersects(inheritedSummaryFrame), "the inherited summary must not overlap its adjacent Custom segment at \(width)pt")
+                print("[WorkerExtraHighGeometry] width=\(width)pt language=\(language) pickerFrame=\(actualPickerFrame) titleRectWidth=\(availableTitleWidth) requiredControlWidth=\(requiredControlWidth) labelWidth=\(labelWidth) inheritedSegmentFrame=\(inheritanceFrame) inheritedSummaryFrame=\(inheritedSummaryFrame) intersects=\(inheritanceFrame.intersects(inheritedSummaryFrame))")
+
+                if width == 760 {
+                    let outerScroll = try #require(descendants(of: host).compactMap { $0 as? NSScrollView }.first { scroll in
+                        guard let document = scroll.documentView else { return false }
+                        return scroll.hasVerticalScroller && document.frame.height > scroll.contentView.bounds.height
+                    })
+                    #expect(!outerScroll.hasHorizontalScroller)
+                    #expect(outerScroll.documentView!.frame.width <= outerScroll.contentView.bounds.width + 1)
+                }
+            }
+        }
+    }
+
     private func descendants(of view: NSView) -> [NSView] {
         view.subviews + view.subviews.flatMap(descendants)
     }

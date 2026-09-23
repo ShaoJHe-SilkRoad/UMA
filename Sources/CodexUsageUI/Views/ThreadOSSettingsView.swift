@@ -706,9 +706,11 @@ public struct ThreadOSSettingsView: View {
                 .labelsHidden().pickerStyle(.segmented).frame(width: 112).disabled(!slot.enabled)
                 .accessibilityLabel(title("\(workerName) configuration", "\(workerName) 配置"))
                 .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).inherit")
+                .background(ThreadOSSchemeBGeometryReporter(identifier: "role.\(role.rawValue).worker.\(index + 1).inherit", probe: layoutProbe))
                 if slot.inherits {
                     Text(title("Inherited: \(selectionSummary(resolved))", "继承：\(selectionSummary(resolved))"))
                         .font(.caption).foregroundStyle(.secondary).frame(minWidth: 260, alignment: .leading)
+                        .background(ThreadOSSchemeBGeometryReporter(identifier: "role.\(role.rawValue).worker.\(index + 1).inherited-summary", probe: layoutProbe))
                 } else {
                     slotSelectionFields(role: role, index: index, selection: slot.selection).disabled(!slot.enabled)
                 }
@@ -736,9 +738,10 @@ public struct ThreadOSSettingsView: View {
             if selection.effort.isEmpty { Text(title("Choose effort", "请选择推理强度")).tag("") }
             ForEach(FactoriumV2SettingsDraft.availableEfforts(model: selection.model, leader: false, catalog: catalog), id: \.self) { effort in Text(effortLabel(effort)).tag(effort) }
         }
-            .labelsHidden().frame(width: 88)
+            .labelsHidden().frame(width: 112)
             .accessibilityLabel(title("Thinking for \(workerName)", "\(workerName) 的推理"))
             .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).effort")
+            .background(ThreadOSSchemeBGeometryReporter(identifier: "role.\(role.rawValue).worker.\(index + 1).effort", probe: layoutProbe))
         if selection.effort.isEmpty {
             Text(title("Choose a reasoning effort before generating this request.", "生成此请求前请选择推理强度。"))
                 .font(.caption).foregroundStyle(.orange)
