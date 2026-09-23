@@ -41,11 +41,11 @@ extension NSPasteboard: ThreadOSSettingsPasteboard {}
 /// Local-only form actions: they do not send work or establish native state.
 @MainActor public enum ThreadOSSettingsFormActions {
     public enum SemanticEditOutcome: Equatable { case applied, unchanged, rejectedMaximumRevision, rejectedInvalidDraft }
-    @discardableResult public static func semanticEdit(_ draft: inout ThreadOSSettingsDraft, _ mutation: (inout ThreadOSSettingsDraft) -> Void) -> SemanticEditOutcome {
+    @discardableResult public static func semanticEdit(_ draft: inout ThreadOSSettingsDraft, allowIncompleteEffort: Bool = false, _ mutation: (inout ThreadOSSettingsDraft) -> Void) -> SemanticEditOutcome {
         let original = draft; var candidate = draft; mutation(&candidate); candidate.revision = original.revision
         guard candidate != original else { return .unchanged }
         guard original.revision < 1_000_000 else { return .rejectedMaximumRevision }
-        guard candidate.isLocallyValid else { return .rejectedInvalidDraft }
+        guard candidate.isLocallyValid || allowIncompleteEffort else { return .rejectedInvalidDraft }
         candidate.changed(); draft = candidate; return .applied
     }
     @discardableResult public static func edit(_ draft: inout ThreadOSSettingsDraft, _ mutation: (inout ThreadOSSettingsDraft) -> Void) -> Bool { semanticEdit(&draft, mutation) == .applied }
@@ -75,6 +75,9 @@ public struct ThreadOSSettingsRolePresentation: Identifiable, Equatable {
     public var modelIdentifier: String { "uma.threados.role.\(id).model" }
     public var effortIdentifier: String { "uma.threados.role.\(id).effort" }
     public func summary(language: AppLanguage) -> String {
+        if selection.reasoningEffort.isEmpty {
+            return localized(language, "\(selection.model) / choose effort; effective native model: UNKNOWN", "\(selection.model) / 请选择推理强度；有效原生模型：UNKNOWN")
+        }
         let choice = "\(selection.model) / \(selection.reasoningEffort)"
         if selection.model == "coder_auto" {
             return localized(language, "\(choice) — catalog fallback: \(resolved.model) / \(resolved.reasoningEffort); effective native model: UNKNOWN", "\(choice) — 目录回退：\(resolved.model) / \(resolved.reasoningEffort)；有效原生模型：UNKNOWN")
@@ -139,9 +142,10 @@ public struct ThreadOSSettingsRolePresentation: Identifiable, Equatable {
             guard choice.model != model else { return }
             let efforts = Self.effortOptions(model: model, catalog: catalog)
             choice.model = model
-            if !efforts.contains(choice.reasoningEffort) {
-                guard let effort = efforts.first else { throw ThreadOSSettingsCodecError.unsupportedModel }
-                choice.reasoningEffort = effort
+            if model == "coder_auto", role == .foreman {
+                choice.reasoningEffort = catalog.selectionPolicy.coderAutoFallback.reasoningEffort
+            } else if !efforts.contains(choice.reasoningEffort) {
+                choice.reasoningEffort = ""
             }
             try applyCustomChoice(choice, role: role, catalog: catalog, language: language)
         } catch { rejectConfigurationEdit(language: language) }
@@ -154,11 +158,11 @@ public struct ThreadOSSettingsRolePresentation: Identifiable, Equatable {
         } catch { rejectConfigurationEdit(language: language) }
     }
     public func rolePresentations(catalog: ThreadOSModelCatalog) throws -> [ThreadOSSettingsRolePresentation] {
-        _ = try ThreadOSSettingsCodec.canonicalRequest(draft, catalog: catalog)
         let choices = draft.preset == "custom" ? draft.customRoles : try Self.catalogRoles(preset: draft.preset, catalog: catalog)
         return try ThreadOSRole.allCases.map { role in
             guard let choice = choices[role] else { throw ThreadOSSettingsCodecError.invalidRoleConfiguration }
-            return .init(role: role, selection: choice, resolved: try ThreadOSSettingsCodec.resolvedSelection(choice, role: role, catalog: catalog), modelOptions: Self.modelOptions(role: role, catalog: catalog), effortOptions: Self.effortOptions(model: choice.model, catalog: catalog), isEditable: draft.preset == "custom")
+            let resolved = (try? ThreadOSSettingsCodec.resolvedSelection(choice, role: role, catalog: catalog)) ?? choice
+            return .init(role: role, selection: choice, resolved: resolved, modelOptions: Self.modelOptions(role: role, catalog: catalog), effortOptions: Self.effortOptions(model: choice.model, catalog: catalog), isEditable: draft.preset == "custom")
         }
     }
     private static func catalogRoles(preset: String, catalog: ThreadOSModelCatalog) throws -> [ThreadOSRole: ThreadOSRoleSelection] {
@@ -179,8 +183,22 @@ public struct ThreadOSSettingsRolePresentation: Identifiable, Equatable {
     }
     private func applyCustomChoice(_ choice: ThreadOSRoleSelection, role: ThreadOSRole, catalog: ThreadOSModelCatalog, language: AppLanguage) throws {
         var candidate = draft; candidate.customRoles[role] = choice
-        _ = try ThreadOSSettingsCodec.canonicalRequest(candidate, catalog: catalog)
-        semanticEdit({ $0 = candidate }, language: language)
+        if !choice.reasoningEffort.isEmpty {
+            _ = try ThreadOSSettingsCodec.canonicalRequest(candidate, catalog: catalog)
+        } else if !Self.modelOptions(role: role, catalog: catalog).contains(choice.model) {
+            throw ThreadOSSettingsCodecError.unsupportedModel
+        } else {
+            var validationCandidate = candidate
+            guard let effort = Self.effortOptions(model: choice.model, catalog: catalog).first else { throw ThreadOSSettingsCodecError.invalidRoleConfiguration }
+            validationCandidate.customRoles[role]?.reasoningEffort = effort
+            _ = try ThreadOSSettingsCodec.canonicalRequest(validationCandidate, catalog: catalog)
+        }
+        switch ThreadOSSettingsFormActions.semanticEdit(&draft, allowIncompleteEffort: choice.reasoningEffort.isEmpty, { $0 = candidate }) {
+        case .applied: invalidateReceiptAndCopy(); ThreadOSSettingsPreferences.save(draft, to: preferences)
+        case .unchanged: break
+        case .rejectedMaximumRevision: message = localized(language, "Edit was not applied: this draft is already at the maximum revision.", "未应用编辑：此草稿已达到最大修订版本。")
+        case .rejectedInvalidDraft: message = localized(language, "Edit was not applied: it would make the local draft invalid.", "未应用编辑：它会使本地草稿无效。")
+        }
     }
     private func rejectConfigurationEdit(language: AppLanguage) {
         message = localized(language, "Edit was not applied: the catalog or role selection is invalid.", "未应用编辑：目录或角色选择无效。")
@@ -339,6 +357,7 @@ public struct ThreadOSSettingsView: View {
     let basicUsage: BasicSharedUsagePresentation?
     let showCodexDetail: (() -> Void)?
     private let preferences: ApplicationPreferences
+    private let clipboard: any ThreadOSSettingsClipboard
     private let layoutProbe: ThreadOSSchemeBLayoutProbe?
     private let footerStatusOverride: String?
     private let defaultExpandedWorkerGroups: Set<FactoriumV2Role>
@@ -360,9 +379,10 @@ public struct ThreadOSSettingsView: View {
         preferences: ApplicationPreferences = .production,
         initiallyExpandedWorkerGroups: Set<FactoriumV2Role> = [.coder],
         layoutProbe: ThreadOSSchemeBLayoutProbe? = nil,
-        footerStatusOverride: String? = nil
+        footerStatusOverride: String? = nil,
+        clipboard: any ThreadOSSettingsClipboard = SystemThreadOSSettingsClipboard()
     ) {
-        self.language = language; self.analytics = analytics; self.basicUsage = basicUsage; self.showCodexDetail = showCodexDetail; self.preferences = preferences; self.layoutProbe = layoutProbe; self.footerStatusOverride = footerStatusOverride; self.defaultExpandedWorkerGroups = initiallyExpandedWorkerGroups
+        self.language = language; self.analytics = analytics; self.basicUsage = basicUsage; self.showCodexDetail = showCodexDetail; self.preferences = preferences; self.clipboard = clipboard; self.layoutProbe = layoutProbe; self.footerStatusOverride = footerStatusOverride; self.defaultExpandedWorkerGroups = initiallyExpandedWorkerGroups
         _form = StateObject(wrappedValue: ThreadOSSettingsFormState(preferences: preferences))
         _attributionBinding = StateObject(wrappedValue: ThreadOSAttributionBindingFormState(preferences: preferences))
         _factoriumV2 = StateObject(wrappedValue: FactoriumV2FormState(preferences: preferences))
@@ -461,6 +481,9 @@ public struct ThreadOSSettingsView: View {
         Text(title("This page generates configuration requests; it does not control Codex execution speed.", "此页面生成配置请求，不控制 Codex 的运行速度。"))
             .foregroundStyle(.secondary).font(.caption)
             .accessibilityIdentifier("uma.threados.v2.speed-boundary")
+        Text(title("Sage standby: availability is unverified. It never starts automatically.", "Sage 待命状态：可用性未经验证，不会自动启动。"))
+            .foregroundStyle(.secondary).font(.caption)
+            .accessibilityIdentifier("uma.threados.sage-standby-status")
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 8, alignment: .top)],
                 alignment: .leading,
@@ -485,7 +508,7 @@ public struct ThreadOSSettingsView: View {
             DisclosureGroup(title("Advanced details", "高级详情")) {
                 LabeledContent(title("Request ID", "请求 ID"), value: factoriumV2.draft.id)
                 LabeledContent(title("Revision", "修订版本"), value: "\(factoriumV2.draft.revision)")
-                LabeledContent(title("Catalog revision", "目录版本"), value: FactoriumV2SettingsDraft.catalogRevision)
+                LabeledContent(title("Catalog revision", "目录版本"), value: factoriumV2.draft.catalogRevision)
                 Text(title("Raw acknowledgement preview", "原始回执预览"))
                 TextEditor(text: $factoriumV2.rawAcknowledgement)
                     .frame(minHeight: 72)
@@ -615,16 +638,25 @@ public struct ThreadOSSettingsView: View {
         }
     }
     @ViewBuilder private func roleSelectionPickers(role: FactoriumV2Role, selection: FactoriumV2Selection) -> some View {
-        Picker("", selection: selectionBinding(role, \.model)) { ForEach(FactoriumV2SettingsDraft.availableModels(), id: \.self) { model in Text(model == "gpt-6-astra" ? "Astra" : "Terra").tag(model) } }
+        let catalog = try? ThreadOSSettingsCodec.loadCatalog(revision: factoriumV2.draft.catalogRevision)
+        Picker("", selection: selectionBinding(role, \.model)) { ForEach(FactoriumV2SettingsDraft.availableModels(catalog: catalog), id: \.self) { model in Text(modelLabel(model)).tag(model) } }
             .labelsHidden().frame(width: 118)
             .accessibilityLabel(title("Model for \(role.title)", "\(role.title) 的模型"))
             .accessibilityIdentifier("uma.threados.v2.role.\(role.rawValue).model")
             .background(ThreadOSSchemeBGeometryReporter(identifier: "role.\(role.rawValue).model", probe: layoutProbe))
-        Picker("", selection: selectionBinding(role, \.effort)) { ForEach(FactoriumV2SettingsDraft.availableEfforts(model: selection.model, leader: role == .leader), id: \.self) { effort in Text(effortLabel(effort)).tag(effort) } }
+        Picker("", selection: selectionBinding(role, \.effort)) {
+            if selection.effort.isEmpty { Text(title("Choose effort", "请选择推理强度")).tag("") }
+            ForEach(FactoriumV2SettingsDraft.availableEfforts(model: selection.model, leader: role == .leader, catalog: catalog), id: \.self) { effort in Text(effortLabel(effort)).tag(effort) }
+        }
             .labelsHidden().frame(width: 88)
             .accessibilityLabel(title("Thinking for \(role.title)", "\(role.title) 的推理"))
             .accessibilityIdentifier("uma.threados.v2.role.\(role.rawValue).effort")
             .background(ThreadOSSchemeBGeometryReporter(identifier: "role.\(role.rawValue).effort", probe: layoutProbe))
+        if selection.effort.isEmpty {
+            Text(title("Choose a reasoning effort before generating this request.", "生成此请求前请选择推理强度。"))
+                .font(.caption).foregroundStyle(.orange)
+                .accessibilityIdentifier("uma.threados.v2.role.\(role.rawValue).effort-required")
+        }
     }
     @ViewBuilder private func workerSlots(role: FactoriumV2Role) -> some View {
         DisclosureGroup(isExpanded: workerExpansionBinding(role)) {
@@ -695,14 +727,23 @@ public struct ThreadOSSettingsView: View {
     }
     @ViewBuilder private func slotSelectionFields(role: FactoriumV2Role, index: Int, selection: FactoriumV2Selection) -> some View {
         let workerName = title("\(roleDisplayName(role)) worker \(index + 1)", "\(roleDisplayName(role)) 工作者 \(index + 1)")
-        Picker("", selection: slotSelectionBinding(role, index, \.model)) { ForEach(FactoriumV2SettingsDraft.availableModels(), id: \.self) { model in Text(model == "gpt-6-astra" ? "Astra" : "Terra").tag(model) } }
+        let catalog = try? ThreadOSSettingsCodec.loadCatalog(revision: factoriumV2.draft.catalogRevision)
+        Picker("", selection: slotSelectionBinding(role, index, \.model)) { ForEach(FactoriumV2SettingsDraft.availableModels(catalog: catalog), id: \.self) { model in Text(modelLabel(model)).tag(model) } }
             .labelsHidden().frame(width: 118)
             .accessibilityLabel(title("Model for \(workerName)", "\(workerName) 的模型"))
             .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).model")
-        Picker("", selection: slotSelectionBinding(role, index, \.effort)) { ForEach(FactoriumV2SettingsDraft.availableEfforts(model: selection.model, leader: false), id: \.self) { effort in Text(effortLabel(effort)).tag(effort) } }
+        Picker("", selection: slotSelectionBinding(role, index, \.effort)) {
+            if selection.effort.isEmpty { Text(title("Choose effort", "请选择推理强度")).tag("") }
+            ForEach(FactoriumV2SettingsDraft.availableEfforts(model: selection.model, leader: false, catalog: catalog), id: \.self) { effort in Text(effortLabel(effort)).tag(effort) }
+        }
             .labelsHidden().frame(width: 88)
             .accessibilityLabel(title("Thinking for \(workerName)", "\(workerName) 的推理"))
             .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).effort")
+        if selection.effort.isEmpty {
+            Text(title("Choose a reasoning effort before generating this request.", "生成此请求前请选择推理强度。"))
+                .font(.caption).foregroundStyle(.orange)
+                .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).effort-required")
+        }
     }
     private func workerSummary(for role: FactoriumV2Role) -> String {
         let slots = factoriumV2.draft.workers(for: role)
@@ -746,19 +787,19 @@ public struct ThreadOSSettingsView: View {
         }
     }
     private func selectionSummary(_ selection: FactoriumV2Selection) -> String {
-        let model = selection.model == "gpt-6-astra" ? "Astra" : "Terra"
+        let model = modelLabel(selection.model)
         return "\(model) · \(effortLabel(selection.effort))"
     }
     private func selectionBinding(_ role: FactoriumV2Role, _ keyPath: WritableKeyPath<FactoriumV2Selection, String>) -> Binding<String> {
         Binding(get: { factoriumV2.draft.roles[role]?.selection[keyPath: keyPath] ?? "" }, set: { value in
             if keyPath == \.model { factoriumV2.selectRoleModel(value, role: role) }
-            else { factoriumV2.edit { $0.roles[role]?.selection[keyPath: keyPath] = value } }
+            else { factoriumV2.edit(allowIncompleteEffort: true) { $0.roles[role]?.selection[keyPath: keyPath] = value } }
         })
     }
     private func slotSelectionBinding(_ role: FactoriumV2Role, _ index: Int, _ keyPath: WritableKeyPath<FactoriumV2Selection, String>) -> Binding<String> {
         Binding(get: { factoriumV2.draft.workers(for: role)[index].selection[keyPath: keyPath] }, set: { value in
             if keyPath == \.model { factoriumV2.selectSlotModel(value, at: index, for: role) }
-            else { factoriumV2.edit { var selection = $0.workers(for: role)[index].selection; selection[keyPath: keyPath] = value; $0.setSlotSelection(selection, at: index, for: role) } }
+            else { factoriumV2.edit(allowIncompleteEffort: true) { var selection = $0.workers(for: role)[index].selection; selection[keyPath: keyPath] = value; $0.setSlotSelection(selection, at: index, for: role) } }
         })
     }
     private func slotEnabledBinding(_ role: FactoriumV2Role, _ index: Int) -> Binding<Bool> {
@@ -768,16 +809,21 @@ public struct ThreadOSSettingsView: View {
         Binding(get: { factoriumV2.draft.workers(for: role)[index].inherits }, set: { value in factoriumV2.edit { $0.setSlotInheritance(value, at: index, for: role) } })
     }
     private func copyFactoriumV2Request() {
-        do {
-            let request = try factoriumV2.generatedRequestForTransfer()
-            factoriumV2.reportCopy(request, success: SystemThreadOSSettingsClipboard().write(request.text), language: language)
-        } catch {
-            factoriumV2.reportTransferGenerationError(error, language: language)
-        }
+        _ = factoriumV2.generateAndCopy(to: clipboard, language: language)
     }
     private func effortLabel(_ effort: String) -> String {
-        guard language == .simplifiedChinese else { return effort }
-        return ["low": "低", "medium": "中", "high": "高", "xhigh": "很高", "max": "最大", "ultra": "超高"][effort] ?? effort
+        let english = ["low": "Light", "medium": "Medium", "high": "High", "xhigh": "Extra High", "max": "Max", "ultra": "Ultra"]
+        let chinese = ["low": "轻", "medium": "中", "high": "高", "xhigh": "额外高", "max": "最大", "ultra": "超高"]
+        return (language == .simplifiedChinese ? chinese : english)[effort] ?? effort
+    }
+    private func modelLabel(_ model: String) -> String {
+        switch model {
+        case "gpt-6-astra": "Astra"
+        case "gpt-6-sol": "Sol"
+        case "gpt-6-luna": "Luna"
+        case "gpt-5.6-terra": "Terra"
+        default: model
+        }
     }
     @ViewBuilder private var analyticsSection: some View {
         let value = analytics ?? .sourceGap()
@@ -888,8 +934,14 @@ public struct ThreadOSSettingsView: View {
                         }
                     }.accessibilityIdentifier(role.modelIdentifier)
                     Picker(title("\(role.id) reasoning effort", "\(role.id) 推理强度"), selection: customEffortBinding(role.role)) {
+                        Text(title("Choose effort", "请选择推理强度")).tag("")
                         ForEach(role.effortOptions, id: \.self) { Text($0).tag($0) }
                     }.accessibilityIdentifier(role.effortIdentifier)
+                    if form.draft.customRoles[role.role]?.reasoningEffort.isEmpty == true {
+                        Text(title("Choose a reasoning effort before copying this configuration.", "复制此配置前请选择推理强度。"))
+                            .foregroundStyle(.orange)
+                            .accessibilityIdentifier("uma.threados.role.\(role.id).effort-required")
+                    }
                 }
             }
         } else {

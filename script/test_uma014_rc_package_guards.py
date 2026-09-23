@@ -245,30 +245,83 @@ class RCGuards(unittest.TestCase):
         self.assertEqual(records[0]['sha256'], rc.sha(path))
         self.assertEqual(records[1]['target'], 'file')
 
-    def test_swiftpm_resource_bundle_is_copied_as_built_bytes(self):
+    def catalog_fixture(self, root, *, revision_v2='sol-luna-20260922.1',
+                        built_v2_marker='canonical'):
+        source = root / 'frozen-source'
+        built_resources = root / 'bin' / 'CodexUsageMonitor_CodexUsageUI.bundle' / 'Contents' / 'Resources'
+        source_catalogs = source / 'Sources/CodexUsageUI/Resources/ThreadOS'
+        source_catalogs.mkdir(parents=True)
+        built_resources.mkdir(parents=True)
+        values = {
+            'models.v1.json': {'schema': 'threados.model-catalog.v1',
+                               'revision': 'astra-20260904.1', 'models': {}},
+            'models.v2.json': {'schema': 'threados.model-catalog.v1',
+                               'revision': revision_v2, 'models': {},
+                               'marker': built_v2_marker},
+        }
+        for name, value in values.items():
+            data = (rc.json.dumps(value, sort_keys=True) + '\n').encode()
+            (source_catalogs / name).write_bytes(data)
+            (built_resources / name).write_bytes(data)
+        return source, built_resources
+
+    def test_swiftpm_resource_bundle_requires_frozen_source_identity_and_copies_exact_bytes(self):
         bin_path = self.root / 'bin'
         resources = self.root / 'UMA.app' / 'Contents' / 'Resources'
-        catalog = (bin_path / 'CodexUsageMonitor_CodexUsageUI.bundle' / 'Contents' /
-                   'Resources' / 'models.v1.json')
-        catalog.parent.mkdir(parents=True)
+        source, built = self.catalog_fixture(self.root)
         resources.mkdir(parents=True)
-        catalog.write_text('{"schema":"threados.models.v1"}\n')
 
-        report = rc.copy_swiftpm_resource_bundle(bin_path, resources)
+        report = rc.copy_swiftpm_resource_bundle(bin_path, resources, source)
 
-        packaged = (resources / 'CodexUsageMonitor_CodexUsageUI.bundle' / 'Contents' /
-                    'Resources' / 'models.v1.json')
-        self.assertEqual(packaged.read_bytes(), catalog.read_bytes())
+        packaged = resources / 'CodexUsageMonitor_CodexUsageUI.bundle' / 'Contents' / 'Resources'
+        for name in ('models.v1.json', 'models.v2.json'):
+            source_file, built_file, copied = (source / 'Sources/CodexUsageUI/Resources/ThreadOS' / name,
+                                                built / name, packaged / name)
+            self.assertEqual(source_file.read_bytes(), built_file.read_bytes())
+            self.assertEqual(copied.read_bytes(), source_file.read_bytes())
+            self.assertEqual(report['catalogs'][name]['source_sha256'], rc.sha(source_file))
+            self.assertEqual(report['catalogs'][name]['built_sha256'], rc.sha(built_file))
+            self.assertEqual(report['catalogs'][name]['sha256'], rc.sha(copied))
+            self.assertEqual(report['catalogs'][name]['revision'],
+                             'astra-20260904.1' if name == 'models.v1.json' else 'sol-luna-20260922.1')
         self.assertEqual(report['bundle'], 'CodexUsageMonitor_CodexUsageUI.bundle')
         self.assertEqual(report['catalog'], 'Contents/Resources/models.v1.json')
-        self.assertEqual(report['catalog_sha256'], rc.sha(catalog))
+        self.assertEqual(report['catalog_sha256'], rc.sha(packaged / 'models.v1.json'))
+
+    def test_swiftpm_resource_bundle_rejects_wrong_v2_revision(self):
+        bin_path = self.root / 'bin'
+        resources = self.root / 'Resources'
+        source, _ = self.catalog_fixture(self.root, revision_v2='sol-luna-wrong')
+        resources.mkdir()
+        with self.assertRaisesRegex(rc.Refusal, 'SOURCE_CATALOG_IDENTITY_INVALID models.v2.json'):
+            rc.copy_swiftpm_resource_bundle(bin_path, resources, source)
+
+    def test_swiftpm_resource_bundle_rejects_bytes_different_from_frozen_source(self):
+        bin_path = self.root / 'bin'
+        resources = self.root / 'Resources'
+        source, built = self.catalog_fixture(self.root)
+        value = rc.json.loads((built / 'models.v2.json').read_text())
+        value['marker'] = 'different-built-byte'
+        (built / 'models.v2.json').write_text(rc.json.dumps(value, sort_keys=True) + '\n')
+        resources.mkdir()
+        with self.assertRaisesRegex(rc.Refusal, 'SWIFTPM_SOURCE_CATALOG_BYTES_MISMATCH models.v2.json'):
+            rc.copy_swiftpm_resource_bundle(bin_path, resources, source)
+
+    def test_swiftpm_resource_bundle_requires_v2_catalog(self):
+        bin_path = self.root / 'bin'
+        resources = self.root / 'Resources'
+        source, built = self.catalog_fixture(self.root)
+        (built / 'models.v2.json').unlink()
+        resources.mkdir()
+        with self.assertRaisesRegex(rc.Refusal, 'BUILT_CATALOG_MISSING models.v2.json'):
+            rc.copy_swiftpm_resource_bundle(bin_path, resources, source)
 
     def test_swiftpm_resource_bundle_refuses_missing_or_symlinked_catalog(self):
         bin_path = self.root / 'bin'
         resources = self.root / 'Resources'
         resources.mkdir()
         with self.assertRaisesRegex(rc.Refusal, 'RESOURCE_BUNDLE_MISSING'):
-            rc.copy_swiftpm_resource_bundle(bin_path, resources)
+            rc.copy_swiftpm_resource_bundle(bin_path, resources, self.root / 'frozen-source')
 
         catalog = (bin_path / 'CodexUsageMonitor_CodexUsageUI.bundle' / 'Contents' /
                    'Resources' / 'models.v1.json')
@@ -277,7 +330,7 @@ class RCGuards(unittest.TestCase):
         target.write_text('{}')
         catalog.symlink_to(target)
         with self.assertRaisesRegex(rc.Refusal, 'SYMLINK_REJECTED'):
-            rc.copy_swiftpm_resource_bundle(bin_path, resources)
+            rc.copy_swiftpm_resource_bundle(bin_path, resources, self.root / 'frozen-source')
 
 
 if __name__ == '__main__':

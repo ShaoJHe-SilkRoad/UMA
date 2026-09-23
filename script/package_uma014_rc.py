@@ -132,21 +132,62 @@ def contains_symlink(root):
     return root.is_symlink() or any(path.is_symlink() for path in root.rglob('*'))
 
 
-def copy_swiftpm_resource_bundle(bin_path, resources):
-    """Preserve SwiftPM's generated Bundle.module payload beside the app executable."""
+def copy_swiftpm_resource_bundle(bin_path, resources, source_root):
+    """Copy SwiftPM resources only when they match the frozen source archive."""
     bundle = bin_path / 'CodexUsageMonitor_CodexUsageUI.bundle'
-    catalog = bundle / 'Contents/Resources/models.v1.json'
-    require(bundle.is_dir() and catalog.is_file(), 'SWIFTPM_RESOURCE_BUNDLE_MISSING')
+    resource_dir = bundle / 'Contents/Resources'
+    source_dir = source_root / 'Sources/CodexUsageUI/Resources/ThreadOS'
+    catalog_expectations = {
+        'models.v1.json': ('threados.model-catalog.v1', 'astra-20260904.1'),
+        'models.v2.json': ('threados.model-catalog.v1', 'sol-luna-20260922.1'),
+    }
+    require(bundle.is_dir(), 'SWIFTPM_RESOURCE_BUNDLE_MISSING')
     require(not contains_symlink(bundle), 'SWIFTPM_RESOURCE_BUNDLE_SYMLINK_REJECTED')
+
+    def validate_catalog(path, name, origin):
+        require(path.is_file() and not path.is_symlink(),
+                f'{origin}_CATALOG_MISSING {name}')
+        try:
+            value = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise Refusal(f'{origin}_CATALOG_INVALID {name}') from exc
+        schema, revision = catalog_expectations[name]
+        require(type(value) is dict and value.get('schema') == schema and
+                value.get('revision') == revision,
+                f'{origin}_CATALOG_IDENTITY_INVALID {name}')
+        return value
+
+    source_hashes, built_hashes = {}, {}
+    for name in catalog_expectations:
+        source_catalog = source_dir / name
+        built_catalog = resource_dir / name
+        validate_catalog(source_catalog, name, 'SOURCE')
+        validate_catalog(built_catalog, name, 'BUILT')
+        source_hashes[name], built_hashes[name] = sha(source_catalog), sha(built_catalog)
+        require(source_hashes[name] == built_hashes[name],
+                f'SWIFTPM_SOURCE_CATALOG_BYTES_MISMATCH {name}')
+
     packaged = resources / bundle.name
     require(not packaged.exists(), 'PACKAGED_RESOURCE_BUNDLE_ALREADY_EXISTS')
     shutil.copytree(bundle, packaged, symlinks=False)
-    packaged_catalog = packaged / 'Contents/Resources/models.v1.json'
-    require(packaged_catalog.is_file(), 'PACKAGED_THREADOS_CATALOG_MISSING')
-    require(sha(catalog) == sha(packaged_catalog), 'PACKAGED_THREADOS_CATALOG_MISMATCH')
+    for name in catalog_expectations:
+        packaged_catalog = packaged / 'Contents/Resources' / name
+        require(packaged_catalog.is_file(), 'PACKAGED_THREADOS_CATALOG_MISSING ' + name)
+        require(sha(built_catalog := resource_dir / name) == sha(packaged_catalog),
+                'PACKAGED_THREADOS_CATALOG_MISMATCH ' + name)
     require(not contains_symlink(packaged), 'PACKAGED_RESOURCE_BUNDLE_SYMLINK_REJECTED')
+    hashes = {name: sha(packaged / 'Contents/Resources' / name)
+              for name in catalog_expectations}
     return {'bundle': bundle.name, 'catalog': 'Contents/Resources/models.v1.json',
-            'catalog_sha256': sha(packaged_catalog), 'manifest': manifest(packaged)}
+            'catalog_sha256': hashes['models.v1.json'],
+            'catalogs': {name: {'path': 'Contents/Resources/' + name,
+                                'source_sha256': source_hashes[name],
+                                'built_sha256': built_hashes[name],
+                                'sha256': hashes[name],
+                                'schema': catalog_expectations[name][0],
+                                'revision': catalog_expectations[name][1]}
+                         for name in catalog_expectations},
+            'manifest': manifest(packaged)}
 
 
 def write_json(path, value):
@@ -302,7 +343,7 @@ def main():
     for target in executables.values():
         shutil.copyfile(bin_path / target.name, target)
         target.chmod(0o755)
-    swiftpm_resources = copy_swiftpm_resource_bundle(bin_path, app / 'Contents/Resources')
+    swiftpm_resources = copy_swiftpm_resource_bundle(bin_path, app / 'Contents/Resources', source)
     shutil.copyfile(source / 'Assets/AppIcon.icns', app / 'Contents/Resources/AppIcon.icns')
     (app / 'Contents/Resources/AppIcon.icns').chmod(0o644)
     logos = app / 'Contents/Resources/AgentLogos'

@@ -69,11 +69,12 @@ public struct FactoriumV2GeneratedRequest: Equatable, Sendable {
 
 /// Local V2 request data only. It is not a native role selection or task control state.
 public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
-    public static var catalogRevision: String { (try? ThreadOSSettingsCodec.loadCatalog().revision) ?? ThreadOSSettingsCodec.catalogRevision }
+    public static var catalogRevision: String { ThreadOSSettingsCodec.latestCatalogRevision }
     public static let apply = "next-wave"
     public static let preset = "custom"
 
     public var project: String
+    public var catalogRevision: String
     public var id: String
     public var revision: Int
     public var roles: [FactoriumV2Role: FactoriumV2RoleSetting]
@@ -82,6 +83,7 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
 
     public init(
         project: String = "",
+        catalogRevision: String? = nil,
         id: String = "cfg-" + UUID().uuidString.lowercased(),
         revision: Int = 1,
         roles: [FactoriumV2Role: FactoriumV2RoleSetting] = Self.defaultRoles,
@@ -89,6 +91,7 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
         reviewerWorkers: [FactoriumV2WorkerSlot]? = nil
     ) {
         self.project = project
+        self.catalogRevision = catalogRevision ?? Self.catalogRevision
         self.id = id
         self.revision = revision
         self.roles = roles
@@ -100,10 +103,10 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
 
     public static let defaultRoles: [FactoriumV2Role: FactoriumV2RoleSetting] = [
         .leader: .init(preserve: true, selection: .init(model: "gpt-6-astra", effort: "high", speed: "standard")),
-        .qa: .init(selection: .init(model: "gpt-6-astra", effort: "medium", speed: "standard")),
-        .coder: .init(selection: .init(model: "gpt-5.6-terra", effort: "medium", speed: "standard")),
+        .qa: .init(selection: .init(model: "gpt-6-sol", effort: "high", speed: "standard")),
+        .coder: .init(selection: .init(model: "gpt-6-luna", effort: "medium", speed: "standard")),
         .repair: .init(selection: .init(model: "gpt-5.6-terra", effort: "medium", speed: "standard")),
-        .reviewer: .init(selection: .init(model: "gpt-5.6-terra", effort: "low", speed: "standard")),
+        .reviewer: .init(selection: .init(model: "gpt-6-luna", effort: "medium", speed: "standard")),
     ]
 
     public var isValidProject: Bool { ThreadOSSettingsDraft.isToken(project) }
@@ -145,7 +148,7 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
     }
 
     public func canonicalRequest() throws -> String {
-        let catalog = try ThreadOSSettingsCodec.loadCatalog()
+        let catalog = try ThreadOSSettingsCodec.loadCatalog(revision: catalogRevision)
         try validate(catalog: catalog)
         let request = Request(draft: self, catalogRevision: catalog.revision)
         let encoder = JSONEncoder()
@@ -206,12 +209,12 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
         guard Self.availableModels(catalog: catalog).contains(selection.model), Self.availableEfforts(model: selection.model, leader: leader, catalog: catalog).contains(selection.effort), ["fast", "standard"].contains(selection.speed) else { throw FactoriumV2SettingsError.invalidSelection }
     }
 
-    public static func availableModels(catalog: ThreadOSModelCatalog? = try? ThreadOSSettingsCodec.loadCatalog()) -> [String] {
+    public static func availableModels(catalog: ThreadOSModelCatalog? = try? ThreadOSSettingsCodec.loadCatalog(revision: catalogRevision)) -> [String] {
         guard let catalog else { return [] }
-        return catalog.models.keys.filter { $0 == "gpt-5.6-terra" || $0 == "gpt-6-astra" }.sorted()
+        return catalog.models.keys.filter { $0 != "gpt-5.6-sol" }.sorted()
     }
 
-    public static func availableEfforts(model: String, leader: Bool, catalog: ThreadOSModelCatalog? = try? ThreadOSSettingsCodec.loadCatalog()) -> [String] {
+    public static func availableEfforts(model: String, leader: Bool, catalog: ThreadOSModelCatalog? = try? ThreadOSSettingsCodec.loadCatalog(revision: catalogRevision)) -> [String] {
         guard let values = catalog?.models[model]?.reasoningEfforts else { return [] }
         return model == "gpt-6-astra" && !leader ? values.filter(["low", "medium", "high"].contains) : values
     }
@@ -269,6 +272,34 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
             speed = slot.inherits ? "inherit" : slot.selection.speed
         }
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case project, catalogRevision, id, revision, roles, coderWorkers, reviewerWorkers
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        project = try values.decode(String.self, forKey: .project)
+        // Existing saved drafts lacked a catalog marker. Keep them on the
+        // immutable catalog they were created against.
+        catalogRevision = try values.decodeIfPresent(String.self, forKey: .catalogRevision) ?? ThreadOSSettingsCodec.legacyCatalogRevision
+        id = try values.decode(String.self, forKey: .id)
+        revision = try values.decode(Int.self, forKey: .revision)
+        roles = try values.decode([FactoriumV2Role: FactoriumV2RoleSetting].self, forKey: .roles)
+        coderWorkers = try values.decode([FactoriumV2WorkerSlot].self, forKey: .coderWorkers)
+        reviewerWorkers = try values.decode([FactoriumV2WorkerSlot].self, forKey: .reviewerWorkers)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(project, forKey: .project)
+        try values.encode(catalogRevision, forKey: .catalogRevision)
+        try values.encode(id, forKey: .id)
+        try values.encode(revision, forKey: .revision)
+        try values.encode(roles, forKey: .roles)
+        try values.encode(coderWorkers, forKey: .coderWorkers)
+        try values.encode(reviewerWorkers, forKey: .reviewerWorkers)
+    }
 }
 
 @MainActor public final class FactoriumV2FormState: ObservableObject {
@@ -322,12 +353,12 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
         invalidateTransferState()
     }
 
-    public func edit(_ mutation: (inout FactoriumV2SettingsDraft) -> Void) {
+    public func edit(allowIncompleteEffort: Bool = false, _ mutation: (inout FactoriumV2SettingsDraft) -> Void) {
         var candidate = draft
         mutation(&candidate)
         guard candidate != draft, candidate.revision < 1_000_000 else { return }
         candidate.revision += 1
-        guard candidate.isLocallyValid else {
+        guard candidate.isLocallyValid || (allowIncompleteEffort && validatesWithExplicitEffortPlaceholders(candidate)) else {
             message = "Edit was not applied because the current catalog does not allow that local selection."
             return
         }
@@ -346,26 +377,48 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
     }
 
     public func selectRoleModel(_ model: String, role: FactoriumV2Role) {
-        edit { draft in
+        edit(allowIncompleteEffort: true) { draft in
             guard var setting = draft.roles[role] else { return }
             setting.selection.model = model
-            if !FactoriumV2SettingsDraft.availableEfforts(model: model, leader: role == .leader).contains(setting.selection.effort) {
-                setting.selection.effort = FactoriumV2SettingsDraft.availableEfforts(model: model, leader: role == .leader).first ?? setting.selection.effort
+            let catalog = try? ThreadOSSettingsCodec.loadCatalog(revision: draft.catalogRevision)
+            if !FactoriumV2SettingsDraft.availableEfforts(model: model, leader: role == .leader, catalog: catalog).contains(setting.selection.effort) {
+                setting.selection.effort = ""
             }
             draft.roles[role] = setting
         }
     }
 
     public func selectSlotModel(_ model: String, at index: Int, for role: FactoriumV2Role) {
-        edit { draft in
+        edit(allowIncompleteEffort: true) { draft in
             guard draft.workers(for: role).indices.contains(index) else { return }
             var selection = draft.workers(for: role)[index].selection
             selection.model = model
-            if !FactoriumV2SettingsDraft.availableEfforts(model: model, leader: false).contains(selection.effort) {
-                selection.effort = FactoriumV2SettingsDraft.availableEfforts(model: model, leader: false).first ?? selection.effort
+            let catalog = try? ThreadOSSettingsCodec.loadCatalog(revision: draft.catalogRevision)
+            if !FactoriumV2SettingsDraft.availableEfforts(model: model, leader: false, catalog: catalog).contains(selection.effort) {
+                selection.effort = ""
             }
             draft.setSlotSelection(selection, at: index, for: role)
         }
+    }
+
+    private func validatesWithExplicitEffortPlaceholders(_ candidate: FactoriumV2SettingsDraft) -> Bool {
+        var completed = candidate
+        guard let catalog = try? ThreadOSSettingsCodec.loadCatalog(revision: candidate.catalogRevision) else { return false }
+        for role in FactoriumV2Role.allCases {
+            guard var setting = completed.roles[role], !setting.preserve, setting.selection.effort.isEmpty else { continue }
+            guard let effort = FactoriumV2SettingsDraft.availableEfforts(model: setting.selection.model, leader: role == .leader, catalog: catalog).first else { return false }
+            setting.selection.effort = effort
+            completed.roles[role] = setting
+        }
+        for role in [FactoriumV2Role.coder, .reviewer] {
+            var slots = completed.workers(for: role)
+            for index in slots.indices where !slots[index].inherits && slots[index].selection.effort.isEmpty {
+                guard let effort = FactoriumV2SettingsDraft.availableEfforts(model: slots[index].selection.model, leader: false, catalog: catalog).first else { return false }
+                slots[index].selection.effort = effort
+            }
+            completed.setWorkers(slots, for: role)
+        }
+        return completed.isLocallyValid
     }
 
     public var requiresStandardConversion: Bool {
@@ -387,6 +440,18 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
             convertSelectedFastDraftToStandard()
         }
         return try generatedRequest()
+    }
+
+    @discardableResult
+    public func generateAndCopy(to clipboard: any ThreadOSSettingsClipboard, language: AppLanguage) -> FactoriumV2GeneratedRequest? {
+        do {
+            let generated = try generatedRequestForTransfer()
+            reportCopy(generated, success: clipboard.write(generated.text), language: language)
+            return generated
+        } catch {
+            reportTransferGenerationError(error, language: language)
+            return nil
+        }
     }
 
     public func reportCopy(_ generated: FactoriumV2GeneratedRequest, success: Bool, language: AppLanguage) {

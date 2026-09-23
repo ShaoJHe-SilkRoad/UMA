@@ -378,16 +378,24 @@ import Testing
         #expect(try ThreadOSSettingsCodec.draft(fromFrozenInput: copy).customRoles[.foreman] == foreman.resolved)
     }
 
-    @Test func modelChangeAtomicallyChoosesAValidEffortFromThatModelsCatalog() throws {
+    @Test func modelChangeRequiresAnExplicitEffortWhenTheSavedEffortIsUnavailable() throws {
         let catalog = try ThreadOSSettingsCodec.loadCatalog()
-        let constrained = ThreadOSModelCatalog(schema: catalog.schema, revision: catalog.revision, models: ["gpt-6-astra": .init(reasoningEfforts: ["high"]), "gpt-5.6-terra": .init(reasoningEfforts: ["low", "medium"])], presets: catalog.presets, selectionPolicy: catalog.selectionPolicy)
+        var models = catalog.models
+        models["gpt-6-astra"] = .init(reasoningEfforts: ["high"])
+        models["gpt-5.6-terra"] = .init(reasoningEfforts: ["low", "medium"])
+        let constrained = ThreadOSModelCatalog(schema: catalog.schema, revision: catalog.revision, models: models, presets: catalog.presets, selectionPolicy: catalog.selectionPolicy)
         let form = makeForm()
         form.selectPreset("custom", catalog: constrained, language: .english)
         let before = form.draft.revision
         form.selectCustomModel("gpt-5.6-terra", role: .leader, catalog: constrained, language: .english)
         #expect(form.draft.revision == before + 1)
-        #expect(form.draft.customRoles[.leader] == .init(model: "gpt-5.6-terra", reasoningEffort: "low"))
+        #expect(form.draft.customRoles[.leader] == .init(model: "gpt-5.6-terra", reasoningEffort: ""))
         let row = try #require(form.rolePresentations(catalog: constrained).first { $0.role == .leader })
+        #expect(row.effortOptions == ["low", "medium"])
+        #expect(row.summary(language: .english).contains("choose effort"))
+        #expect(throws: (any Error).self) { try ThreadOSSettingsCodec.canonicalRequest(form.draft, catalog: constrained) }
+        form.selectCustomEffort("medium", role: .leader, catalog: constrained, language: .english)
+        #expect(form.draft.customRoles[.leader] == .init(model: "gpt-5.6-terra", reasoningEffort: "medium"))
         #expect(row.effortOptions == ["low", "medium"])
         let valid = form.draft
         form.selectCustomEffort("ultra", role: .leader, catalog: constrained, language: .english)
@@ -503,7 +511,7 @@ import Testing
         let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(Set(json.keys) == ["apply", "cat", "id", "p", "preset", "rev", "roles", "workers"])
         #expect(json["apply"] as? String == "next-wave")
-        #expect(json["cat"] as? String == "astra-20260904.1")
+        #expect(json["cat"] as? String == "sol-luna-20260922.1")
         #expect((json["roles"] as? [String: Any])?["leader"] as? [String: Bool] == ["preserve": true])
         let workers = try #require(json["workers"] as? [String: [[String: Any]]])
         #expect(workers["coder"]?.count == 3 && workers["reviewer"]?.count == 3)

@@ -28,7 +28,8 @@ public enum FactoriumV2SettingsCodec {
               let rolesValue = object["roles"] as? [String: Any],
               let workersValue = object["workers"] as? [String: Any]
         else { throw FactoriumV2SettingsCodecError.invalidFields }
-        let catalog = try catalog ?? ThreadOSSettingsCodec.loadCatalog()
+        let catalogRevision = object["cat"] as? String ?? ""
+        let catalog = try catalog ?? ThreadOSSettingsCodec.loadCatalog(revision: catalogRevision)
         guard object["cat"] as? String == catalog.revision else { throw FactoriumV2SettingsCodecError.invalidPrefix }
         guard ThreadOSSettingsDraft.isToken(project), ThreadOSSettingsDraft.isToken(id), (1...1_000_000).contains(revision) else { throw FactoriumV2SettingsCodecError.invalidJSON }
         guard expectedProject == nil || expectedProject == project else { throw FactoriumV2SettingsCodecError.identityMismatch }
@@ -55,7 +56,7 @@ public enum FactoriumV2SettingsCodec {
                     : .init(enabled: enabled, inherits: false, selection: try selection(["model": model, "effort": effort, "speed": speed], leader: false, catalog: catalog), hasCustomSelection: true)
             }
         }
-        let draft = FactoriumV2SettingsDraft(project: project, id: id, revision: revision, roles: roles, coderWorkers: try slots(.coder), reviewerWorkers: try slots(.reviewer))
+        let draft = FactoriumV2SettingsDraft(project: project, catalogRevision: catalog.revision, id: id, revision: revision, roles: roles, coderWorkers: try slots(.coder), reviewerWorkers: try slots(.reviewer))
         guard draft.isLocallyValid else { throw FactoriumV2SettingsCodecError.invalidSelection }
         return draft
     }
@@ -89,7 +90,7 @@ public enum FactoriumV2SettingsCodec {
         guard Set(configured.keys) == keys,
               configured["protocol"] as? String == "TOSCFG/2", configured["p"] as? String == draft.project,
               configured["id"] as? String == draft.id, strictInt(configured["rev"]) == draft.revision,
-              configured["catalog_revision"] as? String == FactoriumV2SettingsDraft.catalogRevision,
+              configured["catalog_revision"] as? String == draft.catalogRevision,
               configured["preset"] as? String == "custom", configured["apply"] as? String == "next-wave",
               configured["effective_observed"] as? String == "unknown", strictBool(configured["manual_required"]) == true,
               let nestedRequested = configured["requested"] as? [String: Any], canonicalJSON(nestedRequested) == canonicalJSON(requested),

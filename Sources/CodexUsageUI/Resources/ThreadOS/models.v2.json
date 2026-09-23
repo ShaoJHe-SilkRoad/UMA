@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schema": "threados.model-catalog.v1",
+  "revision": "sol-luna-20260922.1",
+  "models": {
+    "gpt-5.6-terra": {"reasoning_efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "availability": "configured", "economic_basis": "configured-fallback"},
+    "gpt-6-astra": {"reasoning_efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "availability": "native-pending", "economic_basis": "not-a-verified-low-cost-sku"},
+    "gpt-6-sol": {"reasoning_efforts": ["low", "medium", "high", "xhigh"], "availability": "native-pending", "economic_basis": "unknown-price"},
+    "gpt-6-luna": {"reasoning_efforts": ["low", "medium", "high", "xhigh"], "availability": "native-pending", "economic_basis": "unknown-price"}
+  },
+  "presets": {
+    "astra-economy": {
+      "roles": {
+        "LEADER": {"model": "gpt-6-astra", "reasoning_effort": "high"},
+        "QA": {"model": "gpt-6-sol", "reasoning_effort": "high"},
+        "FOREMAN": {"model": "gpt-6-luna", "reasoning_effort": "medium"},
+        "CODING_WORKER": {"model": "gpt-6-luna", "reasoning_effort": "medium"},
+        "REVIEWER": {"model": "gpt-6-luna", "reasoning_effort": "medium"}
+      },
+      "coding_workers": 1, "review_workers": 2, "service_tier": "standard"
+    },
+    "astra-balanced": {
+      "roles": {
+        "LEADER": {"model": "gpt-6-astra", "reasoning_effort": "high"},
+        "QA": {"model": "gpt-6-sol", "reasoning_effort": "high"},
+        "FOREMAN": {"model": "gpt-6-luna", "reasoning_effort": "medium", "selection": "coder_auto"},
+        "CODING_WORKER": {"model": "gpt-6-luna", "reasoning_effort": "medium"},
+        "REVIEWER": {"model": "gpt-6-luna", "reasoning_effort": "medium"}
+      },
+      "coding_workers": 3, "review_workers": 3, "service_tier": "standard"
+    },
+    "astra-speed": {
+      "roles": {
+        "LEADER": {"model": "gpt-6-astra", "reasoning_effort": "high"},
+        "QA": {"model": "gpt-6-sol", "reasoning_effort": "high"},
+        "FOREMAN": {"model": "gpt-6-luna", "reasoning_effort": "medium", "selection": "coder_auto"},
+        "CODING_WORKER": {"model": "gpt-6-luna", "reasoning_effort": "medium"},
+        "REVIEWER": {"model": "gpt-6-luna", "reasoning_effort": "medium"}
+      },
+      "coding_workers": 4, "review_workers": 3, "service_tier": "standard"
+    },
+    "astra-deep": {
+      "roles": {
+        "LEADER": {"model": "gpt-6-astra", "reasoning_effort": "high"},
+        "QA": {"model": "gpt-6-sol", "reasoning_effort": "high"},
+        "FOREMAN": {"model": "gpt-6-luna", "reasoning_effort": "medium"},
+        "CODING_WORKER": {"model": "gpt-6-luna", "reasoning_effort": "medium"},
+        "REVIEWER": {"model": "gpt-6-luna", "reasoning_effort": "medium"}
+      },
+      "coding_workers": 2, "review_workers": 4, "service_tier": "standard"
+    },
+    "custom": {"roles": {}, "coding_workers": null, "review_workers": null, "service_tier": "standard"}
+  },
+  "selection_policy": {
+    "coder_auto_fallback": {"model": "gpt-6-luna", "reasoning_effort": "medium"},
+    "excluded_automatic_models": [],
+    "requires_verified_economic_basis_for_astra": true,
+    "settings_grant_authority": false
+  }
+}

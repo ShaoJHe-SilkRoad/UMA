@@ -93,11 +93,18 @@ public struct ThreadOSModelCatalog: Codable, Equatable, Sendable {
 }
 
 public enum ThreadOSSettingsCodec {
-    public static let catalogRevision = "astra-20260904.1" // Compatibility constant; serialization reads Bundle.module.
+    public static let legacyCatalogRevision = "astra-20260904.1"
+    /// V1 remains pinned to its original catalog; V2 drafts opt into this revision.
+    public static let catalogRevision = legacyCatalogRevision
+    public static let latestCatalogRevision = "sol-luna-20260922.1"
     public static let roleOrder: [ThreadOSRole] = [.codingWorker, .foreman, .leader, .qa, .reviewer]
-    public static func loadCatalog() throws -> ThreadOSModelCatalog { try loadCatalog(bundle: .module) }
-    public static func loadCatalog(bundle: Bundle) throws -> ThreadOSModelCatalog {
-        let url = bundle.url(forResource: "models.v1", withExtension: "json", subdirectory: "ThreadOS") ?? bundle.url(forResource: "models.v1", withExtension: "json")
+    public static func loadCatalog() throws -> ThreadOSModelCatalog { try loadCatalog(revision: legacyCatalogRevision, bundle: .module) }
+    public static func loadCatalog(bundle: Bundle) throws -> ThreadOSModelCatalog { try loadCatalog(revision: catalogRevision, bundle: bundle) }
+    public static func loadCatalog(revision: String) throws -> ThreadOSModelCatalog { try loadCatalog(revision: revision, bundle: .module) }
+    public static func loadCatalog(revision: String, bundle: Bundle) throws -> ThreadOSModelCatalog {
+        guard [legacyCatalogRevision, latestCatalogRevision].contains(revision) else { throw ThreadOSSettingsCodecError.catalogUnavailable }
+        let resource = revision == legacyCatalogRevision ? "models.v1" : "models.v2"
+        let url = bundle.url(forResource: resource, withExtension: "json", subdirectory: "ThreadOS") ?? bundle.url(forResource: resource, withExtension: "json")
         guard let url, let data = try? Data(contentsOf: url), let catalog = try? JSONDecoder().decode(ThreadOSModelCatalog.self, from: data), catalog.schema == "threados.model-catalog.v1", Set(catalog.presets.keys).isSuperset(of: ["astra-economy", "astra-balanced", "astra-speed", "astra-deep", "custom"]) else { throw ThreadOSSettingsCodecError.catalogUnavailable }
         return catalog
     }
@@ -170,7 +177,8 @@ public enum ThreadOSSettingsCodec {
     public static func draft(fromFrozenInput input: String, catalog: ThreadOSModelCatalog? = nil) throws -> ThreadOSSettingsDraft {
         guard input.hasPrefix("TOSCFG/1 ") else { throw ThreadOSSettingsCodecError.invalidProtocolPrefix }
         let value = try strictObject(String(input.dropFirst("TOSCFG/1 ".count)))
-        let catalog = try catalog ?? loadCatalog()
+        let rawRevision = strictString(value["cat"])
+        let catalog = try catalog ?? loadCatalog(revision: rawRevision ?? legacyCatalogRevision)
         let base: Set<String> = ["cat", "id", "p", "preset", "rev", "apply", "tier", "cw", "rw", "l", "q", "f", "w", "r"]
         guard Set(value.keys).isSubset(of: base), Set(value.keys).isSuperset(of: ["p", "id", "rev", "cat", "preset"]) else { throw ThreadOSSettingsCodecError.invalidRequestFields }
         guard strictString(value["cat"]) == catalog.revision, let presetName = strictString(value["preset"]), let preset = catalog.presets[presetName] else { throw ThreadOSSettingsCodecError.unsupportedPreset }

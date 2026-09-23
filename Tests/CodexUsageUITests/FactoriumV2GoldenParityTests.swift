@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Testing
 @testable import CodexUsageUI
 
@@ -14,6 +15,61 @@ struct FactoriumV2GoldenParityTests {
         // Ordered ledger/wave sequences are producer-runtime behavior. UMA
         // reads their frozen shape but does not emulate ThreadOS persistence.
         #expect(sequences.count == 4)
+    }
+
+    @Test func solLunaCatalogSupportsAllFourRequestedEffortsAndRejectsMalformedValues() throws {
+        let catalog = try ThreadOSSettingsCodec.loadCatalog(revision: "sol-luna-20260922.1")
+        for model in ["gpt-6-sol", "gpt-6-luna"] {
+            #expect(catalog.models[model]?.reasoningEfforts == ["low", "medium", "high", "xhigh"])
+            for effort in ["low", "medium", "high", "xhigh"] {
+                var draft = FactoriumV2SettingsDraft(project: "SAGE_CATALOG", catalogRevision: catalog.revision)
+                draft.setSelection(.init(model: model, effort: effort, speed: "standard"), for: .coder)
+                #expect(draft.isLocallyValid, "\(model)/\(effort) should be valid")
+            }
+            for effort in ["", "ultra", "HIGH", "fast", "unknown"] {
+                var draft = FactoriumV2SettingsDraft(project: "SAGE_CATALOG", catalogRevision: catalog.revision)
+                draft.setSelection(.init(model: model, effort: effort, speed: "standard"), for: .coder)
+                #expect(!draft.isLocallyValid, "malformed effort \(effort) should be rejected")
+            }
+        }
+    }
+
+    @Test func persistedDraftWithoutCatalogRevisionRemainsPinnedToTheLegacyCatalog() throws {
+        var legacyRoles = FactoriumV2SettingsDraft.defaultRoles
+        legacyRoles[.qa] = .init(selection: .init(model: "gpt-6-astra", effort: "medium", speed: "standard"))
+        legacyRoles[.coder] = .init(selection: .init(model: "gpt-5.6-terra", effort: "medium", speed: "standard"))
+        legacyRoles[.reviewer] = .init(selection: .init(model: "gpt-5.6-terra", effort: "low", speed: "standard"))
+        let draft = FactoriumV2SettingsDraft(project: "OLD_DRAFT", catalogRevision: ThreadOSSettingsCodec.legacyCatalogRevision, roles: legacyRoles)
+        var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(draft)) as? [String: Any])
+        object.removeValue(forKey: "catalogRevision")
+        let data = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(FactoriumV2SettingsDraft.self, from: data)
+        #expect(decoded.catalogRevision == ThreadOSSettingsCodec.legacyCatalogRevision)
+        #expect(try decoded.canonicalRequest().contains("astra-20260904.1"))
+    }
+
+    @Test @MainActor func v2ModelSwitchPersistsAnExplicitEffortChoiceForRolesAndCustomChildren() throws {
+        var draft = FactoriumV2SettingsDraft(project: "EXPLICIT_EFFORT")
+        draft.setSelection(.init(model: "gpt-5.6-terra", effort: "ultra", speed: "standard"), for: .qa)
+        draft.setSlotInheritance(false, at: 0, for: .coder)
+        draft.setSlotSelection(.init(model: "gpt-5.6-terra", effort: "ultra", speed: "standard"), at: 0, for: .coder)
+        #expect(draft.isLocallyValid)
+        let preferences = ApplicationPreferences.inMemory()
+        ThreadOSSettingsPreferences.saveFactoriumV2(draft, to: preferences)
+        ThreadOSSettingsPreferences.saveFactoriumV2SelectedProject(draft.project, to: preferences)
+        let form = FactoriumV2FormState(preferences: preferences)
+        form.select(project: draft.project)
+
+        form.selectRoleModel("gpt-6-sol", role: .qa)
+        form.selectSlotModel("gpt-6-luna", at: 0, for: .coder)
+        #expect(form.draft.roles[.qa]?.selection == .init(model: "gpt-6-sol", effort: "", speed: "standard"))
+        #expect(form.draft.coderWorkers[0].selection == .init(model: "gpt-6-luna", effort: "", speed: "standard"))
+        #expect(throws: (any Error).self) { try form.generatedRequest() }
+
+        form.edit(allowIncompleteEffort: true) { $0.roles[.qa]?.selection.effort = "high" }
+        form.edit(allowIncompleteEffort: true) { $0.coderWorkers[0].selection.effort = "xhigh" }
+        #expect(form.draft.isLocallyValid)
+        #expect(try form.generatedRequest().settingsLine.contains("sol-luna-20260922.1"))
     }
 
     @Test func swiftCanonicalizesEveryApplicableFrozenRequestAndValidatesEveryFrozenAck() throws {
@@ -111,6 +167,84 @@ struct FactoriumV2GoldenParityTests {
             #expect(form.receipt == nil && form.receiptInputIsInvalid, "invalid \(mutation) acknowledgement was accepted")
             #expect(form.draft == current, "invalid \(mutation) acknowledgement mutated draft")
         }
+    }
+
+
+    @Test func sharedSolLunaV2CrossLanguageRequestReceiptVectors() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let url = root.appendingPathComponent("Tests/CodexUsageUITests/Fixtures/ThreadOS/sol-luna-v2.json")
+        let fixtureData = try Data(contentsOf: url)
+        #expect(SHA256.hash(data: fixtureData).map { String(format: "%02x", $0) }.joined() ==
+                "d794b1b2b728647580407c2b8a76a26f434e96648a8dbb4d91f751560f3c2d3d")
+        let catalogURL = root.appendingPathComponent("Sources/CodexUsageUI/Resources/ThreadOS/models.v2.json")
+        let catalogData = try Data(contentsOf: catalogURL)
+        #expect(SHA256.hash(data: catalogData).map { String(format: "%02x", $0) }.joined() ==
+                "74b3da41ebca8e0c35aaf98ca4cc4ea3c362d436d2fd71896a2191bd7b1ba160")
+        let fixture = try #require(JSONSerialization.jsonObject(with: fixtureData) as? [String: Any])
+        #expect(fixture["catalog_revision"] as? String == "sol-luna-20260922.1")
+        let vectors = try #require(fixture["vectors"] as? [[String: Any]])
+        #expect(vectors.count == 8)
+        for vector in vectors {
+            let name = try #require(vector["name"] as? String)
+            let input = try #require(vector["input"] as? String)
+            let expected = try #require(vector["canonical_expected"] as? String)
+            let ack = try #require(vector["canonical_ack"] as? String)
+            let draft = try FactoriumV2SettingsCodec.draft(fromWire: input, expectedProject: "PROJECT_DEMO")
+            #expect(try draft.canonicalRequest() == expected, "request mismatch: \(name)")
+            let receipt = try FactoriumV2SettingsCodec.receiptProjection(ack, matching: draft)
+            #expect(receipt.id == draft.id && receipt.revision == draft.revision)
+            #expect(receipt.effectiveObserved == "unknown" && receipt.manualRequired)
+        }
+        let negative = try #require(fixture["negative"] as? [[String: Any]])
+        #expect(negative.count == 2)
+        for vector in negative {
+            let name = try #require(vector["name"] as? String)
+            let input = try #require(vector["input"] as? String)
+            #expect(throws: (any Error).self, "negative vector accepted: \(name)") {
+                _ = try FactoriumV2SettingsCodec.draft(fromWire: input)
+            }
+        }
+    }
+
+    @Test @MainActor func v2GenerateAndCopyUsesOnlyInjectedLocalClipboard() throws {
+        let empty = FactoriumV2FormState(preferences: .inMemory())
+        let invalidClipboard = ClipboardSpy()
+        #expect(empty.generateAndCopy(to: invalidClipboard, language: .english) == nil)
+        #expect(invalidClipboard.writes.isEmpty)
+        #expect(empty.copiedRevision == nil)
+
+        let draft = FactoriumV2SettingsDraft(project: "COPY_V2", catalogRevision: "sol-luna-20260922.1")
+        let preferences = ApplicationPreferences.inMemory()
+        ThreadOSSettingsPreferences.saveFactoriumV2(draft, to: preferences)
+        ThreadOSSettingsPreferences.saveFactoriumV2SelectedProject(draft.project, to: preferences)
+        let form = FactoriumV2FormState(preferences: preferences)
+        let generated = try form.generatedRequest()
+        form.edit { $0.roles[.qa]?.selection.effort = "xhigh" }
+        form.reportCopy(generated, success: true, language: .english)
+        #expect(form.copiedRevision == nil)
+        #expect(form.message.contains("stale"))
+
+        let failingClipboard = ClipboardSpy(success: false)
+        let failed = try #require(form.generateAndCopy(to: failingClipboard, language: .english))
+        #expect(failingClipboard.writes == [failed.text])
+        #expect(form.copiedRevision == nil)
+        #expect(form.message.contains("clipboard could not be written"))
+
+        form.edit { $0.roles[.coder]?.selection.speed = "fast" }
+        let clipboard = ClipboardSpy()
+        let normalized = try #require(form.generateAndCopy(to: clipboard, language: .english))
+        #expect(clipboard.writes == [normalized.text])
+        #expect(normalized.text.hasPrefix("TOSCFG/2 "))
+        #expect(form.draft.roles[.coder]?.selection.speed == "standard")
+        #expect(form.copiedRevision == form.draft.revision)
+        #expect(!normalized.text.contains("\"speed\":\"fast\""))
+    }
+
+    @MainActor private final class ClipboardSpy: ThreadOSSettingsClipboard {
+        var writes: [String] = []
+        let success: Bool
+        init(success: Bool = true) { self.success = success }
+        func write(_ string: String) -> Bool { writes.append(string); return success }
     }
 
     private func object() throws -> [String: Any] {
