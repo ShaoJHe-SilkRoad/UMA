@@ -259,6 +259,7 @@ import Testing
         try ThreadOSSettingsFormActions.copy(draft, to: clipboard)
         try ThreadOSSettingsFormActions.copy(draft, to: clipboard)
         #expect(clipboard.value?.hasPrefix("TOSCFG/1 ") == true)
+        #expect(clipboard.value?.contains(FactoriumV2FormState.leaderTransferAuthorization) == false)
         #expect(draft.revision == 1)
         #expect(throws: ThreadOSSettingsFormError.invalidDraft) {
             try ThreadOSSettingsFormActions.copy(.init(project: ""), to: clipboard)
@@ -611,7 +612,7 @@ import Testing
         let source = try String(contentsOf: root.appendingPathComponent("Sources/CodexUsageUI/Views/ThreadOSSettingsView.swift"), encoding: .utf8)
         let view = try #require(source.range(of: "public struct ThreadOSSettingsView: View"))
         let body = String(source[view.lowerBound...])
-        for wiring in ["factoriumV2Content", "FactoriumV2Role.allCases", "roleCard(role)", "workerSlots(role: role)", "workerSummary(for: role)", "workerColumnHeadings", "workerRow(role: role, index: index, slot: slot)", "workerExpansionBinding(role)", "roleDisplayName(role)", "roleSymbol(role)", "Three stable slots are configuration capacity", "Disabled slots retain this saved draft", "uma.threados.v2.project-selector", "uma.threados.v2.generate-copy", "uma.threados.v2.footer-status", "footerStatus", "footerStatusOverride", "advanced.details", "Model · Thinking", "uma.threados.v2.raw-ack", "uma.threados.v2.coming-soon", "uma.threados.v2.speed-boundary", "VStack(spacing: 0)", "ViewThatFits(in: .horizontal)", ".pickerStyle(.segmented)", "let workerName = title", ".accessibilityLabel(title(\"Model for \\(workerName)\"", ".accessibilityLabel(title(\"Thinking for \\(workerName)\"", "uma.threados.v2.role.\\(role.rawValue).model", "uma.threados.v2.role.\\(role.rawValue).effort"] {
+        for wiring in ["factoriumV2Content", "FactoriumV2Role.allCases", "roleCard(role)", "workerSlots(role: role)", "workerSummary(for: role)", "workerColumnHeadings", "workerRow(role: role, index: index, slot: slot)", "workerExpansionBinding(role)", "roleDisplayName(role)", "roleSymbol(role)", "Three stable slots are configuration capacity", "Disabled slots retain this saved draft", "uma.threados.v2.project-selector", "uma.threados.v2.generate-copy", "uma.threados.v2.footer-status", "uma.threados.v2.transfer-copy-explainer", "Copies the TOSCFG/2 line with the standing TOS+UMA authorization", "Copy V1 settings (legacy)", "uma.threados.v1.copy-explainer", "Legacy V1 copies a local configuration request only; use the V2 button above for manual Leader transfer", "footerStatus", "footerStatusOverride", "advanced.details", "Model · Thinking", "uma.threados.v2.raw-ack", "uma.threados.v2.coming-soon", "uma.threados.v2.speed-boundary", "VStack(spacing: 0)", "ViewThatFits(in: .horizontal)", ".pickerStyle(.segmented)", "let workerName = title", ".accessibilityLabel(title(\"Model for \\(workerName)\"", ".accessibilityLabel(title(\"Thinking for \\(workerName)\"", "uma.threados.v2.role.\\(role.rawValue).model", "uma.threados.v2.role.\\(role.rawValue).effort"] {
             #expect(body.contains(wiring), "Missing actual View wiring: \(wiring)")
         }
         #expect(!body.contains(".accessibilityIdentifier(\"uma.threados.settings\")"))

@@ -411,13 +411,22 @@ public struct ThreadOSSettingsView: View {
     func showCodexDetailForTesting() { showCodexDetail?() }
     private var footer: some View {
         HStack(spacing: 12) {
-            Text(footerStatus)
-                .font(.caption)
-                .foregroundStyle(factoriumV2.message.isEmpty ? .secondary : .primary)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityIdentifier("uma.threados.v2.footer-status")
-                .background(ThreadOSSchemeBGeometryReporter(identifier: "footer.status", probe: layoutProbe))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(footerStatus)
+                    .font(.caption)
+                    .foregroundStyle(factoriumV2.message.isEmpty ? .secondary : .primary)
+                    .lineLimit(2)
+                    .accessibilityIdentifier("uma.threados.v2.footer-status")
+                    .background(ThreadOSSchemeBGeometryReporter(identifier: "footer.status", probe: layoutProbe))
+                Text(title(
+                    "Copies the TOSCFG/2 line with the standing TOS+UMA authorization; platform approval still applies.",
+                    "复制 TOSCFG/2 配置行及 TOS+UMA 持续授权；仍须遵循宿主平台审批。"
+                ))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("uma.threados.v2.transfer-copy-explainer")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
             Button(title("Generate and Copy for Leader", "生成并复制给 Leader"), action: copyFactoriumV2Request)
                 .buttonStyle(.borderedProminent)
                 .disabled(!factoriumV2.draft.isLocallyValid)
@@ -922,7 +931,11 @@ public struct ThreadOSSettingsView: View {
         roleFields
         Stepper(title("Coding workers: \(form.draft.codingWorkers)", "编码工作者：\(form.draft.codingWorkers)"), value: intBinding(\.codingWorkers), in: 1...4).accessibilityIdentifier("uma.threados.coding-workers")
         Stepper(title("Review workers: \(form.draft.reviewWorkers)", "审查工作者：\(form.draft.reviewWorkers)"), value: intBinding(\.reviewWorkers), in: 1...4).accessibilityIdentifier("uma.threados.review-workers")
-        Button(title("Copy settings request", "复制设置请求"), action: { form.copy(to: SystemThreadOSSettingsClipboard(), language: language) }).accessibilityIdentifier("uma.threados.copy")
+        Button(title("Copy V1 settings (legacy)", "复制 V1 设置（旧版）"), action: { form.copy(to: SystemThreadOSSettingsClipboard(), language: language) }).accessibilityIdentifier("uma.threados.copy")
+        Text(title("Legacy V1 copies a local configuration request only; use the V2 button above for manual Leader transfer.", "旧版 V1 仅复制本地配置请求；手动交给 Leader 请用上方 V2 按钮。"))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .accessibilityIdentifier("uma.threados.v1.copy-explainer")
         if !form.message.isEmpty { Text(form.message).accessibilityIdentifier("uma.threados.copy-status") }
         if form.copiedRevision == form.draft.revision { Text(title("Copy confirmation is for revision \(form.draft.revision) only; any edit invalidates it.", "复制确认仅适用于修订版本 \(form.draft.revision)；任何编辑都会使其失效。")).foregroundStyle(.secondary).accessibilityIdentifier("uma.threados.copy-confirmation") }
     }

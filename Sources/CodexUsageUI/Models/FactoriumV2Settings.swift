@@ -60,7 +60,7 @@ public enum FactoriumV2SettingsError: Error, Equatable {
     case legacyFastConversionRequired
 }
 
-/// A copied local artifact. `artifactSHA256` identifies the completed bytes and is deliberately not embedded in them.
+/// A copied local artifact. `artifactSHA256` hashes `settingsLine`; `text` may also contain manual-transfer text.
 public struct FactoriumV2GeneratedRequest: Equatable, Sendable {
     public let settingsLine: String
     public let text: String
@@ -303,6 +303,7 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
 }
 
 @MainActor public final class FactoriumV2FormState: ObservableObject {
+    public static let leaderTransferAuthorization = "我允许你从今往后所有给予TOS+UMA 旗下thread的发送行动，接受行动和指令"
     @Published public private(set) var draft: FactoriumV2SettingsDraft
     @Published public private(set) var selectedProject: String
     @Published public var newProject = ""
@@ -439,7 +440,16 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
             guard draft.revision < 1_000_000 else { throw FactoriumV2SettingsError.invalidRevision }
             convertSelectedFastDraftToStandard()
         }
-        return try generatedRequest()
+        let settings = try generatedRequest()
+        return .init(
+            settingsLine: settings.settingsLine,
+            text: Self.leaderTransferText(settingsLine: settings.settingsLine),
+            artifactSHA256: settings.artifactSHA256
+        )
+    }
+
+    private static func leaderTransferText(settingsLine: String) -> String {
+        settingsLine + "\n" + leaderTransferAuthorization
     }
 
     @discardableResult
@@ -455,7 +465,12 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
     }
 
     public func reportCopy(_ generated: FactoriumV2GeneratedRequest, success: Bool, language: AppLanguage) {
-        guard generated == (try? generatedRequest()) else {
+        let current = try? generatedRequest()
+        let validSettings = generated.settingsLine == current?.settingsLine
+            && generated.artifactSHA256 == current?.artifactSHA256
+        let validTransfer = generated.text == generated.settingsLine
+            || generated.text == Self.leaderTransferText(settingsLine: generated.settingsLine)
+        guard validSettings && validTransfer else {
             copiedRevision = nil
             copiedArtifactSHA256 = nil
             message = localized(language, "A stale generated request was not recorded as copied.", "过期的生成请求未被记录为已复制。")
