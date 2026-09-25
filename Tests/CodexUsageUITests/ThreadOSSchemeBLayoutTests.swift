@@ -4,18 +4,19 @@ import Testing
 @testable import CodexUsageUI
 
 @MainActor struct ThreadOSSchemeBLayoutTests {
-    @Test func schemeBMeasuresWholeWindowsAndReachableRoleChildAndFooterGeometry() throws {
+    @Test func promptComposerFitsAttachedWindowsAcrossSizesLanguagesAndAppearances() throws {
         _ = NSApplication.shared
-        for fixture in LayoutFixture.requiredCases {
-            let preferences = ApplicationPreferences.inMemory()
-            ThreadOSSettingsPreferences.saveFactoriumV2(draft(for: fixture), to: preferences)
-            let probe = ThreadOSSchemeBLayoutProbe()
-            var snapshot = UsageSnapshot.preview(language: fixture.language)
-            snapshot.providerSource = UsageSourceStatus(label: "Account", scope: "account", capturedAt: Date(), isAvailable: true, freshness: .fresh)
-            snapshot.localSource = UsageSourceStatus(label: "Local", scope: "local", capturedAt: Date(), isAvailable: true, freshness: .stale)
-            let settings = ThreadOSSettingsView(language: fixture.language, basicUsage: .make(snapshot: snapshot, provider: nil), preferences: preferences, initiallyExpandedWorkerGroups: fixture.groups, layoutProbe: probe, footerStatusOverride: fixture.footerStatus)
-            let host = NSHostingView(rootView: MainShellReservedHostedView(settings: settings))
-            let window = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        for fixture in PromptComposerFixture.cases {
+            let host = NSHostingView(rootView: ThreadOSSettingsView(
+                language: fixture.language,
+                preferences: .inMemory()
+            ))
+            let window = NSWindow(
+                contentRect: .zero,
+                styleMask: [.titled, .closable],
+                backing: .buffered,
+                defer: false
+            )
             window.contentView = host
             window.appearance = NSAppearance(named: fixture.appearance)
             window.setContentSize(fixture.contentSize)
@@ -24,85 +25,23 @@ import Testing
 
             settle(host)
             #expect(window.contentView?.bounds.size == fixture.contentSize)
-            let views = descendants(of: host)
-            let scroll = try #require(views.compactMap { $0 as? NSScrollView }.first { $0.hasVerticalScroller })
+            #expect(host.bounds.size == fixture.contentSize)
+            #expect(host.fittingSize.width.isFinite && host.fittingSize.height.isFinite)
+            #expect(host.fittingSize.height <= fixture.contentSize.height + 1)
+
+            let scroll = try #require(descendants(of: host).compactMap { $0 as? NSScrollView }.first)
             let document = try #require(scroll.documentView)
+            let viewport = scroll.contentView.bounds
+            let viewportInHost = scroll.contentView.convert(viewport, to: host)
+            #expect(scroll.window === window)
+            #expect(host.bounds.contains(viewportInHost))
             #expect(!scroll.hasHorizontalScroller)
-            #expect(document.frame.width <= scroll.contentView.bounds.width + 1)
-            #expect(scroll.contentView.bounds.height > 0)
-
-            let initialFrames = probe.frames
-            let root = try #require(initialFrames["root"])
-            let viewport = try #require(initialFrames["scroll.viewport"])
-            let documentFrame = try #require(initialFrames["scroll.document"])
-            #expect(root.width == host.bounds.width && root.height < host.bounds.height)
-            #expect(host.bounds.height - root.height >= MainShellReservedHostedView.reservedHeight)
-            #expect(viewport.height > 0 && viewport.height < root.height)
-            #expect(documentFrame.width <= viewport.width + 1)
-            for role in FactoriumV2Role.allCases {
-                let card = try #require(initialFrames["role.\(role.rawValue).card"])
-                let header = try #require(initialFrames["role.\(role.rawValue).header"])
-                #expect(card.width > 0 && card.height >= 52)
-                #expect(document.frame.contains(card))
-                #expect(card.contains(header))
-            }
-            let cards = try FactoriumV2Role.allCases.map { role in
-                try #require(initialFrames["role.\(role.rawValue).card"])
-            }
-            let headers = try FactoriumV2Role.allCases.map { role in
-                try #require(initialFrames["role.\(role.rawValue).header"])
-            }
-            #expect(cards.dropFirst().allSatisfy { abs($0.height - cards[0].height) < 1 })
-            #expect(headers.allSatisfy { $0.height > 0 })
-            let workerRoles: [FactoriumV2Role] = [.qa, .coder, .repair, .reviewer]
-            for role in workerRoles {
-                let model = try #require(initialFrames["role.\(role.rawValue).model"])
-                let effort = try #require(initialFrames["role.\(role.rawValue).effort"])
-                let card = try #require(initialFrames["role.\(role.rawValue).card"])
-                #expect(card.contains(model) && card.contains(effort))
-            }
-            for group in fixture.groups {
-                let panel = try #require(initialFrames["role.\(group.rawValue).workers"])
-                #expect(panel.height > 0)
-                #expect(document.frame.contains(panel))
-                for slot in 1...3 {
-                    let row = try #require(initialFrames["role.\(group.rawValue).worker.\(slot)"])
-                    #expect(row.height >= 34)
-                    #expect(panel.contains(row))
-                }
-            }
-            let footer = try #require(initialFrames["footer.generate-copy"])
-            let footerStatus = try #require(initialFrames["footer.status"])
-            // The footer reporter is in the Scheme B named coordinate space;
-            // AppKit may keep the outer shell's origin during a fresh-state
-            // layout pass. Reachability is established by the fixed footer's
-            // positive frame and the scroll viewport, not mixed coordinates.
-            #expect(footer.width > 0 && footer.height >= 44)
-            #expect(footer.contains(footerStatus))
-            #expect(footer.height >= 44)
-            if fixture.identifier.contains("1040x760") {
-                #expect(cards.dropFirst().allSatisfy { abs($0.minY - cards[0].minY) < 1 })
-                #expect(cards.allSatisfy { $0.maxX <= viewport.maxX + 1 })
-                for control in ["model", "effort"] {
-                    let frames = try workerRoles.map { role in
-                        try #require(initialFrames["role.\(role.rawValue).\(control)"])
-                    }
-                    #expect(frames.dropFirst().allSatisfy { abs($0.minY - frames[0].minY) < 1 })
-                }
-            }
-            captureIfRequested(fixture: fixture, host: host, suffix: "initial")
-
-            let maxY = max(0, document.frame.height - scroll.contentView.bounds.height)
-            scroll.contentView.scroll(to: .init(x: 0, y: maxY))
-            scroll.reflectScrolledClipView(scroll.contentView)
-            settle(host)
-            #expect(probe.frames["footer.generate-copy"]?.height == footer.height)
-            let endViewport = try #require(probe.frames["scroll.viewport"])
-            let advanced = try #require(probe.frames["advanced.details"])
-            #expect(endViewport.contains(advanced), "Maximum scroll must expose Advanced details above the fixed footer")
-            #expect(footer.intersection(advanced).isNull)
-            #expect(footer.contains(try #require(probe.frames["footer.status"])))
-            emitEvidenceIfRequested(fixture: fixture, window: window, host: host, scroll: scroll, document: document, initialFrames: initialFrames, endFrames: probe.frames, endOffset: scroll.contentView.bounds.origin.y)
+            #expect(viewport.width.isFinite && viewport.height.isFinite)
+            #expect(viewport.width > 0 && viewport.height > 0)
+            #expect(document.frame.width.isFinite && document.frame.height.isFinite)
+            #expect(document.frame.width > 0 && document.frame.height > 0)
+            #expect(document.frame.width <= viewport.width + 1)
+            #expect(document.frame.height <= viewport.height + 1, "The compact composer must not force a tall blank document.")
         }
     }
 
@@ -189,6 +128,21 @@ import Testing
         let x: CGFloat; let y: CGFloat; let width: CGFloat; let height: CGFloat
         init(_ value: CGRect) { x = value.origin.x; y = value.origin.y; width = value.width; height = value.height }
     }
+
+    private struct PromptComposerFixture {
+        let contentSize: NSSize
+        let language: AppLanguage
+        let appearance: NSAppearance.Name
+
+        static let cases = [
+            PromptComposerFixture(contentSize: .init(width: 760, height: 552), language: .english, appearance: .aqua),
+            PromptComposerFixture(contentSize: .init(width: 760, height: 552), language: .simplifiedChinese, appearance: .darkAqua),
+            PromptComposerFixture(contentSize: .init(width: 823, height: 640), language: .english, appearance: .darkAqua),
+            PromptComposerFixture(contentSize: .init(width: 823, height: 640), language: .simplifiedChinese, appearance: .aqua),
+            PromptComposerFixture(contentSize: .init(width: 1_040, height: 760), language: .english, appearance: .aqua),
+            PromptComposerFixture(contentSize: .init(width: 1_040, height: 760), language: .simplifiedChinese, appearance: .darkAqua),
+        ]
+    }
 }
 
 /// Mirrors the actual main shell's 48-point toolbar plus divider without
@@ -204,6 +158,8 @@ private struct MainShellReservedHostedView: View {
             settings
         }
     }
+
+
 }
 
 private extension JSONEncoder {

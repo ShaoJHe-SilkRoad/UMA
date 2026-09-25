@@ -6,170 +6,107 @@ import Testing
 @testable import CodexUsageUI
 
 @MainActor struct ThreadOSSettingsSurfaceTests {
-    @Test func threadOSSettingsUsesVerticalReachabilityWithoutHorizontalOverflowAtMinimumWindowWidth() throws {
-        let freshPreferences = ApplicationPreferences.inMemory()
-        ThreadOSSettingsPreferences.saveFactoriumV2(.init(project: "TU4_FRESH"), to: freshPreferences)
-        let preferences = ApplicationPreferences.inMemory()
-        var custom = ThreadOSSettingsDraft(project: "TU4_LAYOUT", preset: "custom")
-        custom.customRoles = ThreadOSSettingsDraft.defaultCustomRoles
-        ThreadOSSettingsPreferences.save(custom, to: preferences)
-        ThreadOSSettingsPreferences.saveFactoriumV2(.init(project: "TU4_LAYOUT"), to: preferences)
-
+    @Test func threadOSSettingsHostedViewFitsMinimumWindowWithoutHorizontalOverflow() throws {
         _ = NSApplication.shared
-        for view in [
-            ThreadOSSettingsView(language: .english, preferences: freshPreferences, initiallyExpandedWorkerGroups: [.coder]),
-            ThreadOSSettingsView(language: .english, preferences: preferences, initiallyExpandedWorkerGroups: [.coder]),
-        ] {
-            let host = NSHostingView(rootView: view)
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 760, height: 552),
-                styleMask: [.titled],
-                backing: .buffered,
-                defer: false
-            )
-            window.contentView = host
-            window.orderFront(nil)
-            defer { window.orderOut(nil) }
+        let host = NSHostingView(rootView: ThreadOSSettingsView(
+            language: .english,
+            preferences: .inMemory()
+        ))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 552),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
 
-            host.layoutSubtreeIfNeeded()
-            window.contentView?.layoutSubtreeIfNeeded()
-            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-            host.layoutSubtreeIfNeeded()
+        host.layoutSubtreeIfNeeded()
+        window.contentView?.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        host.layoutSubtreeIfNeeded()
 
-            // The attached host must not replace child control identifiers with
-            // a common container identifier in the native accessibility tree.
-            #expect(host.accessibilityIdentifier().isEmpty)
-
-            let scrolls = descendants(of: host).compactMap { $0 as? NSScrollView }
-            let outerScroll = try #require(scrolls.first { scroll in
-                guard let document = scroll.documentView else { return false }
-                return scroll.hasVerticalScroller
-                    && document.frame.height > scroll.contentView.bounds.height
-                    && document.frame.width <= scroll.contentView.bounds.width + 1
-            })
-            #expect(!outerScroll.hasHorizontalScroller)
-        }
-    }
-
-    @Test func selectedExtraHighEffortPickersHaveRoomInNormalAndCompactLayouts() throws {
-        _ = NSApplication.shared
-        for width in [760.0, 1_520.0] {
-            for language in [AppLanguage.english, .simplifiedChinese] {
-                var draft = FactoriumV2SettingsDraft(project: "EXTRA_HIGH_LAYOUT")
-                draft.roles[.qa]?.selection.effort = "xhigh"
-                draft.roles[.coder]?.selection.effort = "xhigh"
-                let preferences = ApplicationPreferences.inMemory()
-                ThreadOSSettingsPreferences.saveFactoriumV2(draft, to: preferences)
-
-                let layoutProbe = ThreadOSSchemeBLayoutProbe()
-                let host = NSHostingView(rootView: ThreadOSSettingsView(language: language, preferences: preferences, layoutProbe: layoutProbe))
-                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 552), styleMask: [.titled], backing: .buffered, defer: false)
-                window.contentView = host
-                window.orderFront(nil)
-                defer { window.orderOut(nil) }
-                host.layoutSubtreeIfNeeded()
-                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-                host.layoutSubtreeIfNeeded()
-
-                let selectedLabel = language == .english ? "Extra High" : "额外高"
-                let referencePicker = NSPopUpButton(frame: .zero, pullsDown: false)
-                referencePicker.addItem(withTitle: selectedLabel)
-                referencePicker.sizeToFit()
-                let cell = try #require(referencePicker.cell)
-                let requiredControlWidth = referencePicker.frame.width
-                let font = cell.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
-                let labelWidth = (selectedLabel as NSString).size(withAttributes: [.font: font]).width
-                if language == .english {
-                    #expect(referencePicker.frame.width > 88, "the old 88pt control cannot fit the measured English label")
-                }
-
-                for role in ["qa", "coder"] {
-                    let frame = try #require(layoutProbe.frames["role.\(role).effort"], "missing measured effort picker for \(role)")
-                    referencePicker.setFrameSize(NSSize(width: frame.width, height: referencePicker.frame.height))
-                    let availableTitleWidth = cell.titleRect(forBounds: referencePicker.bounds).width
-                    #expect(frame.width + 0.5 >= requiredControlWidth, "picker frame is narrower than the native control's measured fit for \(selectedLabel)")
-                    #expect(availableTitleWidth + 0.5 >= labelWidth, "picker title area clips \(selectedLabel) at \(width)pt")
-                }
-
-                if width == 760 {
-                    let outerScroll = try #require(descendants(of: host).compactMap { $0 as? NSScrollView }.first { scroll in
-                        guard let document = scroll.documentView else { return false }
-                        return scroll.hasVerticalScroller && document.frame.height > scroll.contentView.bounds.height
-                    })
-                    #expect(!outerScroll.hasHorizontalScroller)
-                    #expect(outerScroll.documentView!.frame.width <= outerScroll.contentView.bounds.width + 1)
-                }
-            }
-        }
-    }
-
-    @Test func customCoderWorkerExtraHighFitsMeasuredAppKitTitleAtMinimumAndWideWindowWidths() throws {
-        _ = NSApplication.shared
-        let selectedLabelByLanguage: [(AppLanguage, String)] = [(.english, "Extra High"), (.simplifiedChinese, "额外高")]
-
-        for width in [760.0, 1_520.0] {
-            for (language, selectedLabel) in selectedLabelByLanguage {
-                var draft = FactoriumV2SettingsDraft(project: "EXTRA_HIGH_WORKER_LAYOUT")
-                draft.roles[.coder]?.selection.effort = "xhigh"
-                let customSelection = FactoriumV2Selection(model: "gpt-6-luna", effort: "xhigh", speed: "standard")
-                draft.coderWorkers = [
-                    FactoriumV2WorkerSlot(inherits: false, selection: customSelection, hasCustomSelection: true),
-                    FactoriumV2WorkerSlot(inherits: true, selection: customSelection),
-                    FactoriumV2WorkerSlot(enabled: false, inherits: true, selection: customSelection),
-                ]
-                let preferences = ApplicationPreferences.inMemory()
-                ThreadOSSettingsPreferences.saveFactoriumV2(draft, to: preferences)
-
-                let layoutProbe = ThreadOSSchemeBLayoutProbe()
-                let host = NSHostingView(rootView: ThreadOSSettingsView(
-                    language: language,
-                    preferences: preferences,
-                    initiallyExpandedWorkerGroups: [.coder],
-                    layoutProbe: layoutProbe
-                ))
-                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 552), styleMask: [.titled], backing: .buffered, defer: false)
-                window.contentView = host
-                window.orderFront(nil)
-                defer { window.orderOut(nil) }
-                host.layoutSubtreeIfNeeded()
-                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-                host.layoutSubtreeIfNeeded()
-
-                let actualPickerFrame = try #require(layoutProbe.frames["role.coder.worker.1.effort"], "the attached custom worker picker must be laid out")
-                let referencePicker = NSPopUpButton(frame: .zero, pullsDown: false)
-                referencePicker.addItem(withTitle: selectedLabel)
-                referencePicker.sizeToFit()
-                let appKitCell = try #require(referencePicker.cell)
-                let requiredControlWidth = referencePicker.frame.width
-                referencePicker.setFrameSize(NSSize(width: actualPickerFrame.width, height: referencePicker.frame.height))
-                #expect(actualPickerFrame.width + 0.5 >= requiredControlWidth, "the actual attached worker picker frame is narrower than AppKit's measured control fit")
-
-                let availableTitleWidth = appKitCell.titleRect(forBounds: referencePicker.bounds).width
-                let font = appKitCell.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
-                let labelWidth = (selectedLabel as NSString).size(withAttributes: [.font: font]).width
-                #expect(availableTitleWidth + 0.5 >= labelWidth, "the actual worker popup title area clips \(selectedLabel) at \(width)pt")
-
-                let inheritanceFrame = try #require(layoutProbe.frames["role.coder.worker.2.inherit"], "missing inherited/custom segment measurement")
-                let inheritedSummaryFrame = try #require(layoutProbe.frames["role.coder.worker.2.inherited-summary"], "missing inherited summary measurement")
-                #expect(!inheritanceFrame.intersects(inheritedSummaryFrame), "the inherited summary must not overlap its adjacent Custom segment at \(width)pt")
-                print("[WorkerExtraHighGeometry] width=\(width)pt language=\(language) pickerFrame=\(actualPickerFrame) titleRectWidth=\(availableTitleWidth) requiredControlWidth=\(requiredControlWidth) labelWidth=\(labelWidth) inheritedSegmentFrame=\(inheritanceFrame) inheritedSummaryFrame=\(inheritedSummaryFrame) intersects=\(inheritanceFrame.intersects(inheritedSummaryFrame))")
-
-                if width == 760 {
-                    let outerScroll = try #require(descendants(of: host).compactMap { $0 as? NSScrollView }.first { scroll in
-                        guard let document = scroll.documentView else { return false }
-                        return scroll.hasVerticalScroller && document.frame.height > scroll.contentView.bounds.height
-                    })
-                    #expect(!outerScroll.hasHorizontalScroller)
-                    #expect(outerScroll.documentView!.frame.width <= outerScroll.contentView.bounds.width + 1)
-                }
-            }
-        }
+        let scroll = try #require(descendants(of: host).compactMap { $0 as? NSScrollView }.first)
+        let document = try #require(scroll.documentView)
+        let viewport = scroll.contentView.bounds
+        #expect(!scroll.hasHorizontalScroller)
+        #expect(document.frame.width.isFinite && document.frame.height.isFinite)
+        #expect(document.frame.width > 0 && document.frame.height > 0)
+        #expect(viewport.width.isFinite && viewport.height.isFinite)
+        #expect(document.frame.width <= viewport.width + 1)
     }
 
     private func descendants(of view: NSView) -> [NSView] {
         view.subviews + view.subviews.flatMap(descendants)
     }
 
+    @Test func promptComposerPersistsExtraHighAndCopiesTargetFreePromptInBothLanguages() throws {
+        let catalog = try ThreadOSSettingsCodec.loadCatalog(revision: ThreadOSSettingsCodec.latestCatalogRevision)
+        for language in [AppLanguage.english, .simplifiedChinese] {
+            let preferences = ApplicationPreferences.inMemory()
+            let form = ThreadOSPromptComposerForm(catalog: catalog, preferences: preferences)
+            form.selectModel("gpt-6-luna")
+            form.selectEffort("xhigh")
+
+            #expect(form.selectedModel == "gpt-6-luna")
+            #expect(form.selectedEffort == "xhigh")
+            #expect(preferences.value(for: ThreadOSPromptComposerPreferences.model) == "gpt-6-luna")
+            #expect(preferences.value(for: ThreadOSPromptComposerPreferences.effort) == "xhigh")
+
+            let clipboard = TestClipboard()
+            #expect(form.generateAndCopy(language: language, to: clipboard) == .copied)
+            let prompt = try #require(clipboard.value)
+            #expect(prompt.contains("gpt-6-luna"))
+            #expect(prompt.contains("xhigh"))
+            #expect(!prompt.contains("project_id"))
+            #expect(!prompt.contains("project_path"))
+            #expect(!prompt.contains("task_id"))
+            #expect(!prompt.contains("TOSCFG/3"))
+        }
+    }
+    @Test func promptComposerExtraHighSelectionFitsAttachedWindowsAcrossWidthsAndLanguages() throws {
+        _ = NSApplication.shared
+        let catalog = try ThreadOSSettingsCodec.loadCatalog(revision: ThreadOSSettingsCodec.latestCatalogRevision)
+        for width in [760.0, 1_040.0] {
+            for language in [AppLanguage.english, .simplifiedChinese] {
+                let preferences = ApplicationPreferences.inMemory()
+                let form = ThreadOSPromptComposerForm(catalog: catalog, preferences: preferences)
+                form.selectModel("gpt-6-luna")
+                form.selectEffort("xhigh")
+
+                let host = NSHostingView(rootView: ThreadOSSettingsView(
+                    language: language,
+                    preferences: preferences,
+                    clipboard: TestClipboard()
+                ))
+                let window = NSWindow(
+                    contentRect: NSRect(x: 0, y: 0, width: width, height: 552),
+                    styleMask: [.titled],
+                    backing: .buffered,
+                    defer: false
+                )
+                window.contentView = host
+                window.orderFront(nil)
+                defer { window.orderOut(nil) }
+                host.layoutSubtreeIfNeeded()
+                window.contentView?.layoutSubtreeIfNeeded()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+                host.layoutSubtreeIfNeeded()
+
+                let scroll = try #require(descendants(of: host).compactMap { $0 as? NSScrollView }.first)
+                let document = try #require(scroll.documentView)
+                let viewport = scroll.contentView.bounds
+                #expect(scroll.window === window)
+                #expect(!scroll.hasHorizontalScroller)
+                #expect(document.frame.width.isFinite && document.frame.height.isFinite)
+                #expect(document.frame.width > 0 && document.frame.height > 0)
+                #expect(viewport.width.isFinite && viewport.height.isFinite)
+                #expect(document.frame.width <= viewport.width + 1)
+            }
+        }
+        // This test checks attached-window geometry only. Native picker/menu text clipping requires runtime QA.
+    }
     @Test func preferencesRetainStableDraftIdentityAndConfiguration() {
         let preferences = ApplicationPreferences.inMemory()
         var draft = ThreadOSSettingsDraft(project: "TU1_FIXTURE", id: "cfg-001", revision: 1, preset: "custom", codingWorkers: 2, reviewWorkers: 4, tier: "priority", customRoles: customRoles)
@@ -602,21 +539,27 @@ import Testing
         }
     }
 
-    @Test func actualViewWiresAllRoleControlsToSharedPresentationsAndActionsAlongsideQ2Controls() throws {
-        let preferences = ApplicationPreferences.inMemory()
-        ThreadOSSettingsPreferences.saveFactoriumV2(.init(project: "PROJECT_A"), to: preferences)
-        let form = FactoriumV2FormState(preferences: preferences)
-        #expect(form.draft.isLocallyValid)
-        // This verifies source wiring only; the hosting test above covers actual AppKit layout.
+    @Test func settingsBodyUsesTargetFreePromptComposerAndExposesModelEffortAndCopyControls() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let source = try String(contentsOf: root.appendingPathComponent("Sources/CodexUsageUI/Views/ThreadOSSettingsView.swift"), encoding: .utf8)
-        let view = try #require(source.range(of: "public struct ThreadOSSettingsView: View"))
-        let body = String(source[view.lowerBound...])
-        for wiring in ["factoriumV2Content", "FactoriumV2Role.allCases", "roleCard(role)", "workerSlots(role: role)", "workerSummary(for: role)", "workerColumnHeadings", "workerRow(role: role, index: index, slot: slot)", "workerExpansionBinding(role)", "roleDisplayName(role)", "roleSymbol(role)", "Three stable slots are configuration capacity", "Disabled slots retain this saved draft", "uma.threados.v2.project-selector", "uma.threados.v2.generate-copy", "uma.threados.v2.footer-status", "uma.threados.v2.transfer-copy-explainer", "Copies the TOSCFG/2 line with the standing TOS+UMA authorization", "Copy V1 settings (legacy)", "uma.threados.v1.copy-explainer", "Legacy V1 copies a local configuration request only; use the V2 button above for manual Leader transfer", "footerStatus", "footerStatusOverride", "advanced.details", "Model · Thinking", "uma.threados.v2.raw-ack", "uma.threados.v2.coming-soon", "uma.threados.v2.speed-boundary", "VStack(spacing: 0)", "ViewThatFits(in: .horizontal)", ".pickerStyle(.segmented)", "let workerName = title", ".accessibilityLabel(title(\"Model for \\(workerName)\"", ".accessibilityLabel(title(\"Thinking for \\(workerName)\"", "uma.threados.v2.role.\\(role.rawValue).model", "uma.threados.v2.role.\\(role.rawValue).effort"] {
-            #expect(body.contains(wiring), "Missing actual View wiring: \(wiring)")
+        let settingsSource = try String(contentsOf: root.appendingPathComponent("Sources/CodexUsageUI/Views/ThreadOSSettingsView.swift"), encoding: .utf8)
+        let settingsView = try #require(settingsSource.range(of: "public struct ThreadOSSettingsView: View"))
+        let bodyStart = try #require(settingsSource.range(of: "public var body: some View {", range: settingsView.lowerBound..<settingsSource.endIndex))
+        let bodyEnd = try #require(settingsSource.range(of: "\n    @ViewBuilder private var factoriumV2Content", range: bodyStart.upperBound..<settingsSource.endIndex))
+        let body = String(settingsSource[bodyStart.lowerBound..<bodyEnd.lowerBound])
+        #expect(body.contains("ThreadOSPromptComposerView("))
+        #expect(!body.contains("factoriumV2Content"))
+
+        let composerSource = try String(contentsOf: root.appendingPathComponent("Sources/CodexUsageUI/Views/ThreadOSPromptComposerView.swift"), encoding: .utf8)
+        for wiring in [
+            "Picker(copy.modelLabel",
+            "Picker(copy.effortLabel",
+            "Button(copy.generateAndCopy)",
+            ".accessibilityIdentifier(\"uma.threados.prompt.model\")",
+            ".accessibilityIdentifier(\"uma.threados.prompt.effort\")",
+            ".accessibilityIdentifier(\"uma.threados.prompt.generate-copy\")",
+        ] {
+            #expect(composerSource.contains(wiring), "Missing prompt composer control wiring: \(wiring)")
         }
-        #expect(!body.contains(".accessibilityIdentifier(\"uma.threados.settings\")"))
-        #expect(!body.contains(".accessibilityIdentifier(\"uma.threados.v2.role.\\(role.rawValue)\")"))
     }
 
     @Test func factoriumV2SerializesTheCanonicalLocalRequest() throws {

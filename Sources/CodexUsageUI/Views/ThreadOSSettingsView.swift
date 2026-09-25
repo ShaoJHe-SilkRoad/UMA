@@ -389,24 +389,11 @@ public struct ThreadOSSettingsView: View {
         _expandedWorkerGroups = State(initialValue: initiallyExpandedWorkerGroups)
     }
     public var body: some View {
-        VStack(spacing: 0) {
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 6) { factoriumV2Content }
-                    .frame(maxWidth: 1_080, alignment: .leading)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 6)
-                    .background(ThreadOSSchemeBGeometryReporter(identifier: "scroll.document", probe: layoutProbe))
-            }
-            .background(ThreadOSSchemeBGeometryReporter(identifier: "scroll.viewport", probe: layoutProbe))
-            footer
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .coordinateSpace(name: "uma.threados.scheme-b")
-        .background(Color(nsColor: .windowBackgroundColor))
-        .background(ThreadOSSchemeBGeometryReporter(identifier: "root", probe: layoutProbe))
-        .onAppear { restoreWorkerExpansion() }
-        .onChange(of: factoriumV2.selectedProject) { _, _ in restoreWorkerExpansion() }
+        ThreadOSPromptComposerView(
+            language: language,
+            preferences: preferences,
+            clipboard: clipboard
+        )
     }
     func showCodexDetailForTesting() { showCodexDetail?() }
     private var footer: some View {
