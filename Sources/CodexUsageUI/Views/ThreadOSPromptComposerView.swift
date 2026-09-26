@@ -4,8 +4,7 @@ import Combine
 
 @MainActor
 enum ThreadOSPromptComposerPreferences {
-    static let model = ApplicationPreferenceKey<String?>(optional: "threados.prompt.composer.model.v1")
-    static let effort = ApplicationPreferenceKey<String?>(optional: "threados.prompt.composer.effort.v1")
+    static let selections = ApplicationPreferenceKey<Data?>(optionalData: "threados.prompt.composer.role-selections.v2")
 }
 
 enum ThreadOSPromptComposerCopyResult: Equatable {
@@ -14,70 +13,100 @@ enum ThreadOSPromptComposerCopyResult: Equatable {
     case clipboardFailure
 }
 
-/// Selection state for the target-free Leader prompt composer.
-/// It uses only its own global preference keys and never reads project drafts.
+private struct PersistedPromptRoleSelection: Codable {
+    let role: ThreadOSPromptRole
+    let model: String
+    let effort: String
+}
+
+private struct PersistedPromptSelections: Codable {
+    let version: Int
+    let selections: [PersistedPromptRoleSelection]
+}
+
+/// Four independent, global prompt selections. This store never reads or writes project drafts.
 @MainActor
 final class ThreadOSPromptComposerForm: ObservableObject {
-    @Published private(set) var selectedModel: String
-    @Published private(set) var selectedEffort: String
+    static let defaultSelections: [ThreadOSPromptRole: ThreadOSPromptSelection] = [
+        .leader: .init(model: "gpt-6-luna", effort: "medium"),
+        .coderCluster: .init(model: "gpt-6-luna", effort: "medium"),
+        .reviewerCluster: .init(model: "gpt-6-luna", effort: "medium"),
+        .qa: .init(model: "gpt-6-sol", effort: "high")
+    ]
 
-    let catalog: ThreadOSModelCatalog?
+    @Published private(set) var selections: [ThreadOSPromptRole: ThreadOSPromptSelection]
     private let preferences: ApplicationPreferences
 
-    init(catalog: ThreadOSModelCatalog?, preferences: ApplicationPreferences) {
-        self.catalog = catalog
+    init(preferences: ApplicationPreferences) {
         self.preferences = preferences
-
-        let models = catalog?.models.keys.sorted() ?? []
-        let savedModel = preferences.value(for: ThreadOSPromptComposerPreferences.model)
-        let model = savedModel.flatMap { models.contains($0) ? $0 : nil }
-            ?? (models.contains("gpt-6-luna") ? "gpt-6-luna" : models.first ?? "")
-        let efforts = catalog?.models[model]?.reasoningEfforts ?? []
-        let savedEffort = preferences.value(for: ThreadOSPromptComposerPreferences.effort)
-        selectedModel = model
-        selectedEffort = savedEffort.flatMap { efforts.contains($0) ? $0 : nil }
-            ?? (efforts.contains("medium") ? "medium" : efforts.first ?? "")
+        selections = Self.loadSelections(from: preferences) ?? Self.defaultSelections
     }
 
-    var modelOptions: [String] { catalog?.models.keys.sorted() ?? [] }
-    var effortOptions: [String] { catalog?.models[selectedModel]?.reasoningEfforts ?? [] }
-    var canGenerate: Bool { !selectedModel.isEmpty && effortOptions.contains(selectedEffort) }
-
-    func selectModel(_ model: String) {
-        guard modelOptions.contains(model), model != selectedModel else { return }
-        selectedModel = model
-        let efforts = effortOptions
-        if !efforts.contains(selectedEffort) {
-            selectedEffort = efforts.contains("medium") ? "medium" : efforts.first ?? ""
-        }
-        persistSelection()
+    var canGenerate: Bool {
+        selections.count == ThreadOSPromptRole.allCases.count &&
+            ThreadOSPromptRole.allCases.allSatisfy { role in
+                guard let selection = selections[role] else { return false }
+                return ThreadOSLeaderPrompt.supportedModels.contains(selection.model) &&
+                    ThreadOSLeaderPrompt.supportedEfforts.contains(selection.effort)
+            }
     }
 
-    func selectEffort(_ effort: String) {
-        guard effortOptions.contains(effort), effort != selectedEffort else { return }
-        selectedEffort = effort
-        persistSelection()
+    func selection(for role: ThreadOSPromptRole) -> ThreadOSPromptSelection {
+        selections[role] ?? Self.defaultSelections[role]!
+    }
+
+    func selectModel(_ model: String, for role: ThreadOSPromptRole) {
+        guard ThreadOSLeaderPrompt.supportedModels.contains(model) else { return }
+        let current = selection(for: role)
+        guard current.model != model else { return }
+        selections[role] = .init(model: model, effort: current.effort)
+        persistSelections()
+    }
+
+    func selectEffort(_ effort: String, for role: ThreadOSPromptRole) {
+        guard ThreadOSLeaderPrompt.supportedEfforts.contains(effort) else { return }
+        let current = selection(for: role)
+        guard current.effort != effort else { return }
+        selections[role] = .init(model: current.model, effort: effort)
+        persistSelections()
     }
 
     func generateAndCopy(
         language: AppLanguage,
         to clipboard: any ThreadOSSettingsClipboard
     ) -> ThreadOSPromptComposerCopyResult {
-        guard let catalog, canGenerate,
-              let prompt = try? ThreadOSLeaderPrompt.make(
-                model: selectedModel,
-                effort: selectedEffort,
-                language: language,
-                catalog: catalog
-              ) else {
+        guard canGenerate,
+              let prompt = try? ThreadOSLeaderPrompt.make(selections: selections, language: language) else {
             return .unavailable
         }
         return clipboard.write(prompt) ? .copied : .clipboardFailure
     }
 
-    private func persistSelection() {
-        preferences.set(selectedModel, for: ThreadOSPromptComposerPreferences.model)
-        preferences.set(selectedEffort, for: ThreadOSPromptComposerPreferences.effort)
+    private static func loadSelections(from preferences: ApplicationPreferences) -> [ThreadOSPromptRole: ThreadOSPromptSelection]? {
+        guard let data = preferences.value(for: ThreadOSPromptComposerPreferences.selections),
+              let stored = try? JSONDecoder().decode(PersistedPromptSelections.self, from: data),
+              stored.version == 1,
+              stored.selections.count == ThreadOSPromptRole.allCases.count else { return nil }
+
+        var decoded: [ThreadOSPromptRole: ThreadOSPromptSelection] = [:]
+        for item in stored.selections {
+            guard decoded[item.role] == nil,
+                  ThreadOSLeaderPrompt.supportedModels.contains(item.model),
+                  ThreadOSLeaderPrompt.supportedEfforts.contains(item.effort) else { return nil }
+            decoded[item.role] = .init(model: item.model, effort: item.effort)
+        }
+        guard ThreadOSPromptRole.allCases.allSatisfy({ decoded[$0] != nil }) else { return nil }
+        return decoded
+    }
+
+    private func persistSelections() {
+        guard canGenerate else { return }
+        let entries = ThreadOSPromptRole.allCases.map { role in
+            let selection = selections[role]!
+            return PersistedPromptRoleSelection(role: role, model: selection.model, effort: selection.effort)
+        }
+        guard let data = try? JSONEncoder().encode(PersistedPromptSelections(version: 1, selections: entries)) else { return }
+        preferences.set(data as Data?, for: ThreadOSPromptComposerPreferences.selections)
     }
 }
 
@@ -101,18 +130,12 @@ public struct ThreadOSPromptComposerView: View {
     ) {
         self.language = language
         self.clipboard = clipboard
-        let catalog = try? ThreadOSSettingsCodec.loadCatalog(
-            revision: ThreadOSSettingsCodec.latestCatalogRevision
-        )
-        _form = StateObject(wrappedValue: ThreadOSPromptComposerForm(
-            catalog: catalog,
-            preferences: preferences
-        ))
+        _form = StateObject(wrappedValue: ThreadOSPromptComposerForm(preferences: preferences))
     }
 
     public var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 14) {
                 Text(copy.title)
                     .font(.title2.weight(.semibold))
                 Text(copy.description)
@@ -121,33 +144,10 @@ public struct ThreadOSPromptComposerView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("uma.threados.prompt.description")
 
-                Picker(copy.modelLabel, selection: Binding(
-                    get: { form.selectedModel },
-                    set: { form.selectModel($0) }
-                )) {
-                    if form.modelOptions.isEmpty {
-                        Text(copy.unavailable).tag("")
-                    }
-                    ForEach(form.modelOptions, id: \.self) { model in
-                        Text(model).tag(model)
-                    }
+                ForEach(ThreadOSPromptRole.allCases, id: \.self) { role in
+                    roleRow(role)
+                    if role != .qa { Divider() }
                 }
-                .disabled(form.modelOptions.isEmpty)
-                .accessibilityIdentifier("uma.threados.prompt.model")
-
-                Picker(copy.effortLabel, selection: Binding(
-                    get: { form.selectedEffort },
-                    set: { form.selectEffort($0) }
-                )) {
-                    if form.effortOptions.isEmpty {
-                        Text(copy.unavailable).tag("")
-                    }
-                    ForEach(form.effortOptions, id: \.self) { effort in
-                        Text(effortLabel(effort)).tag(effort)
-                    }
-                }
-                .disabled(form.effortOptions.isEmpty)
-                .accessibilityIdentifier("uma.threados.prompt.effort")
 
                 Button(copy.generateAndCopy) {
                     switch form.generateAndCopy(language: language, to: clipboard) {
@@ -158,6 +158,7 @@ public struct ThreadOSPromptComposerView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
+                .focusable()
                 .disabled(!form.canGenerate)
                 .accessibilityIdentifier("uma.threados.prompt.generate-copy")
 
@@ -169,18 +170,61 @@ public struct ThreadOSPromptComposerView: View {
                 }
             }
             .padding(20)
-            .frame(maxWidth: 560, alignment: .leading)
+            .frame(maxWidth: 600, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
         }
     }
 
-    private var copy: Copy {
-        Copy(language: language)
+    private func roleRow(_ role: ThreadOSPromptRole) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(role.label(for: language))
+                .font(.headline)
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(copy.modelLabel).font(.caption).foregroundStyle(.secondary)
+                    Picker(copy.modelLabel, selection: Binding(
+                        get: { form.selection(for: role).model },
+                        set: { form.selectModel($0, for: role) }
+                    )) {
+                        ForEach(ThreadOSLeaderPrompt.supportedModels, id: \.self) { model in
+                            Text(model).tag(model)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .focusable()
+                    .labelsHidden()
+                    .accessibilityLabel(copy.modelLabel)
+                    .accessibilityIdentifier("uma.threados.prompt.role.\(role.rawValue).model")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(copy.effortLabel).font(.caption).foregroundStyle(.secondary)
+                    Picker(copy.effortLabel, selection: Binding(
+                        get: { form.selection(for: role).effort },
+                        set: { form.selectEffort($0, for: role) }
+                    )) {
+                        ForEach(ThreadOSLeaderPrompt.supportedEfforts, id: \.self) { effort in
+                            Text(effortLabel(effort)).tag(effort)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .focusable()
+                    .labelsHidden()
+                    .accessibilityLabel(copy.effortLabel)
+                    .accessibilityIdentifier("uma.threados.prompt.role.\(role.rawValue).effort")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var copy: Copy { Copy(language: language) }
+
     private func effortLabel(_ effort: String) -> String {
-        guard language == .simplifiedChinese else { return effort }
-        return ["low": "轻", "medium": "中", "high": "高", "xhigh": "额外高", "max": "最大", "ultra": "超高"][effort] ?? effort
+        guard language == .simplifiedChinese else { return ["xhigh": "Extra High"][effort] ?? effort }
+        return ["low": "低", "medium": "中", "high": "高", "xhigh": "额外高"][effort] ?? effort
     }
 
     private struct Copy {
@@ -188,8 +232,8 @@ public struct ThreadOSPromptComposerView: View {
         var title: String { text("ThreadOS prompt", "ThreadOS 提示") }
         var description: String {
             text(
-                "Choose a model and reasoning effort, then paste the request to the Leader for your development root. This does not change native selection.",
-                "选择模型和思考档位后，将请求粘贴给负责你开发根目录的 Leader。本操作不会切换原生模型。"
+                "Choose a model and reasoning effort for each role. Copy the request for the receiving Leader; this does not change native selection.",
+                "为每个角色选择模型和思考档位，然后复制给接收 Leader。本操作不会切换原生模型。"
             )
         }
         var modelLabel: String { text("Model", "模型") }
@@ -197,7 +241,6 @@ public struct ThreadOSPromptComposerView: View {
         var generateAndCopy: String { text("Generate and Copy for Leader", "生成并复制给 Leader") }
         var copied: String { text("Prompt copied.", "提示已复制。") }
         var failed: String { text("Prompt could not be copied.", "无法复制提示。") }
-        var unavailable: String { text("Unavailable", "不可用") }
         private func text(_ english: String, _ chinese: String) -> String {
             language == .simplifiedChinese ? chinese : english
         }

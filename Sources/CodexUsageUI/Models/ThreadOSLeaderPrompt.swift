@@ -4,25 +4,67 @@ public enum ThreadOSLeaderPromptError: Error, Equatable {
     case unsupportedSelection
 }
 
-/// Builds a target-free request for a receiving Leader to review manually.
-/// This text does not dispatch work or establish that a native selection changed.
+public enum ThreadOSPromptRole: String, CaseIterable, Hashable, Sendable, Codable {
+    case leader
+    case coderCluster
+    case reviewerCluster
+    case qa
+
+    func label(for language: AppLanguage) -> String {
+        switch (self, language) {
+        case (.leader, .simplifiedChinese): return "Leader"
+        case (.coderCluster, .simplifiedChinese): return "Coder Cluster"
+        case (.reviewerCluster, .simplifiedChinese): return "Reviewer Cluster"
+        case (.qa, .simplifiedChinese): return "QA"
+        case (.leader, .english): return "Leader"
+        case (.coderCluster, .english): return "Coder Cluster"
+        case (.reviewerCluster, .english): return "Reviewer Cluster"
+        case (.qa, .english): return "QA"
+        }
+    }
+}
+
+public struct ThreadOSPromptSelection: Equatable, Sendable, Codable {
+    public let model: String
+    public let effort: String
+
+    public init(model: String, effort: String) {
+        self.model = model
+        self.effort = effort
+    }
+}
+
+/// Builds a target-free request for the receiving Leader to apply to its own team.
+/// This text does not authorize dispatch or establish that a native selection changed.
 public enum ThreadOSLeaderPrompt {
+    public static let supportedModels = [
+        "gpt-6-sol", "gpt-6-luna", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra"
+    ]
+    public static let supportedEfforts = ["low", "medium", "high", "xhigh"]
+
     public static func make(
-        model: String,
-        effort: String,
-        language: AppLanguage,
-        catalog: ThreadOSModelCatalog
+        selections: [ThreadOSPromptRole: ThreadOSPromptSelection],
+        language: AppLanguage
     ) throws -> String {
-        guard let supportedEfforts = catalog.models[model]?.reasoningEfforts,
-              supportedEfforts.contains(effort) else {
+        guard selections.count == ThreadOSPromptRole.allCases.count,
+              ThreadOSPromptRole.allCases.allSatisfy({ role in
+                  guard let selection = selections[role] else { return false }
+                  return supportedModels.contains(selection.model) && supportedEfforts.contains(selection.effort)
+              }) else {
             throw ThreadOSLeaderPromptError.unsupportedSelection
         }
 
+        let selectedValues = ThreadOSPromptRole.allCases.map { role in
+            let selection = selections[role]!
+            return "\(role.label(for: language)): \(selection.model) / \(selection.effort)"
+        }.joined(separator: "\n")
+
         switch language {
         case .simplifiedChinese:
-            return "作为接收 Leader，请评估将模型 \(model) 与思考档位 \(effort) 应用于你判断适用的当前任务。请先核实你负责的物理开发根目录和其中的当前任务，再自行决定此请求适用范围。若之后需要原生派工或选择，请通过受支持的原生操作进行，并报告实际结果。本提示只表达请求，不表示任何原生选择已经生效。"
+            return "作为接收 Leader，请确定你自己的用户创建的物理开发根目录，并在那里核实当前角色和任务绑定。请使用受支持的原生操作，仅将以下选择应用于你自己的当前团队：\n\(selectedValues)\nCoder Cluster 和 Reviewer Cluster 的选择应在受支持时涵盖各自当前 Foremen 及已配置的子工人默认值。请分别报告请求值、实际提交值；只有经过验证时才报告为生效值。如果原生控制无法改变你自己的当前回合模型，请明确说明，并报告用户选择仍为何值。本提示仅表达请求，不构成授权，也不能证明任何原生模型选择已经发生。"
         case .english:
-            return "As the receiving Leader, please consider applying model \(model) with reasoning effort \(effort) to the current task or tasks you determine are in scope. First verify the physical development root you are responsible for and the active tasks there, then decide which tasks, if any, this request applies to. If native dispatch or selection is appropriate later, use supported native controls and report the actual outcome. This prompt expresses a request only; it does not mean any native selection has taken effect."
+            return "As the receiving Leader, determine your own user-created physical development root and verify your current role and task bindings there. Use supported native operations to apply the following selections only to your own current team:\n\(selectedValues)\nWhere supported, the Coder Cluster and Reviewer Cluster selections cover their current Foremen and configured child defaults. Report requested and actually submitted values separately; report a value as effective only when verified. If native controls cannot change your own current-turn model, say so and report which user selection remains. This prompt expresses a request only; it is not authorization and does not prove that any native model selection has occurred."
         }
     }
+
 }

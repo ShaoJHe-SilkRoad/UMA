@@ -2,107 +2,90 @@ import Testing
 @testable import CodexUsageUI
 
 struct ThreadOSLeaderPromptTests {
-    private func loadCatalog() throws -> ThreadOSModelCatalog {
-        try ThreadOSSettingsCodec.loadCatalog(revision: ThreadOSSettingsCodec.latestCatalogRevision)
+    private let selections: [ThreadOSPromptRole: ThreadOSPromptSelection] = [
+        .leader: .init(model: "gpt-6-sol", effort: "low"),
+        .coderCluster: .init(model: "gpt-6-luna", effort: "medium"),
+        .reviewerCluster: .init(model: "gpt-6-astra", effort: "high"),
+        .qa: .init(model: "gpt-5.6-terra", effort: "xhigh")
+    ]
+
+    @Test func exposesExactlyFiveModelsAndFourEfforts() {
+        #expect(ThreadOSLeaderPrompt.supportedModels == [
+            "gpt-6-sol", "gpt-6-luna", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra"
+        ])
+        #expect(ThreadOSLeaderPrompt.supportedEfforts == ["low", "medium", "high", "xhigh"])
     }
 
-    @Test func generatesChinesePromptWithSelectedCatalogValuesAndSafeIntent() throws {
-        let catalog = try loadCatalog()
-        let prompt = try ThreadOSLeaderPrompt.make(
-            model: "gpt-6-luna",
-            effort: "medium",
-            language: .simplifiedChinese,
-            catalog: catalog
-        )
+    @Test func generatesChinesePromptMappingAllFourIndependentSelections() throws {
+        let prompt = try ThreadOSLeaderPrompt.make(selections: selections, language: .simplifiedChinese)
 
-        #expect(prompt.contains("gpt-6-luna"))
-        #expect(prompt.contains("medium"))
-        #expect(prompt.contains("接收 Leader"))
-        #expect(prompt.contains("物理开发根目录"))
-        #expect(prompt.contains("自行决定"))
-        #expect(prompt.contains("原生派工或选择"))
-        #expect(prompt.contains("报告实际结果"))
-        #expect(prompt.contains("不表示任何原生选择已经生效"))
-        #expect(!prompt.contains("TOSCFG/2"))
+        #expect(prompt.contains("Leader: gpt-6-sol / low"))
+        #expect(prompt.contains("Coder Cluster: gpt-6-luna / medium"))
+        #expect(prompt.contains("Reviewer Cluster: gpt-6-astra / high"))
+        #expect(prompt.contains("QA: gpt-5.6-terra / xhigh"))
+        #expect(prompt.contains("用户创建的物理开发根目录"))
+        #expect(prompt.contains("当前角色和任务绑定"))
+        #expect(prompt.contains("仅将以下选择应用于你自己的当前团队"))
+        #expect(prompt.contains("当前 Foremen 及已配置的子工人默认值"))
+        #expect(prompt.contains("请求值、实际提交值"))
+        #expect(prompt.contains("不能证明任何原生模型选择已经发生"))
+        assertTargetFree(prompt)
     }
 
-    @Test func generatesEnglishPromptWithSelectedCatalogValuesAndSafeIntent() throws {
-        let catalog = try loadCatalog()
-        let prompt = try ThreadOSLeaderPrompt.make(
-            model: "gpt-6-sol",
-            effort: "high",
-            language: .english,
-            catalog: catalog
-        )
+    @Test func generatesEnglishPromptMappingAllFourIndependentSelections() throws {
+        let prompt = try ThreadOSLeaderPrompt.make(selections: selections, language: .english)
 
-        #expect(prompt.contains("gpt-6-sol"))
-        #expect(prompt.contains("high"))
-        #expect(prompt.contains("As the receiving Leader"))
-        #expect(prompt.contains("physical development root"))
-        #expect(prompt.contains("decide which tasks"))
-        #expect(prompt.contains("native dispatch or selection"))
-        #expect(prompt.contains("report the actual outcome"))
-        #expect(prompt.contains("does not mean any native selection has taken effect"))
+        #expect(prompt.contains("Leader: gpt-6-sol / low"))
+        #expect(prompt.contains("Coder Cluster: gpt-6-luna / medium"))
+        #expect(prompt.contains("Reviewer Cluster: gpt-6-astra / high"))
+        #expect(prompt.contains("QA: gpt-5.6-terra / xhigh"))
+        #expect(prompt.contains("user-created physical development root"))
+        #expect(prompt.contains("verify your current role and task bindings"))
+        #expect(prompt.contains("only to your own current team"))
+        #expect(prompt.contains("current Foremen and configured child defaults"))
+        #expect(prompt.contains("requested and actually submitted values separately"))
+        #expect(prompt.contains("does not prove that any native model selection has occurred"))
+        assertTargetFree(prompt)
     }
 
-    @Test func rejectsUnknownModelAndIllegalEffortCombination() throws {
-        let catalog = try loadCatalog()
-        #expect(throws: ThreadOSLeaderPromptError.unsupportedSelection) {
-            try ThreadOSLeaderPrompt.make(
-                model: "not-in-the-catalog",
-                effort: "medium",
-                language: .english,
-                catalog: catalog
-            )
-        }
-
-        #expect(throws: ThreadOSLeaderPromptError.unsupportedSelection) {
-            try ThreadOSLeaderPrompt.make(
-                model: "gpt-6-luna",
-                effort: "not-a-catalog-effort",
-                language: .simplifiedChinese,
-                catalog: catalog
-            )
+    @Test func everySupportedModelAndEffortCanAppearInSelection() throws {
+        for model in ThreadOSLeaderPrompt.supportedModels {
+            for effort in ThreadOSLeaderPrompt.supportedEfforts {
+                var values = selections
+                values[.leader] = .init(model: model, effort: effort)
+                let prompt = try ThreadOSLeaderPrompt.make(selections: values, language: .english)
+                #expect(prompt.contains("Leader: \(model) / \(effort)"))
+            }
         }
     }
 
-    @Test func generatedPromptContainsNoProjectTaskIdPathOrRoleTargets() throws {
-        let catalog = try loadCatalog()
-        let prompt = try ThreadOSLeaderPrompt.make(
-            model: "gpt-6-luna",
-            effort: "medium",
-            language: .english,
-            catalog: catalog
-        )
+    @Test func rejectsMissingRoleAndUnsupportedModelOrEffort() {
+        var missingRole = selections
+        missingRole.removeValue(forKey: .qa)
+        #expect(throws: ThreadOSLeaderPromptError.unsupportedSelection) {
+            try ThreadOSLeaderPrompt.make(selections: missingRole, language: .english)
+        }
+
+        var unsupportedModel = selections
+        unsupportedModel[.leader] = .init(model: "not-supported", effort: "medium")
+        #expect(throws: ThreadOSLeaderPromptError.unsupportedSelection) {
+            try ThreadOSLeaderPrompt.make(selections: unsupportedModel, language: .english)
+        }
+
+        var unsupportedEffort = selections
+        unsupportedEffort[.qa] = .init(model: "gpt-6-sol", effort: "not-supported")
+        #expect(throws: ThreadOSLeaderPromptError.unsupportedSelection) {
+            try ThreadOSLeaderPrompt.make(selections: unsupportedEffort, language: .simplifiedChinese)
+        }
+    }
+
+    private func assertTargetFree(_ prompt: String) {
         let forbidden = [
-            "TOSUMA",
-            "project_key",
-            "project_id",
-            "task_id",
-            "task-id",
-            "taskId",
-            "thread_id",
-            "LEADER_TASK",
-            "/Volumes/",
-            "/Users/",
-            "/private/",
-            "TOSCFG/2",
-            "\"p\"",
-            "\"p\":",
-            "Coder",
-            "Reviewer",
-            "QA",
-            "Repair",
-            "worker",
-            "role_target",
-            "worker_id",
-            "host permission",
-            "host authorization",
-            "grant host",
-            "宿主授权",
-            "主机权限"
+            "TOSUMA", "project_key", "project_id", "task_id", "task-id", "taskId",
+            "thread_id", "LEADER_TASK", "/Volumes/", "/Users/", "/private/",
+            "TOSCFG/2", "Repair", "worker_id", "role_target", "host authorization",
+            "grant host", "宿主授权", "主机权限"
         ]
-
         for value in forbidden {
             #expect(!prompt.localizedCaseInsensitiveContains(value))
         }

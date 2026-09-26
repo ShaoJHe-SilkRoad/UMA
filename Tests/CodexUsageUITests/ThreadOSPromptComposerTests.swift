@@ -1,59 +1,72 @@
+import Foundation
 import Testing
 @testable import CodexUsageUI
 
+@MainActor
 struct ThreadOSPromptComposerTests {
-    @MainActor
-    private func loadCatalog() throws -> ThreadOSModelCatalog {
-        try ThreadOSSettingsCodec.loadCatalog(revision: ThreadOSSettingsCodec.latestCatalogRevision)
+    private let expectedDefaults: [ThreadOSPromptRole: ThreadOSPromptSelection] = [
+        .leader: .init(model: "gpt-6-luna", effort: "medium"),
+        .coderCluster: .init(model: "gpt-6-luna", effort: "medium"),
+        .reviewerCluster: .init(model: "gpt-6-luna", effort: "medium"),
+        .qa: .init(model: "gpt-6-sol", effort: "high")
+    ]
+
+    @Test func roleSelectionsCanChangeIndependently() {
+        let form = ThreadOSPromptComposerForm(preferences: .inMemory())
+        form.selectModel("gpt-6-astra", for: .leader)
+        form.selectEffort("xhigh", for: .qa)
+
+        #expect(form.selection(for: .leader) == .init(model: "gpt-6-astra", effort: "medium"))
+        #expect(form.selection(for: .coderCluster) == expectedDefaults[.coderCluster])
+        #expect(form.selection(for: .reviewerCluster) == expectedDefaults[.reviewerCluster])
+        #expect(form.selection(for: .qa) == .init(model: "gpt-6-sol", effort: "xhigh"))
+        #expect(form.canGenerate)
     }
 
-    @MainActor
-    @Test func generatesAndCopiesTheValidatedLeaderPromptExactlyOnce() throws {
-        let catalog = try loadCatalog()
-        let form = ThreadOSPromptComposerForm(catalog: catalog, preferences: .inMemory())
-        let clipboard = ClipboardSpy()
+    @Test func allFourRoleSelectionsPersistAcrossReconstruction() throws {
+        let suiteName = "ThreadOSPromptComposerTests.\(UUID().uuidString)"
+        let firstDefaults = try #require(UserDefaults(suiteName: suiteName))
+        firstDefaults.removePersistentDomain(forName: suiteName)
+        defer { firstDefaults.removePersistentDomain(forName: suiteName) }
 
-        let result = form.generateAndCopy(language: .simplifiedChinese, to: clipboard)
-        let expected = try ThreadOSLeaderPrompt.make(
-            model: form.selectedModel,
-            effort: form.selectedEffort,
-            language: .simplifiedChinese,
-            catalog: catalog
-        )
+        let form = ThreadOSPromptComposerForm(preferences: ApplicationPreferences(userDefaults: firstDefaults))
+        form.selectModel("gpt-6-astra", for: .leader)
+        form.selectEffort("low", for: .leader)
+        form.selectModel("gpt-5.6-sol", for: .coderCluster)
+        form.selectEffort("xhigh", for: .coderCluster)
+        form.selectModel("gpt-6-sol", for: .reviewerCluster)
+        form.selectEffort("high", for: .reviewerCluster)
+        form.selectModel("gpt-5.6-terra", for: .qa)
+        form.selectEffort("medium", for: .qa)
 
-        #expect(result == .copied)
-        #expect(clipboard.writes == [expected])
-        #expect(expected.contains("接收 Leader"))
-        #expect(!expected.contains("TOSCFG/2"))
+        let data = try #require(firstDefaults.data(forKey: ThreadOSPromptComposerPreferences.selections.name))
+        let stored = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(stored["version"] as? Int == 1)
+        #expect((stored["selections"] as? [[String: Any]])?.count == 4)
+
+        let reopenedDefaults = try #require(UserDefaults(suiteName: suiteName))
+        let reopened = ThreadOSPromptComposerForm(preferences: ApplicationPreferences(userDefaults: reopenedDefaults))
+        #expect(reopened.selection(for: .leader) == .init(model: "gpt-6-astra", effort: "low"))
+        #expect(reopened.selection(for: .coderCluster) == .init(model: "gpt-5.6-sol", effort: "xhigh"))
+        #expect(reopened.selection(for: .reviewerCluster) == .init(model: "gpt-6-sol", effort: "high"))
+        #expect(reopened.selection(for: .qa) == .init(model: "gpt-5.6-terra", effort: "medium"))
     }
 
-    @MainActor
-    @Test func unavailableSelectionDoesNotTouchClipboard() {
-        let form = ThreadOSPromptComposerForm(catalog: nil, preferences: .inMemory())
-        let clipboard = ClipboardSpy()
-
-        #expect(form.generateAndCopy(language: .english, to: clipboard) == .unavailable)
-        #expect(clipboard.writes.isEmpty)
+    @Test func malformedStoredSelectionsFallBackToValidatedDefaults() {
+        let invalidDocuments = [
+            Data("not a role-selection document".utf8),
+            Data(#"{"version":1,"selections":[{"role":"leader","model":"unsupported","effort":"low"},{"role":"coderCluster","model":"gpt-6-sol","effort":"medium"},{"role":"reviewerCluster","model":"gpt-6-luna","effort":"high"},{"role":"qa","model":"gpt-6-astra","effort":"xhigh"}]}"#.utf8)
+        ]
+        for invalid in invalidDocuments {
+            let preferences = ApplicationPreferences.inMemory(seed: [
+                ThreadOSPromptComposerPreferences.selections.name: invalid
+            ])
+            let form = ThreadOSPromptComposerForm(preferences: preferences)
+            #expect(form.selections == expectedDefaults)
+            #expect(form.canGenerate)
+        }
     }
 
-    @MainActor
-    @Test func changingModelReplacesUnsupportedEffortWithCatalogChoice() throws {
-        let preferences = ApplicationPreferences.inMemory()
-        let catalog = try loadCatalog()
-        let form = ThreadOSPromptComposerForm(catalog: catalog, preferences: preferences)
-        form.selectModel("gpt-5.6-terra")
-        form.selectEffort("ultra")
-
-        form.selectModel("gpt-6-luna")
-
-        #expect(form.selectedModel == "gpt-6-luna")
-        #expect(form.effortOptions.contains(form.selectedEffort))
-        #expect(form.selectedEffort == "medium")
-        #expect(preferences.value(for: ThreadOSPromptComposerPreferences.model) == "gpt-6-luna")
-        #expect(preferences.value(for: ThreadOSPromptComposerPreferences.effort) == "medium")
-    }
-
-    @MainActor
     @Test func newGlobalPreferencesDoNotReadOrModifySelectedProjectDrafts() throws {
         let preferences = ApplicationPreferences.inMemory()
         ThreadOSSettingsPreferences.saveFactoriumV2SelectedProject("old-project", to: preferences)
@@ -63,17 +76,35 @@ struct ThreadOSPromptComposerTests {
             ThreadOSSettingsPreferences.loadFactoriumV2(project: "old-project", from: preferences)
         )
 
-        let form = ThreadOSPromptComposerForm(catalog: try loadCatalog(), preferences: preferences)
-        #expect(form.selectedModel == "gpt-6-luna")
-        form.selectModel("gpt-5.6-terra")
-        form.selectEffort("ultra")
+        let form = ThreadOSPromptComposerForm(preferences: preferences)
+        form.selectModel("gpt-5.6-terra", for: .reviewerCluster)
+        form.selectEffort("xhigh", for: .qa)
 
-        #expect(form.selectedModel == "gpt-5.6-terra")
         #expect(ThreadOSSettingsPreferences.selectedFactoriumV2Project(from: preferences) == "old-project")
         #expect(ThreadOSSettingsPreferences.loadFactoriumV2(project: "old-project", from: preferences) == savedDraft)
     }
 
-    @MainActor
+    @Test func generatesAndCopiesOneValidatedFourRolePromptInBothLanguages() throws {
+        let form = ThreadOSPromptComposerForm(preferences: .inMemory())
+        let clipboard = ClipboardSpy()
+        for language in [AppLanguage.simplifiedChinese, .english] {
+            let result = form.generateAndCopy(language: language, to: clipboard)
+            let expected = try ThreadOSLeaderPrompt.make(selections: form.selections, language: language)
+            #expect(result == .copied)
+            #expect(clipboard.writes.last == expected)
+        }
+        #expect(clipboard.writes.count == 2)
+    }
+
+    @Test func clipboardFailureIsReportedAfterOneAttempt() {
+        let form = ThreadOSPromptComposerForm(preferences: .inMemory())
+        let clipboard = ClipboardSpy()
+        clipboard.succeeds = false
+
+        #expect(form.generateAndCopy(language: .english, to: clipboard) == .clipboardFailure)
+        #expect(clipboard.writes.count == 1)
+    }
+
     private final class ClipboardSpy: ThreadOSSettingsClipboard {
         private(set) var writes: [String] = []
         var succeeds = true

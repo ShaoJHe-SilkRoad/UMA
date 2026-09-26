@@ -41,47 +41,41 @@ import Testing
         view.subviews + view.subviews.flatMap(descendants)
     }
 
-    @Test func promptComposerPersistsExtraHighAndCopiesTargetFreePromptInBothLanguages() throws {
-        let catalog = try ThreadOSSettingsCodec.loadCatalog(revision: ThreadOSSettingsCodec.latestCatalogRevision)
+    @Test func promptComposerPersistsIndependentRoleValuesAndCopiesTargetFreePromptInBothLanguages() throws {
         for language in [AppLanguage.english, .simplifiedChinese] {
             let preferences = ApplicationPreferences.inMemory()
-            let form = ThreadOSPromptComposerForm(catalog: catalog, preferences: preferences)
-            form.selectModel("gpt-6-luna")
-            form.selectEffort("xhigh")
+            let form = ThreadOSPromptComposerForm(preferences: preferences)
+            form.selectModel("gpt-6-astra", for: .leader)
+            form.selectEffort("xhigh", for: .qa)
 
-            #expect(form.selectedModel == "gpt-6-luna")
-            #expect(form.selectedEffort == "xhigh")
-            #expect(preferences.value(for: ThreadOSPromptComposerPreferences.model) == "gpt-6-luna")
-            #expect(preferences.value(for: ThreadOSPromptComposerPreferences.effort) == "xhigh")
+            #expect(form.selection(for: .leader) == .init(model: "gpt-6-astra", effort: "medium"))
+            #expect(form.selection(for: .qa) == .init(model: "gpt-6-sol", effort: "xhigh"))
+            #expect(preferences.contains(ThreadOSPromptComposerPreferences.selections))
 
             let clipboard = TestClipboard()
             #expect(form.generateAndCopy(language: language, to: clipboard) == .copied)
             let prompt = try #require(clipboard.value)
-            #expect(prompt.contains("gpt-6-luna"))
-            #expect(prompt.contains("xhigh"))
+            #expect(prompt.contains("Leader: gpt-6-astra / medium"))
+            #expect(prompt.contains("QA: gpt-6-sol / xhigh"))
             #expect(!prompt.contains("project_id"))
             #expect(!prompt.contains("project_path"))
             #expect(!prompt.contains("task_id"))
             #expect(!prompt.contains("TOSCFG/3"))
         }
     }
-    @Test func promptComposerExtraHighSelectionFitsAttachedWindowsAcrossWidthsAndLanguages() throws {
-        _ = NSApplication.shared
-        let catalog = try ThreadOSSettingsCodec.loadCatalog(revision: ThreadOSSettingsCodec.latestCatalogRevision)
-        for width in [760.0, 1_040.0] {
-            for language in [AppLanguage.english, .simplifiedChinese] {
-                let preferences = ApplicationPreferences.inMemory()
-                let form = ThreadOSPromptComposerForm(catalog: catalog, preferences: preferences)
-                form.selectModel("gpt-6-luna")
-                form.selectEffort("xhigh")
 
+    @Test func promptComposerFitsAttachedWindowsAtSmallAndFullscreenSizes() throws {
+        _ = NSApplication.shared
+        let cases: [(width: CGFloat, height: CGFloat)] = [(760, 552), (1_040, 760), (1_440, 900)]
+        for size in cases {
+            for language in [AppLanguage.english, .simplifiedChinese] {
                 let host = NSHostingView(rootView: ThreadOSSettingsView(
                     language: language,
-                    preferences: preferences,
+                    preferences: .inMemory(),
                     clipboard: TestClipboard()
                 ))
                 let window = NSWindow(
-                    contentRect: NSRect(x: 0, y: 0, width: width, height: 552),
+                    contentRect: NSRect(x: 0, y: 0, width: size.width, height: size.height),
                     styleMask: [.titled],
                     backing: .buffered,
                     defer: false
@@ -105,8 +99,8 @@ import Testing
                 #expect(document.frame.width <= viewport.width + 1)
             }
         }
-        // This test checks attached-window geometry only. Native picker/menu text clipping requires runtime QA.
     }
+
     @Test func preferencesRetainStableDraftIdentityAndConfiguration() {
         let preferences = ApplicationPreferences.inMemory()
         var draft = ThreadOSSettingsDraft(project: "TU1_FIXTURE", id: "cfg-001", revision: 1, preset: "custom", codingWorkers: 2, reviewWorkers: 4, tier: "priority", customRoles: customRoles)
@@ -551,11 +545,12 @@ import Testing
 
         let composerSource = try String(contentsOf: root.appendingPathComponent("Sources/CodexUsageUI/Views/ThreadOSPromptComposerView.swift"), encoding: .utf8)
         for wiring in [
+            "ForEach(ThreadOSPromptRole.allCases",
             "Picker(copy.modelLabel",
             "Picker(copy.effortLabel",
             "Button(copy.generateAndCopy)",
-            ".accessibilityIdentifier(\"uma.threados.prompt.model\")",
-            ".accessibilityIdentifier(\"uma.threados.prompt.effort\")",
+            "uma.threados.prompt.role.\\(role.rawValue).model",
+            "uma.threados.prompt.role.\\(role.rawValue).effort",
             ".accessibilityIdentifier(\"uma.threados.prompt.generate-copy\")",
         ] {
             #expect(composerSource.contains(wiring), "Missing prompt composer control wiring: \(wiring)")

@@ -45,6 +45,49 @@ import Testing
         }
     }
 
+    @Test func promptComposerMovesKeyboardFocusInAttachedWindow() throws {
+        _ = NSApplication.shared
+        let previousPolicy = NSApp.activationPolicy()
+        defer { NSApp.setActivationPolicy(previousPolicy) }
+        #expect(NSApp.setActivationPolicy(.regular))
+        let host = NSHostingView(rootView: ThreadOSPromptComposerView(
+            language: .english,
+            preferences: .inMemory()
+        ))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 552),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        defer { window.orderOut(nil) }
+        settle(host)
+        #expect(host.window === window)
+        #expect(NSApp.isActive)
+        #expect(window.isKeyWindow)
+
+        let initialResponder = window.firstResponder
+        let tab = try #require(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "\t",
+            charactersIgnoringModifiers: "\t",
+            isARepeat: false,
+            keyCode: 48
+        ))
+        window.sendEvent(tab)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        #expect(window.firstResponder !== initialResponder)
+        #expect(window.firstResponder !== window)
+    }
+
     @Test func workerExpansionIsPreservedIndependentlyForEachProjectAndAcrossReopen() {
         let preferences = ApplicationPreferences.inMemory()
         let alpha: Set<FactoriumV2Role> = [.coder]
@@ -141,6 +184,8 @@ import Testing
             PromptComposerFixture(contentSize: .init(width: 823, height: 640), language: .simplifiedChinese, appearance: .aqua),
             PromptComposerFixture(contentSize: .init(width: 1_040, height: 760), language: .english, appearance: .aqua),
             PromptComposerFixture(contentSize: .init(width: 1_040, height: 760), language: .simplifiedChinese, appearance: .darkAqua),
+            PromptComposerFixture(contentSize: .init(width: 1_440, height: 900), language: .english, appearance: .aqua),
+            PromptComposerFixture(contentSize: .init(width: 1_440, height: 900), language: .simplifiedChinese, appearance: .darkAqua),
         ]
     }
 }
