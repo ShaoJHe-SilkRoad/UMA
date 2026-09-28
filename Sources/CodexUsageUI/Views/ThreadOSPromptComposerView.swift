@@ -17,10 +17,11 @@ private struct ThreadOSPromptPopup: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(onSelection: onSelection) }
 
     func makeNSView(context: Context) -> NSPopUpButton {
-        let popup = NSPopUpButton(frame: .zero, pullsDown: false)
+        let popup = ThreadOSPromptFocusablePopUpButton(frame: .zero, pullsDown: false)
         popup.target = context.coordinator
         popup.action = #selector(Coordinator.selectionChanged(_:))
         popup.refusesFirstResponder = false
+        popup.focusRingType = .exterior
         popup.setAccessibilityLabel(label)
         popup.setAccessibilityIdentifier(identifier)
         return popup
@@ -56,6 +57,169 @@ private struct ThreadOSPromptPopup: NSViewRepresentable {
     }
 }
 
+private final class ThreadOSPromptFocusablePopUpButton: NSPopUpButton {
+    override var acceptsFirstResponder: Bool { isEnabled }
+    override var canBecomeKeyView: Bool { isEnabled && !isHidden && alphaValue > 0 }
+}
+
+private final class ThreadOSPromptFocusableButton: NSButton {
+    override var acceptsFirstResponder: Bool { isEnabled }
+    override var canBecomeKeyView: Bool { isEnabled && !isHidden && alphaValue > 0 }
+}
+
+public final class ThreadOSPromptKeyViewLoopBoundaryView: NSView {
+    var originalIncomingKeyViewForPromptLoop: NSView?
+    var originalOutgoingKeyViewForPromptLoop: NSView?
+}
+
+public struct ThreadOSPromptKeyViewLoopBoundary: NSViewRepresentable {
+    public init() {}
+
+    public func makeNSView(context: Context) -> NSView {
+        let view = ThreadOSPromptKeyViewLoopBoundaryView(frame: .zero)
+        view.isHidden = true
+        view.setAccessibilityIdentifier("uma.threados.prompt.key-view-boundary")
+        return view
+    }
+
+    public func updateNSView(_ view: NSView, context: Context) {}
+}
+
+private struct ThreadOSPromptKeyViewLoopAttachment: NSViewRepresentable {
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        view.isHidden = true
+        context.coordinator.start(from: view)
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.start(from: view)
+    }
+
+    static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {
+        coordinator.stop()
+    }
+
+    @MainActor
+    final class Coordinator {
+        private static let controlIdentifiers: [String] = ThreadOSPromptRole.allCases.flatMap { role in
+            ["uma.threados.prompt.role.\(role.rawValue).model", "uma.threados.prompt.role.\(role.rawValue).effort"]
+        } + ["uma.threados.prompt.generate-copy"]
+
+        private var timer: Timer?
+        private var pollCount = 0
+        private var consecutiveLinkedPolls = 0
+        private var originalLinks: [KeyViewLinkSnapshot] = []
+
+        func start(from view: NSView) {
+            guard timer == nil else { return }
+            pollCount = 0
+            consecutiveLinkedPolls = 0
+            timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self, weak view] timer in
+                guard let self, let view else { timer.invalidate(); return }
+                self.pollCount += 1
+                if let window = view.window, self.link(in: window) {
+                    self.consecutiveLinkedPolls += 1
+                } else {
+                    self.consecutiveLinkedPolls = 0
+                }
+                if self.pollCount >= 20 || self.consecutiveLinkedPolls >= 4 {
+                    timer.invalidate()
+                    self.timer = nil
+                }
+            }
+        }
+
+        func stop() {
+            timer?.invalidate()
+            timer = nil
+            restoreOriginalLinks()
+        }
+
+        @discardableResult
+        private func link(in window: NSWindow) -> Bool {
+            guard let root = window.contentView,
+                  let controls = Self.controls(in: root),
+                  controls.allSatisfy({ $0.window === window }) else { return false }
+            let shellBoundary = Self.allViews(in: root).first {
+                $0.accessibilityIdentifier() == "uma.threados.prompt.key-view-boundary"
+            }
+            let anchor = shellBoundary ?? window.initialFirstResponder ?? root
+            guard anchor.window === window else { return false }
+
+            let linkedViews = [anchor] + controls
+            if originalLinks.map(\.view).elementsEqual(linkedViews, by: { $0 === $1 }) {
+                let expectedTargets = Array(controls.dropFirst()) + [returnTarget(for: shellBoundary != nil)]
+                if zip(linkedViews, [controls[0]] + expectedTargets).allSatisfy({ $0.nextKeyView === $1 }) {
+                    return true
+                }
+            } else {
+                restoreOriginalLinks()
+                originalLinks = linkedViews.map(KeyViewLinkSnapshot.init)
+                if let boundary = anchor as? ThreadOSPromptKeyViewLoopBoundaryView {
+                    boundary.originalIncomingKeyViewForPromptLoop = anchor.previousKeyView
+                    boundary.originalOutgoingKeyViewForPromptLoop = originalLinks[0].originalNextView
+                }
+            }
+
+            // Insert the composer controls into the existing key-view route.
+            // Continue from Copy's own outgoing edge so SwiftUI's shell route
+            // can reach toolbar controls and return to the rest of the window.
+            let targets = [controls[0]] + Array(controls.dropFirst()) + [returnTarget(for: shellBoundary != nil)]
+            for (view, next) in zip(linkedViews, targets) {
+                view.nextKeyView = next
+            }
+            for (link, next) in zip(originalLinks, targets) {
+                link.assignedNextView = next
+            }
+            return true
+        }
+
+        private func returnTarget(for shellBoundary: Bool) -> NSView? {
+            let returnLinkIndex = shellBoundary ? 0 : originalLinks.count - 1
+            return originalLinks[returnLinkIndex].originalNextView
+        }
+
+        private func restoreOriginalLinks() {
+            for link in originalLinks.reversed() {
+                guard let view = link.view, view.nextKeyView === link.assignedNextView else { continue }
+                view.nextKeyView = link.originalNextView
+            }
+            originalLinks.removeAll()
+        }
+
+        private static func controls(in root: NSView?) -> [NSView]? {
+            guard let root else { return nil }
+            let byIdentifier = allViews(in: root).reduce(into: [String: NSView]()) { result, candidate in
+                let identifier = candidate.accessibilityIdentifier()
+                guard controlIdentifiers.contains(identifier) else { return }
+                result[identifier] = candidate
+            }
+            let controls = controlIdentifiers.compactMap { byIdentifier[$0] }
+            return controls.count == controlIdentifiers.count ? controls : nil
+        }
+
+        private static func allViews(in root: NSView) -> [NSView] {
+            [root] + root.subviews.flatMap(allViews(in:))
+        }
+    }
+
+    @MainActor
+    private final class KeyViewLinkSnapshot {
+        weak var view: NSView?
+        weak var originalNextView: NSView?
+        weak var assignedNextView: NSView?
+
+        init(_ view: NSView) {
+            self.view = view
+            originalNextView = view.nextKeyView
+        }
+    }
+}
+
 private struct ThreadOSPromptCopyButton: NSViewRepresentable {
     let title: String
     let identifier: String
@@ -65,11 +229,12 @@ private struct ThreadOSPromptCopyButton: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(action: action) }
 
     func makeNSView(context: Context) -> NSButton {
-        let button = NSButton(title: title, target: context.coordinator, action: #selector(Coordinator.activate(_:)))
+        let button = ThreadOSPromptFocusableButton(title: title, target: context.coordinator, action: #selector(Coordinator.activate(_:)))
         button.bezelStyle = .rounded
         button.bezelColor = .controlAccentColor
         button.controlSize = .regular
         button.refusesFirstResponder = false
+        button.focusRingType = .exterior
         button.setAccessibilityLabel(title)
         button.setAccessibilityIdentifier(identifier)
         return button
@@ -260,6 +425,9 @@ public struct ThreadOSPromptComposerView: View {
                         .foregroundStyle(copyStatus == .copied ? Color.secondary : Color.orange)
                         .accessibilityIdentifier("uma.threados.prompt.copy-status")
                 }
+                ThreadOSPromptKeyViewLoopAttachment()
+                    .frame(width: 1, height: 1)
+                    .accessibilityHidden(true)
             }
             .padding(20)
             .frame(maxWidth: 600, alignment: .leading)

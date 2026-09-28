@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import Testing
 @testable import CodexUsageUI
+@testable import CodexUsageMonitor
 
 @MainActor struct ThreadOSSchemeBLayoutTests {
     @Test func promptComposerFitsAttachedWindowsAcrossSizesLanguagesAndAppearances() throws {
@@ -122,6 +123,148 @@ import Testing
         }
     }
 
+    @Test func promptComposerTraversesAttachedWindowKeyViewLoopInBothDirections() throws {
+        _ = NSApplication.shared
+        let host = NSHostingView(rootView: ThreadOSPromptComposerView(
+            language: .english,
+            preferences: .inMemory()
+        ))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 552),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        let copyIdentifier = "uma.threados.prompt.generate-copy"
+        let prelinkCopy = try #require(descendants(of: host).first { $0.accessibilityIdentifier() == copyIdentifier })
+        let originalCopyOutgoingKeyView = prelinkCopy.nextKeyView
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        settle(host)
+        let views = descendants(of: host)
+        let identifiers = ThreadOSPromptRole.allCases.flatMap { role in
+            ["uma.threados.prompt.role.\(role.rawValue).model", "uma.threados.prompt.role.\(role.rawValue).effort"]
+        } + ["uma.threados.prompt.generate-copy"]
+        let byIdentifier = Dictionary(uniqueKeysWithValues: views.compactMap { view in
+            let identifier = view.accessibilityIdentifier()
+            return identifiers.contains(identifier) ? (identifier, view) : nil
+        })
+        let controls = try identifiers.map { try #require(byIdentifier[$0]) }
+        let anchor = try #require(window.initialFirstResponder)
+        #expect(controls.count == 9)
+        #expect(anchor.nextKeyView === controls[0])
+        #expect(controls.allSatisfy {
+            $0.window === window && $0.canBecomeKeyView && $0.focusRingType == .exterior
+        })
+        for (current, next) in zip(controls, controls.dropFirst()) {
+            #expect(current.nextKeyView === next)
+        }
+        #expect(controls.last?.nextKeyView === originalCopyOutgoingKeyView)
+
+        #expect(window.makeFirstResponder(window))
+        for control in controls {
+            window.selectNextKeyView(nil)
+            #expect(window.firstResponder === control)
+        }
+        window.selectNextKeyView(nil)
+        #expect(window.firstResponder === controls[0])
+        window.selectPreviousKeyView(nil)
+        #expect(window.firstResponder === controls.last)
+        for control in controls.reversed().dropFirst() {
+            window.selectPreviousKeyView(nil)
+            #expect(window.firstResponder === control)
+        }
+        #expect(controls.count == 9)
+    }
+
+    @Test func promptComposerKeepsMainWindowToolbarInKeyViewRouteAndRestoresItWhenLeaving() throws {
+        _ = NSApplication.shared
+        let controller = MainWindowController(restoresSavedFrame: false)
+        var scanActionCount = 0
+        var refreshActionCount = 0
+        var settingsActionCount = 0
+        controller.attach(
+            store: UsageStore.preview(language: .english),
+            openSettings: { settingsActionCount += 1 },
+            scanAll: { scanActionCount += 1 },
+            refreshAll: { refreshActionCount += 1 },
+            connectCodex: {},
+            disconnectCodex: {},
+            claudeControlState: { .consentRequired },
+            connectClaude: {},
+            accuracySyncClaude: {}
+        )
+        defer { controller.tearDown() }
+
+        controller.showDestination(.threadOS)
+        guard let window = controller.window, let contentView = window.contentView else {
+            Issue.record("Main UMA window did not attach its content view")
+            return
+        }
+        contentView.layoutSubtreeIfNeeded()
+        let boundaryIdentifier = "uma.threados.prompt.key-view-boundary"
+        let prelinkBoundary = try #require(descendants(of: contentView).first {
+            $0.accessibilityIdentifier() == boundaryIdentifier
+        })
+        let prelinkPrevious = prelinkBoundary.previousKeyView
+        let prelinkNext = prelinkBoundary.nextKeyView
+        settle(contentView)
+        let boundary = try #require(descendants(of: contentView).first {
+            $0.accessibilityIdentifier() == boundaryIdentifier
+        })
+        let refreshButton = try #require(descendants(of: contentView).compactMap { $0 as? NSButton }.first {
+            $0.accessibilityIdentifier() == "uma.main.refresh"
+        })
+        let scanButton = try #require(descendants(of: contentView).compactMap { $0 as? NSButton }.first {
+            $0.accessibilityIdentifier() == "uma.main.scan"
+        })
+        let settingsButton = try #require(descendants(of: contentView).compactMap { $0 as? NSButton }.first {
+            $0.accessibilityIdentifier() == "uma.main.settings"
+        })
+        #expect(!refreshButton.isEnabled)
+        #expect(scanButton.isEnabled)
+        #expect(settingsButton.isEnabled)
+        scanButton.performClick(nil)
+        refreshButton.performClick(nil)
+        settingsButton.performClick(nil)
+        #expect(scanActionCount == 1)
+        #expect(refreshActionCount == 0)
+        #expect(settingsActionCount == 1)
+        let incomingBoundaryLink = descendants(of: contentView).first { $0.nextKeyView === boundary }
+        let threadOSRoute = keyViewRoute(in: window)
+        let threadOSIdentifiers = threadOSRoute.compactMap(accessibilityIdentifier(in:))
+            + keyViewAccessibilityIdentifiers(in: window)
+        let composerIdentifiers = ThreadOSPromptRole.allCases.flatMap { role in
+            ["uma.threados.prompt.role.\(role.rawValue).model", "uma.threados.prompt.role.\(role.rawValue).effort"]
+        } + ["uma.threados.prompt.generate-copy"]
+        for identifier in composerIdentifiers {
+            #expect(threadOSIdentifiers.contains(identifier))
+        }
+        for identifier in ["uma.main.scan", "uma.main.refresh", "uma.main.settings"] {
+            #expect(threadOSIdentifiers.contains(identifier))
+        }
+        #expect(incomingBoundaryLink === boundary.previousKeyView)
+        #expect(threadOSRoute.contains { accessibilityLabel(in: $0) == "UMA navigation" })
+
+        controller.showDestination(.agents)
+        guard let agentsContentView = window.contentView else {
+            Issue.record("Main UMA window lost its content view after leaving ThreadOS")
+            return
+        }
+        settle(agentsContentView)
+        #expect(boundary.previousKeyView === prelinkPrevious)
+        #expect(boundary.nextKeyView === prelinkNext)
+        let agentsRoute = keyViewRoute(in: window)
+        let agentsIdentifiers = agentsRoute.compactMap(accessibilityIdentifier(in:))
+        for identifier in ["uma.main.scan", "uma.main.refresh", "uma.main.settings"] {
+            #expect(agentsIdentifiers.contains(identifier))
+        }
+        #expect(agentsRoute.contains { accessibilityLabel(in: $0) == "UMA navigation" })
+        #expect(!agentsIdentifiers.contains("uma.threados.prompt.generate-copy"))
+    }
+
     @Test func workerExpansionIsPreservedIndependentlyForEachProjectAndAcrossReopen() {
         let preferences = ApplicationPreferences.inMemory()
         let alpha: Set<FactoriumV2Role> = [.coder]
@@ -156,6 +299,55 @@ import Testing
             host.layoutSubtreeIfNeeded()
             RunLoop.main.run(until: Date().addingTimeInterval(0.08))
         }
+    }
+
+    private func keyViewRoute(in window: NSWindow) -> [NSView] {
+        guard window.makeFirstResponder(window) else { return [] }
+        var route: [NSView] = []
+        var seen = Set<ObjectIdentifier>()
+        for _ in 0..<160 {
+            window.selectNextKeyView(nil)
+            guard let view = window.firstResponder as? NSView else { continue }
+            guard seen.insert(ObjectIdentifier(view)).inserted else { break }
+            route.append(view)
+        }
+        return route
+    }
+
+    private func keyViewAccessibilityIdentifiers(in window: NSWindow) -> [String] {
+        var identifiers: [String] = []
+        var seenStates = Set<String>()
+        for _ in 0..<160 {
+            window.selectNextKeyView(nil)
+            let focusedElement = window.accessibilityFocusedUIElement
+            let focusedIdentifier = (focusedElement as? NSAccessibilityElement)?.accessibilityIdentifier()
+                ?? (window.firstResponder as? NSView).flatMap(accessibilityIdentifier(in:))
+            let state = "\(String(describing: window.firstResponder))|\(focusedIdentifier ?? "")"
+            guard seenStates.insert(state).inserted else { break }
+            if let focusedIdentifier, !focusedIdentifier.isEmpty {
+                identifiers.append(focusedIdentifier)
+            }
+        }
+        return identifiers
+    }
+
+    private func accessibilityIdentifier(in view: NSView) -> String? {
+        var current: NSView? = view
+        while let candidate = current {
+            let identifier = candidate.accessibilityIdentifier()
+            if !identifier.isEmpty { return identifier }
+            current = candidate.superview
+        }
+        return nil
+    }
+
+    private func accessibilityLabel(in view: NSView) -> String? {
+        var current: NSView? = view
+        while let candidate = current {
+            if let label = candidate.accessibilityLabel(), !label.isEmpty { return label }
+            current = candidate.superview
+        }
+        return nil
     }
 
     private func descendants(of view: NSView) -> [NSView] { view.subviews + view.subviews.flatMap(descendants) }

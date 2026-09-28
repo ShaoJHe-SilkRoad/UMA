@@ -1,10 +1,109 @@
 import CodexUsageUI
 import SwiftUI
+import AppKit
 
 enum MainSurfaceDestination: String, CaseIterable, Identifiable {
     case agents = "Agents & Settings"
     case threadOS = "ThreadOS"
     var id: String { rawValue }
+}
+
+private struct MainToolbarNavigationControl: NSViewRepresentable {
+    @Binding var selection: MainSurfaceDestination
+    let labels: [String]
+    let accessibilityLabel: String
+
+    func makeCoordinator() -> Coordinator { Coordinator(selection: $selection) }
+
+    func makeNSView(context: Context) -> NSSegmentedControl {
+        let control = MainToolbarFocusableSegmentedControl(frame: .zero)
+        control.segmentCount = labels.count
+        control.trackingMode = .selectOne
+        control.segmentStyle = .automatic
+        control.controlSize = .regular
+        for (index, label) in labels.enumerated() {
+            control.setLabel(label, forSegment: index)
+            control.setWidth(125, forSegment: index)
+        }
+        control.target = context.coordinator
+        control.action = #selector(Coordinator.selectionChanged(_:))
+        control.setAccessibilityLabel(accessibilityLabel)
+        control.setAccessibilityIdentifier("uma.main.navigation")
+        return control
+    }
+
+    func updateNSView(_ control: NSSegmentedControl, context: Context) {
+        context.coordinator.selection = $selection
+        for (index, label) in labels.enumerated() {
+            control.setLabel(label, forSegment: index)
+        }
+        control.selectedSegment = MainSurfaceDestination.allCases.firstIndex(of: selection) ?? 0
+        control.setAccessibilityLabel(accessibilityLabel)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var selection: Binding<MainSurfaceDestination>
+
+        init(selection: Binding<MainSurfaceDestination>) { self.selection = selection }
+
+        @objc func selectionChanged(_ sender: NSSegmentedControl) {
+            guard MainSurfaceDestination.allCases.indices.contains(sender.selectedSegment) else { return }
+            selection.wrappedValue = MainSurfaceDestination.allCases[sender.selectedSegment]
+        }
+    }
+}
+
+private final class MainToolbarFocusableSegmentedControl: NSSegmentedControl {
+    override var acceptsFirstResponder: Bool { isEnabled }
+    override var canBecomeKeyView: Bool { isEnabled && !isHidden && alphaValue > 0 }
+}
+
+private struct MainToolbarIconButton: NSViewRepresentable {
+    let symbol: String
+    let label: String
+    let identifier: String
+    let isEnabled: Bool
+    let action: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+
+    func makeNSView(context: Context) -> NSButton {
+        let button = MainToolbarFocusableButton(image: NSImage(
+            systemSymbolName: symbol,
+            accessibilityDescription: label
+        ) ?? NSImage(size: NSSize(width: 16, height: 16)), target: context.coordinator, action: #selector(Coordinator.activate(_:)))
+        button.bezelStyle = .rounded
+        button.controlSize = .regular
+        button.imagePosition = .imageOnly
+        button.refusesFirstResponder = false
+        button.setAccessibilityLabel(label)
+        button.setAccessibilityIdentifier(identifier)
+        button.toolTip = label
+        return button
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) {
+        context.coordinator.action = action
+        button.isEnabled = isEnabled
+        button.setAccessibilityLabel(label)
+        button.setAccessibilityIdentifier(identifier)
+        button.toolTip = label
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var action: () -> Void
+
+        init(action: @escaping () -> Void) { self.action = action }
+
+        @objc func activate(_ sender: NSButton) { action() }
+    }
+}
+
+private final class MainToolbarFocusableButton: NSButton {
+    override var acceptsFirstResponder: Bool { true }
+    override var canBecomeKeyView: Bool { !isHidden && alphaValue > 0 }
 }
 
 @MainActor
@@ -48,29 +147,38 @@ struct MainWindowRootView: View {
 
     private var toolbar: some View {
         HStack(spacing: 12) {
-            Picker(localized("Destination", "导航"), selection: $navigation.destination) {
-                ForEach(MainSurfaceDestination.allCases) { item in
-                    Text(destinationTitle(item)).tag(item)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            MainToolbarNavigationControl(
+                selection: $navigation.destination,
+                labels: MainSurfaceDestination.allCases.map(destinationTitle),
+                accessibilityLabel: localized("UMA navigation", "UMA 导航")
+            )
             .frame(width: 250)
-            .accessibilityLabel(localized("UMA navigation", "UMA 导航"))
             Spacer()
-            Button(action: scanAll) { Image(systemName: "sparkle.magnifyingglass") }
-                .help(localized("Scan All", "全部扫描"))
-                .accessibilityLabel(localized("Scan All", "全部扫描"))
-                .accessibilityIdentifier("uma.main.scan")
-            Button(action: refreshAll) { Image(systemName: "arrow.clockwise") }
-                .help(localized("Refresh All", "全部刷新"))
-                .accessibilityLabel(localized("Refresh All", "全部刷新"))
-                .accessibilityIdentifier("uma.main.refresh")
-                .disabled(!store.allowsManualRefresh)
-            Button(action: openSettings) { Image(systemName: "gearshape") }
-                .help(localized("Global Settings", "全局设置"))
-                .accessibilityLabel(localized("Global Settings", "全局设置"))
-                .accessibilityIdentifier("uma.main.settings")
+            MainToolbarIconButton(
+                symbol: "sparkle.magnifyingglass",
+                label: localized("Scan All", "全部扫描"),
+                identifier: "uma.main.scan",
+                isEnabled: true,
+                action: scanAll
+            )
+            MainToolbarIconButton(
+                symbol: "arrow.clockwise",
+                label: localized("Refresh All", "全部刷新"),
+                identifier: "uma.main.refresh",
+                isEnabled: store.allowsManualRefresh,
+                action: refreshAll
+            )
+            MainToolbarIconButton(
+                symbol: "gearshape",
+                label: localized("Global Settings", "全局设置"),
+                identifier: "uma.main.settings",
+                isEnabled: true,
+                action: openSettings
+            )
+            .help(localized("Global Settings", "全局设置"))
+            ThreadOSPromptKeyViewLoopBoundary()
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
         }
         .padding(.horizontal, 14)
         .frame(height: 48)
