@@ -88,6 +88,40 @@ import Testing
         #expect(window.firstResponder !== window)
     }
 
+    @Test func promptComposerNativeControlsAcceptAttachedWindowFocusAndHaveActions() throws {
+        _ = NSApplication.shared
+        let host = NSHostingView(rootView: ThreadOSPromptComposerView(
+            language: .english,
+            preferences: .inMemory()
+        ))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 552),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        settle(host)
+
+        let descendants = descendants(of: host)
+        let popups = descendants.compactMap { $0 as? NSPopUpButton }
+        let copyButton = try #require(descendants.compactMap { $0 as? NSButton }.first)
+        #expect(host.window === window)
+        #expect(popups.count == 8)
+        #expect(popups.allSatisfy { $0.window === window && !$0.refusesFirstResponder && $0.action != nil && $0.selectedItem != nil })
+        #expect(copyButton.window === window)
+        #expect(!copyButton.refusesFirstResponder)
+        #expect(copyButton.action != nil)
+
+        let controls: [NSControl] = popups.map { $0 as NSControl } + [copyButton]
+        for control in controls {
+            #expect(window.makeFirstResponder(control))
+            #expect(window.firstResponder === control)
+        }
+    }
+
     @Test func workerExpansionIsPreservedIndependentlyForEachProjectAndAcrossReopen() {
         let preferences = ApplicationPreferences.inMemory()
         let alpha: Set<FactoriumV2Role> = [.coder]

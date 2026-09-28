@@ -543,17 +543,81 @@ import Testing
         #expect(body.contains("ThreadOSPromptComposerView("))
         #expect(!body.contains("factoriumV2Content"))
 
-        let composerSource = try String(contentsOf: root.appendingPathComponent("Sources/CodexUsageUI/Views/ThreadOSPromptComposerView.swift"), encoding: .utf8)
-        for wiring in [
-            "ForEach(ThreadOSPromptRole.allCases",
-            "Picker(copy.modelLabel",
-            "Picker(copy.effortLabel",
-            "Button(copy.generateAndCopy)",
-            "uma.threados.prompt.role.\\(role.rawValue).model",
-            "uma.threados.prompt.role.\\(role.rawValue).effort",
-            ".accessibilityIdentifier(\"uma.threados.prompt.generate-copy\")",
-        ] {
-            #expect(composerSource.contains(wiring), "Missing prompt composer control wiring: \(wiring)")
+        for language in [AppLanguage.english, .simplifiedChinese] {
+            let preferences = ApplicationPreferences.inMemory()
+            let clipboard = TestClipboard()
+            let host = NSHostingView(rootView: ThreadOSPromptComposerView(
+                language: language,
+                preferences: preferences,
+                clipboard: clipboard
+            ))
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 760, height: 552),
+                styleMask: [.titled],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView = host
+            window.orderFront(nil)
+            defer { window.orderOut(nil) }
+            host.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            host.layoutSubtreeIfNeeded()
+
+            let controls = descendants(of: host)
+            let popups = controls.compactMap { $0 as? NSPopUpButton }
+            let effortTitles = language == .simplifiedChinese
+                ? ["低", "中", "高", "额外高"]
+                : ["low", "medium", "high", "Extra High"]
+            var identifiers: [String: NSPopUpButton] = [:]
+            for popup in popups {
+                identifiers[popup.accessibilityIdentifier()] = popup
+            }
+            #expect(host.window === window)
+            #expect(popups.count == 8)
+            #expect(Set(identifiers.keys) == Set(ThreadOSPromptRole.allCases.flatMap { role in
+                [
+                    "uma.threados.prompt.role.\(role.rawValue).model",
+                    "uma.threados.prompt.role.\(role.rawValue).effort"
+                ]
+            }))
+
+            for role in ThreadOSPromptRole.allCases {
+                let model = try #require(identifiers["uma.threados.prompt.role.\(role.rawValue).model"])
+                let effort = try #require(identifiers["uma.threados.prompt.role.\(role.rawValue).effort"])
+                #expect(model.window === window && !model.refusesFirstResponder)
+                #expect(effort.window === window && !effort.refusesFirstResponder)
+                #expect(model.accessibilityLabel() == (language == .simplifiedChinese ? "模型" : "Model"))
+                #expect(effort.accessibilityLabel() == (language == .simplifiedChinese ? "思考档位" : "Reasoning effort"))
+                #expect(model.itemArray.map { $0.title } == ThreadOSLeaderPrompt.supportedModels)
+                #expect(effort.itemArray.map { $0.title } == effortTitles)
+                #expect(model.target != nil && model.action != nil && model.selectedItem != nil)
+                #expect(effort.target != nil && effort.action != nil && effort.selectedItem != nil)
+                #expect(model.frame.width > 0 && model.frame.height > 0)
+                #expect(effort.frame.width > 0 && effort.frame.height > 0)
+            }
+
+            let buttons = controls.compactMap { $0 as? NSButton }
+            let copyButton = try #require(buttons.first { $0.accessibilityIdentifier() == "uma.threados.prompt.generate-copy" })
+            #expect(buttons.count == 9)
+            #expect(copyButton.window === window)
+            #expect(copyButton.accessibilityIdentifier() == "uma.threados.prompt.generate-copy")
+            #expect(copyButton.accessibilityLabel() == (language == .simplifiedChinese ? "生成并复制给 Leader" : "Generate and Copy for Leader"))
+            #expect(copyButton.target != nil && copyButton.action != nil && copyButton.isEnabled)
+            #expect(copyButton.frame.width > 0 && copyButton.frame.height > 0)
+
+            let leaderModel = try #require(identifiers["uma.threados.prompt.role.leader.model"])
+            leaderModel.selectItem(at: 2)
+            let selectionAction = try #require(leaderModel.action)
+            #expect(NSApp.sendAction(selectionAction, to: leaderModel.target, from: leaderModel))
+            let storedSelections = try #require(preferences.value(for: ThreadOSPromptComposerPreferences.selections))
+            #expect(String(data: storedSelections, encoding: .utf8)?.contains("gpt-6-astra") == true)
+
+            copyButton.performClick(nil)
+            var expectedSelections = ThreadOSPromptComposerForm.defaultSelections
+            expectedSelections[.leader] = .init(model: "gpt-6-astra", effort: "medium")
+            let expectedPrompt = try ThreadOSLeaderPrompt.make(selections: expectedSelections, language: language)
+            #expect(clipboard.value == expectedPrompt)
         }
     }
 

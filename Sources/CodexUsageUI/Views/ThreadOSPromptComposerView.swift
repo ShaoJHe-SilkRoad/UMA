@@ -2,6 +2,97 @@ import SwiftUI
 import AppKit
 import Combine
 
+private struct ThreadOSPromptPopup: NSViewRepresentable {
+    struct Option {
+        let title: String
+        let value: String
+    }
+
+    let label: String
+    let identifier: String
+    let options: [Option]
+    let selection: String
+    let onSelection: (String) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onSelection: onSelection) }
+
+    func makeNSView(context: Context) -> NSPopUpButton {
+        let popup = NSPopUpButton(frame: .zero, pullsDown: false)
+        popup.target = context.coordinator
+        popup.action = #selector(Coordinator.selectionChanged(_:))
+        popup.refusesFirstResponder = false
+        popup.setAccessibilityLabel(label)
+        popup.setAccessibilityIdentifier(identifier)
+        return popup
+    }
+
+    func updateNSView(_ popup: NSPopUpButton, context: Context) {
+        context.coordinator.onSelection = onSelection
+        let current = popup.itemArray.map { ($0.title, $0.representedObject as? String ?? "") }
+        if current.map(\.1) != options.map(\.value) || current.map(\.0) != options.map(\.title) {
+            popup.removeAllItems()
+            for option in options {
+                popup.addItem(withTitle: option.title)
+                popup.lastItem?.representedObject = option.value
+            }
+        }
+        if let index = options.firstIndex(where: { $0.value == selection }) {
+            popup.selectItem(at: index)
+        }
+        popup.setAccessibilityLabel(label)
+        popup.setAccessibilityIdentifier(identifier)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var onSelection: (String) -> Void
+
+        init(onSelection: @escaping (String) -> Void) { self.onSelection = onSelection }
+
+        @objc func selectionChanged(_ sender: NSPopUpButton) {
+            guard let value = sender.selectedItem?.representedObject as? String else { return }
+            onSelection(value)
+        }
+    }
+}
+
+private struct ThreadOSPromptCopyButton: NSViewRepresentable {
+    let title: String
+    let identifier: String
+    let enabled: Bool
+    let action: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+
+    func makeNSView(context: Context) -> NSButton {
+        let button = NSButton(title: title, target: context.coordinator, action: #selector(Coordinator.activate(_:)))
+        button.bezelStyle = .rounded
+        button.bezelColor = .controlAccentColor
+        button.controlSize = .regular
+        button.refusesFirstResponder = false
+        button.setAccessibilityLabel(title)
+        button.setAccessibilityIdentifier(identifier)
+        return button
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) {
+        context.coordinator.action = action
+        button.title = title
+        button.isEnabled = enabled
+        button.setAccessibilityLabel(title)
+        button.setAccessibilityIdentifier(identifier)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var action: () -> Void
+
+        init(action: @escaping () -> Void) { self.action = action }
+
+        @objc func activate(_ sender: NSButton) { action() }
+    }
+}
+
 @MainActor
 enum ThreadOSPromptComposerPreferences {
     static let selections = ApplicationPreferenceKey<Data?>(optionalData: "threados.prompt.composer.role-selections.v2")
@@ -149,7 +240,11 @@ public struct ThreadOSPromptComposerView: View {
                     if role != .qa { Divider() }
                 }
 
-                Button(copy.generateAndCopy) {
+                ThreadOSPromptCopyButton(
+                    title: copy.generateAndCopy,
+                    identifier: "uma.threados.prompt.generate-copy",
+                    enabled: form.canGenerate
+                ) {
                     switch form.generateAndCopy(language: language, to: clipboard) {
                     case .copied:
                         copyStatus = .copied
@@ -157,10 +252,7 @@ public struct ThreadOSPromptComposerView: View {
                         copyStatus = .failed
                     }
                 }
-                .buttonStyle(.borderedProminent)
-                .focusable()
-                .disabled(!form.canGenerate)
-                .accessibilityIdentifier("uma.threados.prompt.generate-copy")
+                .frame(minHeight: 24, alignment: .leading)
 
                 if let copyStatus {
                     Text(copyStatus == .copied ? copy.copied : copy.failed)
@@ -182,37 +274,27 @@ public struct ThreadOSPromptComposerView: View {
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(copy.modelLabel).font(.caption).foregroundStyle(.secondary)
-                    Picker(copy.modelLabel, selection: Binding(
-                        get: { form.selection(for: role).model },
-                        set: { form.selectModel($0, for: role) }
-                    )) {
-                        ForEach(ThreadOSLeaderPrompt.supportedModels, id: \.self) { model in
-                            Text(model).tag(model)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .focusable()
-                    .labelsHidden()
-                    .accessibilityLabel(copy.modelLabel)
-                    .accessibilityIdentifier("uma.threados.prompt.role.\(role.rawValue).model")
+                    ThreadOSPromptPopup(
+                        label: copy.modelLabel,
+                        identifier: "uma.threados.prompt.role.\(role.rawValue).model",
+                        options: ThreadOSLeaderPrompt.supportedModels.map { .init(title: $0, value: $0) },
+                        selection: form.selection(for: role).model,
+                        onSelection: { form.selectModel($0, for: role) }
+                    )
+                    .frame(minHeight: 24, alignment: .leading)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(copy.effortLabel).font(.caption).foregroundStyle(.secondary)
-                    Picker(copy.effortLabel, selection: Binding(
-                        get: { form.selection(for: role).effort },
-                        set: { form.selectEffort($0, for: role) }
-                    )) {
-                        ForEach(ThreadOSLeaderPrompt.supportedEfforts, id: \.self) { effort in
-                            Text(effortLabel(effort)).tag(effort)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .focusable()
-                    .labelsHidden()
-                    .accessibilityLabel(copy.effortLabel)
-                    .accessibilityIdentifier("uma.threados.prompt.role.\(role.rawValue).effort")
+                    ThreadOSPromptPopup(
+                        label: copy.effortLabel,
+                        identifier: "uma.threados.prompt.role.\(role.rawValue).effort",
+                        options: ThreadOSLeaderPrompt.supportedEfforts.map { .init(title: effortLabel($0), value: $0) },
+                        selection: form.selection(for: role).effort,
+                        onSelection: { form.selectEffort($0, for: role) }
+                    )
+                    .frame(minHeight: 24, alignment: .leading)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
