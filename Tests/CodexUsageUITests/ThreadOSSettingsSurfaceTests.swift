@@ -48,15 +48,15 @@ import Testing
             form.selectModel("gpt-6-astra", for: .leader)
             form.selectEffort("xhigh", for: .qa)
 
-            #expect(form.selection(for: .leader) == .init(model: "gpt-6-astra", effort: "medium"))
-            #expect(form.selection(for: .qa) == .init(model: "gpt-6-sol", effort: "xhigh"))
+            #expect(form.selection(for: .leader) == .init(model: "gpt-6-astra", effort: "high"))
+            #expect(form.selection(for: .qa) == .init(model: "gpt-6.1-sol", effort: "xhigh"))
             #expect(preferences.contains(ThreadOSPromptComposerPreferences.selections))
 
             let clipboard = TestClipboard()
             #expect(form.generateAndCopy(language: language, to: clipboard) == .copied)
             let prompt = try #require(clipboard.value)
-            #expect(prompt.contains("Leader: gpt-6-astra / medium"))
-            #expect(prompt.contains("QA: gpt-6-sol / xhigh"))
+            #expect(prompt.contains("Leader: gpt-6-astra / high"))
+            #expect(prompt.contains("QA: gpt-6.1-sol / xhigh"))
             #expect(!prompt.contains("project_id"))
             #expect(!prompt.contains("project_path"))
             #expect(!prompt.contains("task_id"))
@@ -567,8 +567,8 @@ import Testing
             let controls = descendants(of: host)
             let popups = controls.compactMap { $0 as? NSPopUpButton }
             let effortTitles = language == .simplifiedChinese
-                ? ["低", "中", "高", "额外高"]
-                : ["low", "medium", "high", "Extra High"]
+                ? ["轻量", "中等", "高", "极高"]
+                : ["Light", "Medium", "High", "Extra High"]
             var identifiers: [String: NSPopUpButton] = [:]
             for popup in popups {
                 identifiers[popup.accessibilityIdentifier()] = popup
@@ -615,7 +615,7 @@ import Testing
 
             copyButton.performClick(nil)
             var expectedSelections = ThreadOSPromptComposerForm.defaultSelections
-            expectedSelections[.leader] = .init(model: "gpt-6-astra", effort: "medium")
+            expectedSelections[.leader] = .init(model: "gpt-6-astra", effort: "high")
             let expectedPrompt = try ThreadOSLeaderPrompt.make(selections: expectedSelections, language: language)
             #expect(clipboard.value == expectedPrompt)
         }
@@ -629,8 +629,8 @@ import Testing
         let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(Set(json.keys) == ["apply", "cat", "id", "p", "preset", "rev", "roles", "workers"])
         #expect(json["apply"] as? String == "next-wave")
-        #expect(json["cat"] as? String == "sol-luna-20260922.1")
-        #expect((json["roles"] as? [String: Any])?["leader"] as? [String: Bool] == ["preserve": true])
+        #expect(json["cat"] as? String == "sol-luna-20261001.1")
+        #expect((json["roles"] as? [String: Any])?["leader"] as? [String: String] == ["model": "gpt-6.1-sol", "effort": "high", "speed": "standard"])
         let workers = try #require(json["workers"] as? [String: [[String: Any]]])
         #expect(workers["coder"]?.count == 3 && workers["reviewer"]?.count == 3)
         #expect(workers["coder"]?.allSatisfy { $0["enabled"] as? Bool == true && $0["model"] as? String == "inherit" && $0["effort"] as? String == "inherit" && $0["speed"] as? String == "inherit" } == true)

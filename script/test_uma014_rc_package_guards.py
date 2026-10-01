@@ -246,7 +246,8 @@ class RCGuards(unittest.TestCase):
         self.assertEqual(records[1]['target'], 'file')
 
     def catalog_fixture(self, root, *, revision_v2='sol-luna-20260922.1',
-                        built_v2_marker='canonical'):
+                        revision_v3='sol-luna-20261001.1', built_v2_marker='canonical',
+                        built_v3_marker='canonical'):
         source = root / 'frozen-source'
         built_resources = root / 'bin' / 'CodexUsageMonitor_CodexUsageUI.bundle' / 'Contents' / 'Resources'
         source_catalogs = source / 'Sources/CodexUsageUI/Resources/ThreadOS'
@@ -258,6 +259,9 @@ class RCGuards(unittest.TestCase):
             'models.v2.json': {'schema': 'threados.model-catalog.v1',
                                'revision': revision_v2, 'models': {},
                                'marker': built_v2_marker},
+            'models.v3.json': {'schema': 'threados.model-catalog.v1',
+                               'revision': revision_v3, 'models': {},
+                               'marker': built_v3_marker},
         }
         for name, value in values.items():
             data = (rc.json.dumps(value, sort_keys=True) + '\n').encode()
@@ -274,7 +278,7 @@ class RCGuards(unittest.TestCase):
         report = rc.copy_swiftpm_resource_bundle(bin_path, resources, source)
 
         packaged = resources / 'CodexUsageMonitor_CodexUsageUI.bundle' / 'Contents' / 'Resources'
-        for name in ('models.v1.json', 'models.v2.json'):
+        for name in ('models.v1.json', 'models.v2.json', 'models.v3.json'):
             source_file, built_file, copied = (source / 'Sources/CodexUsageUI/Resources/ThreadOS' / name,
                                                 built / name, packaged / name)
             self.assertEqual(source_file.read_bytes(), built_file.read_bytes())
@@ -283,7 +287,9 @@ class RCGuards(unittest.TestCase):
             self.assertEqual(report['catalogs'][name]['built_sha256'], rc.sha(built_file))
             self.assertEqual(report['catalogs'][name]['sha256'], rc.sha(copied))
             self.assertEqual(report['catalogs'][name]['revision'],
-                             'astra-20260904.1' if name == 'models.v1.json' else 'sol-luna-20260922.1')
+                             {'models.v1.json': 'astra-20260904.1',
+                              'models.v2.json': 'sol-luna-20260922.1',
+                              'models.v3.json': 'sol-luna-20261001.1'}[name])
         self.assertEqual(report['bundle'], 'CodexUsageMonitor_CodexUsageUI.bundle')
         self.assertEqual(report['catalog'], 'Contents/Resources/models.v1.json')
         self.assertEqual(report['catalog_sha256'], rc.sha(packaged / 'models.v1.json'))
@@ -294,6 +300,14 @@ class RCGuards(unittest.TestCase):
         source, _ = self.catalog_fixture(self.root, revision_v2='sol-luna-wrong')
         resources.mkdir()
         with self.assertRaisesRegex(rc.Refusal, 'SOURCE_CATALOG_IDENTITY_INVALID models.v2.json'):
+            rc.copy_swiftpm_resource_bundle(bin_path, resources, source)
+
+    def test_swiftpm_resource_bundle_rejects_wrong_v3_revision(self):
+        bin_path = self.root / 'bin'
+        resources = self.root / 'Resources'
+        source, _ = self.catalog_fixture(self.root, revision_v3='sol-luna-wrong')
+        resources.mkdir()
+        with self.assertRaisesRegex(rc.Refusal, 'SOURCE_CATALOG_IDENTITY_INVALID models.v3.json'):
             rc.copy_swiftpm_resource_bundle(bin_path, resources, source)
 
     def test_swiftpm_resource_bundle_rejects_bytes_different_from_frozen_source(self):
@@ -307,6 +321,17 @@ class RCGuards(unittest.TestCase):
         with self.assertRaisesRegex(rc.Refusal, 'SWIFTPM_SOURCE_CATALOG_BYTES_MISMATCH models.v2.json'):
             rc.copy_swiftpm_resource_bundle(bin_path, resources, source)
 
+    def test_swiftpm_resource_bundle_rejects_different_v3_built_bytes(self):
+        bin_path = self.root / 'bin'
+        resources = self.root / 'Resources'
+        source, built = self.catalog_fixture(self.root)
+        value = rc.json.loads((built / 'models.v3.json').read_text())
+        value['marker'] = 'different-built-byte'
+        (built / 'models.v3.json').write_text(rc.json.dumps(value, sort_keys=True) + '\n')
+        resources.mkdir()
+        with self.assertRaisesRegex(rc.Refusal, 'SWIFTPM_SOURCE_CATALOG_BYTES_MISMATCH models.v3.json'):
+            rc.copy_swiftpm_resource_bundle(bin_path, resources, source)
+
     def test_swiftpm_resource_bundle_requires_v2_catalog(self):
         bin_path = self.root / 'bin'
         resources = self.root / 'Resources'
@@ -314,6 +339,65 @@ class RCGuards(unittest.TestCase):
         (built / 'models.v2.json').unlink()
         resources.mkdir()
         with self.assertRaisesRegex(rc.Refusal, 'BUILT_CATALOG_MISSING models.v2.json'):
+            rc.copy_swiftpm_resource_bundle(bin_path, resources, source)
+
+    def test_swiftpm_resource_bundle_requires_v3_catalog(self):
+        bin_path = self.root / 'bin'
+        resources = self.root / 'Resources'
+        source, built = self.catalog_fixture(self.root)
+        (built / 'models.v3.json').unlink()
+        resources.mkdir()
+        with self.assertRaisesRegex(rc.Refusal, 'BUILT_CATALOG_MISSING models.v3.json'):
+            rc.copy_swiftpm_resource_bundle(bin_path, resources, source)
+
+    def test_swiftpm_resource_bundle_requires_v3_source_catalog(self):
+        bin_path = self.root / 'bin'
+        resources = self.root / 'Resources'
+        source, _ = self.catalog_fixture(self.root)
+        (source / 'Sources/CodexUsageUI/Resources/ThreadOS/models.v3.json').unlink()
+        resources.mkdir()
+        with self.assertRaisesRegex(rc.Refusal, 'SOURCE_CATALOG_MISSING models.v3.json'):
+            rc.copy_swiftpm_resource_bundle(bin_path, resources, source)
+
+    def test_swiftpm_resource_bundle_rejects_malformed_v3_catalog(self):
+        bin_path = self.root / 'bin'
+        resources = self.root / 'Resources'
+        source, _ = self.catalog_fixture(self.root)
+        (source / 'Sources/CodexUsageUI/Resources/ThreadOS/models.v3.json').write_text('{broken\n')
+        resources.mkdir()
+        with self.assertRaisesRegex(rc.Refusal, 'SOURCE_CATALOG_INVALID models.v3.json'):
+            rc.copy_swiftpm_resource_bundle(bin_path, resources, source)
+
+    def test_swiftpm_resource_bundle_rejects_malformed_v3_built_catalog(self):
+        bin_path = self.root / 'bin'
+        resources = self.root / 'Resources'
+        source, built = self.catalog_fixture(self.root)
+        (built / 'models.v3.json').write_text('{broken\n')
+        resources.mkdir()
+        with self.assertRaisesRegex(rc.Refusal, 'BUILT_CATALOG_INVALID models.v3.json'):
+            rc.copy_swiftpm_resource_bundle(bin_path, resources, source)
+
+    def test_swiftpm_resource_bundle_rejects_v3_catalog_symlinks(self):
+        bin_path = self.root / 'bin'
+        resources = self.root / 'Resources'
+        source, built = self.catalog_fixture(self.root)
+        source_catalog = source / 'Sources/CodexUsageUI/Resources/ThreadOS/models.v3.json'
+        source_target = self.root / 'source-v3-target.json'
+        source_target.write_bytes(source_catalog.read_bytes())
+        source_catalog.unlink()
+        source_catalog.symlink_to(source_target)
+        resources.mkdir()
+        with self.assertRaisesRegex(rc.Refusal, 'SOURCE_CATALOG_MISSING models.v3.json'):
+            rc.copy_swiftpm_resource_bundle(bin_path, resources, source)
+
+        source_catalog.unlink()
+        source_catalog.write_bytes(source_target.read_bytes())
+        built_catalog = built / 'models.v3.json'
+        built_target = self.root / 'built-v3-target.json'
+        built_target.write_bytes(built_catalog.read_bytes())
+        built_catalog.unlink()
+        built_catalog.symlink_to(built_target)
+        with self.assertRaisesRegex(rc.Refusal, 'SYMLINK_REJECTED'):
             rc.copy_swiftpm_resource_bundle(bin_path, resources, source)
 
     def test_swiftpm_resource_bundle_refuses_missing_or_symlinked_catalog(self):

@@ -96,14 +96,18 @@ public enum ThreadOSSettingsCodec {
     public static let legacyCatalogRevision = "astra-20260904.1"
     /// V1 remains pinned to its original catalog; V2 drafts opt into this revision.
     public static let catalogRevision = legacyCatalogRevision
-    public static let latestCatalogRevision = "sol-luna-20260922.1"
+    public static let latestCatalogRevision = "sol-luna-20261001.1"
     public static let roleOrder: [ThreadOSRole] = [.codingWorker, .foreman, .leader, .qa, .reviewer]
     public static func loadCatalog() throws -> ThreadOSModelCatalog { try loadCatalog(revision: legacyCatalogRevision, bundle: .module) }
     public static func loadCatalog(bundle: Bundle) throws -> ThreadOSModelCatalog { try loadCatalog(revision: catalogRevision, bundle: bundle) }
     public static func loadCatalog(revision: String) throws -> ThreadOSModelCatalog { try loadCatalog(revision: revision, bundle: .module) }
     public static func loadCatalog(revision: String, bundle: Bundle) throws -> ThreadOSModelCatalog {
-        guard [legacyCatalogRevision, latestCatalogRevision].contains(revision) else { throw ThreadOSSettingsCodecError.catalogUnavailable }
-        let resource = revision == legacyCatalogRevision ? "models.v1" : "models.v2"
+        guard [legacyCatalogRevision, "sol-luna-20260922.1", latestCatalogRevision].contains(revision) else { throw ThreadOSSettingsCodecError.unsupportedPreset }
+        let resource = switch revision {
+        case legacyCatalogRevision: "models.v1"
+        case "sol-luna-20260922.1": "models.v2"
+        default: "models.v3"
+        }
         let url = bundle.url(forResource: resource, withExtension: "json", subdirectory: "ThreadOS") ?? bundle.url(forResource: resource, withExtension: "json")
         guard let url, let data = try? Data(contentsOf: url), let catalog = try? JSONDecoder().decode(ThreadOSModelCatalog.self, from: data), catalog.schema == "threados.model-catalog.v1", Set(catalog.presets.keys).isSuperset(of: ["astra-economy", "astra-balanced", "astra-speed", "astra-deep", "custom"]) else { throw ThreadOSSettingsCodecError.catalogUnavailable }
         return catalog

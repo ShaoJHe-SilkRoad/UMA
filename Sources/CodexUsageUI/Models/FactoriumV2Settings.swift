@@ -102,8 +102,8 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
     }
 
     public static let defaultRoles: [FactoriumV2Role: FactoriumV2RoleSetting] = [
-        .leader: .init(preserve: true, selection: .init(model: "gpt-6-astra", effort: "high", speed: "standard")),
-        .qa: .init(selection: .init(model: "gpt-6-sol", effort: "high", speed: "standard")),
+        .leader: .init(selection: .init(model: "gpt-6.1-sol", effort: "high", speed: "standard")),
+        .qa: .init(selection: .init(model: "gpt-6.1-sol", effort: "high", speed: "standard")),
         .coder: .init(selection: .init(model: "gpt-6-luna", effort: "medium", speed: "standard")),
         .repair: .init(selection: .init(model: "gpt-5.6-terra", effort: "medium", speed: "standard")),
         .reviewer: .init(selection: .init(model: "gpt-6-luna", effort: "medium", speed: "standard")),
@@ -111,6 +111,19 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
 
     public var isValidProject: Bool { ThreadOSSettingsDraft.isToken(project) }
     public var isLocallyValid: Bool { (try? canonicalRequest()) != nil }
+    var isPersistableForLocalRepair: Bool {
+        guard isValidProject,
+              ThreadOSSettingsDraft.isToken(id),
+              (1...1_000_000).contains(revision),
+              Set(roles.keys) == Set(FactoriumV2Role.allCases),
+              coderWorkers.count == 3,
+              reviewerWorkers.count == 3,
+              (try? ThreadOSSettingsCodec.loadCatalog(revision: catalogRevision)) != nil
+        else { return false }
+        return roles.allSatisfy { role, setting in
+            !setting.preserve || role == .leader
+        }
+    }
 
     public func workers(for role: FactoriumV2Role) -> [FactoriumV2WorkerSlot] {
         role == .coder ? coderWorkers : reviewerWorkers
@@ -183,8 +196,14 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
 
     public static func conversionPreview(language: AppLanguage) -> String {
         language == .simplifiedChinese
-            ? "Leader 保持为保留；QA 映射到 QA；V1 Foreman 映射到 Coder；V1 Coding Worker 变为保留的 Coder 槽位；Repair 保持 V2 默认值；V1 Reviewer 映射到 Reviewer。"
-            : "Leader stays Preserve; QA maps to QA; V1 Foreman maps to Coder; V1 Coding Worker becomes retained Coder slots; Repair keeps the V2 default; V1 Reviewer maps to Reviewer."
+            ? "Leader 使用 V2 当前默认值（GPT-6.1 Sol / High），除非明确选择保留；QA 映射到 QA；V1 Foreman 映射到 Coder；V1 Coding Worker 变为保留的 Coder 槽位；Repair 保持 V2 默认值；V1 Reviewer 映射到 Reviewer。"
+            : "Leader uses the current V2 default (GPT-6.1 Sol / High) unless Preserve is explicitly selected; QA maps to QA; V1 Foreman maps to Coder; V1 Coding Worker becomes retained Coder slots; Repair keeps the V2 default; V1 Reviewer maps to Reviewer."
+    }
+
+    public static func effortDisplayLabel(_ effort: String, language: AppLanguage) -> String {
+        let english = ["low": "Light", "medium": "Medium", "high": "High", "xhigh": "Extra High", "max": "Max", "ultra": "Ultra"]
+        let chinese = ["low": "轻量", "medium": "中等", "high": "高", "xhigh": "极高", "max": "最大", "ultra": "超高"]
+        return (language == .simplifiedChinese ? chinese : english)[effort] ?? effort
     }
 
     private func validate(catalog: ThreadOSModelCatalog) throws {
@@ -196,22 +215,34 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
         for role in FactoriumV2Role.allCases {
             guard let setting = roles[role] else { throw FactoriumV2SettingsError.invalidRole }
             if setting.preserve && role != .leader { throw FactoriumV2SettingsError.invalidRole }
-            if !setting.preserve { try validate(setting.selection, leader: role == .leader, catalog: catalog) }
+            if !setting.preserve {
+                try validate(setting.selection, leader: role == .leader, catalog: catalog)
+                if catalog.revision == ThreadOSSettingsCodec.latestCatalogRevision && setting.selection.model == "gpt-6-sol" {
+                    throw FactoriumV2SettingsError.invalidSelection
+                }
+            }
         }
         for (parent, slots) in [(FactoriumV2Role.coder, coderWorkers), (.reviewer, reviewerWorkers)] {
             for slot in slots {
-                try validate(resolvedSlot(slot, parent: parent), leader: false, catalog: catalog)
+                let selection = resolvedSlot(slot, parent: parent)
+                try validate(selection, leader: false, catalog: catalog)
+                if catalog.revision == ThreadOSSettingsCodec.latestCatalogRevision,
+                   ((!slot.inherits && slot.selection.model == "gpt-6-sol") || selection.model == "gpt-6-sol") {
+                    throw FactoriumV2SettingsError.invalidSelection
+                }
             }
         }
     }
 
     private func validate(_ selection: FactoriumV2Selection, leader: Bool, catalog: ThreadOSModelCatalog) throws {
-        guard Self.availableModels(catalog: catalog).contains(selection.model), Self.availableEfforts(model: selection.model, leader: leader, catalog: catalog).contains(selection.effort), ["fast", "standard"].contains(selection.speed) else { throw FactoriumV2SettingsError.invalidSelection }
+        guard catalog.models[selection.model] != nil, Self.availableEfforts(model: selection.model, leader: leader, catalog: catalog).contains(selection.effort), ["fast", "standard"].contains(selection.speed) else { throw FactoriumV2SettingsError.invalidSelection }
     }
 
     public static func availableModels(catalog: ThreadOSModelCatalog? = try? ThreadOSSettingsCodec.loadCatalog(revision: catalogRevision)) -> [String] {
         guard let catalog else { return [] }
-        return catalog.models.keys.filter { $0 != "gpt-5.6-sol" }.sorted()
+        return catalog.models.keys.filter {
+            $0 != "gpt-5.6-sol" && !(catalog.revision == ThreadOSSettingsCodec.latestCatalogRevision && $0 == "gpt-6-sol")
+        }.sorted()
     }
 
     public static func availableEfforts(model: String, leader: Bool, catalog: ThreadOSModelCatalog? = try? ThreadOSSettingsCodec.loadCatalog(revision: catalogRevision)) -> [String] {
@@ -314,15 +345,24 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
     @Published public private(set) var receipt: FactoriumV2ReceiptProjection?
     @Published public private(set) var receiptInputIsInvalid = false
     private let preferences: ApplicationPreferences
+    private let language: AppLanguage
 
-    public init(preferences: ApplicationPreferences = .production) {
+    private struct MigrationResult {
+        let draft: FactoriumV2SettingsDraft
+        let notice: String?
+    }
+
+    public init(preferences: ApplicationPreferences = .production, language: AppLanguage = .english) {
         self.preferences = preferences
+        self.language = language
         let available = Array(Set(ThreadOSSettingsPreferences.factoriumV2Projects(from: preferences) + ThreadOSSettingsPreferences.projects(from: preferences))).sorted()
         let remembered = ThreadOSSettingsPreferences.selectedFactoriumV2Project(from: preferences)
         let project = remembered.flatMap { available.contains($0) ? $0 : nil } ?? available.first ?? ""
         let saved = project.isEmpty ? nil : ThreadOSSettingsPreferences.loadFactoriumV2(project: project, from: preferences)
-        draft = saved ?? FactoriumV2SettingsDraft()
+        let migrated = saved.map { Self.migrateSelectedDraft($0, preferences: preferences, language: language) }
+        draft = migrated?.draft ?? FactoriumV2SettingsDraft()
         selectedProject = project
+        message = [migrated?.notice, unresolvedDraftNotice()].compactMap { $0 }.joined(separator: " ")
     }
 
     public var projects: [String] { Array(Set(ThreadOSSettingsPreferences.factoriumV2Projects(from: preferences) + ThreadOSSettingsPreferences.projects(from: preferences))).sorted() }
@@ -334,9 +374,49 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
 
     public func select(project: String) {
         selectedProject = project
-        draft = ThreadOSSettingsPreferences.loadFactoriumV2(project: project, from: preferences) ?? .init()
+        let migrated = ThreadOSSettingsPreferences.loadFactoriumV2(project: project, from: preferences)
+            .map { Self.migrateSelectedDraft($0, preferences: preferences, language: language) }
+        draft = migrated?.draft ?? .init()
         invalidateTransferState()
+        message = [migrated?.notice, unresolvedDraftNotice()].compactMap { $0 }.joined(separator: " ")
         ThreadOSSettingsPreferences.saveFactoriumV2SelectedProject(project.isEmpty ? nil : project, to: preferences)
+    }
+
+    private static func migrateSelectedDraft(
+        _ source: FactoriumV2SettingsDraft,
+        preferences: ApplicationPreferences,
+        language: AppLanguage
+    ) -> MigrationResult {
+        let leaderNeedsMigration = source.roles[.leader]?.preserve == false && source.roles[.leader]?.selection.model == "gpt-6-sol"
+        let qaNeedsMigration = source.roles[.qa]?.selection.model == "gpt-6-sol"
+        guard leaderNeedsMigration || qaNeedsMigration else { return .init(draft: source, notice: nil) }
+        ThreadOSSettingsPreferences.saveFactoriumV2LegacySnapshot(source, to: preferences)
+        var migrated = source
+        migrated.catalogRevision = ThreadOSSettingsCodec.latestCatalogRevision
+        for role in [FactoriumV2Role.leader, .qa] {
+            guard var setting = migrated.roles[role], (role == .leader && leaderNeedsMigration) || (role == .qa && qaNeedsMigration) else { continue }
+            setting.preserve = false
+            setting.selection = .init(model: "gpt-6.1-sol", effort: "high", speed: setting.selection.speed)
+            migrated.roles[role] = setting
+        }
+        // A migration must leave room for subsequent explicit repairs. A
+        // source at 999,999 would otherwise migrate to the terminal revision.
+        let usedNewIdentity = source.revision >= 999_999
+        if usedNewIdentity {
+            migrated.id = "cfg-" + UUID().uuidString.lowercased()
+            migrated.revision = 1
+        } else {
+            migrated.revision += 1
+        }
+        ThreadOSSettingsPreferences.saveFactoriumV2(migrated, to: preferences)
+        let notice = usedNewIdentity
+            ? (language == .simplifiedChinese
+                ? "已将旧版 Leader/QA 选择迁移为 GPT-6.1 Sol / High，并因原修订号已达上限而使用新的请求标识。原草稿已保留以供恢复。"
+                : "Legacy Leader/QA choices were migrated to GPT-6.1 Sol / High under a new request identity because the saved revision reached its limit. The original draft was retained for recovery.")
+            : (language == .simplifiedChinese
+                ? "已将旧版 Leader/QA 选择迁移为 GPT-6.1 Sol / High。原草稿已保留以供恢复。"
+                : "Legacy Leader/QA choices were migrated to GPT-6.1 Sol / High. The original draft was retained for recovery.")
+        return .init(draft: migrated, notice: notice)
     }
 
     public func createProject() {
@@ -352,20 +432,54 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
         saveCurrent()
         ThreadOSSettingsPreferences.saveFactoriumV2SelectedProject(project, to: preferences)
         invalidateTransferState()
+        message = unresolvedDraftNotice() ?? ""
     }
 
     public func edit(allowIncompleteEffort: Bool = false, _ mutation: (inout FactoriumV2SettingsDraft) -> Void) {
         var candidate = draft
         mutation(&candidate)
-        guard candidate != draft, candidate.revision < 1_000_000 else { return }
-        candidate.revision += 1
-        guard candidate.isLocallyValid || (allowIncompleteEffort && validatesWithExplicitEffortPlaceholders(candidate)) else {
-            message = "Edit was not applied because the current catalog does not allow that local selection."
+        guard candidate != draft else { return }
+        if draft.revision == 1_000_000 {
+            // Preserve the established terminal-revision refusal for a valid
+            // draft. Invalid saved drafts remain explicitly repairable.
+            guard !draft.isLocallyValid else { return }
+            candidate.id = "cfg-" + UUID().uuidString.lowercased()
+            candidate.revision = 1
+        } else {
+            guard draft.revision < 1_000_000 else { return }
+            candidate.revision = draft.revision + 1
+            if !candidate.isLocallyValid && candidate.revision == 1_000_000 {
+                candidate.id = "cfg-" + UUID().uuidString.lowercased()
+                candidate.revision = 1
+            }
+        }
+        let locallyValid = candidate.isLocallyValid
+        let repairIdentityRolledOver = candidate.id != draft.id
+        let editableWhileRepairing = validatesWithExplicitEffortPlaceholders(
+            candidate,
+            retainingRetiredSelectionsFrom: draft,
+            allowIncompleteEffort: allowIncompleteEffort
+        )
+        guard locallyValid || editableWhileRepairing else {
+            message = localized(
+                language,
+                "Edit was not applied because the current catalog does not allow that local selection. Choose a supported model and effort.",
+                "未应用此项编辑，因为当前目录不支持该选择。请选择受支持的模型和思考档位。"
+            )
             return
         }
         draft = candidate
         saveCurrent()
         invalidateTransferState()
+        if repairIdentityRolledOver {
+            message = localized(
+                language,
+                "This repair continues under a new request identity because the previous revision reached its limit. Remaining saved selections still need resolution; request generation stays blocked.",
+                "由于原修订号已达上限，此次修复已使用新的请求标识继续。其余已保存的选择仍需处理；请求生成保持阻止。"
+            )
+        } else if !locallyValid {
+            message = unresolvedDraftNotice() ?? ""
+        }
     }
 
     public func convert(legacy: ThreadOSSettingsDraft, confirmedFourWorkerConversion: Bool) throws {
@@ -402,22 +516,70 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
         }
     }
 
-    private func validatesWithExplicitEffortPlaceholders(_ candidate: FactoriumV2SettingsDraft) -> Bool {
+    private func validatesWithExplicitEffortPlaceholders(
+        _ candidate: FactoriumV2SettingsDraft,
+        retainingRetiredSelectionsFrom previous: FactoriumV2SettingsDraft? = nil,
+        allowIncompleteEffort: Bool
+    ) -> Bool {
         var completed = candidate
         guard let catalog = try? ThreadOSSettingsCodec.loadCatalog(revision: candidate.catalogRevision) else { return false }
-        for role in FactoriumV2Role.allCases {
-            guard var setting = completed.roles[role], !setting.preserve, setting.selection.effort.isEmpty else { continue }
-            guard let effort = FactoriumV2SettingsDraft.availableEfforts(model: setting.selection.model, leader: role == .leader, catalog: catalog).first else { return false }
-            setting.selection.effort = effort
-            completed.roles[role] = setting
-        }
-        for role in [FactoriumV2Role.coder, .reviewer] {
-            var slots = completed.workers(for: role)
-            for index in slots.indices where !slots[index].inherits && slots[index].selection.effort.isEmpty {
-                guard let effort = FactoriumV2SettingsDraft.availableEfforts(model: slots[index].selection.model, leader: false, catalog: catalog).first else { return false }
-                slots[index].selection.effort = effort
+
+        // A migrated draft may retain more than one retired GPT-6 Sol choice.
+        // Validate a temporary copy with only byte-for-byte unchanged retired
+        // selections replaced by valid current choices. The stored candidate
+        // keeps every unresolved value intact until the user explicitly edits it.
+        if catalog.revision == ThreadOSSettingsCodec.latestCatalogRevision,
+           let previous,
+           previous.catalogRevision == candidate.catalogRevision,
+           previous.project == candidate.project,
+           ((previous.id == candidate.id && candidate.revision == previous.revision + 1)
+                || ([999_999, 1_000_000].contains(previous.revision) && candidate.revision == 1 && previous.id != candidate.id)) {
+            for role in FactoriumV2Role.allCases {
+                guard var setting = completed.roles[role],
+                      let old = previous.roles[role],
+                      !setting.preserve,
+                      setting == old,
+                      setting.selection.model == "gpt-6-sol" else { continue }
+                let replacement = role == .leader || role == .qa ? "gpt-6.1-sol" : "gpt-6-luna"
+                guard let effort = FactoriumV2SettingsDraft.availableEfforts(model: replacement, leader: role == .leader, catalog: catalog).first else { return false }
+                setting.selection = .init(model: replacement, effort: effort, speed: setting.selection.speed)
+                completed.roles[role] = setting
             }
-            completed.setWorkers(slots, for: role)
+            for role in [FactoriumV2Role.coder, .reviewer] {
+                let oldSlots = previous.workers(for: role)
+                var slots = completed.workers(for: role)
+                guard oldSlots.count == slots.count else { return false }
+                for index in slots.indices {
+                    let old = oldSlots[index]
+                    guard !slots[index].inherits,
+                          !old.inherits,
+                          slots[index].enabled == old.enabled,
+                          slots[index].inherits == old.inherits,
+                          slots[index].hasCustomSelection == old.hasCustomSelection,
+                          slots[index].selection == old.selection,
+                          slots[index].selection.model == "gpt-6-sol" else { continue }
+                    guard let effort = FactoriumV2SettingsDraft.availableEfforts(model: "gpt-6-luna", leader: false, catalog: catalog).first else { return false }
+                    slots[index].selection = .init(model: "gpt-6-luna", effort: effort, speed: slots[index].selection.speed)
+                }
+                completed.setWorkers(slots, for: role)
+            }
+        }
+
+        if allowIncompleteEffort {
+            for role in FactoriumV2Role.allCases {
+                guard var setting = completed.roles[role], !setting.preserve, setting.selection.effort.isEmpty else { continue }
+                guard let effort = FactoriumV2SettingsDraft.availableEfforts(model: setting.selection.model, leader: role == .leader, catalog: catalog).first else { return false }
+                setting.selection.effort = effort
+                completed.roles[role] = setting
+            }
+            for role in [FactoriumV2Role.coder, .reviewer] {
+                var slots = completed.workers(for: role)
+                for index in slots.indices where !slots[index].inherits && slots[index].selection.effort.isEmpty {
+                    guard let effort = FactoriumV2SettingsDraft.availableEfforts(model: slots[index].selection.model, leader: false, catalog: catalog).first else { return false }
+                    slots[index].selection.effort = effort
+                }
+                completed.setWorkers(slots, for: role)
+            }
         }
         return completed.isLocallyValid
     }
@@ -553,6 +715,15 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
         receiptInputIsInvalid = false
         rawAcknowledgement = ""
         message = ""
+    }
+
+    private func unresolvedDraftNotice() -> String? {
+        guard draft.isValidProject, !draft.isLocallyValid else { return nil }
+        return localized(
+            language,
+            "Saved selections still need resolution. Choose a supported model and effort for each affected role or worker slot; request generation stays blocked until all are valid.",
+            "已保存的选择仍需处理。请为每个受影响的角色或工作者槽位选择受支持的模型和思考档位；全部有效前仍不能生成请求。"
+        )
     }
 
     private func sha256(_ value: String) -> String {

@@ -4,6 +4,33 @@ import Testing
 @testable import CodexUsageUI
 
 struct ThreadOSSettingsContractTests {
+    @Test func latestCatalogAdds61SolWithoutChangingPinnedHistoryOrWorkers() throws {
+        let legacy = try ThreadOSSettingsCodec.loadCatalog(revision: ThreadOSSettingsCodec.legacyCatalogRevision)
+        let prior = try ThreadOSSettingsCodec.loadCatalog(revision: "sol-luna-20260922.1")
+        let current = try ThreadOSSettingsCodec.loadCatalog(revision: ThreadOSSettingsCodec.latestCatalogRevision)
+        #expect(legacy.revision == "astra-20260904.1")
+        #expect(prior.revision == "sol-luna-20260922.1")
+        #expect(prior.models["gpt-6-sol"]?.reasoningEfforts == ["low", "medium", "high", "xhigh"])
+        #expect(current.revision == "sol-luna-20261001.1")
+        #expect(current.models["gpt-6-sol"]?.reasoningEfforts == ["low", "medium", "high", "xhigh"])
+        #expect(!FactoriumV2SettingsDraft.availableModels(catalog: current).contains("gpt-6-sol"))
+        #expect(current.models["gpt-6.1-sol"]?.reasoningEfforts == ["low", "medium", "high", "xhigh"])
+        #expect(FactoriumV2SettingsDraft.availableModels(catalog: current).contains("gpt-6.1-sol"))
+        #expect(!FactoriumV2SettingsDraft.availableModels(catalog: current).contains("gpt-6-sol"))
+        for preset in current.presets.values where !preset.roles.isEmpty {
+            #expect(preset.roles["LEADER"]?.model == "gpt-6.1-sol")
+            #expect(preset.roles["LEADER"]?.reasoningEffort == "high")
+            #expect(preset.roles["QA"]?.model == "gpt-6.1-sol")
+            #expect(preset.roles["QA"]?.reasoningEffort == "high")
+            #expect(preset.roles["CODING_WORKER"]?.model == "gpt-6-luna")
+            #expect(preset.roles["REVIEWER"]?.model == "gpt-6-luna")
+        }
+        #expect(FactoriumV2SettingsDraft.defaultRoles[.leader]?.selection == .init(model: "gpt-6.1-sol", effort: "high", speed: "standard"))
+        #expect(FactoriumV2SettingsDraft.defaultRoles[.qa]?.selection == .init(model: "gpt-6.1-sol", effort: "high", speed: "standard"))
+        #expect(FactoriumV2SettingsDraft.defaultRoles[.coder]?.selection == .init(model: "gpt-6-luna", effort: "medium", speed: "standard"))
+        #expect(FactoriumV2SettingsDraft.defaultRoles[.reviewer]?.selection == .init(model: "gpt-6-luna", effort: "medium", speed: "standard"))
+        #expect(FactoriumV2SettingsDraft.defaultRoles[.repair]?.selection.model == "gpt-5.6-terra")
+    }
     @Test func frozenTU1FixtureHasAllCasesAndCanonicalBytes() throws {
         let fixture = try fixture()
         let cases = try #require(fixture["cases"] as? [[String: Any]])

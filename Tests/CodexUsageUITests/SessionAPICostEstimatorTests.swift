@@ -42,6 +42,16 @@ struct SessionAPICostEstimatorTests {
     }
 
     @Test
+    func keeps61SolPriceUnknownWithoutPerRequestContextEvidence() {
+        #expect(SessionAPICostEstimator.estimatedUSD(
+            model: "gpt-6.1-sol",
+            inputTokens: 1_000,
+            cachedInputTokens: 0,
+            outputTokens: 100
+        ) == nil)
+    }
+
+    @Test
     func freezesRecordedPricesAndUsesNewPriceOnlyForTokenDeltas() throws {
         let oldPrice = APIModelPrice(
             version: "old-price",

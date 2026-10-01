@@ -61,7 +61,10 @@ import Foundation
     }
 
     public static func saveFactoriumV2(_ draft: FactoriumV2SettingsDraft, to preferences: ApplicationPreferences) {
-        guard draft.isLocallyValid else { return }
+        // Invalid retained selections may be saved only as a structurally
+        // sound local draft so users can repair them incrementally. Request
+        // generation and every external boundary still require full validity.
+        guard draft.isPersistableForLocalRepair else { return }
         var values = factoriumV2Drafts(from: preferences)
         values[draft.project] = draft
         preferences.set(try? JSONEncoder().encode(values), for: factoriumV2DraftsKey)
@@ -74,7 +77,9 @@ import Foundation
         factoriumV2LegacySnapshots(project: project, from: preferences)
     }
     public static func saveFactoriumV2LegacySnapshot(_ draft: FactoriumV2SettingsDraft, to preferences: ApplicationPreferences) {
-        guard draft.isLocallyValid else { return }
+        // Keep a well-shaped pre-migration draft recoverable even when its
+        // retained model or effort is no longer semantically valid.
+        guard draft.isPersistableForLocalRepair else { return }
         var histories = factoriumV2LegacySnapshotHistories(from: preferences)
         var history = histories[draft.project] ?? []
         guard !history.contains(draft) else { return }
@@ -91,18 +96,21 @@ import Foundation
 
     private static func factoriumV2Drafts(from preferences: ApplicationPreferences) -> [String: FactoriumV2SettingsDraft] {
         guard let data = preferences.value(for: factoriumV2DraftsKey), let values = try? JSONDecoder().decode([String: FactoriumV2SettingsDraft].self, from: data) else { return [:] }
-        return values.filter { $0.key == $0.value.project && $0.value.isLocallyValid }
+        return values.filter { $0.key == $0.value.project && $0.value.isPersistableForLocalRepair }
     }
     private static func factoriumV2LegacySnapshots(project: String, from preferences: ApplicationPreferences) -> [FactoriumV2SettingsDraft] {
         factoriumV2LegacySnapshotHistories(from: preferences)[project] ?? []
     }
     private static func factoriumV2LegacySnapshotHistories(from preferences: ApplicationPreferences) -> [String: [FactoriumV2SettingsDraft]] {
         if let data = preferences.value(for: factoriumV2LegacySnapshotHistoryKey), let histories = try? JSONDecoder().decode([String: [FactoriumV2SettingsDraft]].self, from: data) {
-            return histories.mapValues { values in values.filter { $0.isLocallyValid } }
+            return histories.reduce(into: [:]) { result, entry in
+                let snapshots = entry.value.filter { $0.project == entry.key && $0.isPersistableForLocalRepair }
+                if !snapshots.isEmpty { result[entry.key] = snapshots }
+            }
         }
         guard let data = preferences.value(for: factoriumV2LegacySnapshotsKey), let values = try? JSONDecoder().decode([String: FactoriumV2SettingsDraft].self, from: data) else { return [:] }
         return values.reduce(into: [:]) { result, entry in
-            if entry.key == entry.value.project, entry.value.isLocallyValid { result[entry.key] = [entry.value] }
+            if entry.key == entry.value.project, entry.value.isPersistableForLocalRepair { result[entry.key] = [entry.value] }
         }
     }
 }

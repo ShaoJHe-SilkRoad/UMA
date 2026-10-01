@@ -3,7 +3,7 @@ import Testing
 
 struct ThreadOSLeaderPromptTests {
     private let selections: [ThreadOSPromptRole: ThreadOSPromptSelection] = [
-        .leader: .init(model: "gpt-6-sol", effort: "low"),
+        .leader: .init(model: "gpt-6.1-sol", effort: "low"),
         .coderCluster: .init(model: "gpt-6-luna", effort: "medium"),
         .reviewerCluster: .init(model: "gpt-6-astra", effort: "high"),
         .qa: .init(model: "gpt-5.6-terra", effort: "xhigh")
@@ -11,7 +11,7 @@ struct ThreadOSLeaderPromptTests {
 
     @Test func exposesExactlyFiveModelsAndFourEfforts() {
         #expect(ThreadOSLeaderPrompt.supportedModels == [
-            "gpt-6-sol", "gpt-6-luna", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra"
+            "gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra"
         ])
         #expect(ThreadOSLeaderPrompt.supportedEfforts == ["low", "medium", "high", "xhigh"])
     }
@@ -19,7 +19,7 @@ struct ThreadOSLeaderPromptTests {
     @Test func generatesChinesePromptMappingAllFourIndependentSelections() throws {
         let prompt = try ThreadOSLeaderPrompt.make(selections: selections, language: .simplifiedChinese)
 
-        #expect(prompt.contains("Leader: gpt-6-sol / low"))
+        #expect(prompt.contains("Leader: gpt-6.1-sol / low"))
         #expect(prompt.contains("Coder Cluster: gpt-6-luna / medium"))
         #expect(prompt.contains("Reviewer Cluster: gpt-6-astra / high"))
         #expect(prompt.contains("QA: gpt-5.6-terra / xhigh"))
@@ -35,7 +35,7 @@ struct ThreadOSLeaderPromptTests {
     @Test func generatesEnglishPromptMappingAllFourIndependentSelections() throws {
         let prompt = try ThreadOSLeaderPrompt.make(selections: selections, language: .english)
 
-        #expect(prompt.contains("Leader: gpt-6-sol / low"))
+        #expect(prompt.contains("Leader: gpt-6.1-sol / low"))
         #expect(prompt.contains("Coder Cluster: gpt-6-luna / medium"))
         #expect(prompt.contains("Reviewer Cluster: gpt-6-astra / high"))
         #expect(prompt.contains("QA: gpt-5.6-terra / xhigh"))

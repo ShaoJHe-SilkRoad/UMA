@@ -385,7 +385,7 @@ public struct ThreadOSSettingsView: View {
         self.language = language; self.analytics = analytics; self.basicUsage = basicUsage; self.showCodexDetail = showCodexDetail; self.preferences = preferences; self.clipboard = clipboard; self.layoutProbe = layoutProbe; self.footerStatusOverride = footerStatusOverride; self.defaultExpandedWorkerGroups = initiallyExpandedWorkerGroups
         _form = StateObject(wrappedValue: ThreadOSSettingsFormState(preferences: preferences))
         _attributionBinding = StateObject(wrappedValue: ThreadOSAttributionBindingFormState(preferences: preferences))
-        _factoriumV2 = StateObject(wrappedValue: FactoriumV2FormState(preferences: preferences))
+        _factoriumV2 = StateObject(wrappedValue: FactoriumV2FormState(preferences: preferences, language: language))
         _expandedWorkerGroups = State(initialValue: initiallyExpandedWorkerGroups)
     }
     public var body: some View {
@@ -811,14 +811,13 @@ public struct ThreadOSSettingsView: View {
         _ = factoriumV2.generateAndCopy(to: clipboard, language: language)
     }
     private func effortLabel(_ effort: String) -> String {
-        let english = ["low": "Light", "medium": "Medium", "high": "High", "xhigh": "Extra High", "max": "Max", "ultra": "Ultra"]
-        let chinese = ["low": "轻", "medium": "中", "high": "高", "xhigh": "额外高", "max": "最大", "ultra": "超高"]
-        return (language == .simplifiedChinese ? chinese : english)[effort] ?? effort
+        FactoriumV2SettingsDraft.effortDisplayLabel(effort, language: language)
     }
     private func modelLabel(_ model: String) -> String {
         switch model {
         case "gpt-6-astra": "Astra"
-        case "gpt-6-sol": "Sol"
+        case "gpt-6.1-sol": "Sol"
+        case "gpt-6-sol": "Sol (legacy)"
         case "gpt-6-luna": "Luna"
         case "gpt-5.6-terra": "Terra"
         default: model

@@ -140,6 +140,7 @@ def copy_swiftpm_resource_bundle(bin_path, resources, source_root):
     catalog_expectations = {
         'models.v1.json': ('threados.model-catalog.v1', 'astra-20260904.1'),
         'models.v2.json': ('threados.model-catalog.v1', 'sol-luna-20260922.1'),
+        'models.v3.json': ('threados.model-catalog.v1', 'sol-luna-20261001.1'),
     }
     require(bundle.is_dir(), 'SWIFTPM_RESOURCE_BUNDLE_MISSING')
     require(not contains_symlink(bundle), 'SWIFTPM_RESOURCE_BUNDLE_SYMLINK_REJECTED')
