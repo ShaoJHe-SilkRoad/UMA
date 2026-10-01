@@ -60,11 +60,32 @@ private struct ThreadOSPromptPopup: NSViewRepresentable {
 private final class ThreadOSPromptFocusablePopUpButton: NSPopUpButton {
     override var acceptsFirstResponder: Bool { isEnabled }
     override var canBecomeKeyView: Bool { isEnabled && !isHidden && alphaValue > 0 }
+
+    override func becomeFirstResponder() -> Bool {
+        let becameFirstResponder = super.becomeFirstResponder()
+        if becameFirstResponder { revealPromptFocusInEnclosingScrollView() }
+        return becameFirstResponder
+    }
 }
 
 private final class ThreadOSPromptFocusableButton: NSButton {
     override var acceptsFirstResponder: Bool { isEnabled }
     override var canBecomeKeyView: Bool { isEnabled && !isHidden && alphaValue > 0 }
+
+    override func becomeFirstResponder() -> Bool {
+        let becameFirstResponder = super.becomeFirstResponder()
+        if becameFirstResponder { revealPromptFocusInEnclosingScrollView() }
+        return becameFirstResponder
+    }
+}
+
+private extension NSView {
+    func revealPromptFocusInEnclosingScrollView() {
+        guard let scrollView = enclosingScrollView else { return }
+        let focusRect = convert(bounds, to: scrollView.contentView).insetBy(dx: -6, dy: -6)
+        guard !scrollView.contentView.bounds.contains(focusRect) else { return }
+        _ = scrollView.contentView.scrollToVisible(focusRect)
+    }
 }
 
 public final class ThreadOSPromptKeyViewLoopBoundaryView: NSView {
@@ -224,9 +245,14 @@ private struct ThreadOSPromptCopyButton: NSViewRepresentable {
     let title: String
     let identifier: String
     let enabled: Bool
+    let status: String?
     let action: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+
+    private var accessibilityLabel: String {
+        status.map { "\(title), \($0)" } ?? title
+    }
 
     func makeNSView(context: Context) -> NSButton {
         let button = ThreadOSPromptFocusableButton(title: title, target: context.coordinator, action: #selector(Coordinator.activate(_:)))
@@ -235,7 +261,7 @@ private struct ThreadOSPromptCopyButton: NSViewRepresentable {
         button.controlSize = .regular
         button.refusesFirstResponder = false
         button.focusRingType = .exterior
-        button.setAccessibilityLabel(title)
+        button.setAccessibilityLabel(accessibilityLabel)
         button.setAccessibilityIdentifier(identifier)
         return button
     }
@@ -244,7 +270,7 @@ private struct ThreadOSPromptCopyButton: NSViewRepresentable {
         context.coordinator.action = action
         button.title = title
         button.isEnabled = enabled
-        button.setAccessibilityLabel(title)
+        button.setAccessibilityLabel(accessibilityLabel)
         button.setAccessibilityIdentifier(identifier)
     }
 
@@ -464,7 +490,8 @@ public struct ThreadOSPromptComposerView: View {
                 ThreadOSPromptCopyButton(
                     title: copy.generateAndCopy,
                     identifier: "uma.threados.prompt.generate-copy",
-                    enabled: form.canGenerate
+                    enabled: form.canGenerate,
+                    status: copyStatus.map { $0 == .copied ? copy.copied : copy.failed }
                 ) {
                     switch form.generateAndCopy(language: language, to: clipboard) {
                     case .copied:
@@ -479,6 +506,8 @@ public struct ThreadOSPromptComposerView: View {
                     Text(copyStatus == .copied ? copy.copied : copy.failed)
                         .font(.callout)
                         .foregroundStyle(copyStatus == .copied ? Color.secondary : Color.orange)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(copyStatus == .copied ? copy.copied : copy.failed)
                         .accessibilityIdentifier("uma.threados.prompt.copy-status")
                 }
                 ThreadOSPromptKeyViewLoopAttachment()
@@ -488,6 +517,9 @@ public struct ThreadOSPromptComposerView: View {
             .padding(20)
             .frame(maxWidth: 600, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .onChange(of: form.selections) { _, _ in
+            copyStatus = nil
         }
     }
 

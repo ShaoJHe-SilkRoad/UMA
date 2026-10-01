@@ -606,18 +606,57 @@ import Testing
             #expect(copyButton.target != nil && copyButton.action != nil && copyButton.isEnabled)
             #expect(copyButton.frame.width > 0 && copyButton.frame.height > 0)
 
+            let copyButtonTitle = language == .simplifiedChinese ? "生成并复制给 Leader" : "Generate and Copy for Leader"
+            let copiedStatus = language == .simplifiedChinese ? "提示已复制。" : "Prompt copied."
+            func copiedStatusIsExposedForAccessibility() -> Bool {
+                copyButton.accessibilityLabel() == "\(copyButtonTitle), \(copiedStatus)"
+            }
+            func copyStatusHasClearedFromAccessibilityLabel() -> Bool {
+                copyButton.accessibilityLabel() == copyButtonTitle
+            }
+            func settleComposer() {
+                host.layoutSubtreeIfNeeded()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+                host.layoutSubtreeIfNeeded()
+            }
+
             let leaderModel = try #require(identifiers["uma.threados.prompt.role.leader.model"])
             leaderModel.selectItem(at: 2)
             let selectionAction = try #require(leaderModel.action)
             #expect(NSApp.sendAction(selectionAction, to: leaderModel.target, from: leaderModel))
             let storedSelections = try #require(preferences.value(for: ThreadOSPromptComposerPreferences.selections))
             #expect(String(data: storedSelections, encoding: .utf8)?.contains("gpt-6-astra") == true)
+            settleComposer()
+            #expect(copyStatusHasClearedFromAccessibilityLabel())
 
             copyButton.performClick(nil)
             var expectedSelections = ThreadOSPromptComposerForm.defaultSelections
             expectedSelections[.leader] = .init(model: "gpt-6-astra", effort: "high")
             let expectedPrompt = try ThreadOSLeaderPrompt.make(selections: expectedSelections, language: language)
             #expect(clipboard.value == expectedPrompt)
+
+            #expect(copiedStatusIsExposedForAccessibility())
+            let clipboardAfterCopy = try #require(clipboard.value)
+
+            let nextModel = ThreadOSLeaderPrompt.supportedModels.firstIndex { $0 != "gpt-6-astra" }
+            leaderModel.selectItem(at: try #require(nextModel))
+            #expect(NSApp.sendAction(selectionAction, to: leaderModel.target, from: leaderModel))
+            settleComposer()
+            #expect(copyStatusHasClearedFromAccessibilityLabel())
+            #expect(clipboard.value == clipboardAfterCopy, "Changing a selection clears the stale success indicator without overwriting the clipboard.")
+
+            copyButton.performClick(nil)
+            settleComposer()
+            #expect(copiedStatusIsExposedForAccessibility())
+            let clipboardBeforeEffortChange = try #require(clipboard.value)
+            let leaderEffort = try #require(identifiers["uma.threados.prompt.role.leader.effort"])
+            let currentEffort = try #require(leaderEffort.selectedItem?.representedObject as? String)
+            let nextEffort = try #require(ThreadOSLeaderPrompt.supportedEfforts.firstIndex { $0 != currentEffort })
+            leaderEffort.selectItem(at: nextEffort)
+            #expect(NSApp.sendAction(try #require(leaderEffort.action), to: leaderEffort.target, from: leaderEffort))
+            settleComposer()
+            #expect(copyStatusHasClearedFromAccessibilityLabel())
+            #expect(clipboard.value == clipboardBeforeEffortChange, "Changing an effort clears the stale success indicator without overwriting the clipboard.")
         }
     }
 

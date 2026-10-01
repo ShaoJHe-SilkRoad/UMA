@@ -40,7 +40,7 @@
     <key>BundleIdentifier</key>
     <string>com.silkrd.uma</string>
 		<key>BuildNumber</key>
-		<string>2026100101</string>
+		<string>2026100102</string>
     <key>PackageStem</key>
     <string>uma-0.14-rc</string>
     <key>MinimumSystemVersion</key>

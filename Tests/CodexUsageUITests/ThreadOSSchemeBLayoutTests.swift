@@ -179,6 +179,79 @@ import Testing
         #expect(controls.count == 9)
     }
 
+    @Test func wholeWindowKeyboardFocusKeepsPromptControlsVisibleInScrollViewport() throws {
+        _ = NSApplication.shared
+        let controller = MainWindowController(restoresSavedFrame: false)
+        controller.attach(
+            store: UsageStore.preview(language: .english),
+            openSettings: {},
+            scanAll: {},
+            refreshAll: {},
+            connectCodex: {},
+            disconnectCodex: {},
+            claudeControlState: { .consentRequired },
+            connectClaude: {},
+            accuracySyncClaude: {}
+        )
+        defer { controller.tearDown() }
+        controller.showDestination(.threadOS)
+        guard let window = controller.window, let contentView = window.contentView else {
+            Issue.record("Main UMA window did not attach its ThreadOS content view")
+            return
+        }
+        window.setContentSize(NSSize(width: 760, height: 420))
+        window.orderFront(nil)
+        settle(contentView)
+
+        let identifiers = ThreadOSPromptRole.allCases.flatMap { role in
+            ["uma.threados.prompt.role.\(role.rawValue).model", "uma.threados.prompt.role.\(role.rawValue).effort"]
+        } + ["uma.threados.prompt.generate-copy"]
+        let identifierSet = Set(identifiers)
+        let scroll = try #require(descendants(of: contentView).compactMap { $0 as? NSScrollView }.first {
+            descendants(of: $0).contains { identifierSet.contains($0.accessibilityIdentifier()) }
+        })
+        let controlsByIdentifier = Dictionary(uniqueKeysWithValues: descendants(of: scroll).compactMap { view in
+            let identifier = view.accessibilityIdentifier()
+            return identifierSet.contains(identifier) ? (identifier, view) : nil
+        })
+        let controls = try identifiers.map { try #require(controlsByIdentifier[$0]) }
+        let copyControl = try #require(controlsByIdentifier["uma.threados.prompt.generate-copy"])
+        func focusRectInViewport(_ view: NSView) -> NSRect {
+            view.convert(view.bounds, to: scroll.contentView).insetBy(dx: -6, dy: -6)
+        }
+
+        #expect(controls.count == 9)
+        #expect(controls.allSatisfy { $0.window === window && $0.canBecomeKeyView && $0.focusRingType == .exterior })
+        let copyStartsOutsideViewport = !scroll.contentView.bounds.contains(focusRectInViewport(copyControl))
+        #expect(copyStartsOutsideViewport, "Copy must start outside the visible viewport for this regression to be meaningful.")
+        #expect(window.makeFirstResponder(window))
+
+        var forwardVisible = Set<String>()
+        for _ in 0..<40 {
+            window.selectNextKeyView(nil)
+            guard let focused = window.firstResponder as? NSView else { continue }
+            let identifier = accessibilityIdentifier(in: focused) ?? ""
+            guard identifierSet.contains(identifier), let focusedControl = controlsByIdentifier[identifier] else { continue }
+            forwardVisible.insert(identifier)
+            #expect(scroll.contentView.bounds.contains(focusRectInViewport(focusedControl)), "Forward focus \(identifier) must be visible without manual scrolling.")
+            if forwardVisible.count == identifierSet.count { break }
+        }
+        #expect(forwardVisible == identifierSet)
+
+        #expect(window.makeFirstResponder(copyControl))
+        var reverseVisible = Set<String>()
+        for _ in 0..<40 {
+            window.selectPreviousKeyView(nil)
+            guard let focused = window.firstResponder as? NSView else { continue }
+            let identifier = accessibilityIdentifier(in: focused) ?? ""
+            guard identifierSet.contains(identifier), let focusedControl = controlsByIdentifier[identifier] else { continue }
+            reverseVisible.insert(identifier)
+            #expect(scroll.contentView.bounds.contains(focusRectInViewport(focusedControl)), "Reverse focus \(identifier) must be visible without manual scrolling.")
+            if reverseVisible.count == identifierSet.count { break }
+        }
+        #expect(reverseVisible == identifierSet)
+    }
+
     @Test func promptComposerKeepsMainWindowToolbarInKeyViewRouteAndRestoresItWhenLeaving() throws {
         _ = NSApplication.shared
         let controller = MainWindowController(restoresSavedFrame: false)
