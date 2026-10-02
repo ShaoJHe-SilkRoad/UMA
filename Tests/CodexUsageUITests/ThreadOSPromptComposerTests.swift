@@ -117,15 +117,16 @@ struct ThreadOSPromptComposerTests {
                 for language in [AppLanguage.simplifiedChinese, .english] {
                     #expect(form.generateAndCopy(language: language, to: clipboard) == .copied)
                     let copied = try #require(clipboard.writes.last)
-                    #expect(copied.contains("\(role.label(for: language)): gpt-6-sol / \(effort)"))
-                    let selected = form.selection(for: role)
-                    let arguments = "`model: \"\(selected.model)\"`, `thinking: \"\(selected.effort)\"`"
-                    let expectedNativeValues = role == .leader
-                        ? (language == .english
-                            ? "set your own Leader selection to \(arguments)"
-                            : "将自己的 Leader 选择设为 \(arguments)")
-                        : "\(role.label(for: language)) \(arguments)"
-                    #expect(copied.contains(expectedNativeValues))
+                    let command = try #require(JSONSerialization.jsonObject(with: Data(copied.utf8)) as? [String: Any])
+                    #expect(command["op"] as? String == "set_team_models")
+                    #expect(command["scope"] as? String == "receiving_leader_bound_root")
+                    let copiedRoles = try #require(command["roles"] as? [String: [String: String]])
+                    for selectedRole in roles {
+                        let selected = form.selection(for: selectedRole)
+                        let values = try #require(copiedRoles[selectedRole.rawValue])
+                        #expect(values["model"] == selected.model)
+                        #expect(values["thinking"] == selected.effort)
+                    }
                 }
             }
         }

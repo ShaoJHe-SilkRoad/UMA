@@ -43,15 +43,49 @@ public enum ThreadOSLeaderPrompt {
 
     public static func make(
         selections: [ThreadOSPromptRole: ThreadOSPromptSelection],
-        language: AppLanguage
+        language _: AppLanguage
     ) throws -> String {
         guard selections.count == ThreadOSPromptRole.allCases.count,
               ThreadOSPromptRole.allCases.allSatisfy({ role in
                   guard let selection = selections[role] else { return false }
                   return supportedModels.contains(selection.model) && supportedEfforts.contains(selection.effort)
-              }) else {
+        }) else {
             throw ThreadOSLeaderPromptError.unsupportedSelection
         }
+
+        let roles = Dictionary(uniqueKeysWithValues: ThreadOSPromptRole.allCases.map { role in
+            let selection = selections[role]!
+            return (role.rawValue, ["model": selection.model, "thinking": selection.effort])
+        })
+        let command: [String: Any] = [
+            "op": "set_team_models",
+            "scope": "receiving_leader_bound_root",
+            "roles": roles,
+            "execution": [
+                "parallel_native_dispatch": true,
+                "only_bound_roles": true,
+                "no_self_dispatch": true,
+                "no_interrupt": true,
+                "update_foremen_and_child_defaults": true,
+                "no_routine_confirmation": true,
+                "minimal_recording": true,
+                "respect_host_restrictions": true,
+                "report_values": ["requested", "submitted", "effective"],
+                "leader_control": "native_control_or_manual"
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: command, options: [.sortedKeys, .withoutEscapingSlashes])
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw ThreadOSLeaderPromptError.unsupportedSelection
+        }
+        return json
+    }
+
+#if false // Superseded by the compact JSON command above.
+    private static func legacyPrompt(
+        selections: [ThreadOSPromptRole: ThreadOSPromptSelection],
+        language: AppLanguage
+    ) -> String {
 
         let selectedValues = ThreadOSPromptRole.allCases.map { role in
             let selection = selections[role]!
@@ -81,5 +115,6 @@ public enum ThreadOSLeaderPrompt {
     private static func nativeParameterValues(for selection: ThreadOSPromptSelection) -> String {
         "`model: \"\(selection.model)\"`, `thinking: \"\(selection.effort)\"`"
     }
+#endif
 
 }

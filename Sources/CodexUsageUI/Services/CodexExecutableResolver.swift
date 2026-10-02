@@ -10,7 +10,7 @@ protocol CodexExecutableResolving: Sendable {
 /// without changing that production contract.
 struct CodexExecutableResolver: CodexExecutableResolving, Sendable {
     static let defaultCandidatePaths = [
-        "/Applications/ChatGPT.app/Contents/Resources/codex"
+        "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex"
     ]
 
     static let defaultApplicationPaths = [
