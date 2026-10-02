@@ -32,6 +32,30 @@ struct ThreadOSPromptComposerTests {
         #expect(form.canGenerate)
     }
 
+    @Test func summaryLinesReflectCurrentSelectionsInBothLanguages() {
+        let form = ThreadOSPromptComposerForm(preferences: .inMemory())
+        form.selectModel("gpt-6-astra", for: .leader)
+        form.selectEffort("low", for: .leader)
+        form.selectModel("gpt-5.6-terra", for: .reviewerCluster)
+        form.selectEffort("xhigh", for: .reviewerCluster)
+
+        let english = ThreadOSPromptComposerSummary.lines(from: form.selections, language: .english)
+        #expect(english == [
+            "Leader · GPT-6 Astra / Low",
+            "Coder Cluster · GPT-6 Luna / Medium",
+            "Reviewer Cluster · GPT-5.6 Terra / Ex High",
+            "QA · GPT-6.1 Sol / High"
+        ])
+
+        let chinese = ThreadOSPromptComposerSummary.lines(from: form.selections, language: .simplifiedChinese)
+        #expect(chinese == [
+            "Leader · GPT-6 Astra / 低",
+            "Coder Cluster · GPT-6 Luna / 中",
+            "Reviewer Cluster · GPT-5.6 Terra / 极高",
+            "QA · GPT-6.1 Sol / 高"
+        ])
+    }
+
     @Test func preservesSavedSixSolSelectionsEffortsAndExistingRecoverySnapshotAcrossReopen() throws {
         let preferences = ApplicationPreferences.inMemory()
         let saved = StoredSelections(version: 1, selections: [

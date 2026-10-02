@@ -123,6 +123,39 @@ import Testing
         }
     }
 
+    @Test func promptComposerUsesUsableContentWidthAt680PointBreakpoint() throws {
+        _ = NSApplication.shared
+        for (width, usesColumns) in [(712.0, true), (711.0, false)] {
+            let host = NSHostingView(rootView: ThreadOSPromptComposerView(
+                language: .english,
+                preferences: .inMemory()
+            ))
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: width, height: 720),
+                styleMask: [.titled, .closable],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView = host
+            window.orderFront(nil)
+            defer { window.orderOut(nil) }
+            settle(host)
+
+            let views = descendants(of: host)
+            let copy = try #require(views.first { $0.accessibilityIdentifier() == "uma.threados.prompt.generate-copy" })
+            let qaEffort = try #require(views.first {
+                $0.accessibilityIdentifier() == "uma.threados.prompt.role.qa.effort"
+            })
+            let copyY = copy.convert(copy.bounds, to: host).minY
+            let qaEffortY = qaEffort.convert(qaEffort.bounds, to: host).minY
+            if usesColumns {
+                #expect(copyY < qaEffortY, "At 680pt of usable content width, the summary and copy control should sit beside the role list.")
+            } else {
+                #expect(copyY > qaEffortY, "Below 680pt of usable content width, the summary and copy control should follow all four roles.")
+            }
+        }
+    }
+
     @Test func promptComposerTraversesAttachedWindowKeyViewLoopInBothDirections() throws {
         _ = NSApplication.shared
         let host = NSHostingView(rootView: ThreadOSPromptComposerView(
@@ -152,8 +185,10 @@ import Testing
             return identifiers.contains(identifier) ? (identifier, view) : nil
         })
         let controls = try identifiers.map { try #require(byIdentifier[$0]) }
-        let anchor = try #require(window.initialFirstResponder)
         #expect(controls.count == 9)
+        let anchor = try #require(window.contentView)
+        #expect(!window.autorecalculatesKeyViewLoop)
+        #expect(window.initialFirstResponder === anchor)
         #expect(anchor.nextKeyView === controls[0])
         #expect(controls.allSatisfy {
             $0.window === window && $0.canBecomeKeyView && $0.focusRingType == .exterior
@@ -162,19 +197,17 @@ import Testing
             #expect(current.nextKeyView === next)
         }
         #expect(controls.last?.nextKeyView === originalCopyOutgoingKeyView)
-
         #expect(window.makeFirstResponder(window))
         for control in controls {
             window.selectNextKeyView(nil)
-            #expect(window.firstResponder === control)
+            let current = window.firstResponder as? NSView
+            #expect(current === control)
         }
-        window.selectNextKeyView(nil)
-        #expect(window.firstResponder === controls[0])
-        window.selectPreviousKeyView(nil)
-        #expect(window.firstResponder === controls.last)
+        #expect(window.makeFirstResponder(controls[controls.count - 1]))
         for control in controls.reversed().dropFirst() {
             window.selectPreviousKeyView(nil)
-            #expect(window.firstResponder === control)
+            let current = window.firstResponder as? NSView
+            #expect(current === control)
         }
         #expect(controls.count == 9)
     }
@@ -216,14 +249,15 @@ import Testing
         })
         let controls = try identifiers.map { try #require(controlsByIdentifier[$0]) }
         let copyControl = try #require(controlsByIdentifier["uma.threados.prompt.generate-copy"])
+        let finalRoleControl = try #require(controlsByIdentifier["uma.threados.prompt.role.qa.effort"])
         func focusRectInViewport(_ view: NSView) -> NSRect {
             view.convert(view.bounds, to: scroll.contentView).insetBy(dx: -6, dy: -6)
         }
 
         #expect(controls.count == 9)
         #expect(controls.allSatisfy { $0.window === window && $0.canBecomeKeyView && $0.focusRingType == .exterior })
-        let copyStartsOutsideViewport = !scroll.contentView.bounds.contains(focusRectInViewport(copyControl))
-        #expect(copyStartsOutsideViewport, "Copy must start outside the visible viewport for this regression to be meaningful.")
+        let finalRoleStartsOutsideViewport = !scroll.contentView.bounds.contains(focusRectInViewport(finalRoleControl))
+        #expect(finalRoleStartsOutsideViewport, "The final role control must start outside the visible viewport for this regression to be meaningful.")
         #expect(window.makeFirstResponder(window))
 
         var forwardVisible = Set<String>()
@@ -239,7 +273,8 @@ import Testing
         #expect(forwardVisible == identifierSet)
 
         #expect(window.makeFirstResponder(copyControl))
-        var reverseVisible = Set<String>()
+        var reverseVisible: Set<String> = ["uma.threados.prompt.generate-copy"]
+        #expect(scroll.contentView.bounds.contains(focusRectInViewport(copyControl)))
         for _ in 0..<40 {
             window.selectPreviousKeyView(nil)
             guard let focused = window.firstResponder as? NSView else { continue }
@@ -271,6 +306,7 @@ import Testing
         )
         defer { controller.tearDown() }
 
+        let originalAutorecalculatesKeyViewLoop = try #require(controller.window).autorecalculatesKeyViewLoop
         controller.showDestination(.threadOS)
         guard let window = controller.window, let contentView = window.contentView else {
             Issue.record("Main UMA window did not attach its content view")
@@ -282,11 +318,11 @@ import Testing
             $0.accessibilityIdentifier() == boundaryIdentifier
         })
         let prelinkPrevious = prelinkBoundary.previousKeyView
-        let prelinkNext = prelinkBoundary.nextKeyView
         settle(contentView)
         let boundary = try #require(descendants(of: contentView).first {
             $0.accessibilityIdentifier() == boundaryIdentifier
         })
+        #expect(!window.autorecalculatesKeyViewLoop)
         let refreshButton = try #require(descendants(of: contentView).compactMap { $0 as? NSButton }.first {
             $0.accessibilityIdentifier() == "uma.main.refresh"
         })
@@ -327,14 +363,15 @@ import Testing
             return
         }
         settle(agentsContentView)
+        #expect(window.autorecalculatesKeyViewLoop == originalAutorecalculatesKeyViewLoop)
         #expect(boundary.previousKeyView === prelinkPrevious)
-        #expect(boundary.nextKeyView === prelinkNext)
         let agentsRoute = keyViewRoute(in: window)
         let agentsIdentifiers = agentsRoute.compactMap(accessibilityIdentifier(in:))
         for identifier in ["uma.main.scan", "uma.main.refresh", "uma.main.settings"] {
             #expect(agentsIdentifiers.contains(identifier))
         }
         #expect(agentsRoute.contains { accessibilityLabel(in: $0) == "UMA navigation" })
+        #expect(!agentsIdentifiers.contains { $0.hasPrefix("uma.threados.prompt.role.") })
         #expect(!agentsIdentifiers.contains("uma.threados.prompt.generate-copy"))
     }
 

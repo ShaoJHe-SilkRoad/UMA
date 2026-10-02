@@ -54,13 +54,16 @@ import Testing
 
             let clipboard = TestClipboard()
             #expect(form.generateAndCopy(language: language, to: clipboard) == .copied)
-            let prompt = try #require(clipboard.value)
-            #expect(prompt.contains("Leader: gpt-6-astra / high"))
-            #expect(prompt.contains("QA: gpt-6.1-sol / xhigh"))
-            #expect(!prompt.contains("project_id"))
-            #expect(!prompt.contains("project_path"))
-            #expect(!prompt.contains("task_id"))
-            #expect(!prompt.contains("TOSCFG/3"))
+            let prompt = try #require(clipboard.value?.data(using: .utf8))
+            let command = try #require(JSONSerialization.jsonObject(with: prompt) as? [String: Any])
+            #expect(command["op"] as? String == "set_team_models")
+            #expect(command["scope"] as? String == "receiving_leader_bound_root")
+            let roles = try #require(command["roles"] as? [String: [String: String]])
+            #expect(roles["leader"] == ["model": "gpt-6-astra", "thinking": "high"])
+            #expect(roles["qa"] == ["model": "gpt-6.1-sol", "thinking": "xhigh"])
+            #expect(command["project_id"] == nil)
+            #expect(command["project_path"] == nil)
+            #expect(command["task_id"] == nil)
         }
     }
 
@@ -567,8 +570,8 @@ import Testing
             let controls = descendants(of: host)
             let popups = controls.compactMap { $0 as? NSPopUpButton }
             let effortTitles = language == .simplifiedChinese
-                ? ["轻量", "中等", "高", "极高"]
-                : ["Light", "Medium", "High", "Extra High"]
+                ? ["低", "中", "高", "极高"]
+                : ["Low", "Medium", "High", "Ex High"]
             var identifiers: [String: NSPopUpButton] = [:]
             for popup in popups {
                 identifiers[popup.accessibilityIdentifier()] = popup
@@ -588,8 +591,10 @@ import Testing
                 #expect(model.window === window && !model.refusesFirstResponder)
                 #expect(effort.window === window && !effort.refusesFirstResponder)
                 #expect(model.accessibilityLabel() == (language == .simplifiedChinese ? "模型" : "Model"))
-                #expect(effort.accessibilityLabel() == (language == .simplifiedChinese ? "思考档位" : "Reasoning effort"))
-                #expect(model.itemArray.map { $0.title } == ThreadOSLeaderPrompt.supportedModels)
+                #expect(effort.accessibilityLabel() == (language == .simplifiedChinese ? "思考档位" : "Thinking"))
+                #expect(model.itemArray.map { $0.title } == [
+                    "GPT-6.1 Sol", "GPT-6 Sol", "GPT-6 Luna", "GPT-6 Astra", "GPT-5.6 Sol", "GPT-5.6 Terra"
+                ])
                 #expect(effort.itemArray.map { $0.title } == effortTitles)
                 #expect(model.target != nil && model.action != nil && model.selectedItem != nil)
                 #expect(effort.target != nil && effort.action != nil && effort.selectedItem != nil)
@@ -602,12 +607,12 @@ import Testing
             #expect(buttons.count == 9)
             #expect(copyButton.window === window)
             #expect(copyButton.accessibilityIdentifier() == "uma.threados.prompt.generate-copy")
-            #expect(copyButton.accessibilityLabel() == (language == .simplifiedChinese ? "生成并复制给 Leader" : "Generate and Copy for Leader"))
+            #expect(copyButton.accessibilityLabel() == (language == .simplifiedChinese ? "生成并复制指令" : "Generate and Copy Instruction"))
             #expect(copyButton.target != nil && copyButton.action != nil && copyButton.isEnabled)
             #expect(copyButton.frame.width > 0 && copyButton.frame.height > 0)
 
-            let copyButtonTitle = language == .simplifiedChinese ? "生成并复制给 Leader" : "Generate and Copy for Leader"
-            let copiedStatus = language == .simplifiedChinese ? "提示已复制。" : "Prompt copied."
+            let copyButtonTitle = language == .simplifiedChinese ? "生成并复制指令" : "Generate and Copy Instruction"
+            let copiedStatus = language == .simplifiedChinese ? "指令已复制。" : "Instruction copied."
             func copiedStatusIsExposedForAccessibility() -> Bool {
                 copyButton.accessibilityLabel() == "\(copyButtonTitle), \(copiedStatus)"
             }
@@ -621,7 +626,7 @@ import Testing
             }
 
             let leaderModel = try #require(identifiers["uma.threados.prompt.role.leader.model"])
-            leaderModel.selectItem(at: 2)
+            leaderModel.selectItem(at: try #require(ThreadOSLeaderPrompt.supportedModels.firstIndex(of: "gpt-6-astra")))
             let selectionAction = try #require(leaderModel.action)
             #expect(NSApp.sendAction(selectionAction, to: leaderModel.target, from: leaderModel))
             let storedSelections = try #require(preferences.value(for: ThreadOSPromptComposerPreferences.selections))
