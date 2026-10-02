@@ -171,18 +171,20 @@ private struct ThreadOSPromptKeyViewLoopAttachment: NSViewRepresentable {
             let shellBoundary = Self.allViews(in: root).first {
                 $0.accessibilityIdentifier() == "uma.threados.prompt.key-view-boundary"
             }
+            let shellOutgoingTarget = shellBoundary.flatMap { _ in
+                Self.allViews(in: root).first {
+                    $0.accessibilityIdentifier() == "uma.main.navigation" && $0.canBecomeKeyView
+                }
+            }
+            guard shellBoundary == nil || shellOutgoingTarget != nil else { return false }
             let preferredAnchor = shellBoundary ?? window.initialFirstResponder ?? root
             let anchor = controls.contains(where: { $0 === preferredAnchor }) ? root : preferredAnchor
             guard anchor.window === window else { return false }
             preserveExplicitKeyViewLoop(in: window)
 
             let linkedViews = [anchor] + controls
-            if originalLinks.map(\.view).elementsEqual(linkedViews, by: { $0 === $1 }) {
-                let expectedTargets = Array(controls.dropFirst()) + [returnTarget(for: shellBoundary != nil)]
-                if zip(linkedViews, [controls[0]] + expectedTargets).allSatisfy({ $0.nextKeyView === $1 }) {
-                    return true
-                }
-            } else {
+            let linksMatch = originalLinks.map(\.view).elementsEqual(linkedViews, by: { $0 === $1 })
+            if !linksMatch {
                 restoreOriginalLinks()
                 originalLinks = linkedViews.map(KeyViewLinkSnapshot.init)
                 if let boundary = anchor as? ThreadOSPromptKeyViewLoopBoundaryView {
@@ -190,11 +192,19 @@ private struct ThreadOSPromptKeyViewLoopAttachment: NSViewRepresentable {
                     boundary.originalOutgoingKeyViewForPromptLoop = originalLinks[0].originalNextView
                 }
             }
+            let outgoingTarget = shellBoundary == nil ? originalLinks.last?.originalNextView : shellOutgoingTarget
+            if linksMatch {
+                let expectedTargets = Array(controls.dropFirst()) + [outgoingTarget]
+                if zip(linkedViews, [controls[0]] + expectedTargets).allSatisfy({ $0.nextKeyView === $1 }) {
+                    return true
+                }
+            }
 
             // Insert the composer controls into the existing key-view route.
-            // Continue from Copy's own outgoing edge so SwiftUI's shell route
-            // can reach toolbar controls and return to the rest of the window.
-            let targets = [controls[0]] + Array(controls.dropFirst()) + [returnTarget(for: shellBoundary != nil)]
+            // In the app shell, continue from Copy to the outer toolbar navigation
+            // control. The hidden boundary's original outgoing edge can point back
+            // into this SwiftUI subtree, which traps native forward Tab locally.
+            let targets = [controls[0]] + Array(controls.dropFirst()) + [outgoingTarget]
             for (view, next) in zip(linkedViews, targets) {
                 view.nextKeyView = next
             }
@@ -202,11 +212,6 @@ private struct ThreadOSPromptKeyViewLoopAttachment: NSViewRepresentable {
                 link.assignedNextView = next
             }
             return true
-        }
-
-        private func returnTarget(for shellBoundary: Bool) -> NSView? {
-            let returnLinkIndex = shellBoundary ? 0 : originalLinks.count - 1
-            return originalLinks[returnLinkIndex].originalNextView
         }
 
         private func preserveExplicitKeyViewLoop(in window: NSWindow) {

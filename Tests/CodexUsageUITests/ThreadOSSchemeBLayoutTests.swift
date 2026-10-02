@@ -375,6 +375,92 @@ import Testing
         #expect(!agentsIdentifiers.contains("uma.threados.prompt.generate-copy"))
     }
 
+    @Test func promptComposerCopyExitsToMainWindowRouteAndReturnsBeforePageSwitchRestoresLinks() throws {
+        _ = NSApplication.shared
+        let controller = MainWindowController(restoresSavedFrame: false)
+        controller.attach(
+            store: UsageStore.preview(language: .english),
+            openSettings: {},
+            scanAll: {},
+            refreshAll: {},
+            connectCodex: {},
+            disconnectCodex: {},
+            claudeControlState: { .consentRequired },
+            connectClaude: {},
+            accuracySyncClaude: {}
+        )
+        defer { controller.tearDown() }
+        let originalAutorecalculatesKeyViewLoop = try #require(controller.window).autorecalculatesKeyViewLoop
+        controller.showDestination(.threadOS)
+        guard let window = controller.window, let contentView = window.contentView else {
+            Issue.record("Main UMA window did not attach its ThreadOS content view")
+            return
+        }
+        contentView.layoutSubtreeIfNeeded()
+        let boundaryIdentifier = "uma.threados.prompt.key-view-boundary"
+        let prelinkBoundary = try #require(descendants(of: contentView).first {
+            $0.accessibilityIdentifier() == boundaryIdentifier
+        })
+        let boundaryOriginalPrevious = prelinkBoundary.previousKeyView
+        settle(contentView)
+
+        let boundary = try #require(descendants(of: contentView).first {
+            $0.accessibilityIdentifier() == boundaryIdentifier
+        } as? ThreadOSPromptKeyViewLoopBoundaryView)
+        let promptIdentifiers = ThreadOSPromptRole.allCases.flatMap { role in
+            ["uma.threados.prompt.role.\(role.rawValue).model", "uma.threados.prompt.role.\(role.rawValue).effort"]
+        } + ["uma.threados.prompt.generate-copy"]
+        let promptViews = Dictionary(uniqueKeysWithValues: descendants(of: contentView).compactMap { view in
+            let identifier = view.accessibilityIdentifier()
+            return promptIdentifiers.contains(identifier) ? (identifier, view) : nil
+        })
+        let promptControls = try promptIdentifiers.map { try #require(promptViews[$0]) }
+        let copy = try #require(promptViews["uma.threados.prompt.generate-copy"])
+        let outerRouteIdentifiers: Set<String> = [
+            "uma.main.navigation", "uma.main.scan", "uma.main.refresh", "uma.main.settings"
+        ]
+
+        #expect(promptControls.count == 9)
+        #expect(promptControls.allSatisfy { $0.window === window && $0.canBecomeKeyView })
+        #expect(!window.autorecalculatesKeyViewLoop)
+        #expect(window.makeFirstResponder(copy))
+
+        for expected in promptControls.reversed().dropFirst() {
+            window.selectPreviousKeyView(nil)
+            #expect((window.firstResponder as? NSView) === expected, "Reverse Tab from Copy must traverse every prompt control.")
+        }
+        for expected in promptControls.dropFirst() {
+            window.selectNextKeyView(nil)
+            #expect((window.firstResponder as? NSView) === expected, "Forward Tab must traverse every prompt control before leaving Copy.")
+        }
+
+        window.selectNextKeyView(nil)
+        let afterCopy = window.firstResponder as? NSView
+        let afterCopyIdentifier = afterCopy.flatMap(accessibilityIdentifier(in:)) ?? ""
+        print("KEYBOARD_REPAIR_ROUTE copy.next=\(String(describing: copy.nextKeyView)) firstResponderAfterCopy=\(String(describing: afterCopy)) id=\(afterCopyIdentifier)")
+        #expect(afterCopy !== copy, "Tab from Copy must leave the composer rather than loop or stop on Copy.")
+        #expect(outerRouteIdentifiers.contains(afterCopyIdentifier), "Tab from Copy must re-enter the main toolbar navigation route.")
+
+        window.selectPreviousKeyView(nil)
+        #expect(window.firstResponder === copy, "Shift-Tab from the outer shell route must return to Copy.")
+
+        controller.showDestination(.agents)
+        guard let agentsContentView = window.contentView else {
+            Issue.record("Main UMA window lost its content view after leaving ThreadOS")
+            return
+        }
+        settle(agentsContentView)
+        #expect(window.autorecalculatesKeyViewLoop == originalAutorecalculatesKeyViewLoop)
+        #expect(boundary.previousKeyView === boundaryOriginalPrevious)
+        let agentsRoute = keyViewRoute(in: window)
+        let agentsIdentifiers = agentsRoute.compactMap(accessibilityIdentifier(in:))
+        #expect(agentsIdentifiers.contains("uma.main.navigation"))
+        #expect(agentsIdentifiers.contains("uma.main.scan"))
+        #expect(agentsIdentifiers.contains("uma.main.settings"))
+        #expect(!agentsIdentifiers.contains { $0.hasPrefix("uma.threados.prompt.role.") })
+        #expect(!agentsIdentifiers.contains("uma.threados.prompt.generate-copy"))
+    }
+
     @Test func workerExpansionIsPreservedIndependentlyForEachProjectAndAcrossReopen() {
         let preferences = ApplicationPreferences.inMemory()
         let alpha: Set<FactoriumV2Role> = [.coder]
