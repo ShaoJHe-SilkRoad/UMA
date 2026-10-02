@@ -32,90 +32,104 @@ struct ThreadOSPromptComposerTests {
         #expect(form.canGenerate)
     }
 
-    @Test func migratesOnlyLeaderAndQALegacyDefaultsAndPreservesOriginalDraft() throws {
+    @Test func preservesSavedSixSolSelectionsEffortsAndExistingRecoverySnapshotAcrossReopen() throws {
         let preferences = ApplicationPreferences.inMemory()
-        let legacy = StoredSelections(version: 1, selections: [
+        let saved = StoredSelections(version: 1, selections: [
             .init(role: .leader, model: "gpt-6-sol", effort: "low"),
-            .init(role: .coderCluster, model: "gpt-6-luna", effort: "medium"),
-            .init(role: .reviewerCluster, model: "gpt-6-sol", effort: "xhigh"),
-            .init(role: .qa, model: "gpt-6-sol", effort: "medium")
+            .init(role: .coderCluster, model: "gpt-6-sol", effort: "medium"),
+            .init(role: .reviewerCluster, model: "gpt-6-sol", effort: "high"),
+            .init(role: .qa, model: "gpt-6-sol", effort: "xhigh")
         ])
-        let original = try JSONEncoder().encode(legacy)
+        let original = try JSONEncoder().encode(saved)
+        let oldSnapshot = Data("previous recovery snapshot".utf8)
         preferences.set(original as Data?, for: ThreadOSPromptComposerPreferences.selections)
+        preferences.set(oldSnapshot as Data?, for: ThreadOSPromptComposerPreferences.legacySelections)
 
         let form = ThreadOSPromptComposerForm(preferences: preferences)
-        #expect(form.selection(for: .leader) == .init(model: "gpt-6.1-sol", effort: "high"))
-        #expect(form.selection(for: .qa) == .init(model: "gpt-6.1-sol", effort: "high"))
-        #expect(form.selection(for: .reviewerCluster) == .init(model: "gpt-6-sol", effort: "xhigh"))
-        #expect(form.canGenerate == false)
-        #expect(preferences.value(for: ThreadOSPromptComposerPreferences.legacySelections) == original)
-        #expect(form.statusMessage(language: .english)?.contains("recovery snapshot") == true)
-
-        form.selectModel("gpt-6-luna", for: .reviewerCluster)
+        #expect(form.selection(for: .leader) == .init(model: "gpt-6-sol", effort: "low"))
+        #expect(form.selection(for: .coderCluster) == .init(model: "gpt-6-sol", effort: "medium"))
+        #expect(form.selection(for: .reviewerCluster) == .init(model: "gpt-6-sol", effort: "high"))
+        #expect(form.selection(for: .qa) == .init(model: "gpt-6-sol", effort: "xhigh"))
         #expect(form.canGenerate)
-        let reopened = ThreadOSPromptComposerForm(preferences: preferences)
-        #expect(reopened.selection(for: .leader) == .init(model: "gpt-6.1-sol", effort: "high"))
-        #expect(preferences.value(for: ThreadOSPromptComposerPreferences.legacySelections) == original)
-    }
-
-    @Test func migratesLegacyTargetWithNoneEffortAndPreservesUnrelatedChoicesAcrossReopen() throws {
-        let preferences = ApplicationPreferences.inMemory()
-        let legacy = StoredSelections(version: 1, selections: [
-            .init(role: .leader, model: "gpt-6-sol", effort: "none"),
-            .init(role: .coderCluster, model: "gpt-6-luna", effort: "xhigh"),
-            .init(role: .reviewerCluster, model: "gpt-6-astra", effort: "low"),
-            .init(role: .qa, model: "gpt-6-sol", effort: "none")
-        ])
-        let original = try JSONEncoder().encode(legacy)
-        preferences.set(original as Data?, for: ThreadOSPromptComposerPreferences.selections)
-
-        let migrated = ThreadOSPromptComposerForm(preferences: preferences)
-        #expect(migrated.selection(for: .leader) == .init(model: "gpt-6.1-sol", effort: "high"))
-        #expect(migrated.selection(for: .qa) == .init(model: "gpt-6.1-sol", effort: "high"))
-        #expect(migrated.selection(for: .coderCluster) == .init(model: "gpt-6-luna", effort: "xhigh"))
-        #expect(migrated.selection(for: .reviewerCluster) == .init(model: "gpt-6-astra", effort: "low"))
-        #expect(migrated.canGenerate)
-        #expect(migrated.statusMessage(language: .english)?.contains("recovery snapshot") == true)
-        #expect(preferences.value(for: ThreadOSPromptComposerPreferences.legacySelections) == original)
-
-        let reopened = ThreadOSPromptComposerForm(preferences: preferences)
-        #expect(reopened.selections == migrated.selections)
-        #expect(reopened.canGenerate)
-        #expect(preferences.value(for: ThreadOSPromptComposerPreferences.legacySelections) == original)
-    }
-
-    @Test func invalidUnrelatedSelectionsRemainVisibleAndRepairDoesNotDiscardOtherChoices() throws {
-        let preferences = ApplicationPreferences.inMemory()
-        let stored = StoredSelections(version: 1, selections: [
-            .init(role: .leader, model: "gpt-6-sol", effort: "none"),
-            .init(role: .coderCluster, model: "retired-unknown-model", effort: "none"),
-            .init(role: .reviewerCluster, model: "gpt-6-astra", effort: "none"),
-            .init(role: .qa, model: "gpt-6-sol", effort: "none")
-        ])
-        let original = try JSONEncoder().encode(stored)
-        preferences.set(original as Data?, for: ThreadOSPromptComposerPreferences.selections)
-
-        let form = ThreadOSPromptComposerForm(preferences: preferences)
-        #expect(form.selection(for: .leader) == .init(model: "gpt-6.1-sol", effort: "high"))
-        #expect(form.selection(for: .coderCluster) == .init(model: "retired-unknown-model", effort: "none"))
-        #expect(form.selection(for: .reviewerCluster) == .init(model: "gpt-6-astra", effort: "none"))
-        #expect(!form.canGenerate)
-        #expect(form.statusMessage(language: .english)?.contains("Coder Cluster") == true)
-        #expect(form.statusMessage(language: .english)?.contains("Reviewer Cluster") == true)
-        #expect(form.statusMessage(language: .simplifiedChinese)?.contains("受支持") == true)
-        #expect(preferences.value(for: ThreadOSPromptComposerPreferences.legacySelections) == original)
+        #expect(form.statusMessage(language: .english) == nil)
+        #expect(preferences.value(for: ThreadOSPromptComposerPreferences.selections) == original)
+        #expect(preferences.value(for: ThreadOSPromptComposerPreferences.legacySelections) == oldSnapshot)
 
         let reopened = ThreadOSPromptComposerForm(preferences: preferences)
         #expect(reopened.selections == form.selections)
-        reopened.selectModel("gpt-6-luna", for: .coderCluster)
-        #expect(reopened.selection(for: .coderCluster) == .init(model: "gpt-6-luna", effort: "medium"))
-        #expect(reopened.selection(for: .reviewerCluster) == .init(model: "gpt-6-astra", effort: "none"))
-        reopened.selectEffort("low", for: .reviewerCluster)
         #expect(reopened.canGenerate)
-        #expect(reopened.selection(for: .leader) == .init(model: "gpt-6.1-sol", effort: "high"))
-        #expect(preferences.value(for: ThreadOSPromptComposerPreferences.legacySelections) == original)
-        let repairedAgain = ThreadOSPromptComposerForm(preferences: preferences)
-        #expect(repairedAgain.selections == reopened.selections)
+        #expect(preferences.value(for: ThreadOSPromptComposerPreferences.legacySelections) == oldSnapshot)
+    }
+
+    @Test func unsupportedSavedValuesRemainVisibleAndRequireExplicitCorrection() throws {
+        let preferences = ApplicationPreferences.inMemory()
+        let saved = StoredSelections(version: 1, selections: [
+            .init(role: .leader, model: "gpt-6-sol", effort: "none"),
+            .init(role: .coderCluster, model: "retired-unknown-model", effort: "none"),
+            .init(role: .reviewerCluster, model: "gpt-6-astra", effort: "none"),
+            .init(role: .qa, model: "gpt-6-sol", effort: "high")
+        ])
+        let original = try JSONEncoder().encode(saved)
+        preferences.set(original as Data?, for: ThreadOSPromptComposerPreferences.selections)
+
+        let form = ThreadOSPromptComposerForm(preferences: preferences)
+        #expect(form.selection(for: .leader) == .init(model: "gpt-6-sol", effort: "none"))
+        #expect(form.selection(for: .coderCluster) == .init(model: "retired-unknown-model", effort: "none"))
+        #expect(form.selection(for: .reviewerCluster) == .init(model: "gpt-6-astra", effort: "none"))
+        #expect(form.selection(for: .qa) == .init(model: "gpt-6-sol", effort: "high"))
+        #expect(!form.canGenerate)
+        #expect(form.statusMessage(language: .english)?.contains("Leader") == true)
+        #expect(form.statusMessage(language: .english)?.contains("Coder Cluster") == true)
+        #expect(form.statusMessage(language: .english)?.contains("Reviewer Cluster") == true)
+        #expect(preferences.value(for: ThreadOSPromptComposerPreferences.selections) == original)
+
+        let clipboard = ClipboardSpy()
+        #expect(form.generateAndCopy(language: .english, to: clipboard) == .unavailable)
+        #expect(clipboard.writes.isEmpty)
+
+        form.selectModel("gpt-6-luna", for: .coderCluster)
+        #expect(form.selection(for: .coderCluster) == .init(model: "gpt-6-luna", effort: "none"))
+        #expect(!form.canGenerate)
+        form.selectEffort("medium", for: .coderCluster)
+        form.selectEffort("low", for: .leader)
+        form.selectEffort("high", for: .reviewerCluster)
+        #expect(form.canGenerate)
+        #expect(form.selection(for: .qa) == .init(model: "gpt-6-sol", effort: "high"))
+        #expect(preferences.value(for: ThreadOSPromptComposerPreferences.legacySelections) == nil)
+
+        let reopened = ThreadOSPromptComposerForm(preferences: preferences)
+        #expect(reopened.selections == form.selections)
+        #expect(reopened.canGenerate)
+    }
+
+    @Test func sixSolSupportsEveryEffortForEachRoleInGeneratedCopiedPrompt() throws {
+        let form = ThreadOSPromptComposerForm(preferences: .inMemory())
+        let clipboard = ClipboardSpy()
+        let roles = ThreadOSPromptRole.allCases
+        let efforts = ThreadOSLeaderPrompt.supportedEfforts
+
+        for role in roles {
+            for effort in efforts {
+                form.selectModel("gpt-6-sol", for: role)
+                form.selectEffort(effort, for: role)
+                #expect(form.canGenerate)
+
+                for language in [AppLanguage.simplifiedChinese, .english] {
+                    #expect(form.generateAndCopy(language: language, to: clipboard) == .copied)
+                    let copied = try #require(clipboard.writes.last)
+                    #expect(copied.contains("\(role.label(for: language)): gpt-6-sol / \(effort)"))
+                    let selected = form.selection(for: role)
+                    let arguments = "`model: \"\(selected.model)\"`, `thinking: \"\(selected.effort)\"`"
+                    let expectedNativeValues = role == .leader
+                        ? (language == .english
+                            ? "set your own Leader selection to \(arguments)"
+                            : "将自己的 Leader 选择设为 \(arguments)")
+                        : "\(role.label(for: language)) \(arguments)"
+                    #expect(copied.contains(expectedNativeValues))
+                }
+            }
+        }
+        #expect(clipboard.writes.count == roles.count * efforts.count * 2)
     }
 
     @Test func allFourRoleSelectionsPersistAcrossReconstruction() throws {
@@ -125,13 +139,13 @@ struct ThreadOSPromptComposerTests {
         defer { firstDefaults.removePersistentDomain(forName: suiteName) }
 
         let form = ThreadOSPromptComposerForm(preferences: ApplicationPreferences(userDefaults: firstDefaults))
-        form.selectModel("gpt-6-astra", for: .leader)
+        form.selectModel("gpt-6-sol", for: .leader)
         form.selectEffort("low", for: .leader)
-        form.selectModel("gpt-5.6-sol", for: .coderCluster)
+        form.selectModel("gpt-6-sol", for: .coderCluster)
         form.selectEffort("xhigh", for: .coderCluster)
-        form.selectModel("gpt-6.1-sol", for: .reviewerCluster)
+        form.selectModel("gpt-6-sol", for: .reviewerCluster)
         form.selectEffort("high", for: .reviewerCluster)
-        form.selectModel("gpt-5.6-terra", for: .qa)
+        form.selectModel("gpt-6-sol", for: .qa)
         form.selectEffort("medium", for: .qa)
 
         let data = try #require(firstDefaults.data(forKey: ThreadOSPromptComposerPreferences.selections.name))
@@ -141,10 +155,10 @@ struct ThreadOSPromptComposerTests {
 
         let reopenedDefaults = try #require(UserDefaults(suiteName: suiteName))
         let reopened = ThreadOSPromptComposerForm(preferences: ApplicationPreferences(userDefaults: reopenedDefaults))
-        #expect(reopened.selection(for: .leader) == .init(model: "gpt-6-astra", effort: "low"))
-        #expect(reopened.selection(for: .coderCluster) == .init(model: "gpt-5.6-sol", effort: "xhigh"))
-        #expect(reopened.selection(for: .reviewerCluster) == .init(model: "gpt-6.1-sol", effort: "high"))
-        #expect(reopened.selection(for: .qa) == .init(model: "gpt-5.6-terra", effort: "medium"))
+        #expect(reopened.selection(for: .leader) == .init(model: "gpt-6-sol", effort: "low"))
+        #expect(reopened.selection(for: .coderCluster) == .init(model: "gpt-6-sol", effort: "xhigh"))
+        #expect(reopened.selection(for: .reviewerCluster) == .init(model: "gpt-6-sol", effort: "high"))
+        #expect(reopened.selection(for: .qa) == .init(model: "gpt-6-sol", effort: "medium"))
     }
 
     @Test func malformedStoredSelectionsFallBackToValidatedDefaults() {

@@ -319,13 +319,11 @@ final class ThreadOSPromptComposerForm: ObservableObject {
 
     @Published private(set) var selections: [ThreadOSPromptRole: ThreadOSPromptSelection]
     private let preferences: ApplicationPreferences
-    private let didMigrateLegacyTargets: Bool
 
     init(preferences: ApplicationPreferences) {
         self.preferences = preferences
         let loaded = Self.loadSelections(from: preferences)
         selections = loaded.selections ?? Self.defaultSelections
-        didMigrateLegacyTargets = loaded.didMigrateLegacyTargets
     }
 
     var invalidRoles: Set<ThreadOSPromptRole> {
@@ -337,16 +335,11 @@ final class ThreadOSPromptComposerForm: ObservableObject {
     }
 
     func statusMessage(language: AppLanguage) -> String? {
-        let migration = didMigrateLegacyTargets
-            ? (language == .simplifiedChinese
-                ? "已将已保存的 Leader/QA GPT-6 Sol 选择迁移为 GPT-6.1 Sol / High，并保留了迁移前快照。"
-                : "Saved Leader/QA GPT-6 Sol choices were migrated to GPT-6.1 Sol / High. The original selections were retained in a recovery snapshot.")
-            : nil
         let invalid = invalidRoles
         let validation = invalid.isEmpty ? nil : (language == .simplifiedChinese
             ? "以下已保存角色的模型或思考档位不受支持：\(invalid.sorted { $0.rawValue < $1.rawValue }.map { $0.label(for: language) }.joined(separator: "、"))。请在对应菜单中选择受支持的值；保留的选择不会被默认值替换。"
             : "Saved model or reasoning-effort values are unsupported for: \(invalid.sorted { $0.rawValue < $1.rawValue }.map { $0.label(for: language) }.joined(separator: ", ")). Choose a supported value in each role menu; saved choices are not replaced with defaults.")
-        let messages = [migration, validation].compactMap { $0 }
+        let messages = [validation].compactMap { $0 }
         return messages.isEmpty ? nil : messages.joined(separator: " ")
     }
 
@@ -367,8 +360,7 @@ final class ThreadOSPromptComposerForm: ObservableObject {
         guard ThreadOSLeaderPrompt.supportedModels.contains(model) else { return }
         let current = selection(for: role)
         guard current.model != model else { return }
-        let effort = ThreadOSLeaderPrompt.supportedEfforts.contains(current.effort) ? current.effort : "medium"
-        selections[role] = .init(model: model, effort: effort)
+        selections[role] = .init(model: model, effort: current.effort)
         persistSelections()
     }
 
@@ -393,41 +385,21 @@ final class ThreadOSPromptComposerForm: ObservableObject {
 
     private struct LoadResult {
         let selections: [ThreadOSPromptRole: ThreadOSPromptSelection]?
-        let didMigrateLegacyTargets: Bool
     }
 
     private static func loadSelections(from preferences: ApplicationPreferences) -> LoadResult {
         guard let data = preferences.value(for: ThreadOSPromptComposerPreferences.selections),
               let stored = try? JSONDecoder().decode(PersistedPromptSelections.self, from: data),
               stored.version == 1,
-              stored.selections.count == ThreadOSPromptRole.allCases.count else { return .init(selections: nil, didMigrateLegacyTargets: false) }
+              stored.selections.count == ThreadOSPromptRole.allCases.count else { return .init(selections: nil) }
 
         var decoded: [ThreadOSPromptRole: ThreadOSPromptSelection] = [:]
         for item in stored.selections {
-            guard decoded[item.role] == nil else { return .init(selections: nil, didMigrateLegacyTargets: false) }
+            guard decoded[item.role] == nil else { return .init(selections: nil) }
             decoded[item.role] = .init(model: item.model, effort: item.effort)
         }
-        guard ThreadOSPromptRole.allCases.allSatisfy({ decoded[$0] != nil }) else { return .init(selections: nil, didMigrateLegacyTargets: false) }
-        var didMigrate = false
-        for role in [ThreadOSPromptRole.leader, .qa] {
-            if decoded[role]?.model == "gpt-6-sol" {
-                decoded[role] = .init(model: "gpt-6.1-sol", effort: "high")
-                didMigrate = true
-            }
-        }
-        if didMigrate {
-            if preferences.value(for: ThreadOSPromptComposerPreferences.legacySelections) == nil {
-                preferences.set(data as Data?, for: ThreadOSPromptComposerPreferences.legacySelections)
-            }
-            let entries = ThreadOSPromptRole.allCases.map { role in
-                let selection = decoded[role]!
-                return PersistedPromptRoleSelection(role: role, model: selection.model, effort: selection.effort)
-            }
-            if let migrated = try? JSONEncoder().encode(PersistedPromptSelections(version: 1, selections: entries)) {
-                preferences.set(migrated as Data?, for: ThreadOSPromptComposerPreferences.selections)
-            }
-        }
-        return .init(selections: decoded, didMigrateLegacyTargets: didMigrate)
+        guard ThreadOSPromptRole.allCases.allSatisfy({ decoded[$0] != nil }) else { return .init(selections: nil) }
+        return .init(selections: decoded)
     }
 
     private func persistSelections() {
@@ -563,12 +535,7 @@ public struct ThreadOSPromptComposerView: View {
     private func modelOptions(for role: ThreadOSPromptRole) -> [ThreadOSPromptPopup.Option] {
         let current = form.selection(for: role).model
         var models = ThreadOSLeaderPrompt.supportedModels.map { ThreadOSPromptPopup.Option(title: $0, value: $0) }
-        if ThreadOSLeaderPrompt.legacyModels.contains(current) {
-            let title = language == .simplifiedChinese
-                ? "\(current)（旧版，选择替代项）"
-                : "\(current) (legacy — choose replacement)"
-            models.append(.init(title: title, value: current))
-        } else if !ThreadOSLeaderPrompt.supportedModels.contains(current) {
+        if !ThreadOSLeaderPrompt.supportedModels.contains(current) {
             let title = language == .simplifiedChinese
                 ? "\(current)（已保存但不受支持，选择替代项）"
                 : "\(current) (saved unsupported — choose replacement)"

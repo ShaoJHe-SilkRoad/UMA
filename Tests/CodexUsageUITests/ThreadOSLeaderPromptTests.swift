@@ -15,9 +15,9 @@ struct ThreadOSLeaderPromptTests {
         .qa: .init(model: "gpt-6-luna", effort: "medium")
     ]
 
-    @Test func exposesExactlyFiveModelsAndFourEfforts() {
+    @Test func exposesExactlySixModelsAndFourEfforts() {
         #expect(ThreadOSLeaderPrompt.supportedModels == [
-            "gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra"
+            "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra"
         ])
         #expect(ThreadOSLeaderPrompt.supportedEfforts == ["low", "medium", "high", "xhigh"])
     }

@@ -37,9 +37,8 @@ public struct ThreadOSPromptSelection: Equatable, Sendable, Codable {
 /// Builds a target-free executable instruction for the receiving Leader to apply its own team settings.
 public enum ThreadOSLeaderPrompt {
     public static let supportedModels = [
-        "gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra"
+        "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra"
     ]
-    public static let legacyModels = ["gpt-6-sol"]
     public static let supportedEfforts = ["low", "medium", "high", "xhigh"]
 
     public static func make(
