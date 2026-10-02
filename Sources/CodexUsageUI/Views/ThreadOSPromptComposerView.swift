@@ -601,8 +601,8 @@ public struct ThreadOSPromptComposerView: View {
         var title: String { text("ThreadOS prompt", "ThreadOS 提示") }
         var description: String {
             text(
-                "Choose a model and reasoning effort for each role. Copy the request for the receiving Leader; this does not change native selection.",
-                "为每个角色选择模型和思考档位，然后复制给接收 Leader。本操作不会切换原生模型。"
+                "Choose a model and reasoning effort for each role, then copy and paste to the receiving Leader to execute these team settings. Copying does not switch models.",
+                "为每个角色选择模型和思考档位，然后复制并粘贴给接收 Leader 执行本团队设置。复制本身不会切换模型。"
             )
         }
         var modelLabel: String { text("Model", "模型") }
