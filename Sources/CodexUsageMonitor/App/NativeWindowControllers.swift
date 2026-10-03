@@ -205,7 +205,9 @@ final class MainWindowController: NSWindowController {
         disconnectCodex: @escaping () -> Void,
         claudeControlState: @escaping () -> ClaudeAgentControlState,
         connectClaude: @escaping () -> Void,
-        accuracySyncClaude: @escaping () -> Void
+        accuracySyncClaude: @escaping () -> Void,
+        hesectoriumStore: HESectoriumStore? = nil,
+        promptClipboard: (any ThreadOSSettingsClipboard)? = nil
     ) {
         guard attachedStore == nil else { return }
         // NSHostingController may negotiate its minimum content size while it
@@ -224,7 +226,9 @@ final class MainWindowController: NSWindowController {
                 disconnectCodex: disconnectCodex,
                 claudeControlState: claudeControlState,
                 connectClaude: connectClaude,
-                accuracySyncClaude: accuracySyncClaude
+                accuracySyncClaude: accuracySyncClaude,
+                hesectoriumStore: hesectoriumStore,
+                promptClipboard: promptClipboard
             )
         )
         if let frameBeforeHosting {

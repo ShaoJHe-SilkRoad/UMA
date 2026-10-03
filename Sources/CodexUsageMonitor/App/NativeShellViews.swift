@@ -122,6 +122,8 @@ struct MainWindowRootView: View {
     let claudeControlState: () -> ClaudeAgentControlState
     let connectClaude: () -> Void
     let accuracySyncClaude: () -> Void
+    var hesectoriumStore: HESectoriumStore? = nil
+    var promptClipboard: (any ThreadOSSettingsClipboard)? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -136,7 +138,8 @@ struct MainWindowRootView: View {
                     showCodexDetail: {
                         navigation.selectedAgent = .codex
                         navigation.destination = .agents
-                    }
+                    },
+                    clipboard: promptClipboard ?? SystemThreadOSSettingsClipboard()
                 )
             }
         }
@@ -167,7 +170,10 @@ struct MainWindowRootView: View {
                 action: refreshAll
             )
             .frame(width: store.language == .simplifiedChinese ? 76 : 94, height: 30)
-            HESectoriumStatusControl(isChinese: store.language == .simplifiedChinese)
+            HESectoriumStatusControl(
+                isChinese: store.language == .simplifiedChinese,
+                store: hesectoriumStore
+            )
             MainToolbarActionButton(
                 label: localized("Global Settings", "全局设置"),
                 identifier: "uma.main.settings",

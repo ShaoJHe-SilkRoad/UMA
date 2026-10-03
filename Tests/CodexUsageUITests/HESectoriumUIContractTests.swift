@@ -20,7 +20,8 @@ struct HESectoriumUIContractTests {
     func compactEntries() throws {
         let toolbar = try source("Sources/CodexUsageMonitor/App/NativeShellViews.swift")
         let panel = try source("Sources/CodexUsageUI/Views/AgentSurfaceViews.swift")
-        #expect(toolbar.contains("HESectoriumStatusControl(isChinese:"))
+        #expect(toolbar.contains("HESectoriumStatusControl("))
+        #expect(toolbar.contains("store: hesectoriumStore"))
         #expect(panel.contains("HESectoriumStatusControl(isChinese:"))
         #expect(!settingsOrShellStartsStorageAction(toolbar))
     }

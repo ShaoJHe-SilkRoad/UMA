@@ -5,9 +5,9 @@ public struct HESectoriumSettingsView: View {
     @StateObject private var model: HESectoriumStore
     private let isChinese: Bool
 
-    public init(isChinese: Bool = false) {
+    public init(isChinese: Bool = false, store: HESectoriumStore? = nil) {
         self.isChinese = isChinese
-        _model = StateObject(wrappedValue: HESectoriumStore())
+        _model = StateObject(wrappedValue: store ?? HESectoriumStore())
     }
 
     public var body: some View {
@@ -21,26 +21,45 @@ public struct HESectoriumSettingsView: View {
                 LabeledContent(text("Pending eject recovery", "待处理的弹出恢复"), value: model.snapshot.pendingEject.map { $0 ? text("Yes", "是") : text("No", "否") } ?? text("Unknown", "未知"))
                 if case .missing = model.snapshot.installed {
                     HStack {
-                        Button(text("Install HESectorium", "安装 HESectorium")) { model.install() }
-                        Button(text("Repair HESectorium", "修复 HESectorium")) { model.installRepair() }
+                        HESectoriumSettingsNativeButton(
+                            title: text("Install HESectorium", "安装 HESectorium"),
+                            identifier: "uma.settings.hesectorium.install", isEnabled: !model.isBusy,
+                            action: model.install
+                        )
+                        HESectoriumSettingsNativeButton(
+                            title: text("Repair HESectorium", "修复 HESectorium"),
+                            identifier: "uma.settings.hesectorium.repair", isEnabled: !model.isBusy,
+                            action: model.installRepair
+                        )
                     }
                     .disabled(model.isBusy)
                 } else {
-                    Button(text("Repair HESectorium", "修复 HESectorium")) { model.installRepair() }
-                        .disabled(model.isBusy)
+                    HESectoriumSettingsNativeButton(
+                        title: text("Repair HESectorium", "修复 HESectorium"),
+                        identifier: "uma.settings.hesectorium.repair", isEnabled: !model.isBusy,
+                        action: model.installRepair
+                    )
                 }
-                Toggle(text("Enable mount automation", "启用挂载自动化"), isOn: Binding(
-                    get: { model.snapshot.automationEnabled },
-                    set: { model.setAutomation($0) }
-                ))
-                .disabled(model.isBusy)
+                HESectoriumSettingsNativeToggle(
+                    title: text("Enable mount automation", "启用挂载自动化"),
+                    identifier: "uma.settings.hesectorium.automation",
+                    isOn: model.snapshot.automationEnabled, isEnabled: !model.isBusy,
+                    action: model.setAutomation
+                )
                 HStack {
-                    Button(text("Mount DEV", "挂载 DEV")) { model.mountDEV() }
-                    Button(text("Safe Eject HE", "安全推出 HE")) { model.safeEjectHE() }
+                    HESectoriumSettingsNativeButton(
+                        title: text("Mount DEV", "挂载 DEV"), identifier: "uma.settings.hesectorium.mount",
+                        isEnabled: !model.isBusy, action: model.mountDEV
+                    )
+                    HESectoriumSettingsNativeButton(
+                        title: text("Safe Eject HE", "安全推出 HE"), identifier: "uma.settings.hesectorium.eject",
+                        isEnabled: !model.isBusy, action: model.safeEjectHE
+                    )
                 }
-                .disabled(model.isBusy)
-                Button(text("Refresh Status", "刷新状态")) { model.refresh() }
-                    .disabled(model.isBusy)
+                HESectoriumSettingsNativeButton(
+                    title: text("Refresh Status", "刷新状态"), identifier: "uma.settings.hesectorium.refresh",
+                    isEnabled: !model.isBusy, action: model.refresh
+                )
             } header: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("HESectorium").font(.title2.weight(.semibold))
@@ -98,26 +117,24 @@ public struct HESectoriumSettingsView: View {
 }
 
 public struct HESectoriumStatusControl: View {
-    @StateObject private var model = HESectoriumStore()
+    @StateObject private var model: HESectoriumStore
     private let isChinese: Bool
 
-    public init(isChinese: Bool = false) { self.isChinese = isChinese }
+    public init(isChinese: Bool = false, store: HESectoriumStore? = nil) {
+        self.isChinese = isChinese
+        _model = StateObject(wrappedValue: store ?? HESectoriumStore())
+    }
 
     public var body: some View {
-        Menu {
-            Text(statusText)
-            Text(text("Automation preference: \(model.snapshot.automationEnabled ? "Enabled" : "Disabled")", "自动化偏好：\(model.snapshot.automationEnabled ? "已启用" : "已停用")"))
-            Text(agentStatusText)
-            Divider()
-            Button(text("Mount DEV", "挂载 DEV"), systemImage: "externaldrive.badge.plus") { model.mountDEV() }
-            Button(text("Safe Eject HE", "安全推出 HE"), systemImage: "eject") { model.safeEjectHE() }
-            Button(text("Refresh Status", "刷新状态"), systemImage: "arrow.clockwise") { model.refresh() }
-        } label: {
-            Label(text("Storage", "存储"), systemImage: "externaldrive")
-        }
-        .disabled(model.isBusy)
+        HESectoriumNativeQuickActions(
+            model: model,
+            isChinese: isChinese,
+            readinessText: statusText,
+            automationText: text("Automation preference: \(model.snapshot.automationEnabled ? "Enabled" : "Disabled")", "自动化偏好：\(model.snapshot.automationEnabled ? "已启用" : "已停用")"),
+            agentStatusText: agentStatusText,
+            isEnabled: !model.isBusy
+        )
         .help(statusText)
-        .accessibilityIdentifier("uma.hesectorium.quick-actions")
         .onAppear { model.refresh() }
     }
 
@@ -136,4 +153,154 @@ public struct HESectoriumStatusControl: View {
         }
     }
     private func text(_ english: String, _ chinese: String) -> String { isChinese ? chinese : english }
+}
+
+
+private final class HESectoriumKeyboardButton: NSButton {
+    override var acceptsFirstResponder: Bool { isEnabled }
+    override var canBecomeKeyView: Bool { isEnabled && !isHidden && alphaValue > 0 }
+}
+
+@MainActor
+final class HESectoriumSettingsControlCoordinator: NSObject {
+    var action: (NSButton) -> Void
+
+    init(action: @escaping (NSButton) -> Void) {
+        self.action = action
+    }
+
+    @objc func activate(_ sender: NSButton) {
+        guard sender.isEnabled else { return }
+        action(sender)
+    }
+}
+
+private struct HESectoriumSettingsNativeButton: NSViewRepresentable {
+    let title: String
+    let identifier: String
+    let isEnabled: Bool
+    let action: () -> Void
+    func makeCoordinator() -> HESectoriumSettingsControlCoordinator {
+        HESectoriumSettingsControlCoordinator { _ in action() }
+    }
+    func makeNSView(context: Context) -> NSButton {
+        let button = HESectoriumKeyboardButton(title: title, target: context.coordinator, action: #selector(Coordinator.activate(_:)))
+        button.bezelStyle = .rounded
+        button.controlSize = .regular
+        button.refusesFirstResponder = false
+        button.focusRingType = .exterior
+        button.setAccessibilityLabel(title)
+        button.setAccessibilityIdentifier(identifier)
+        return button
+    }
+    func updateNSView(_ button: NSButton, context: Context) {
+        context.coordinator.action = { _ in action() }
+        button.title = title
+        button.isEnabled = isEnabled
+        button.setAccessibilityLabel(title)
+        button.setAccessibilityIdentifier(identifier)
+    }
+}
+
+private struct HESectoriumSettingsNativeToggle: NSViewRepresentable {
+    let title: String
+    let identifier: String
+    let isOn: Bool
+    let isEnabled: Bool
+    let action: (Bool) -> Void
+    func makeCoordinator() -> HESectoriumSettingsControlCoordinator {
+        HESectoriumSettingsControlCoordinator { sender in action(sender.state == .on) }
+    }
+    func makeNSView(context: Context) -> NSButton {
+        let button = HESectoriumKeyboardButton(checkboxWithTitle: title, target: context.coordinator, action: #selector(Coordinator.activate(_:)))
+        button.setButtonType(.switch)
+        button.refusesFirstResponder = false
+        button.focusRingType = .exterior
+        button.setAccessibilityLabel(title)
+        button.setAccessibilityIdentifier(identifier)
+        return button
+    }
+    func updateNSView(_ button: NSButton, context: Context) {
+        context.coordinator.action = { sender in action(sender.state == .on) }
+        button.title = title
+        button.state = isOn ? .on : .off
+        button.isEnabled = isEnabled
+        button.setAccessibilityLabel(title)
+        button.setAccessibilityIdentifier(identifier)
+    }
+}
+
+private struct HESectoriumNativeQuickActions: NSViewRepresentable {
+    let model: HESectoriumStore
+    let isChinese: Bool
+    let readinessText: String
+    let automationText: String
+    let agentStatusText: String
+    let isEnabled: Bool
+    func makeCoordinator() -> Coordinator { Coordinator(model: model) }
+    func makeNSView(context: Context) -> NSPopUpButton {
+        let button = HESectoriumKeyboardPopupButton(frame: .zero, pullsDown: true)
+        button.controlSize = .regular
+        button.refusesFirstResponder = false
+        button.focusRingType = .exterior
+        button.setAccessibilityLabel(isChinese ? "存储" : "Storage")
+        button.setAccessibilityIdentifier("uma.hesectorium.quick-actions")
+        context.coordinator.update(button, isChinese: isChinese, readinessText: readinessText,
+                                   automationText: automationText, agentStatusText: agentStatusText, isEnabled: isEnabled)
+        return button
+    }
+    func updateNSView(_ button: NSPopUpButton, context: Context) {
+        context.coordinator.model = model
+        context.coordinator.update(button, isChinese: isChinese, readinessText: readinessText,
+                                   automationText: automationText, agentStatusText: agentStatusText, isEnabled: isEnabled)
+    }
+    @MainActor final class Coordinator: NSObject {
+        var model: HESectoriumStore
+        init(model: HESectoriumStore) { self.model = model }
+        func update(_ button: NSPopUpButton, isChinese: Bool, readinessText: String,
+                    automationText: String, agentStatusText: String, isEnabled: Bool) {
+            isCurrentChinese = isChinese
+            let storageLabel = isChinese ? "存储" : "Storage"
+            let menu = NSMenu(title: storageLabel)
+            let title = NSMenuItem(title: storageLabel, action: nil, keyEquivalent: "")
+            title.image = NSImage(systemSymbolName: "externaldrive", accessibilityDescription: storageLabel)
+            menu.addItem(title)
+            let readiness = NSMenuItem(title: readinessText, action: nil, keyEquivalent: "")
+            readiness.isEnabled = false; menu.addItem(readiness)
+            let automation = NSMenuItem(title: automationText, action: nil, keyEquivalent: "")
+            automation.isEnabled = false; menu.addItem(automation)
+            let agent = NSMenuItem(title: agentStatusText, action: nil, keyEquivalent: "")
+            agent.isEnabled = false; menu.addItem(agent)
+            menu.addItem(.separator())
+            addAction("Mount DEV", chinese: "挂载 DEV", image: "externaldrive.badge.plus", key: "mount", to: menu)
+            addAction("Safe Eject HE", chinese: "安全推出 HE", image: "eject", key: "eject", to: menu)
+            addAction("Refresh Status", chinese: "刷新状态", image: "arrow.clockwise", key: "refresh", to: menu)
+            button.menu = menu
+            button.selectItem(at: 0)
+            button.isEnabled = isEnabled
+            button.setAccessibilityLabel(storageLabel)
+            button.setAccessibilityIdentifier("uma.hesectorium.quick-actions")
+        }
+        private func addAction(_ english: String, chinese: String, image: String, key: String, to menu: NSMenu) {
+            let title = isCurrentChinese ? chinese : english
+            let item = NSMenuItem(title: title, action: #selector(activate(_:)), keyEquivalent: "")
+            item.target = self; item.representedObject = key
+            item.image = NSImage(systemSymbolName: image, accessibilityDescription: title)
+            menu.addItem(item)
+        }
+        private var isCurrentChinese = false
+        @objc func activate(_ item: NSMenuItem) {
+            switch item.representedObject as? String {
+            case "mount": model.mountDEV()
+            case "eject": model.safeEjectHE()
+            case "refresh": model.refresh()
+            default: break
+            }
+        }
+    }
+}
+
+private final class HESectoriumKeyboardPopupButton: NSPopUpButton {
+    override var acceptsFirstResponder: Bool { isEnabled }
+    override var canBecomeKeyView: Bool { isEnabled && !isHidden && alphaValue > 0 }
 }

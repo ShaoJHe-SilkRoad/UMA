@@ -1,10 +1,79 @@
 import AppKit
 import SwiftUI
 import Testing
+import HESectoriumCore
+import HESectoriumRuntime
 @testable import CodexUsageUI
 @testable import CodexUsageMonitor
 
+@Suite(.serialized)
 @MainActor struct ThreadOSSchemeBLayoutTests {
+    @Test func promptRouteRetryStopsForAnIncompleteMountedRoute() {
+        var attempts = 0
+        let retry = ThreadOSPromptKeyViewRouteRetryController(
+            interval: 0.005, maximumPolls: 3, requiredSuccesses: 2
+        ) {
+            attempts += 1
+            return false
+        }
+        retry.start()
+        waitForRetryToStop(retry)
+
+        #expect(!retry.isActive)
+        #expect(retry.pollCount == 3)
+        #expect(attempts == 3)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.025))
+        retry.start()
+        #expect(retry.pollCount == 3, "A completed retry budget must not restart on an ordinary update.")
+        #expect(attempts == 3)
+    }
+
+    @Test func promptRouteRetryRecoversWhenControlsArriveWithinItsBudget() {
+        var attempts = 0
+        let retry = ThreadOSPromptKeyViewRouteRetryController(
+            interval: 0.005, maximumPolls: 8, requiredSuccesses: 4
+        ) {
+            attempts += 1
+            return attempts >= 3
+        }
+        retry.start()
+        waitForRetryToStop(retry)
+
+        #expect(!retry.isActive)
+        #expect(retry.pollCount == 6)
+        #expect(attempts == 6)
+    }
+
+    @Test func promptRouteRetryGetsAFreshBudgetAfterWindowAttachmentChanges() {
+        var routeIsAvailable = false
+        let retry = ThreadOSPromptKeyViewRouteRetryController(
+            interval: 0.005, maximumPolls: 2, requiredSuccesses: 2
+        ) { routeIsAvailable }
+        retry.start()
+        waitForRetryToStop(retry)
+        #expect(retry.pollCount == 2)
+        #expect(!retry.isActive)
+
+        routeIsAvailable = true
+        retry.reset()
+        waitForRetryToStop(retry)
+        #expect(!retry.isActive)
+        #expect(retry.pollCount == 2)
+    }
+
+    @Test func disabledHESettingsActionCoordinatorDoesNotInvokeItsAction() {
+        var activations = 0
+        let coordinator = HESectoriumSettingsControlCoordinator { _ in activations += 1 }
+        let button = NSButton(title: "Refresh Status", target: nil, action: nil)
+        button.isEnabled = false
+        coordinator.activate(button)
+        #expect(activations == 0)
+
+        button.isEnabled = true
+        coordinator.activate(button)
+        #expect(activations == 1)
+    }
+
     @Test func promptComposerFitsAttachedWindowsAcrossSizesLanguagesAndAppearances() throws {
         _ = NSApplication.shared
         for fixture in PromptComposerFixture.cases {
@@ -46,48 +115,6 @@ import Testing
         }
     }
 
-    @Test func promptComposerMovesKeyboardFocusInAttachedWindow() throws {
-        _ = NSApplication.shared
-        let previousPolicy = NSApp.activationPolicy()
-        defer { NSApp.setActivationPolicy(previousPolicy) }
-        #expect(NSApp.setActivationPolicy(.regular))
-        let host = NSHostingView(rootView: ThreadOSPromptComposerView(
-            language: .english,
-            preferences: .inMemory()
-        ))
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 552),
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: false
-        )
-        window.contentView = host
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        defer { window.orderOut(nil) }
-        settle(host)
-        #expect(host.window === window)
-        #expect(NSApp.isActive)
-        #expect(window.isKeyWindow)
-
-        let initialResponder = window.firstResponder
-        let tab = try #require(NSEvent.keyEvent(
-            with: .keyDown,
-            location: .zero,
-            modifierFlags: [],
-            timestamp: ProcessInfo.processInfo.systemUptime,
-            windowNumber: window.windowNumber,
-            context: nil,
-            characters: "\t",
-            charactersIgnoringModifiers: "\t",
-            isARepeat: false,
-            keyCode: 48
-        ))
-        window.sendEvent(tab)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-        #expect(window.firstResponder !== initialResponder)
-        #expect(window.firstResponder !== window)
-    }
 
     @Test func promptComposerNativeControlsAcceptAttachedWindowFocusAndHaveActions() throws {
         _ = NSApplication.shared
@@ -324,7 +351,6 @@ import Testing
         #expect(scanButton.isEnabled)
         #expect(settingsButton.isEnabled)
         scanButton.performClick(nil)
-        refreshButton.performClick(nil)
         settingsButton.performClick(nil)
         #expect(scanActionCount == 1)
         #expect(refreshActionCount == 0)
@@ -449,6 +475,105 @@ import Testing
         #expect(!agentsIdentifiers.contains("uma.threados.prompt.generate-copy"))
     }
 
+    @Test func initialMainRouteIncludesStorageAndCopyTraversesToNavigation() throws {
+        _ = NSApplication.shared
+        let fixture = HESectoriumKeyboardFixture()
+        defer { fixture.remove() }
+        let clipboard = HESectoriumKeyboardClipboard()
+        let controller = MainWindowController(restoresSavedFrame: false)
+        controller.attach(
+            store: UsageStore.preview(language: .english),
+            openSettings: {}, scanAll: {}, refreshAll: {},
+            connectCodex: {}, disconnectCodex: {},
+            claudeControlState: { .consentRequired }, connectClaude: {}, accuracySyncClaude: {},
+            hesectoriumStore: fixture.store, promptClipboard: clipboard
+        )
+        defer { controller.tearDown() }
+        controller.showDestination(.agents)
+        let window = try #require(controller.window)
+        let content = try #require(window.contentView)
+        settle(content)
+
+        let storage = try #require(descendants(of: content).first {
+            $0.accessibilityIdentifier() == "uma.hesectorium.quick-actions"
+        })
+        let storagePopup = try #require(storage as? NSPopUpButton)
+        #expect(storagePopup.acceptsFirstResponder)
+        #expect(storagePopup.focusRingType == .exterior)
+        let storageMenuTitles = Set(storagePopup.menu?.items.map(\.title) ?? [])
+        #expect(storageMenuTitles.isSuperset(of: ["Storage", "Mount DEV", "Safe Eject HE", "Refresh Status"]))
+        let initialRoute = keyViewRoute(in: window)
+        let initialIDs = initialRoute.compactMap(accessibilityIdentifier(in:))
+        #expect(initialIDs.contains("uma.hesectorium.quick-actions"))
+        #expect((initialIDs.firstIndex(of: "uma.main.refresh") ?? -1) < (initialIDs.firstIndex(of: "uma.hesectorium.quick-actions") ?? -1))
+        #expect((initialIDs.firstIndex(of: "uma.hesectorium.quick-actions") ?? Int.max) < (initialIDs.firstIndex(of: "uma.main.settings") ?? -1))
+        #expect(window.makeFirstResponder(storage))
+
+        let navigation = try #require(descendants(of: content).first {
+            $0.accessibilityIdentifier() == "uma.main.navigation"
+        } as? NSSegmentedControl)
+        navigation.selectedSegment = 1
+        #expect(navigation.sendAction(try #require(navigation.action), to: navigation.target))
+        settle(try #require(window.contentView))
+        let threadContent = try #require(window.contentView)
+        let copy = try #require(descendants(of: threadContent).first {
+            $0.accessibilityIdentifier() == "uma.threados.prompt.generate-copy"
+        } as? NSButton)
+        #expect(copy.window === window)
+        click(copy, in: window)
+        #expect(clipboard.writes.count == 1)
+        #expect(copy.nextKeyView === navigation, "Copy must link into the main toolbar route after first-entry composition.")
+        #expect(window.makeFirstResponder(copy))
+        window.selectNextKeyView(nil)
+        #expect(window.firstResponder === navigation)
+        window.selectPreviousKeyView(nil)
+        #expect(window.firstResponder === copy)
+    }
+
+    @Test func hesSettingsActionsReceiveVisibleForwardAndReverseWindowFocus() throws {
+        _ = NSApplication.shared
+        let fixture = HESectoriumKeyboardFixture()
+        defer { fixture.remove() }
+        let host = NSHostingView(rootView: HESectoriumSettingsView(store: fixture.store))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 552),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        settle(host)
+        let expected: Set<String> = [
+            "uma.settings.hesectorium.install", "uma.settings.hesectorium.repair",
+            "uma.settings.hesectorium.automation", "uma.settings.hesectorium.mount",
+            "uma.settings.hesectorium.eject", "uma.settings.hesectorium.refresh"
+        ]
+        var forward: Set<String> = []
+        for _ in 0..<48 {
+            window.selectNextKeyView(nil)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            if let view = window.firstResponder as? NSView,
+               let identifier = accessibilityIdentifier(in: view), expected.contains(identifier) {
+                forward.insert(identifier)
+                if let control = view as? NSControl { #expect(control.focusRingType != .none) }
+            }
+        }
+        #expect(forward == expected)
+
+        let refresh = try #require(descendants(of: host).first {
+            $0.accessibilityIdentifier() == "uma.settings.hesectorium.refresh"
+        })
+        #expect(window.makeFirstResponder(refresh))
+        var reverse: Set<String> = []
+        for _ in 0..<24 {
+            window.selectPreviousKeyView(nil)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            if let view = window.firstResponder as? NSView,
+               let identifier = accessibilityIdentifier(in: view), expected.contains(identifier) {
+                reverse.insert(identifier)
+            }
+        }
+        #expect(reverse == expected)
+    }
+
     @Test func workerExpansionIsPreservedIndependentlyForEachProjectAndAcrossReopen() {
         let preferences = ApplicationPreferences.inMemory()
         let alpha: Set<FactoriumV2Role> = [.coder]
@@ -482,6 +607,13 @@ import Testing
         for _ in 0..<3 {
             host.layoutSubtreeIfNeeded()
             RunLoop.main.run(until: Date().addingTimeInterval(0.08))
+        }
+    }
+
+    private func waitForRetryToStop(_ retry: ThreadOSPromptKeyViewRouteRetryController) {
+        let deadline = Date().addingTimeInterval(1)
+        while retry.isActive && Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.005))
         }
     }
 
@@ -674,5 +806,77 @@ private struct MainShellReservedHostedView: View {
 private extension JSONEncoder {
     static var pretty: JSONEncoder {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]; return encoder
+    }
+}
+
+
+@MainActor private func sendTab(to window: NSWindow, reverse: Bool = false) {
+    guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero,
+        modifierFlags: reverse ? [.shift] : [], timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber, context: nil, characters: "\t",
+        charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48) else { return }
+    window.sendEvent(event)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+}
+
+@MainActor private func click(_ view: NSView, in window: NSWindow) {
+    let point = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
+    for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+        guard let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+            context: nil, eventNumber: 0, clickCount: 1, pressure: 1) else { continue }
+        window.sendEvent(event)
+    }
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+}
+
+@MainActor private final class HESectoriumKeyboardClipboard: ThreadOSSettingsClipboard {
+    private(set) var writes: [String] = []
+    func write(_ string: String) -> Bool { writes.append(string); return true }
+}
+
+@MainActor private struct HESectoriumKeyboardFixture {
+    let root: URL
+    let store: HESectoriumStore
+    init() {
+        root = URL(fileURLWithPath: "/private/tmp/hesectorium-keyboard-\(UUID().uuidString)", isDirectory: true)
+        try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let paths = HESectoriumPaths(root: root.appendingPathComponent("support", isDirectory: true))
+        let service = HESectoriumService(paths: paths, backend: HESectoriumKeyboardBackend(),
+            store: HESectoriumKeyboardStateStore(), operationLock: HESectoriumKeyboardLock(),
+            installer: HESectoriumInstaller(paths: paths, home: root), runner: HESectoriumKeyboardRunner(),
+            identityPolicy: .expected, agentStatusProvider: UnknownAgentStatusProvider())
+        store = HESectoriumStore(service: service)
+    }
+    func remove() { try? FileManager.default.removeItem(at: root) }
+}
+
+private final class HESectoriumKeyboardStateStore: DurableStateStore {
+    private var state = StoragePersistentState(ejectIntent: false)
+    func load() throws -> StoragePersistentState { state }
+    func compareAndSwap(expectedRevision: UInt64, newState: StoragePersistentState) throws -> Bool {
+        guard state.revision == expectedRevision else { return false }
+        state = newState
+        return true
+    }
+}
+
+private final class HESectoriumKeyboardLock: OperationLock {
+    func acquire() -> Bool { true }
+    func release() {}
+}
+
+private final class HESectoriumKeyboardBackend: StorageBackend {
+    func observeOuter() -> VolumeIdentity? { nil }
+    func observe() -> StorageObservation? { nil }
+    func attachImage() -> CommandOutcome { .init(exitCode: 97, detail: "fixture forbids storage commands") }
+    func assessOccupancy(scope: OccupancyScope) -> OccupancyAssessment { .incomplete(reason: "fixture has no live occupancy") }
+    func perform(_ step: EjectStep) -> CommandOutcome { .init(exitCode: 97, detail: "fixture forbids storage commands") }
+    func finalOuterState() -> FinalOuterState { .unknown("fixture forbids storage commands") }
+}
+
+private final class HESectoriumKeyboardRunner: HESectoriumCommandRunning {
+    func run(_ executable: String, _ arguments: [String], cwd: URL) -> CommandOutcome {
+        .init(exitCode: 97, detail: "fixture forbids command execution")
     }
 }

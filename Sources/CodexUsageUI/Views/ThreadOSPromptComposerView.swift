@@ -131,37 +131,49 @@ private struct ThreadOSPromptKeyViewLoopAttachment: NSViewRepresentable {
             ["uma.threados.prompt.role.\(role.rawValue).model", "uma.threados.prompt.role.\(role.rawValue).effort"]
         } + ["uma.threados.prompt.generate-copy"]
 
-        private var timer: Timer?
-        private var pollCount = 0
-        private var consecutiveLinkedPolls = 0
+        private var routeRetry: ThreadOSPromptKeyViewRouteRetryController?
+        private weak var attachmentView: NSView?
+        private weak var observedWindow: NSWindow?
+        private var hasObservedWindow = false
         private var originalLinks: [KeyViewLinkSnapshot] = []
         private weak var keyLoopWindow: NSWindow?
         private var originalAutorecalculatesKeyViewLoop: Bool?
 
         func start(from view: NSView) {
-            guard timer == nil else { return }
-            pollCount = 0
-            consecutiveLinkedPolls = 0
-            timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self, weak view] timer in
-                guard let self, let view else { timer.invalidate(); return }
-                self.pollCount += 1
-                if let window = view.window, self.link(in: window) {
-                    self.consecutiveLinkedPolls += 1
-                } else {
-                    self.consecutiveLinkedPolls = 0
-                }
-                if self.pollCount >= 20 || self.consecutiveLinkedPolls >= 4 {
-                    timer.invalidate()
-                    self.timer = nil
-                }
+            if attachmentView !== view {
+                routeRetry?.stop()
+                routeRetry = nil
+                hasObservedWindow = false
             }
+            attachmentView = view
+            let currentWindow = view.window
+            if hasObservedWindow, observedWindow !== currentWindow {
+                restoreOriginalLinks()
+                restoreKeyViewLoopCalculation()
+                routeRetry?.reset()
+            } else if routeRetry == nil {
+                routeRetry = ThreadOSPromptKeyViewRouteRetryController { [weak self] in
+                    self?.pollKeyViewRoute() ?? false
+                }
+                routeRetry?.start()
+            }
+            observedWindow = currentWindow
+            hasObservedWindow = true
         }
 
         func stop() {
-            timer?.invalidate()
-            timer = nil
+            routeRetry?.stop()
+            routeRetry = nil
+            attachmentView = nil
+            observedWindow = nil
+            hasObservedWindow = false
             restoreOriginalLinks()
             restoreKeyViewLoopCalculation()
+        }
+
+        private func pollKeyViewRoute() -> Bool {
+            guard let view = attachmentView, let window = view.window else { return false }
+            return link(in: window)
         }
 
         @discardableResult
@@ -270,6 +282,70 @@ private struct ThreadOSPromptKeyViewLoopAttachment: NSViewRepresentable {
             self.view = view
             originalNextView = view.nextKeyView
         }
+    }
+}
+
+/// Retries a changing SwiftUI key-view route for a bounded period. The caller
+/// resets the budget only when the representable attaches to a different window.
+@MainActor
+final class ThreadOSPromptKeyViewRouteRetryController: NSObject {
+    private let interval: TimeInterval
+    private let maximumPolls: Int
+    private let requiredSuccesses: Int
+    private let poll: () -> Bool
+    private var timer: Timer?
+    private(set) var pollCount = 0
+    private var consecutiveSuccesses = 0
+    private var hasStarted = false
+
+    var isActive: Bool { timer?.isValid == true }
+
+    init(interval: TimeInterval = 0.05, maximumPolls: Int = 200,
+         requiredSuccesses: Int = 4, poll: @escaping () -> Bool) {
+        self.interval = max(interval, 0.001)
+        self.maximumPolls = max(maximumPolls, 1)
+        self.requiredSuccesses = max(requiredSuccesses, 1)
+        self.poll = poll
+        super.init()
+    }
+
+    func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
+        pollCount = 0
+        consecutiveSuccesses = 0
+        let timer = Timer(timeInterval: interval, target: self,
+                          selector: #selector(tick(_:)), userInfo: nil, repeats: true)
+        self.timer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    func reset() {
+        invalidateTimer()
+        hasStarted = false
+        start()
+    }
+
+    func stop() {
+        invalidateTimer()
+        hasStarted = true
+    }
+
+    @objc private func tick(_ timer: Timer) {
+        pollCount += 1
+        if poll() {
+            consecutiveSuccesses += 1
+        } else {
+            consecutiveSuccesses = 0
+        }
+        if consecutiveSuccesses >= requiredSuccesses || pollCount >= maximumPolls {
+            invalidateTimer()
+        }
+    }
+
+    private func invalidateTimer() {
+        timer?.invalidate()
+        timer = nil
     }
 }
 
