@@ -423,6 +423,7 @@ public struct QuickPanelSurface: View {
                 .disabled(!store.allowsManualRefresh)
             headerButton(localized("Desktop Wizard", "桌面向导"), "wand.and.stars", toggleWizard)
             headerButton(localized("Settings", "设置"), "gearshape", openSettings)
+            HESectoriumStatusControl(isChinese: store.language == .simplifiedChinese)
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 9)
@@ -1535,6 +1536,7 @@ public enum GlobalSettingsPane: String, CaseIterable, Identifiable, Sendable {
     case appearance = "Appearance"
     case desktopWizard = "Desktop Wizard"
     case privacy = "Privacy & Data"
+    case hesectorium = "HESectorium"
     public var id: String { rawValue }
 }
 
@@ -1807,6 +1809,8 @@ public struct GlobalSettingsSurface: View {
                     )
                     .accessibilityIdentifier("uma.settings.wizard.reset-position")
                 }
+            case .hesectorium:
+                HESectoriumSettingsView(isChinese: model.language == .simplifiedChinese)
             case .privacy:
                 settingsSection(
                     title: localized("Privacy & Data", "隐私与数据"),
@@ -1893,6 +1897,7 @@ public struct GlobalSettingsSurface: View {
         case .appearance: "paintbrush"
         case .desktopWizard: "wand.and.stars"
         case .privacy: "hand.raised"
+        case .hesectorium: "externaldrive"
         }
     }
 
@@ -1902,6 +1907,7 @@ public struct GlobalSettingsSurface: View {
         case .appearance: localized("Appearance", "外观")
         case .desktopWizard: localized("Desktop Wizard", "桌面向导")
         case .privacy: localized("Privacy & Data", "隐私与数据")
+        case .hesectorium: "HESectorium"
         }
     }
 

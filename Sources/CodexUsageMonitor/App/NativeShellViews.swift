@@ -167,6 +167,7 @@ struct MainWindowRootView: View {
                 action: refreshAll
             )
             .frame(width: store.language == .simplifiedChinese ? 76 : 94, height: 30)
+            HESectoriumStatusControl(isChinese: store.language == .simplifiedChinese)
             MainToolbarActionButton(
                 label: localized("Global Settings", "全局设置"),
                 identifier: "uma.main.settings",

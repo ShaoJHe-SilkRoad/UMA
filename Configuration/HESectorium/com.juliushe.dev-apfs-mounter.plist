@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.juliushe.dev-apfs-mounter</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__UMA_CONTROL_PATH__</string>
+        <string>agent</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>StandardOutPath</key>
+        <string>__UMA_LOG_OUT__</string>
+    <key>StandardErrorPath</key>
+        <string>__UMA_LOG_ERR__</string>
+</dict>
+</plist>

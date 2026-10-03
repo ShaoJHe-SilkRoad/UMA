@@ -1,0 +1,8 @@
+{
+  "outerUUID": "2FE2A779-0DC8-3468-8E3C-E113598C46CE",
+  "devUUID": "0476F9CC-86A3-40D8-A8D4-83D882522CAD",
+  "outerMountPoint": "/Volumes/HE",
+  "devMountPoint": "/Volumes/HE/DEV",
+  "devVolumeName": "DEV_APFS",
+  "imagePath": "/Volumes/HE/.DEV-APFS.sparsebundle"
+}

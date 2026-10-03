@@ -12,12 +12,37 @@ let package = Package(
         .executable(name: "ClaudeStatusLineRelay", targets: ["ClaudeStatusLineRelay"]),
         .executable(name: "ClaudeBrowserNativeHost", targets: ["ClaudeBrowserNativeHost"]),
         .executable(name: "UMASafariBridgeHost", targets: ["UMASafariBridgeHost"]),
-        .executable(name: "PreviewRendererTool", targets: ["PreviewRendererTool"])
+        .executable(name: "PreviewRendererTool", targets: ["PreviewRendererTool"]),
+        .executable(name: "HESectoriumControl", targets: ["HESectoriumControl"])
     ],
     targets: [
         .target(
             name: "ClaudeStatusLineCore",
             path: "Sources/ClaudeStatusLineCore"
+        ),
+        .target(
+            name: "HESectoriumCore",
+            path: "Sources/HESectoriumCore"
+        ),
+        .target(
+            name: "HESectoriumRuntime",
+            dependencies: ["HESectoriumCore"],
+            path: "Sources/HESectoriumRuntime"
+        ),
+        .target(
+            name: "HESectoriumCLI",
+            dependencies: ["HESectoriumCore", "HESectoriumRuntime"],
+            path: "Sources/HESectoriumCLI"
+        ),
+        .executableTarget(
+            name: "HESectoriumControl",
+            dependencies: ["HESectoriumCore", "HESectoriumRuntime", "HESectoriumCLI"],
+            path: "Sources/HESectoriumControl"
+        ),
+        .executableTarget(
+            name: "HESectoriumControlTestHarness",
+            dependencies: ["HESectoriumCore", "HESectoriumRuntime", "HESectoriumCLI"],
+            path: "Tests/HESectoriumControlTestHarness"
         ),
         .executableTarget(
             name: "ClaudeStatusLineRelay",
@@ -62,6 +87,7 @@ let package = Package(
                 "ClaudeBrowserBridgeProtocol",
                 "ClaudeBrowserNativeHostCore",
                 "ClaudeSafariHostIPC",
+                "HESectoriumRuntime",
             ],
             path: "Sources/CodexUsageUI",
             resources: [.process("Resources")]
@@ -96,6 +122,16 @@ let package = Package(
                 "ClaudeSafariHostIPC",
             ],
             path: "Tests/ClaudeBrowserBridgeCoreTests"
+        ),
+        .testTarget(
+            name: "HESectoriumCoreTests",
+            dependencies: ["HESectoriumCore"],
+            path: "Tests/HESectoriumCoreTests"
+        ),
+        .testTarget(
+            name: "HESectoriumRuntimeTests",
+            dependencies: ["HESectoriumRuntime", "HESectoriumCore"],
+            path: "Tests/HESectoriumRuntimeTests"
         )
     ]
 )

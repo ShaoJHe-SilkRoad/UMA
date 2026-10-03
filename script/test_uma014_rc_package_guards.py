@@ -245,6 +245,50 @@ class RCGuards(unittest.TestCase):
         self.assertEqual(records[0]['sha256'], rc.sha(path))
         self.assertEqual(records[1]['target'], 'file')
 
+    def hesectorium_fixture(self):
+        source = self.root / 'source'
+        assets = source / 'Configuration/HESectorium'
+        assets.mkdir(parents=True)
+        identity = {
+            'outerUUID': '2FE2A779-0DC8-3468-8E3C-E113598C46CE',
+            'devUUID': '0476F9CC-86A3-40D8-A8D4-83D882522CAD',
+            'outerMountPoint': '/Volumes/HE', 'devMountPoint': '/Volumes/HE/DEV',
+            'devVolumeName': 'DEV_APFS', 'imagePath': '/Volumes/HE/.DEV-APFS.sparsebundle'}
+        (assets / 'storage-identity.json').write_text(rc.json.dumps(identity))
+        (assets / 'dev-apfs-mount').write_text('#!/bin/sh\nexit 0\n')
+        (assets / 'he-eject').write_text('#!/bin/sh\nexit 0\n')
+        (assets / 'com.juliushe.dev-apfs-mounter.plist').write_bytes(plistlib.dumps({
+            'Label': 'com.juliushe.dev-apfs-mounter', 'RunAtLoad': True,
+            'ProgramArguments': ['__UMA_CONTROL_PATH__', 'agent']}))
+        bin_path = self.root / 'bin'
+        bin_path.mkdir()
+        (bin_path / 'HESectoriumControl').write_bytes(b'fixture executable')
+        app = self.root / 'UMA.app'
+        (app / 'Contents').mkdir(parents=True)
+        return bin_path, app, source
+
+    def test_hesectorium_assets_are_copied_with_identity_and_modes(self):
+        bin_path, app, source = self.hesectorium_fixture()
+        report = rc.copy_hesectorium_assets(bin_path, app, source)
+        helper = app / 'Contents/Helpers/HESectoriumControl'
+        resources = app / 'Contents/Resources/HESectorium'
+        self.assertEqual(helper.read_bytes(), b'fixture executable')
+        self.assertEqual((helper.stat().st_mode & 0o777), 0o755)
+        self.assertEqual(report['control']['sha256'], rc.sha(helper))
+        self.assertEqual((resources / 'storage-identity.json').read_text(),
+                         (source / 'Configuration/HESectorium/storage-identity.json').read_text())
+        self.assertEqual((resources / 'dev-apfs-mount').stat().st_mode & 0o777, 0o700)
+        self.assertEqual((resources / 'storage-identity.json').stat().st_mode & 0o777, 0o600)
+
+    def test_hesectorium_assets_reject_identity_mismatch(self):
+        bin_path, app, source = self.hesectorium_fixture()
+        path = source / 'Configuration/HESectorium/storage-identity.json'
+        value = rc.json.loads(path.read_text())
+        value['outerUUID'] = '00000000-0000-0000-0000-000000000000'
+        path.write_text(rc.json.dumps(value))
+        with self.assertRaisesRegex(rc.Refusal, 'HES_IDENTITY_ASSET_MISMATCH'):
+            rc.copy_hesectorium_assets(bin_path, app, source)
+
     def catalog_fixture(self, root, *, revision_v2='sol-luna-20260922.1',
                         revision_v3='sol-luna-20261001.1', built_v2_marker='canonical',
                         built_v3_marker='canonical'):

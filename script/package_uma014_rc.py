@@ -191,6 +191,52 @@ def copy_swiftpm_resource_bundle(bin_path, resources, source_root):
             'manifest': manifest(packaged)}
 
 
+def copy_hesectorium_assets(bin_path, app, source_root):
+    """Bundle the one shared controller and its explicit deployment assets."""
+    control_source = bin_path / 'HESectoriumControl'
+    require(control_source.is_file() and not control_source.is_symlink(),
+            'HES_CONTROL_BINARY_MISSING')
+    helper_dir = app / 'Contents/Helpers'
+    helper_dir.mkdir(parents=True, exist_ok=True)
+    control = helper_dir / 'HESectoriumControl'
+    shutil.copyfile(control_source, control)
+    control.chmod(0o755)
+
+    source = source_root / 'Configuration/HESectorium'
+    resources = app / 'Contents/Resources/HESectorium'
+    resources.mkdir(parents=True, exist_ok=False)
+    files = {
+        'dev-apfs-mount': 0o700,
+        'he-eject': 0o700,
+        'com.juliushe.dev-apfs-mounter.plist': 0o600,
+        'storage-identity.json': 0o600,
+    }
+    for name, mode in files.items():
+        origin = source / name
+        require(origin.is_file() and not origin.is_symlink(),
+                f'HES_ASSET_MISSING {name}')
+        target = resources / name
+        shutil.copyfile(origin, target)
+        target.chmod(mode)
+    try:
+        identity = json.loads((resources / 'storage-identity.json').read_text(encoding='utf-8'))
+        agent = plistlib.loads((resources / 'com.juliushe.dev-apfs-mounter.plist').read_bytes())
+    except (OSError, UnicodeError, json.JSONDecodeError, plistlib.InvalidFileException) as exc:
+        raise Refusal('HES_ASSET_INVALID') from exc
+    require(identity == {
+        'outerUUID': '2FE2A779-0DC8-3468-8E3C-E113598C46CE',
+        'devUUID': '0476F9CC-86A3-40D8-A8D4-83D882522CAD',
+        'outerMountPoint': '/Volumes/HE', 'devMountPoint': '/Volumes/HE/DEV',
+        'devVolumeName': 'DEV_APFS', 'imagePath': '/Volumes/HE/.DEV-APFS.sparsebundle'},
+        'HES_IDENTITY_ASSET_MISMATCH')
+    require(agent.get('Label') == 'com.juliushe.dev-apfs-mounter' and
+            agent.get('RunAtLoad') is True and 'StartOnMount' not in agent and
+            agent.get('ProgramArguments', [None])[0] == '__UMA_CONTROL_PATH__',
+            'HES_LAUNCH_AGENT_ASSET_MISMATCH')
+    return {'control': {'path': 'Contents/Helpers/HESectoriumControl', 'sha256': sha(control)},
+            'resources': {'path': 'Contents/Resources/HESectorium', 'manifest': manifest(resources)}}
+
+
 def write_json(path, value):
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + '\n')
 
@@ -327,7 +373,7 @@ def main():
                '-Xswiftc', '-D', '-Xswiftc', 'UMA_PRODUCTION_RELEASE',
                '--scratch-path', build / 'swift', '--configuration', 'release']
     commands = []
-    for product in ('CodexUsageMonitor', 'ClaudeStatusLineRelay'):
+    for product in ('CodexUsageMonitor', 'ClaudeStatusLineRelay', 'HESectoriumControl'):
         command = [swift, 'build', *options, '--product', product]
         commands.append([str(x) for x in command])
         with (output / f'build-{product}.log').open('wb') as log:
@@ -340,11 +386,13 @@ def main():
     for subpath in ('Contents/MacOS', 'Contents/Helpers', 'Contents/Resources'):
         (app / subpath).mkdir(parents=True, exist_ok=True)
     executables = {'main': app / 'Contents/MacOS/CodexUsageMonitor',
-                   'relay': app / 'Contents/Helpers/ClaudeStatusLineRelay'}
+                   'relay': app / 'Contents/Helpers/ClaudeStatusLineRelay',
+                   'hesectorium_control': app / 'Contents/Helpers/HESectoriumControl'}
     for target in executables.values():
         shutil.copyfile(bin_path / target.name, target)
         target.chmod(0o755)
     swiftpm_resources = copy_swiftpm_resource_bundle(bin_path, app / 'Contents/Resources', source)
+    hesectorium = copy_hesectorium_assets(bin_path, app, source)
     shutil.copyfile(source / 'Assets/AppIcon.icns', app / 'Contents/Resources/AppIcon.icns')
     (app / 'Contents/Resources/AppIcon.icns').chmod(0o644)
     logos = app / 'Contents/Resources/AgentLogos'
@@ -395,7 +443,9 @@ def main():
               'version_authority_sha256': sha(source / 'Configuration/UMAProductVersion.plist'),
               'swiftpm_resources': swiftpm_resources,
               'main_executable_sha256': sha(executables['main']),
-              'relay_sha256': sha(executables['relay']), 'signing': 'NO_SIGNING_COMMAND',
+              'relay_sha256': sha(executables['relay']),
+              'hesectorium_control_sha256': sha(executables['hesectorium_control']),
+              'hesectorium': hesectorium, 'signing': 'NO_SIGNING_COMMAND',
               'notarization': 'NOT_RUN', 'runtime_development_dependency': 'NONE',
               'host_compatibility': {'state': 'METADATA_ONLY_LIVE_GATE',
                                      'version': authority['SafariCompatibility']['HostMarketingVersion'],
