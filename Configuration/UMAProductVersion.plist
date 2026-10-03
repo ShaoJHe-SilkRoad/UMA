@@ -13,7 +13,7 @@
     <key>DefaultBuildNumber</key>
     <string>1</string>
     <key>MarketingVersion</key>
-    <string>0.14.0</string>
+    <string>0.14.1</string>
     <key>PackageStem</key>
     <string>uma-0.14-m1-dev</string>
   </dict>
@@ -40,7 +40,7 @@
     <key>BundleIdentifier</key>
     <string>com.silkrd.uma</string>
 		<key>BuildNumber</key>
-		<string>2026100206</string>
+		<string>2026100207</string>
     <key>PackageStem</key>
     <string>uma-0.14-rc</string>
     <key>MinimumSystemVersion</key>

@@ -131,7 +131,7 @@ class RCGuards(unittest.TestCase):
 
     def test_canonical_metadata_and_invalid_build(self):
         authority, metadata, version = rc.version_metadata(rc.ROOT)
-        self.assertEqual(version, '0.14.0')
+        self.assertEqual(version, '0.14.1')
         self.assertEqual(metadata['BuildNumber'], authority['ReleaseCandidate']['BuildNumber'])
         self.assertRegex(metadata['BuildNumber'], r'^[1-9]\d*$')
         self.assertEqual(metadata['BundleIdentifier'], 'com.silkrd.uma')
