@@ -59,8 +59,7 @@ private final class MainToolbarFocusableSegmentedControl: NSSegmentedControl {
     override var canBecomeKeyView: Bool { isEnabled && !isHidden && alphaValue > 0 }
 }
 
-private struct MainToolbarIconButton: NSViewRepresentable {
-    let symbol: String
+private struct MainToolbarActionButton: NSViewRepresentable {
     let label: String
     let identifier: String
     let isEnabled: Bool
@@ -69,13 +68,12 @@ private struct MainToolbarIconButton: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(action: action) }
 
     func makeNSView(context: Context) -> NSButton {
-        let button = MainToolbarFocusableButton(image: NSImage(
-            systemSymbolName: symbol,
-            accessibilityDescription: label
-        ) ?? NSImage(size: NSSize(width: 16, height: 16)), target: context.coordinator, action: #selector(Coordinator.activate(_:)))
+        let button = MainToolbarFocusableButton(title: label, target: context.coordinator, action: #selector(Coordinator.activate(_:)))
         button.bezelStyle = .rounded
         button.controlSize = .regular
-        button.imagePosition = .imageOnly
+        button.imagePosition = .noImage
+        button.font = .systemFont(ofSize: 13)
+        button.focusRingType = .exterior
         button.refusesFirstResponder = false
         button.setAccessibilityLabel(label)
         button.setAccessibilityIdentifier(identifier)
@@ -85,6 +83,7 @@ private struct MainToolbarIconButton: NSViewRepresentable {
 
     func updateNSView(_ button: NSButton, context: Context) {
         context.coordinator.action = action
+        button.title = label
         button.isEnabled = isEnabled
         button.setAccessibilityLabel(label)
         button.setAccessibilityIdentifier(identifier)
@@ -154,27 +153,27 @@ struct MainWindowRootView: View {
             )
             .frame(width: 250)
             Spacer()
-            MainToolbarIconButton(
-                symbol: "sparkle.magnifyingglass",
-                label: localized("Scan All", "全部扫描"),
+            MainToolbarActionButton(
+                label: localized("Scan for Agents", "扫描智能体"),
                 identifier: "uma.main.scan",
                 isEnabled: true,
                 action: scanAll
             )
-            MainToolbarIconButton(
-                symbol: "arrow.clockwise",
+            .frame(width: store.language == .simplifiedChinese ? 92 : 112, height: 30)
+            MainToolbarActionButton(
                 label: localized("Refresh All", "全部刷新"),
                 identifier: "uma.main.refresh",
                 isEnabled: store.allowsManualRefresh,
                 action: refreshAll
             )
-            MainToolbarIconButton(
-                symbol: "gearshape",
+            .frame(width: store.language == .simplifiedChinese ? 76 : 94, height: 30)
+            MainToolbarActionButton(
                 label: localized("Global Settings", "全局设置"),
                 identifier: "uma.main.settings",
                 isEnabled: true,
                 action: openSettings
             )
+            .frame(width: store.language == .simplifiedChinese ? 76 : 110, height: 30)
             .help(localized("Global Settings", "全局设置"))
             ThreadOSPromptKeyViewLoopBoundary()
                 .frame(width: 0, height: 0)

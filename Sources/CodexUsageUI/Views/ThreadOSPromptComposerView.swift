@@ -22,6 +22,7 @@ private struct ThreadOSPromptPopup: NSViewRepresentable {
         popup.action = #selector(Coordinator.selectionChanged(_:))
         popup.refusesFirstResponder = false
         popup.focusRingType = .exterior
+        popup.font = .systemFont(ofSize: 13)
         popup.setAccessibilityLabel(label)
         popup.setAccessibilityIdentifier(identifier)
         return popup
@@ -349,12 +350,15 @@ final class ThreadOSPromptComposerForm: ObservableObject {
     ]
 
     @Published private(set) var selections: [ThreadOSPromptRole: ThreadOSPromptSelection]
+    @Published private(set) var generatedInstruction: String?
+    @Published private(set) var copyResult: ThreadOSPromptComposerCopyResult?
     private let preferences: ApplicationPreferences
 
     init(preferences: ApplicationPreferences) {
         self.preferences = preferences
         let loaded = Self.loadSelections(from: preferences)
         selections = loaded.selections ?? Self.defaultSelections
+        refreshInstruction()
     }
 
     var invalidRoles: Set<ThreadOSPromptRole> {
@@ -392,6 +396,7 @@ final class ThreadOSPromptComposerForm: ObservableObject {
         let current = selection(for: role)
         guard current.model != model else { return }
         selections[role] = .init(model: model, effort: current.effort)
+        refreshInstruction()
         persistSelections()
     }
 
@@ -400,6 +405,7 @@ final class ThreadOSPromptComposerForm: ObservableObject {
         let current = selection(for: role)
         guard current.effort != effort else { return }
         selections[role] = .init(model: current.model, effort: effort)
+        refreshInstruction()
         persistSelections()
     }
 
@@ -407,11 +413,19 @@ final class ThreadOSPromptComposerForm: ObservableObject {
         language: AppLanguage,
         to clipboard: any ThreadOSSettingsClipboard
     ) -> ThreadOSPromptComposerCopyResult {
-        guard canGenerate,
-              let prompt = try? ThreadOSLeaderPrompt.make(selections: selections, language: language) else {
+        guard canGenerate, let prompt = generatedInstruction else {
+            copyResult = .unavailable
             return .unavailable
         }
-        return clipboard.write(prompt) ? .copied : .clipboardFailure
+        let result: ThreadOSPromptComposerCopyResult = clipboard.write(prompt) ? .copied : .clipboardFailure
+        copyResult = result
+        return result
+    }
+
+    private func refreshInstruction() {
+        // Preview and Copy share this exact generated value. Wrapping is visual only.
+        generatedInstruction = try? ThreadOSLeaderPrompt.make(selections: selections, language: .english)
+        copyResult = nil
     }
 
     private struct LoadResult {
@@ -443,18 +457,94 @@ final class ThreadOSPromptComposerForm: ObservableObject {
     }
 }
 
-/// A compact, independent surface for creating and copying a request to a receiving Leader.
-/// It does not dispatch work or alter native model selection.
+enum ThreadOSPromptWorkbenchMetrics {
+    static let heading: CGFloat = 28
+    static let columns: CGFloat = 22
+    static let row: CGFloat = 74
+    static let selector: CGFloat = 30
+    static let copy: CGFloat = 32
+    static let previewGap: CGFloat = 12
+    static var previewHeight: CGFloat {
+        heading + columns + 3 * row + 7 + 20 + 7 + selector / 2 - copy / 2 - previewGap
+    }
+}
+
+private final class ThreadOSPromptPreviewTextView: NSTextView {
+    // Selectable by mouse/accessibility without adding another normal Tab stop.
+    override var canBecomeKeyView: Bool { false }
+
+    override func keyDown(with event: NSEvent) {
+        guard event.keyCode == 48, let root = window?.contentView else {
+            super.keyDown(with: event)
+            return
+        }
+        let identifier = event.modifierFlags.contains(.shift)
+            ? "uma.threados.prompt.role.qa.effort" : "uma.threados.prompt.generate-copy"
+        func find(_ view: NSView) -> NSView? {
+            if view.accessibilityIdentifier() == identifier { return view }
+            return view.subviews.lazy.compactMap(find).first
+        }
+        if let target = find(root), target.canBecomeKeyView {
+            window?.makeFirstResponder(target)
+            target.revealPromptFocusInEnclosingScrollView()
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+}
+
+private struct ThreadOSPromptInstructionPreview: NSViewRepresentable {
+    let instruction: String
+    let label: String
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.autohidesScrollers = true
+        scroll.borderType = .noBorder
+        scroll.drawsBackground = true
+        scroll.backgroundColor = .textBackgroundColor
+        scroll.setAccessibilityIdentifier("uma.threados.prompt.preview")
+        let text = ThreadOSPromptPreviewTextView(frame: .zero)
+        text.isEditable = false
+        text.isSelectable = true
+        text.isRichText = false
+        text.allowsUndo = false
+        text.isAutomaticQuoteSubstitutionEnabled = false
+        text.isAutomaticDashSubstitutionEnabled = false
+        text.isAutomaticSpellingCorrectionEnabled = false
+        text.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        text.textColor = .labelColor
+        text.backgroundColor = .textBackgroundColor
+        text.textContainerInset = NSSize(width: 10, height: 10)
+        text.isHorizontallyResizable = false
+        text.isVerticallyResizable = true
+        text.autoresizingMask = [.width]
+        text.textContainer?.widthTracksTextView = true
+        text.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+        text.setAccessibilityLabel(label)
+        text.setAccessibilityIdentifier("uma.threados.prompt.preview.text")
+        scroll.documentView = text
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        guard let text = scroll.documentView as? NSTextView else { return }
+        if text.string != instruction {
+            text.string = instruction
+            text.setSelectedRange(NSRange(location: 0, length: 0))
+            text.scrollRangeToVisible(NSRange(location: 0, length: 0))
+        }
+        text.setAccessibilityLabel(label)
+    }
+}
+
+/// A target-free command composer. This view does not dispatch or switch models.
 public struct ThreadOSPromptComposerView: View {
     @StateObject private var form: ThreadOSPromptComposerForm
     private let language: AppLanguage
     private let clipboard: any ThreadOSSettingsClipboard
-    @State private var copyStatus: CopyStatus?
-
-    private enum CopyStatus {
-        case copied
-        case failed
-    }
 
     public init(
         language: AppLanguage = .english,
@@ -468,62 +558,47 @@ public struct ThreadOSPromptComposerView: View {
 
     public var body: some View {
         GeometryReader { geometry in
-            let contentWidth = min(max(geometry.size.width - 32, 0), 1120)
+            let contentWidth = min(max(geometry.size.width - 40, 0), 1120)
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 9) {
-                        Circle()
-                            .fill(Color.purple)
-                            .frame(width: 8, height: 8)
-                            .accessibilityHidden(true)
-                        Text(copy.title)
-                            .font(.title2.weight(.semibold))
-                    }
-                    Text(copy.description)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("uma.threados.prompt.description")
-
-                    if let status = form.statusMessage(language: language) {
-                        Text(status)
-                            .font(.callout)
-                            .foregroundStyle(form.canGenerate ? Color.secondary : Color.orange)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("uma.threados.prompt.selection-status")
-                    }
-
+                VStack(alignment: .leading, spacing: 0) {
                     if contentWidth >= 680 {
-                        HStack(alignment: .top, spacing: 24) {
+                        HStack(alignment: .top, spacing: 20) {
                             roleSettingsColumn
-                                .frame(minWidth: 400, maxWidth: .infinity, alignment: .topLeading)
-                            settingsSummary
-                                .frame(width: 240, alignment: .topLeading)
+                                .frame(width: min(360, contentWidth * 0.46), alignment: .topLeading)
+                            instructionColumn
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
                         }
                     } else {
-                        VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 16) {
                             roleSettingsColumn
-                            settingsSummary
+                            instructionColumn
                         }
                     }
-
                     ThreadOSPromptKeyViewLoopAttachment()
                         .frame(width: 1, height: 1)
                         .accessibilityHidden(true)
                 }
-                .padding(16)
-                .frame(maxWidth: 1152, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .center)
+                .frame(width: contentWidth, alignment: .topLeading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
+                .frame(maxWidth: .infinity, alignment: .top)
             }
         }
         .tint(.purple)
-        .onChange(of: form.selections) { _, _ in
-            copyStatus = nil
-        }
     }
 
     private var roleSettingsColumn: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(copy.title)
+                .font(.system(size: 18, weight: .semibold))
+                .frame(height: ThreadOSPromptWorkbenchMetrics.heading, alignment: .topLeading)
+            HStack(spacing: 12) {
+                Text(copy.modelLabel).frame(maxWidth: .infinity, alignment: .leading)
+                Text(copy.effortLabel).frame(width: 112, alignment: .leading)
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(.secondary)
+            .frame(height: ThreadOSPromptWorkbenchMetrics.columns)
             ForEach(ThreadOSPromptRole.allCases, id: \.self) { role in
                 roleRow(role)
             }
@@ -531,122 +606,89 @@ public struct ThreadOSPromptComposerView: View {
     }
 
     private func roleRow(_ role: ThreadOSPromptRole) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 9) {
-                Image(systemName: role.symbolName)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.purple)
-                    .frame(width: 22, height: 22)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(role.label(for: language))
-                        .font(.system(size: 14, weight: .semibold))
-                    Text(role.responsibility(for: language))
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(role.label(for: language)).font(.system(size: 13, weight: .semibold))
                 Spacer(minLength: 0)
+                Text(role.responsibility(for: language))
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
             }
-
-            HStack(alignment: .top, spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(copy.modelLabel).font(.caption).foregroundStyle(.secondary)
-                    modelPopup(for: role)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(copy.effortLabel).font(.caption).foregroundStyle(.secondary)
-                    effortPopup(for: role)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 20)
+            HStack(spacing: 12) {
+                modelPopup(for: role).frame(maxWidth: .infinity)
+                effortPopup(for: role).frame(width: 112)
             }
+            .frame(height: ThreadOSPromptWorkbenchMetrics.selector)
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.055)))
+        .padding(.top, 7)
+        .frame(height: ThreadOSPromptWorkbenchMetrics.row, alignment: .top)
+        .overlay(alignment: .bottom) { Divider() }
     }
 
-    private var settingsSummary: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text(copy.summaryTitle)
-                .font(.system(size: 14, weight: .semibold))
-            Text(copy.summaryCaveat)
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("uma.threados.prompt.summary.caveat")
-
-            ForEach(ThreadOSPromptRole.allCases, id: \.self) { role in
-                let selection = form.selection(for: role)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(role.label(for: language))
-                        .font(.system(size: 12, weight: .medium))
-                    Text(ThreadOSPromptComposerSummary.line(role: role, selection: selection, language: language))
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("uma.threados.prompt.summary.role.\(role.rawValue)")
-                }
-            }
-
-            Text(copy.leaderScopeNote)
-                .font(.system(size: 12))
-                .fixedSize(horizontal: false, vertical: true)
-            Text(copy.childInheritanceNote)
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
+    private var instructionColumn: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ThreadOSPromptInstructionPreview(
+                instruction: form.generatedInstruction ?? "",
+                label: language == .simplifiedChinese ? "完整设置指令" : "Complete settings instruction"
+            )
+            .frame(height: ThreadOSPromptWorkbenchMetrics.previewHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(nsColor: .separatorColor), lineWidth: 1))
+            .padding(.bottom, ThreadOSPromptWorkbenchMetrics.previewGap)
             ThreadOSPromptCopyButton(
                 title: copy.generateAndCopy,
                 identifier: "uma.threados.prompt.generate-copy",
-                enabled: form.canGenerate,
-                status: copyStatus.map { $0 == .copied ? copy.copied : copy.failed }
+                enabled: form.canGenerate && form.generatedInstruction != nil,
+                status: feedback
             ) {
-                switch form.generateAndCopy(language: language, to: clipboard) {
-                case .copied:
-                    copyStatus = .copied
-                case .unavailable, .clipboardFailure:
-                    copyStatus = .failed
-                }
+                _ = form.generateAndCopy(language: language, to: clipboard)
             }
-            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-
-            if let copyStatus {
-                Text(copyStatus == .copied ? copy.copied : copy.failed)
+            .frame(height: ThreadOSPromptWorkbenchMetrics.copy)
+            Text(copy.leaderScopeNote)
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8)
+            if let feedback {
+                Text(feedback)
                     .font(.system(size: 12))
-                    .foregroundStyle(copyStatus == .copied ? Color.secondary : Color.orange)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(copyStatus == .copied ? copy.copied : copy.failed)
+                    .foregroundStyle(form.copyResult == .copied ? Color.secondary : Color.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 6)
                     .accessibilityIdentifier("uma.threados.prompt.copy-status")
             }
+            if let status = form.statusMessage(language: language) {
+                Text(status)
+                    .font(.system(size: 12)).foregroundStyle(Color.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 6)
+                    .accessibilityIdentifier("uma.threados.prompt.selection-status")
+            }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple.opacity(0.055)))
+    }
+
+    private var feedback: String? {
+        guard let result = form.copyResult else { return nil }
+        return result == .copied ? copy.copied : copy.failed
     }
 
     private func modelPopup(for role: ThreadOSPromptRole) -> some View {
         ThreadOSPromptPopup(
-            label: copy.modelLabel,
+            label: "\(role.label(for: language)) — \(copy.modelLabel)",
             identifier: "uma.threados.prompt.role.\(role.rawValue).model",
             options: modelOptions(for: role),
             selection: form.selection(for: role).model,
             onSelection: { form.selectModel($0, for: role) }
         )
-        .frame(minHeight: 24, alignment: .leading)
     }
 
     private func effortPopup(for role: ThreadOSPromptRole) -> some View {
         ThreadOSPromptPopup(
-            label: copy.effortLabel,
+            label: "\(role.label(for: language)) — \(copy.effortLabel)",
             identifier: "uma.threados.prompt.role.\(role.rawValue).effort",
             options: effortOptions(for: role),
             selection: form.selection(for: role).effort,
             onSelection: { form.selectEffort($0, for: role) }
         )
-        .frame(minHeight: 24, alignment: .leading)
     }
 
     private var copy: Copy { Copy(language: language) }
@@ -690,17 +732,8 @@ public struct ThreadOSPromptComposerView: View {
 
     private struct Copy {
         let language: AppLanguage
-        var title: String { text("ThreadOS · Team models", "ThreadOS · 团队模型") }
-        var description: String {
-            text(
-                "Choose settings, then copy the instruction to the Leader responsible for the development directory.",
-                "选择后复制，粘贴给负责开发目录的 Leader。"
-            )
-        }
-        var summaryTitle: String { text("Settings Summary", "设置摘要") }
-        var summaryCaveat: String { text("Summary only. This is not a complete execution command.", "这里只是设置摘要，不是完整执行命令。") }
-        var leaderScopeNote: String { text("Paste to a Leader to set the team it is responsible for.", "粘贴给哪个 Leader，就设置其所负责的团队。") }
-        var childInheritanceNote: String { text("Child workers inherit their Cluster settings.", "子工人沿用所属 Cluster 设置。") }
+        var title: String { text("Decision settings", "决策设置") }
+        var leaderScopeNote: String { text("Paste to the Leader to apply to its team.", "粘贴给 Leader，应用到其负责的团队。") }
         var modelLabel: String { text("Model", "模型") }
         var effortLabel: String { text("Thinking", "思考档位") }
         var generateAndCopy: String { text("Generate and Copy Instruction", "生成并复制指令") }
@@ -713,25 +746,16 @@ public struct ThreadOSPromptComposerView: View {
 }
 
 private extension ThreadOSPromptRole {
-    var symbolName: String {
-        switch self {
-        case .leader: return "person.2.fill"
-        case .coderCluster: return "wrench.and.screwdriver.fill"
-        case .reviewerCluster: return "doc.text.magnifyingglass"
-        case .qa: return "checkmark.seal.fill"
-        }
-    }
-
     func responsibility(for language: AppLanguage) -> String {
         switch (self, language) {
         case (.leader, .simplifiedChinese): return "规划与协调"
         case (.coderCluster, .simplifiedChinese): return "实现与集成"
         case (.reviewerCluster, .simplifiedChinese): return "独立代码审查"
         case (.qa, .simplifiedChinese): return "验证与验收"
-        case (.leader, .english): return "Planning and coordination"
-        case (.coderCluster, .english): return "Implementation and integration"
-        case (.reviewerCluster, .english): return "Independent code review"
-        case (.qa, .english): return "Verification and acceptance"
+        case (.leader, .english): return "Plan & coordinate"
+        case (.coderCluster, .english): return "Build & integrate"
+        case (.reviewerCluster, .english): return "Independent review"
+        case (.qa, .english): return "Verify & accept"
         }
     }
 }

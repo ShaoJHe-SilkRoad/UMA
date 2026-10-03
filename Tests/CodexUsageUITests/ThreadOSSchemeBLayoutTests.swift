@@ -125,7 +125,7 @@ import Testing
 
     @Test func promptComposerUsesUsableContentWidthAt680PointBreakpoint() throws {
         _ = NSApplication.shared
-        for (width, usesColumns) in [(712.0, true), (711.0, false)] {
+        for (width, usesColumns) in [(720.0, true), (719.0, false)] {
             let host = NSHostingView(rootView: ThreadOSPromptComposerView(
                 language: .english,
                 preferences: .inMemory()
@@ -146,10 +146,10 @@ import Testing
             let qaEffort = try #require(views.first {
                 $0.accessibilityIdentifier() == "uma.threados.prompt.role.qa.effort"
             })
-            let copyY = copy.convert(copy.bounds, to: host).minY
-            let qaEffortY = qaEffort.convert(qaEffort.bounds, to: host).minY
+            let copyY = copy.convert(copy.bounds, to: host).midY
+            let qaEffortY = qaEffort.convert(qaEffort.bounds, to: host).midY
             if usesColumns {
-                #expect(copyY < qaEffortY, "At 680pt of usable content width, the summary and copy control should sit beside the role list.")
+                #expect(abs(copyY - qaEffortY) <= 2, "Copy and the QA selector must share a baseline at the two-column breakpoint.")
             } else {
                 #expect(copyY > qaEffortY, "Below 680pt of usable content width, the summary and copy control should follow all four roles.")
             }
@@ -212,28 +212,16 @@ import Testing
         #expect(controls.count == 9)
     }
 
-    @Test func wholeWindowKeyboardFocusKeepsPromptControlsVisibleInScrollViewport() throws {
+    @Test func stackedComposerKeyboardFocusKeepsControlsVisibleInShortScrollViewport() throws {
         _ = NSApplication.shared
-        let controller = MainWindowController(restoresSavedFrame: false)
-        controller.attach(
-            store: UsageStore.preview(language: .english),
-            openSettings: {},
-            scanAll: {},
-            refreshAll: {},
-            connectCodex: {},
-            disconnectCodex: {},
-            claudeControlState: { .consentRequired },
-            connectClaude: {},
-            accuracySyncClaude: {}
-        )
-        defer { controller.tearDown() }
-        controller.showDestination(.threadOS)
-        guard let window = controller.window, let contentView = window.contentView else {
-            Issue.record("Main UMA window did not attach its ThreadOS content view")
-            return
-        }
-        window.setContentSize(NSSize(width: 760, height: 420))
+        let contentView = NSHostingView(rootView: ThreadOSPromptComposerView(
+            language: .english, preferences: .inMemory()
+        ))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 719, height: 320),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.contentView = contentView
         window.orderFront(nil)
+        defer { window.orderOut(nil) }
         settle(contentView)
 
         let identifiers = ThreadOSPromptRole.allCases.flatMap { role in
@@ -544,6 +532,60 @@ import Testing
             current = candidate.superview
         }
         return nil
+    }
+
+    @Test func rawPreviewMatchesCopyUpdatesFromNativeMenusAndExitsByTab() throws {
+        _ = NSApplication.shared
+        let clipboard = WorkbenchClipboardSpy()
+        let host = NSHostingView(rootView: ThreadOSPromptComposerView(
+            language: .simplifiedChinese, preferences: .inMemory(), clipboard: clipboard
+        ))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 552),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        settle(host)
+        let views = descendants(of: host)
+        let preview = try #require(views.first { $0.accessibilityIdentifier() == "uma.threados.prompt.preview.text" } as? NSTextView)
+        let previewScroll = try #require(preview.enclosingScrollView)
+        let copy = try #require(views.first { $0.accessibilityIdentifier() == "uma.threados.prompt.generate-copy" } as? NSButton)
+        let qa = try #require(views.first { $0.accessibilityIdentifier() == "uma.threados.prompt.role.qa.effort" })
+        #expect(!preview.isEditable && preview.isSelectable && !preview.canBecomeKeyView)
+        #expect(!previewScroll.hasHorizontalScroller)
+        #expect(preview.textContainer?.widthTracksTextView == true)
+        #expect((preview.textContainer?.containerSize.width ?? 0) > 0)
+        #expect(abs(copy.convert(copy.bounds, to: host).midY - qa.convert(qa.bounds, to: host).midY) <= 2)
+        for role in ThreadOSPromptRole.allCases {
+            for kind in ["model", "effort"] {
+                let popup = try #require(views.first { $0.accessibilityIdentifier() == "uma.threados.prompt.role.\(role.rawValue).\(kind)" } as? NSPopUpButton)
+                let desired = kind == "model" ? "gpt-5.6-terra" : "xhigh"
+                let index = try #require(popup.itemArray.firstIndex { $0.representedObject as? String == desired })
+                popup.selectItem(at: index)
+                #expect(popup.sendAction(try #require(popup.action), to: popup.target))
+                settle(host)
+                let command = try #require(JSONSerialization.jsonObject(with: Data(preview.string.utf8)) as? [String: Any])
+                let roles = try #require(command["roles"] as? [String: [String: String]])
+                #expect(roles[role.rawValue]?[kind == "model" ? "model" : "thinking"] == desired)
+                copy.performClick(nil)
+                settle(host)
+                #expect(clipboard.writes.last?.utf8.elementsEqual(preview.string.utf8) == true)
+            }
+        }
+        for reverse in [false, true] {
+            #expect(window.makeFirstResponder(preview))
+            let tab = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero,
+                modifierFlags: reverse ? [.shift] : [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, characters: "\t",
+                charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48))
+            preview.keyDown(with: tab)
+            #expect(window.firstResponder === (reverse ? qa : copy))
+        }
+    }
+
+    private final class WorkbenchClipboardSpy: ThreadOSSettingsClipboard {
+        var writes: [String] = []
+        func write(_ text: String) -> Bool { writes.append(text); return true }
     }
 
     private func descendants(of view: NSView) -> [NSView] { view.subviews + view.subviews.flatMap(descendants) }

@@ -236,6 +236,62 @@ struct ThreadOSPromptComposerTests {
         #expect(clipboard.writes.count == 1)
     }
 
+    @Test func previewAndCopyShareExactBytesAcrossEditsAndReopen() throws {
+        let preferences = ApplicationPreferences.inMemory()
+        let form = ThreadOSPromptComposerForm(preferences: preferences)
+        let clipboard = ClipboardSpy()
+        for role in ThreadOSPromptRole.allCases {
+            for effort in ThreadOSLeaderPrompt.supportedEfforts {
+                form.selectModel("gpt-5.6-terra", for: role)
+                form.selectEffort(effort, for: role)
+                #expect(form.copyResult == nil)
+                let preview = try #require(form.generatedInstruction)
+                #expect(form.generateAndCopy(language: .simplifiedChinese, to: clipboard) == .copied)
+                #expect(clipboard.writes.last?.utf8.elementsEqual(preview.utf8) == true)
+                #expect(form.copyResult == .copied)
+                #expect(form.generateAndCopy(language: .english, to: clipboard) == .copied)
+                #expect(clipboard.writes.last == preview)
+                let reopened = ThreadOSPromptComposerForm(preferences: preferences)
+                #expect(reopened.generatedInstruction == preview)
+                #expect(reopened.copyResult == nil)
+            }
+        }
+    }
+
+    @Test func copyFailureClearsOnlyAfterAnActualSelectionChange() throws {
+        let form = ThreadOSPromptComposerForm(preferences: .inMemory())
+        let clipboard = ClipboardSpy()
+        clipboard.succeeds = false
+        let before = try #require(form.generatedInstruction)
+        #expect(form.generateAndCopy(language: .english, to: clipboard) == .clipboardFailure)
+        #expect(form.copyResult == .clipboardFailure)
+        form.selectModel("unsupported", for: .leader)
+        #expect(form.copyResult == .clipboardFailure)
+        #expect(form.generatedInstruction == before)
+        form.selectEffort("low", for: .leader)
+        #expect(form.copyResult == nil)
+        #expect(form.generatedInstruction != before)
+    }
+
+    @Test func unsupportedSavedSelectionsNeverShowOrCopyAStaleInstruction() throws {
+        let preferences = ApplicationPreferences.inMemory()
+        let saved = StoredSelections(version: 1, selections: ThreadOSPromptRole.allCases.map { role in
+            .init(role: role, model: role == .qa ? "saved-unknown" : "gpt-6-sol", effort: "medium")
+        })
+        preferences.set(try JSONEncoder().encode(saved) as Data?, for: ThreadOSPromptComposerPreferences.selections)
+        let form = ThreadOSPromptComposerForm(preferences: preferences)
+        let clipboard = ClipboardSpy()
+        #expect(form.generatedInstruction == nil)
+        #expect(form.generateAndCopy(language: .english, to: clipboard) == .unavailable)
+        #expect(clipboard.writes.isEmpty)
+        #expect(form.selection(for: .qa).model == "saved-unknown")
+        form.selectModel("gpt-6-luna", for: .qa)
+        #expect(form.copyResult == nil)
+        let preview = try #require(form.generatedInstruction)
+        #expect(form.generateAndCopy(language: .english, to: clipboard) == .copied)
+        #expect(clipboard.writes == [preview])
+    }
+
     private final class ClipboardSpy: ThreadOSSettingsClipboard {
         private(set) var writes: [String] = []
         var succeeds = true
