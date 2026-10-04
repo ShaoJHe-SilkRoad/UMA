@@ -106,6 +106,17 @@ final class MainWindow: NSWindow {
     var delegatedEventObserver: ((NSEvent) -> Void)?
 
     override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown, event.keyCode == 48,
+           event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
+           let responder = firstResponder as? NSView,
+           isPromptRouteControl(responder) {
+            if event.modifierFlags.contains(.shift) {
+                selectPreviousKeyView(nil)
+            } else {
+                selectNextKeyView(nil)
+            }
+            return
+        }
         guard event.type == .leftMouseUp,
               event.window === self,
               MainWindowTitlebarDoubleClickPolicy.shouldHandle(
@@ -120,6 +131,18 @@ final class MainWindow: NSWindow {
             return
         }
         titlebarBackgroundDoubleClick?()
+    }
+
+    private func isPromptRouteControl(_ view: NSView) -> Bool {
+        let identifier = view.accessibilityIdentifier()
+        guard identifier == "uma.main.navigation" || identifier == "uma.main.settings"
+                || identifier.hasPrefix("uma.threados.prompt.role.")
+                || identifier == "uma.threados.prompt.generate-copy" else { return false }
+        func containsCopy(_ candidate: NSView) -> Bool {
+            candidate.accessibilityIdentifier() == "uma.threados.prompt.generate-copy"
+                || candidate.subviews.contains(where: containsCopy)
+        }
+        return contentView.map(containsCopy) ?? false
     }
 
     private var standardWindowButtons: [NSButton] {

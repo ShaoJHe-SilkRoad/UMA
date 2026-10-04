@@ -567,6 +567,7 @@ private struct SectoriumWorkbenchButton: NSViewRepresentable {
                                                        action: #selector(Coordinator.activate(_:)))
         button.bezelStyle = .rounded
         button.controlSize = .regular
+        button.setWorkbenchEnabled(isEnabled)
         button.refusesFirstResponder = false
         button.focusRingType = .exterior
         button.setAccessibilityLabel(title)
@@ -577,7 +578,7 @@ private struct SectoriumWorkbenchButton: NSViewRepresentable {
     func updateNSView(_ button: NSButton, context: Context) {
         context.coordinator.action = action
         button.title = title
-        button.isEnabled = isEnabled
+        (button as? SectoriumWorkbenchFocusableButton)?.setWorkbenchEnabled(isEnabled)
         button.setAccessibilityLabel(title)
         button.setAccessibilityIdentifier(identifier)
     }
@@ -603,6 +604,7 @@ private struct SectoriumWorkbenchConsentControl: NSViewRepresentable {
                                                        action: #selector(Coordinator.activate(_:)))
         button.setButtonType(.switch)
         button.bezelStyle = .regularSquare
+        button.setWorkbenchEnabled(isEnabled)
         button.refusesFirstResponder = false
         button.setAccessibilityLabel(title)
         button.setAccessibilityIdentifier(identifier)
@@ -613,7 +615,7 @@ private struct SectoriumWorkbenchConsentControl: NSViewRepresentable {
         context.coordinator.action = action
         button.title = title
         button.state = isConsented ? .on : .off
-        button.isEnabled = isEnabled
+        (button as? SectoriumWorkbenchFocusableButton)?.setWorkbenchEnabled(isEnabled)
         button.setAccessibilityLabel(title)
         button.setAccessibilityIdentifier(identifier)
     }
@@ -629,8 +631,20 @@ private struct SectoriumWorkbenchConsentControl: NSViewRepresentable {
 }
 
 private final class SectoriumWorkbenchFocusableButton: NSButton {
-    override var acceptsFirstResponder: Bool { true }
-    override var canBecomeKeyView: Bool { !isHidden && alphaValue > 0 }
+    private var workbenchEnabled = true
+
+    override var isEnabled: Bool {
+        get { workbenchEnabled && super.isEnabled }
+        set { super.isEnabled = workbenchEnabled && newValue }
+    }
+
+    func setWorkbenchEnabled(_ enabled: Bool) {
+        workbenchEnabled = enabled
+        super.isEnabled = enabled
+    }
+
+    override var acceptsFirstResponder: Bool { isEnabled }
+    override var canBecomeKeyView: Bool { isEnabled && !isHidden && alphaValue > 0 }
 
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()

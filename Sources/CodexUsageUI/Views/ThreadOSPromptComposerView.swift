@@ -388,7 +388,10 @@ private struct ThreadOSPromptCopyButton: NSViewRepresentable {
 
         init(action: @escaping () -> Void) { self.action = action }
 
-        @objc func activate(_ sender: NSButton) { action() }
+        @objc func activate(_ sender: NSButton) {
+            action()
+            sender.window?.makeFirstResponder(sender)
+        }
     }
 }
 

@@ -536,6 +536,48 @@ import HESectoriumRuntime
         #expect(window.firstResponder === copy)
     }
 
+    @Test func attachedMainWindowCopyReceivesNativeTabAndReverseTabEvents() throws {
+        _ = NSApplication.shared
+        let clipboard = HESectoriumKeyboardClipboard()
+        let controller = MainWindowController(restoresSavedFrame: false)
+        controller.attach(
+            store: UsageStore.preview(language: .english),
+            openSettings: {}, scanAll: {}, refreshAll: {},
+            connectCodex: {}, disconnectCodex: {},
+            claudeControlState: { .consentRequired }, connectClaude: {}, accuracySyncClaude: {},
+            promptClipboard: clipboard
+        )
+        defer { controller.tearDown() }
+        controller.showDestination(.threadOS)
+        let window = try #require(controller.window)
+        let content = try #require(window.contentView)
+        settle(content)
+        let copy = try #require(descendants(of: content).first {
+            $0.accessibilityIdentifier() == "uma.threados.prompt.generate-copy"
+        } as? NSButton)
+        let navigation = try #require(descendants(of: content).first {
+            $0.accessibilityIdentifier() == "uma.main.navigation"
+        } as? NSSegmentedControl)
+        let settings = try #require(descendants(of: content).first {
+            $0.accessibilityIdentifier() == "uma.main.settings"
+        } as? NSButton)
+        click(copy, in: window)
+        #expect(clipboard.writes.count == 1)
+        #expect(window.firstResponder === copy)
+
+        sendTab(to: window)
+        #expect(window.firstResponder === navigation,
+                "A native Tab after Copy must enter the attached main toolbar.")
+        sendTab(to: window)
+        #expect(window.firstResponder === settings,
+                "A second native Tab must continue through the toolbar.")
+        sendTab(to: window, reverse: true)
+        #expect(window.firstResponder === navigation)
+        sendTab(to: window, reverse: true)
+        #expect(window.firstResponder === copy,
+                "A native reverse Tab must return from the toolbar to Copy.")
+    }
+
     @Test func sectoriumWorkbenchControlsAttachToRealWindowAndFitNarrowContent() throws {
         _ = NSApplication.shared
         let fixture = HESectoriumKeyboardFixture(isExternal: false)
@@ -621,11 +663,21 @@ import HESectoriumRuntime
             let create = try #require(buttons.first { $0.accessibilityIdentifier() == "uma.sectorium.create" })
             let adopt = try #require(buttons.first { $0.accessibilityIdentifier() == "uma.sectorium.adopt" })
             let resume = try #require(buttons.first { $0.accessibilityIdentifier() == "uma.sectorium.resume" })
+            #expect(fixture.store.workbench.pendingOperation == scenario.pending)
             #expect(create.isEnabled == (scenario.identityVerified && scenario.pending == nil))
             #expect(adopt.isEnabled == (scenario.identityVerified && scenario.pending == nil))
             #expect(resume.isEnabled == (scenario.pending != nil))
             if scenario.pending != nil {
                 #expect(fixture.store.workbench.readiness == .operationInProgress("start:interrupted"))
+            } else {
+                fixture.store.apply(devices: [fixture.device], profiles: [], readiness: .connected,
+                                    pending: "start:interrupted")
+                settle(host)
+                #expect(resume.isEnabled, "A newly pending operation must enable the same native Resume control.")
+                fixture.store.apply(devices: [fixture.device], profiles: [], readiness: .connected,
+                                    pending: nil)
+                settle(host)
+                #expect(!resume.isEnabled, "Clearing the pending operation must disable the native Resume control again.")
             }
         }
     }
@@ -665,7 +717,12 @@ import HESectoriumRuntime
             let button = try #require(descendants(of: host).compactMap { $0 as? NSButton }
                 .first { $0.accessibilityIdentifier() == scenario.action },
                 "Enabled action missing from window fixture: \(scenario.action), readiness=\(scenario.readiness), pending=\(String(describing: scenario.pending))")
-            #expect(button.isEnabled, "\(scenario.action) should be enabled in its attached fixture state")
+            // This fixture has no validated physical eject topology or durable eject
+            // journal. Those actions must stay disabled until their real guards pass.
+            let requiresMissingEjectEvidence = scenario.action == "uma.sectorium.eject-drive"
+                || scenario.action == "uma.sectorium.return-to-development"
+            #expect(button.isEnabled == !requiresMissingEjectEvidence,
+                    "\(scenario.action) must reflect the evidence available in this fixture")
             #expect(button.window === window)
             func focusRectInViewport(_ view: NSView) -> NSRect {
                 view.convert(view.bounds, to: scroll.contentView).insetBy(dx: -6, dy: -6)
@@ -674,6 +731,16 @@ import HESectoriumRuntime
             let originalResponder = try #require(descendants(of: host).compactMap { $0 as? NSButton }
                 .first { $0.accessibilityIdentifier() == "uma.sectorium.refresh" })
             #expect(window.makeFirstResponder(originalResponder))
+            if requiresMissingEjectEvidence {
+                #expect(!button.canBecomeKeyView)
+                var reachedUnsafeAction = false
+                for _ in 0..<96 {
+                    window.selectNextKeyView(nil)
+                    if window.firstResponder === button { reachedUnsafeAction = true; break }
+                }
+                #expect(!reachedUnsafeAction, "An unavailable eject recovery action must not enter the native Tab route.")
+                continue
+            }
             var traversed = false
             for _ in 0..<96 {
                 window.selectNextKeyView(nil)
@@ -687,9 +754,7 @@ import HESectoriumRuntime
                 }
             }
             #expect(traversed, "Forward Tab must reach enabled \(scenario.action) in the real attached NSWindow fixture")
-            if scenario.action == "uma.sectorium.return-to-development" || scenario.action == "uma.sectorium.eject-drive" {
-                #expect(startsOutsideViewport, "Bottom storage action should begin outside the top viewport to exercise focus-driven scrolling.")
-            }
+            #expect(startsOutsideViewport, "Bottom storage action should begin outside the top viewport to exercise focus-driven scrolling.")
             var restored = false
             for _ in 0..<96 {
                 if window.firstResponder === originalResponder { restored = true; break }
@@ -705,6 +770,137 @@ import HESectoriumRuntime
             #expect(restored,
                     "Reverse traversal must restore the original attached-window responder; current=\(String(describing: window.firstResponder)), original=\(String(describing: originalResponder)), initial=\(String(describing: window.initialFirstResponder)).")
         }
+    }
+
+    @Test func sectoriumValidatedEjectAndJournaledReturnParticipateInAttachedWindowTabTraversal() async throws {
+        _ = NSApplication.shared
+        for mode in [HESectoriumKeyboardEjectMode.ready, .journaledReturn] {
+            let fixture = HESectoriumKeyboardFixture(ejectMode: mode)
+            defer { fixture.remove() }
+            fixture.store.selectDevice(fixture.device.id)
+            #expect(fixture.store.workbench.selectedDeviceID == fixture.device.id)
+            #expect(mode == .ready ? fixture.service.canPrepareWholeDeviceEjectConfirmation()
+                    : fixture.service.canReturnFromWholeDeviceEject(),
+                    "The isolated service must accept the observed topology or recoverable journal.")
+            let host = NSHostingView(rootView: SectoriumWorkbenchView(store: fixture.store))
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 520),
+                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.contentView = host
+            window.makeKeyAndOrderFront(nil)
+            defer { window.orderOut(nil) }
+            let action = mode == .ready ? "uma.sectorium.eject-drive" : "uma.sectorium.return-to-development"
+            let deadline = Date().addingTimeInterval(2)
+            while Date() < deadline {
+                settle(host)
+                if mode == .ready && fixture.store.canBeginWholeDeviceEject { break }
+                if mode == .journaledReturn && fixture.store.canReturnFromWholeDeviceEject { break }
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
+            #expect(mode == .ready ? fixture.store.canBeginWholeDeviceEject : fixture.store.canReturnFromWholeDeviceEject,
+                    "The service must establish action availability from the injected topology and durable journal.")
+            if mode == .journaledReturn {
+                #expect(fixture.store.workbench.pendingOperation?.hasPrefix("eject:") == true)
+                #expect(try JSONStateStore(url: fixture.paths.state).load().ejectIntent)
+            }
+            let scroll = try #require(descendants(of: host).compactMap { $0 as? NSScrollView }.first)
+            let button = try #require(descendants(of: host).compactMap { $0 as? NSButton }
+                .first { $0.accessibilityIdentifier() == action })
+            let refresh = try #require(descendants(of: host).compactMap { $0 as? NSButton }
+                .first { $0.accessibilityIdentifier() == "uma.sectorium.refresh" })
+            #expect(button.isEnabled)
+            #expect(button.canBecomeKeyView)
+            #expect(button.window === window)
+            let focusRect = { (view: NSView) in
+                view.convert(view.bounds, to: scroll.contentView).insetBy(dx: -6, dy: -6)
+            }
+            let startsOutsideViewport = !scroll.contentView.bounds.contains(focusRect(button))
+            #expect(window.makeFirstResponder(refresh))
+            var reached = false
+            for _ in 0..<96 {
+                window.selectNextKeyView(nil)
+                try await Task.sleep(nanoseconds: 5_000_000)
+                if window.firstResponder === button {
+                    reached = true
+                    #expect(scroll.contentView.bounds.contains(focusRect(button)),
+                            "Forward focus must scroll the validated \(action) into view.")
+                    break
+                }
+            }
+            #expect(reached, "Forward attached-window Tab must reach \(action).")
+            #expect(startsOutsideViewport, "The bottom action must begin outside the top viewport.")
+            var restored = false
+            for _ in 0..<96 {
+                if window.firstResponder === refresh { restored = true; break }
+                window.selectPreviousKeyView(nil)
+                try await Task.sleep(nanoseconds: 5_000_000)
+                if let responder = window.firstResponder as? NSView {
+                    #expect(scroll.contentView.bounds.contains(focusRect(responder)),
+                            "Reverse focus must remain visible after \(action).")
+                }
+            }
+            #expect(restored, "Reverse Tab must restore Refresh after \(action).")
+        }
+    }
+
+    @Test func sectoriumNativeLocalConsentButtonTracksVerifiedDeviceState() throws {
+        _ = NSApplication.shared
+        let fixture = HESectoriumKeyboardFixture(isExternal: false)
+        defer { fixture.remove() }
+        fixture.store.selectDevice(fixture.device.id)
+        let host = NSHostingView(rootView: SectoriumWorkbenchView(store: fixture.store))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 520),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        settle(host)
+        let unverified = SectoriumPhysicalDevice(id: fixture.device.id, bsdName: fixture.device.bsdName,
+            name: fixture.device.name, isExternal: false, identityVerified: false,
+            wholeDeviceBytes: fixture.device.wholeDeviceBytes, mountedVolumePaths: [], volumeUUIDs: [],
+            readBytes: nil, writtenBytes: nil)
+        fixture.store.apply(devices: [unverified], profiles: [], readiness: .unknown("Identity unavailable"), pending: nil)
+        settle(host)
+        let consent = try #require(descendants(of: host).compactMap { $0 as? NSButton }
+            .first { $0.accessibilityIdentifier() == "uma.sectorium.local-sampling-consent" })
+        let refresh = try #require(descendants(of: host).compactMap { $0 as? NSButton }
+            .first { $0.accessibilityIdentifier() == "uma.sectorium.refresh" })
+        #expect(!consent.isEnabled)
+        #expect(!consent.canBecomeKeyView)
+        click(consent, in: window)
+        #expect(!fixture.store.isLocalDeviceSamplingConsented(fixture.device.id))
+        #expect(fixture.ioSampler.sampledNames.isEmpty)
+        #expect(window.makeFirstResponder(refresh))
+        for _ in 0..<96 {
+            window.selectNextKeyView(nil)
+            #expect(window.firstResponder !== consent, "Disabled consent must be absent from the native key route.")
+        }
+
+        fixture.store.apply(devices: [fixture.device], profiles: [], readiness: .connected, pending: nil)
+        settle(host)
+        #expect(consent.isEnabled, "The same native control must enable after identity verification.")
+        #expect(consent.canBecomeKeyView)
+        #expect(descendants(of: host).contains { $0 === consent })
+        #expect(window.makeFirstResponder(refresh))
+        var reached = false
+        for _ in 0..<96 {
+            window.selectNextKeyView(nil)
+            if window.firstResponder === consent { reached = true; break }
+        }
+        #expect(reached, "Tab must reach the enabled native consent control.")
+        click(consent, in: window)
+        #expect(fixture.store.isLocalDeviceSamplingConsented(fixture.device.id))
+        waitForIOCalls(fixture.ioSampler, count: 1)
+        #expect(fixture.ioSampler.sampledNames == [fixture.device.bsdName])
+        #expect(fixture.runner.targetedInfoNames == [fixture.device.bsdName])
+        fixture.store.setLocalDeviceSamplingConsent(false, for: fixture.device.id)
+        fixture.store.apply(devices: [unverified], profiles: [], readiness: .unknown("Identity unavailable"), pending: nil)
+        settle(host)
+        #expect(!consent.isEnabled)
+        #expect(!consent.canBecomeKeyView)
+        #expect(descendants(of: host).contains { $0 === consent })
+        click(consent, in: window)
+        #expect(!fixture.store.isLocalDeviceSamplingConsented(fixture.device.id))
+        #expect(fixture.ioSampler.sampledNames == [fixture.device.bsdName])
     }
 
     @Test func sectoriumSamplingRequiresPageSelectionAndLocalConsent() throws {
@@ -1145,16 +1341,21 @@ private extension JSONEncoder {
     func write(_ string: String) -> Bool { writes.append(string); return true }
 }
 
+private enum HESectoriumKeyboardEjectMode { case none, ready, journaledReturn }
+
 @MainActor private struct HESectoriumKeyboardFixture {
     let root: URL
+    let paths: HESectoriumPaths
+    let service: HESectoriumService
     let store: HESectoriumStore
     let device: SectoriumPhysicalDevice
     let runner: HESectoriumKeyboardRunner
     let ioSampler: HESectoriumKeyboardIOSampler
-    init(isExternal: Bool = true, identityVerified: Bool = true) {
+    init(isExternal: Bool = true, identityVerified: Bool = true,
+         ejectMode: HESectoriumKeyboardEjectMode = .none) {
         root = URL(fileURLWithPath: "/private/tmp/hesectorium-keyboard-\(UUID().uuidString)", isDirectory: true)
         try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let paths = HESectoriumPaths(root: root.appendingPathComponent("support", isDirectory: true))
+        paths = HESectoriumPaths(root: root.appendingPathComponent("support", isDirectory: true))
         let mediaUUID = UUID()
         device = SectoriumPhysicalDevice(id: identityVerified ? mediaUUID.uuidString : "unverified-disk81",
             bsdName: "disk81", name: "Fixture drive",
@@ -1162,15 +1363,70 @@ private extension JSONEncoder {
             mountedVolumePaths: [], volumeUUIDs: [], readBytes: nil, writtenBytes: nil)
         runner = HESectoriumKeyboardRunner(device: device)
         ioSampler = HESectoriumKeyboardIOSampler()
-        let service = HESectoriumService(paths: paths, backend: HESectoriumKeyboardBackend(),
-            store: HESectoriumKeyboardStateStore(), operationLock: HESectoriumKeyboardLock(),
+        let stateStore: DurableStateStore
+        let ejectDriver: WholeDeviceEjectDriving?
+        if ejectMode == .none {
+            stateStore = HESectoriumKeyboardStateStore()
+            ejectDriver = nil
+        } else {
+            let physicalVolume = "\(UUID().uuidString.lowercased())|disk81s1"
+            let imageVolume = "\(UUID().uuidString.lowercased())|disk31s1"
+            let topology = WholeDeviceTopology(physicalIdentity: device.id, bsdName: device.bsdName,
+                isWholeDevice: true, isExternal: true, isSystemDevice: false, inventoryComplete: true,
+                volumes: [.init(identity: physicalVolume, mounted: true)],
+                images: [.init(identity: "image:disk30", attached: true,
+                    volumeIdentities: [imageVolume], mountedVolumeIdentities: [imageVolume])])
+            let durableStore = JSONStateStore(url: paths.state)
+            if ejectMode == .journaledReturn {
+                let journal = WholeDeviceEjectJournalRecord(operationID: UUID().uuidString,
+                    target: topology, phase: .interrupted,
+                    completedSteps: ["unmountImageVolumes:image:disk30"],
+                    lastReceipt: .busy("fixture busy before detach"), lastIssuedAction: .imageVolumesUnmount)
+                let initial = try! durableStore.load()
+                let encoded = try! JSONEncoder().encode(journal).base64EncodedString()
+                let persisted = try! durableStore.compareAndSwap(expectedRevision: initial.revision,
+                    newState: StoragePersistentState(revision: initial.revision + 1, ejectIntent: true,
+                        operationID: journal.operationID, workbenchOperation: "eject:\(journal.operationID)",
+                        workbenchPhase: "eject:interrupted", workbenchTarget: encoded,
+                        workbenchCompletedStep: journal.completedSteps.last))
+                precondition(persisted, "The return fixture requires a durable journal")
+            }
+            stateStore = durableStore
+            ejectDriver = HESectoriumKeyboardEjectDriver(topology: topology)
+        }
+        service = HESectoriumService(paths: paths, backend: HESectoriumKeyboardBackend(),
+            store: stateStore, operationLock: HESectoriumKeyboardLock(),
             installer: HESectoriumInstaller(paths: paths, home: root), runner: runner,
             identityPolicy: .expected, agentStatusProvider: UnknownAgentStatusProvider(),
             sectoriumDeviceObserver: HESectoriumKeyboardDeviceObserver(device: device),
-            sectoriumDeviceIOSampler: ioSampler)
+            sectoriumDeviceIOSampler: ioSampler, wholeDeviceEjectDriverOverride: ejectDriver)
         store = HESectoriumStore(service: service, sampleIntervalNanoseconds: 60_000_000_000)
     }
     func remove() { try? FileManager.default.removeItem(at: root) }
+}
+
+private final class HESectoriumKeyboardEjectDriver: WholeDeviceEjectDriving {
+    let topology: WholeDeviceTopology
+    init(topology: WholeDeviceTopology) { self.topology = topology }
+    func observe(physicalIdentity: String) -> WholeDeviceTopology? {
+        physicalIdentity == topology.physicalIdentity ? topology : nil
+    }
+    func unmountImageVolumesNonForce(_ imageIdentity: String, volumeIdentities: [String],
+                                     from target: WholeDeviceTopology) -> WholeDeviceActionReceipt { .busy("fixture forbids mutation") }
+    func detachImageNonForce(_ imageIdentity: String, from target: WholeDeviceTopology) -> WholeDeviceActionReceipt { .busy("fixture forbids mutation") }
+    func unmountAllPhysicalVolumesNonForce(_ target: WholeDeviceTopology) -> WholeDeviceActionReceipt { .busy("fixture forbids mutation") }
+    func ejectWholeDeviceNonForce(_ target: WholeDeviceTopology) -> WholeDeviceActionReceipt { .busy("fixture forbids mutation") }
+    func presence(physicalIdentity: String) -> WholeDevicePresence { .present }
+    func freshReturnIdentityMatches(_ journal: WholeDeviceEjectJournalRecord) -> Bool {
+        guard journal.target.matchesPhysicalIdentityAndVolumes(topology),
+              topology.volumes.allSatisfy(\.mounted),
+              topology.images.count == journal.target.images.count else { return false }
+        let expected = Dictionary(uniqueKeysWithValues: journal.target.images.map { ($0.identity, Set($0.volumeIdentities)) })
+        return topology.images.allSatisfy { image in
+            image.attached && image.mountedVolumeIdentities.map(Set.init) == expected[image.identity]
+                && Set(image.volumeIdentities) == expected[image.identity]
+        }
+    }
 }
 
 private final class HESectoriumKeyboardDeviceObserver: SectoriumDeviceObserving {
