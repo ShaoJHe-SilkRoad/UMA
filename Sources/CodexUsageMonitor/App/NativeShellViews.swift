@@ -3,8 +3,9 @@ import SwiftUI
 import AppKit
 
 enum MainSurfaceDestination: String, CaseIterable, Identifiable {
-    case agents = "Agents & Settings"
+    case agents = "UMA"
     case threadOS = "ThreadOS"
+    case sectorium = "Sectorium"
     var id: String { rawValue }
 }
 
@@ -23,7 +24,7 @@ private struct MainToolbarNavigationControl: NSViewRepresentable {
         control.controlSize = .regular
         for (index, label) in labels.enumerated() {
             control.setLabel(label, forSegment: index)
-            control.setWidth(125, forSegment: index)
+            control.setWidth(118, forSegment: index)
         }
         control.target = context.coordinator
         control.action = #selector(Coordinator.selectionChanged(_:))
@@ -141,6 +142,11 @@ struct MainWindowRootView: View {
                     },
                     clipboard: promptClipboard ?? SystemThreadOSSettingsClipboard()
                 )
+            case .sectorium:
+                SectoriumWorkbenchView(
+                    store: hesectoriumStore ?? HESectoriumStore(),
+                    isChinese: store.language == .simplifiedChinese
+                )
             }
         }
         .frame(minWidth: 760, minHeight: 520)
@@ -154,26 +160,24 @@ struct MainWindowRootView: View {
                 labels: MainSurfaceDestination.allCases.map(destinationTitle),
                 accessibilityLabel: localized("UMA navigation", "UMA 导航")
             )
-            .frame(width: 250)
+            .frame(width: 360)
             Spacer()
-            MainToolbarActionButton(
-                label: localized("Scan for Agents", "扫描智能体"),
-                identifier: "uma.main.scan",
-                isEnabled: true,
-                action: scanAll
-            )
-            .frame(width: store.language == .simplifiedChinese ? 92 : 112, height: 30)
-            MainToolbarActionButton(
-                label: localized("Refresh All", "全部刷新"),
-                identifier: "uma.main.refresh",
-                isEnabled: store.allowsManualRefresh,
-                action: refreshAll
-            )
-            .frame(width: store.language == .simplifiedChinese ? 76 : 94, height: 30)
-            HESectoriumStatusControl(
-                isChinese: store.language == .simplifiedChinese,
-                store: hesectoriumStore
-            )
+            if navigation.destination == .agents {
+                MainToolbarActionButton(
+                    label: localized("Scan for Agents", "扫描智能体"),
+                    identifier: "uma.main.scan",
+                    isEnabled: true,
+                    action: scanAll
+                )
+                .frame(width: store.language == .simplifiedChinese ? 92 : 112, height: 30)
+                MainToolbarActionButton(
+                    label: localized("Refresh All", "全部刷新"),
+                    identifier: "uma.main.refresh",
+                    isEnabled: store.allowsManualRefresh,
+                    action: refreshAll
+                )
+                .frame(width: store.language == .simplifiedChinese ? 76 : 94, height: 30)
+            }
             MainToolbarActionButton(
                 label: localized("Global Settings", "全局设置"),
                 identifier: "uma.main.settings",
@@ -255,8 +259,9 @@ struct MainWindowRootView: View {
 
     private func destinationTitle(_ destination: MainSurfaceDestination) -> String {
         switch destination {
-        case .agents: localized("Agents & Settings", "智能体与设置")
+        case .agents: localized("UMA", "UMA")
         case .threadOS: "ThreadOS"
+        case .sectorium: localized("Sectorium", "分区工")
         }
     }
 

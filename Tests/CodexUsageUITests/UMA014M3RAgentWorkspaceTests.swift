@@ -12,7 +12,7 @@ struct UMA014M3RAgentWorkspaceTests {
     func mainUsesBoundedTwoLevelNavigation() throws {
         let source = try read("Sources/CodexUsageMonitor/App/NativeShellViews.swift")
 
-        #expect(source.contains("case agents = \"Agents & Settings\""))
+        #expect(source.contains("case agents = \"UMA\""))
         #expect(source.contains("case threadOS = \"ThreadOS\""))
         #expect(!source.contains("case overview"))
         #expect(source.contains("HSplitView"))

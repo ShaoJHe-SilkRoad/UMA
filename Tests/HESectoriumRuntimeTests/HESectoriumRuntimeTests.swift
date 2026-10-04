@@ -24,12 +24,13 @@ private final class FixtureBackend: StorageBackend {
     var outerObservation: VolumeIdentity? = StorageObservation.expectedReady.outer
     var attachCount = 0
     var performed: [EjectStep] = []
+    var occupancyChecks = 0
     var occupancy: [OccupancyScope: OccupancyAssessment] = [.dev: .noVisibleOccupancy, .outer: .noVisibleOccupancy]
     var final: FinalOuterState = .absent
     func observeOuter() -> VolumeIdentity? { outerObservation }
     func observe() -> StorageObservation? { observation }
     func attachImage() -> CommandOutcome { attachCount += 1; return .success }
-    func assessOccupancy(scope: OccupancyScope) -> OccupancyAssessment { occupancy[scope] ?? .incomplete(reason: "fixture unset") }
+    func assessOccupancy(scope: OccupancyScope) -> OccupancyAssessment { occupancyChecks += 1; return occupancy[scope] ?? .incomplete(reason: "fixture unset") }
     func perform(_ step: EjectStep) -> CommandOutcome { performed.append(step); return .success }
     func finalOuterState() -> FinalOuterState { final }
 }
@@ -300,6 +301,23 @@ private struct Fixture {
     #expect(backend.performed.isEmpty)
 }
 
+@Test func compatibilityEjectRefusesWithoutWholeDeviceCheckpointOrStorageDispatch() throws {
+    let f = try Fixture(); defer { f.remove() }
+    let backend = FixtureBackend(), store = MemoryStore(), lock = MemoryLock(), runner = ScriptedRunner()
+    let service = HESectoriumService(paths: f.paths, backend: backend, store: store,
+        operationLock: lock, runner: runner, identityPolicy: .expected)
+
+    let result = service.safeEjectHE()
+
+    #expect(!result.succeeded)
+    #expect(result.failure == .workbenchFailed("whole-device eject requires a fresh user-reviewed confirmation"))
+    #expect(result.steps.map(\.step) == ["requireWholeDeviceEjectConfirmation"])
+    #expect(backend.occupancyChecks == 0)
+    #expect(backend.performed.isEmpty)
+    #expect(runner.invocations.isEmpty)
+    #expect(!store.value.ejectIntent)
+}
+
 @Test func startupAutomaticMountRequiresValidIdentityAndNoPendingIntent() throws {
     let f = try Fixture(); defer { f.remove() }
     let backend = FixtureBackend(); let store = MemoryStore(); let lock = MemoryLock()
@@ -344,7 +362,7 @@ private struct Fixture {
         "WritableVolume": true, "VolumeName": "HE", "DeviceIdentifier": "disk20s1", "PartOfWhole": "disk20"
     ])
     runner.outputs["/usr/sbin/diskutil info -plist /Volumes/HE/DEV"] = try diskInfo([
-        "VolumeUUID": p.devUUID.uuidString, "MountPoint": p.devMountPoint, "FilesystemType": "APFS",
+        "VolumeUUID": p.devUUID!.uuidString, "MountPoint": p.devMountPoint, "FilesystemType": "APFS",
         "WritableVolume": true, "VolumeName": p.devVolumeName, "DeviceIdentifier": "disk31s1", "APFSContainerReference": "disk31"
     ])
     runner.outputs["/usr/sbin/diskutil info -plist /dev/disk31s1"] = runner.outputs["/usr/sbin/diskutil info -plist /Volumes/HE/DEV"]!
@@ -352,12 +370,12 @@ private struct Fixture {
     runner.outputs["/usr/sbin/diskutil info -plist /dev/disk20"] = try diskInfo(["DeviceIdentifier": "disk20"])
     runner.outputs["/usr/sbin/diskutil apfs list -plist"] = try diskInfo(["Containers": [[
         "ContainerReference": "disk31", "PhysicalStores": [["DeviceIdentifier": "disk30"]],
-        "Volumes": [["APFSVolumeUUID": p.devUUID.uuidString, "DeviceIdentifier": "disk31s1"]]
+        "Volumes": [["APFSVolumeUUID": p.devUUID!.uuidString, "DeviceIdentifier": "disk31s1"]]
     ]]])
     runner.outputs["/usr/bin/hdiutil info -plist"] = try diskInfo(["images": [[
         "image-path": p.imagePath, "system-entities": [
             ["content-hint": "GUID_partition_scheme", "dev-entry": "/dev/disk30"],
-            ["mount-point": p.devMountPoint, "volume-uuid": p.devUUID.uuidString, "dev-entry": "/dev/disk31s1"]
+            ["mount-point": p.devMountPoint, "volume-uuid": p.devUUID!.uuidString, "dev-entry": "/dev/disk31s1"]
         ]
     ]]])
     runner.outputs["/bin/df -P \(p.imagePath)"] = .init(exitCode: 0, detail: "Filesystem 512-blocks Used Available Capacity iused ifree %iused Mounted on\n/dev/disk20s1 1000 100 900 10% 1 2 1% /Volumes/HE\n")
@@ -370,7 +388,7 @@ private struct Fixture {
     runner.outputs["/bin/df -P \(p.imagePath)"] = .init(exitCode: 0, detail: "Filesystem 512-blocks Used Available Capacity iused ifree %iused Mounted on\n/dev/disk20s1 1000 100 900 10% 1 2 1% /Volumes/HE\n")
     runner.outputs["/usr/sbin/diskutil apfs list -plist"] = try diskInfo(["Containers": [[
         "ContainerReference": "disk31", "PhysicalStores": [["DeviceIdentifier": "disk99"]],
-        "Volumes": [["APFSVolumeUUID": p.devUUID.uuidString, "DeviceIdentifier": "disk31s1"]]
+        "Volumes": [["APFSVolumeUUID": p.devUUID!.uuidString, "DeviceIdentifier": "disk31s1"]]
     ]]])
     #expect(backend.observe() == nil)
 }
@@ -392,6 +410,31 @@ private struct Fixture {
     let backend = MacStorageBackend(paths: f.paths, runner: runner, policy: policy)
     let result = backend.attachImage()
     #expect(!result.succeeded)
+    #expect(!runner.invocations.contains { $0.0 == "/usr/sbin/diskutil" && $0.1.first == "image" })
+}
+
+@Test func storageBackendUsesSharedDescriptorPreflightAndRefusesNonEmptyMountpoint() throws {
+    let f = try Fixture(); defer { f.remove() }
+    let mount = f.root.appendingPathComponent("outer", isDirectory: true)
+    let dev = mount.appendingPathComponent("DEV", isDirectory: true)
+    let image = mount.appendingPathComponent("DEV-APFS.sparsebundle", isDirectory: true)
+    try FileManager.default.createDirectory(at: dev, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: image, withIntermediateDirectories: false)
+    try Data("preserve".utf8).write(to: dev.appendingPathComponent("existing.txt"))
+    let outerUUID = UUID()
+    let policy = StorageIdentityPolicy(outerUUID: outerUUID, devUUID: UUID(), outerMountPoint: mount.path,
+                                      devMountPoint: dev.path, devVolumeName: "DEV_APFS", imagePath: image.path)
+    let runner = ScriptedRunner()
+    runner.outputs["/usr/sbin/diskutil info -plist \(mount.path)"] = try diskInfo([
+        "VolumeUUID": outerUUID.uuidString, "MountPoint": mount.path, "FilesystemType": "ExFAT",
+        "WritableVolume": true, "VolumeName": "HE", "DeviceIdentifier": "disk20s1"
+    ])
+    let backend = MacStorageBackend(paths: f.paths, runner: runner, policy: policy)
+    let result = backend.attachImage()
+
+    #expect(!result.succeeded)
+    #expect(result.detail.contains("non-empty"))
+    #expect(try Data(contentsOf: dev.appendingPathComponent("existing.txt")) == Data("preserve".utf8))
     #expect(!runner.invocations.contains { $0.0 == "/usr/sbin/diskutil" && $0.1.first == "image" })
 }
 
@@ -455,6 +498,30 @@ private struct Fixture {
     #expect(!(try store.compareAndSwap(expectedRevision: initial.revision, newState: .init(ejectIntent: false))))
 }
 
+@Test func persistentStateRoundTripsReconnectClaimAndReadsLegacyJSON() throws {
+    let f = try Fixture(); defer { f.remove() }
+    let store = JSONStateStore(url: f.paths.state)
+    let initial = try store.load()
+    let state = StoragePersistentState(revision: initial.revision + 1, ejectIntent: true,
+        operationID: "reconnect-fixture", outerDisappearedAfterIntent: true,
+        outerReconnectAttempted: true, workbenchOperation: "start:interrupted",
+        workbenchPhase: "mutating", workbenchTarget: "fixture-image",
+        workbenchCompletedStep: "attachImage", workbenchTerminalResult: nil)
+    #expect(try store.compareAndSwap(expectedRevision: initial.revision, newState: state))
+    let reloaded = try JSONStateStore(url: f.paths.state).load()
+    #expect(reloaded.outerReconnectAttempted)
+    #expect(reloaded.workbenchOperation == state.workbenchOperation)
+    #expect(reloaded.workbenchPhase == "mutating")
+    #expect(reloaded.workbenchCompletedStep == "attachImage")
+
+    let legacy = #"{"revision":9,"ejectIntent":true,"operationID":"legacy","outerDisappearedAfterIntent":true}"#
+    try Data(legacy.utf8).write(to: f.paths.state, options: .atomic)
+    let oldState = try JSONStateStore(url: f.paths.state).load()
+    #expect(oldState.outerDisappearedAfterIntent)
+    #expect(!oldState.outerReconnectAttempted)
+    #expect(oldState.workbenchOperation == nil)
+}
+
 @Test func symlinkedIdentityRootIsNotAccepted() throws {
     let f = try Fixture(); defer { f.remove() }
     let escaped = f.root.appendingPathComponent("escaped-support", isDirectory: true)
@@ -505,7 +572,7 @@ private struct Fixture {
     #expect(offEvent.steps.first?.step == "automationGate")
     #expect(backend.attachCount == 0)
     #expect(service.setAutomationEnabled(true).succeeded)
-    _ = service.runAutomationAgent(.devMounted(uuid: StorageIdentityPolicy.expected.devUUID))
+    _ = service.runAutomationAgent(.devMounted(uuid: StorageIdentityPolicy.expected.devUUID!))
     _ = service.runAutomationAgent(.imageChanged)
     #expect(backend.attachCount == 0)
     let reconnect = service.runAutomationAgent(.outerReappeared(uuid: StorageIdentityPolicy.expected.outerUUID))

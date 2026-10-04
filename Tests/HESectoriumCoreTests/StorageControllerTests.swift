@@ -2,6 +2,15 @@ import XCTest
 @testable import HESectoriumCore
 
 final class StorageControllerTests: XCTestCase {
+    func testWorkbenchIntentBlocksCoreStorageOperations() {
+        let rig = ControllerRig()
+        rig.state.current = .init(ejectIntent: false, workbenchOperation: "stop:fixture")
+        let result = rig.controller.mountDEV()
+        XCTAssertEqual(result.failure, .operationInProgress)
+        XCTAssertEqual(rig.backend.attachCount, 0)
+        XCTAssertTrue(rig.backend.performed.isEmpty)
+    }
+
     func testReadinessRejectsWrongUUIDAndOrdinaryDirectory() {
         let policy = StorageIdentityPolicy.expected
         var observed = StorageObservation.expectedReady
@@ -177,7 +186,7 @@ final class StorageControllerTests: XCTestCase {
     func testOnlyOuterPhysicalReconnectRecoversIntent() throws {
         let rig = ControllerRig()
         rig.state.current = .init(ejectIntent: true, operationID: "interrupted")
-        _ = rig.controller.handle(.devMounted(uuid: StorageIdentityPolicy.expected.devUUID))
+        _ = rig.controller.handle(.devMounted(uuid: StorageIdentityPolicy.expected.devUUID!))
         _ = rig.controller.handle(.imageChanged)
         XCTAssertTrue(try XCTUnwrap(rig.state.current).ejectIntent)
         _ = rig.controller.handle(.outerDisappeared(uuid: StorageIdentityPolicy.expected.outerUUID))

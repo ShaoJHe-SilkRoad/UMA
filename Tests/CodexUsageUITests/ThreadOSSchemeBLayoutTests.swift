@@ -8,6 +8,19 @@ import HESectoriumRuntime
 
 @Suite(.serialized)
 @MainActor struct ThreadOSSchemeBLayoutTests {
+    @Test func sectoriumCapacityInputIsBoundedAndRecommendationCannotOverflow() {
+        let oneGiB: UInt64 = 1_073_741_824
+        #expect(SectoriumCapacityInput.requestedBytes(gib: Int.min) == nil)
+        #expect(SectoriumCapacityInput.requestedBytes(gib: 0) == nil)
+        #expect(SectoriumCapacityInput.requestedBytes(gib: 1) == oneGiB)
+        #expect(SectoriumCapacityInput.requestedBytes(gib: 16_384) == 16_384 * oneGiB)
+        #expect(SectoriumCapacityInput.requestedBytes(gib: 16_385) == nil)
+        #expect(SectoriumCapacityInput.requestedBytes(gib: Int.max) == nil)
+        #expect(SectoriumCapacityInput.recommendedGiB(availableBytes: oneGiB) == nil)
+        #expect(SectoriumCapacityInput.recommendedGiB(availableBytes: oneGiB * 10) == 8)
+        #expect(SectoriumCapacityInput.recommendedGiB(availableBytes: UInt64.max) == 16_384)
+    }
+
     @Test func promptRouteRetryStopsForAnIncompleteMountedRoute() {
         var attempts = 0
         let retry = ThreadOSPromptKeyViewRouteRetryController(
@@ -338,21 +351,12 @@ import HESectoriumRuntime
             $0.accessibilityIdentifier() == boundaryIdentifier
         })
         #expect(!window.autorecalculatesKeyViewLoop)
-        let refreshButton = try #require(descendants(of: contentView).compactMap { $0 as? NSButton }.first {
-            $0.accessibilityIdentifier() == "uma.main.refresh"
-        })
-        let scanButton = try #require(descendants(of: contentView).compactMap { $0 as? NSButton }.first {
-            $0.accessibilityIdentifier() == "uma.main.scan"
-        })
         let settingsButton = try #require(descendants(of: contentView).compactMap { $0 as? NSButton }.first {
             $0.accessibilityIdentifier() == "uma.main.settings"
         })
-        #expect(!refreshButton.isEnabled)
-        #expect(scanButton.isEnabled)
         #expect(settingsButton.isEnabled)
-        scanButton.performClick(nil)
         settingsButton.performClick(nil)
-        #expect(scanActionCount == 1)
+        #expect(scanActionCount == 0)
         #expect(refreshActionCount == 0)
         #expect(settingsActionCount == 1)
         let incomingBoundaryLink = descendants(of: contentView).first { $0.nextKeyView === boundary }
@@ -365,9 +369,11 @@ import HESectoriumRuntime
         for identifier in composerIdentifiers {
             #expect(threadOSIdentifiers.contains(identifier))
         }
-        for identifier in ["uma.main.scan", "uma.main.refresh", "uma.main.settings"] {
+        for identifier in ["uma.main.settings"] {
             #expect(threadOSIdentifiers.contains(identifier))
         }
+        #expect(!threadOSIdentifiers.contains("uma.main.scan"))
+        #expect(!threadOSIdentifiers.contains("uma.main.refresh"))
         #expect(incomingBoundaryLink === boundary.previousKeyView)
         #expect(threadOSRoute.contains { accessibilityLabel(in: $0) == "UMA navigation" })
 
@@ -475,7 +481,7 @@ import HESectoriumRuntime
         #expect(!agentsIdentifiers.contains("uma.threados.prompt.generate-copy"))
     }
 
-    @Test func initialMainRouteIncludesStorageAndCopyTraversesToNavigation() throws {
+    @Test func initialMainRouteKeepsStorageOnItsOwnTabAndCopyTraversesToNavigation() throws {
         _ = NSApplication.shared
         let fixture = HESectoriumKeyboardFixture()
         defer { fixture.remove() }
@@ -494,24 +500,24 @@ import HESectoriumRuntime
         let content = try #require(window.contentView)
         settle(content)
 
-        let storage = try #require(descendants(of: content).first {
-            $0.accessibilityIdentifier() == "uma.hesectorium.quick-actions"
-        })
-        let storagePopup = try #require(storage as? NSPopUpButton)
-        #expect(storagePopup.acceptsFirstResponder)
-        #expect(storagePopup.focusRingType == .exterior)
-        let storageMenuTitles = Set(storagePopup.menu?.items.map(\.title) ?? [])
-        #expect(storageMenuTitles.isSuperset(of: ["Storage", "Mount DEV", "Safe Eject HE", "Refresh Status"]))
-        let initialRoute = keyViewRoute(in: window)
-        let initialIDs = initialRoute.compactMap(accessibilityIdentifier(in:))
-        #expect(initialIDs.contains("uma.hesectorium.quick-actions"))
-        #expect((initialIDs.firstIndex(of: "uma.main.refresh") ?? -1) < (initialIDs.firstIndex(of: "uma.hesectorium.quick-actions") ?? -1))
-        #expect((initialIDs.firstIndex(of: "uma.hesectorium.quick-actions") ?? Int.max) < (initialIDs.firstIndex(of: "uma.main.settings") ?? -1))
-        #expect(window.makeFirstResponder(storage))
-
         let navigation = try #require(descendants(of: content).first {
             $0.accessibilityIdentifier() == "uma.main.navigation"
         } as? NSSegmentedControl)
+        let initialRoute = keyViewRoute(in: window)
+        let initialIDs = initialRoute.compactMap(accessibilityIdentifier(in:))
+        #expect(initialIDs.contains("uma.main.navigation"))
+        #expect(!initialIDs.contains("uma.hesectorium.quick-actions"))
+        #expect(initialIDs.contains("uma.main.scan"))
+        #expect(initialIDs.contains("uma.main.refresh"))
+        #expect(initialIDs.contains("uma.main.settings"))
+
+        navigation.selectedSegment = 2
+        #expect(navigation.sendAction(try #require(navigation.action), to: navigation.target))
+        settle(try #require(window.contentView))
+        #expect(window.contentView != nil)
+        #expect(navigation.selectedSegment == 2)
+        #expect(!keyViewRoute(in: window).contains { $0.accessibilityIdentifier() == "uma.hesectorium.quick-actions" })
+
         navigation.selectedSegment = 1
         #expect(navigation.sendAction(try #require(navigation.action), to: navigation.target))
         settle(try #require(window.contentView))
@@ -528,6 +534,303 @@ import HESectoriumRuntime
         #expect(window.firstResponder === navigation)
         window.selectPreviousKeyView(nil)
         #expect(window.firstResponder === copy)
+    }
+
+    @Test func sectoriumWorkbenchControlsAttachToRealWindowAndFitNarrowContent() throws {
+        _ = NSApplication.shared
+        let fixture = HESectoriumKeyboardFixture(isExternal: false)
+        defer { fixture.remove() }
+        fixture.store.selectDevice(fixture.device.id)
+        fixture.store.apply(devices: [fixture.device], profiles: [], readiness: .connected, pending: nil)
+        let host = NSHostingView(rootView: SectoriumWorkbenchView(store: fixture.store))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 520),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        settle(host)
+
+        let workbenchScroll = try #require(descendants(of: host).compactMap { $0 as? NSScrollView }.first)
+        let workbenchDocument = try #require(workbenchScroll.documentView)
+        workbenchScroll.contentView.scroll(to: NSPoint(
+            x: 0,
+            y: max(0, workbenchDocument.frame.height - workbenchScroll.contentView.bounds.height)
+        ))
+        workbenchScroll.reflectScrolledClipView(workbenchScroll.contentView)
+        settle(host)
+
+        let identifiers: Set<String> = [
+            "uma.sectorium.refresh", "uma.sectorium.settings",
+            "uma.sectorium.create", "uma.sectorium.adopt", "uma.sectorium.start",
+            "uma.sectorium.stop", "uma.sectorium.resume", "uma.sectorium.eject-drive",
+            "uma.sectorium.local-sampling-consent"
+        ]
+        let controls = descendants(of: host).filter { identifiers.contains($0.accessibilityIdentifier()) }
+        #expect(controls.count == identifiers.count)
+        #expect(controls.allSatisfy { $0.window === window })
+        let controlFrames = controls.map { $0.convert($0.bounds, to: host) }
+        let controlFramesFitNarrowWidth = controlFrames.allSatisfy { $0.minX >= host.bounds.minX && $0.maxX <= host.bounds.maxX }
+        #expect(controlFramesFitNarrowWidth,
+                "Workbench controls must remain within the narrow attached content width: \(controlFrames)")
+
+        var traversed = Set<String>()
+        for _ in 0..<64 {
+            window.selectNextKeyView(nil)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            if let responder = window.firstResponder as? NSView,
+               let identifier = accessibilityIdentifier(in: responder), identifiers.contains(identifier) {
+                traversed.insert(identifier)
+            }
+        }
+        #expect(traversed.contains("uma.sectorium.refresh"))
+        #expect(traversed.contains("uma.sectorium.settings"))
+        #expect(traversed.contains("uma.sectorium.create"))
+        #expect(traversed.contains("uma.sectorium.adopt"))
+        #expect(traversed.contains("uma.sectorium.local-sampling-consent"))
+    }
+
+    @Test func sectoriumMutationButtonsRequireVerifiedIdentityAndNoPendingOperation() throws {
+        _ = NSApplication.shared
+        let scenarios: [(identityVerified: Bool, pending: String?)] = [
+            (false, nil),
+            (true, "start:interrupted")
+        ]
+        for scenario in scenarios {
+            let fixture = HESectoriumKeyboardFixture(isExternal: false,
+                                                      identityVerified: scenario.identityVerified)
+            defer { fixture.remove() }
+            fixture.store.selectDevice(fixture.device.id)
+            fixture.store.apply(devices: [fixture.device], profiles: [], readiness: .connected,
+                                pending: scenario.pending)
+            let host = NSHostingView(rootView: SectoriumWorkbenchView(store: fixture.store))
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 520),
+                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.contentView = host
+            window.makeKeyAndOrderFront(nil)
+            defer { window.orderOut(nil) }
+            settle(host)
+            fixture.store.apply(devices: [fixture.device], profiles: [], readiness: .connected,
+                                pending: scenario.pending)
+            let scroll = try #require(descendants(of: host).compactMap { $0 as? NSScrollView }.first)
+            let document = try #require(scroll.documentView)
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, document.frame.height - scroll.contentView.bounds.height)))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            settle(host)
+
+            let buttons = descendants(of: host).compactMap { $0 as? NSButton }
+            let create = try #require(buttons.first { $0.accessibilityIdentifier() == "uma.sectorium.create" })
+            let adopt = try #require(buttons.first { $0.accessibilityIdentifier() == "uma.sectorium.adopt" })
+            let resume = try #require(buttons.first { $0.accessibilityIdentifier() == "uma.sectorium.resume" })
+            #expect(create.isEnabled == (scenario.identityVerified && scenario.pending == nil))
+            #expect(adopt.isEnabled == (scenario.identityVerified && scenario.pending == nil))
+            #expect(resume.isEnabled == (scenario.pending != nil))
+            if scenario.pending != nil {
+                #expect(fixture.store.workbench.readiness == .operationInProgress("start:interrupted"))
+            }
+        }
+    }
+
+    @Test func sectoriumEnabledStorageActionsParticipateInAttachedWindowTabTraversal() throws {
+        _ = NSApplication.shared
+        let scenarios: [(action: String, readiness: SectoriumWorkbenchReadiness, pending: String?)] = [
+            ("uma.sectorium.start", .notStarted, nil),
+            ("uma.sectorium.stop", .ready, nil),
+            ("uma.sectorium.resume", .operationInProgress("start:interrupted"), "start:interrupted"),
+            ("uma.sectorium.eject-drive", .notStarted, nil),
+            ("uma.sectorium.return-to-development", .operationInProgress("eject:pending"), "eject:pending")
+        ]
+        for scenario in scenarios {
+            let fixture = HESectoriumKeyboardFixture(isExternal: true)
+            defer { fixture.remove() }
+            let profile = SectoriumDevelopmentProfile(id: UUID().uuidString, name: "Fixture",
+                deviceID: fixture.device.id, backingVolumeUUID: UUID(), backingMountPoint: "/private/tmp/HE",
+                imagePath: "/private/tmp/HE/Fixture.sparsebundle", devVolumeName: "Fixture",
+                devMountPoint: "/Volumes/Fixture-DEV", encrypted: false,
+                caseSensitive: false, logicalCapacityBytes: 1024, imageFormat: "UDSB")
+            fixture.store.selectDevice(fixture.device.id)
+            fixture.store.apply(devices: [fixture.device], profiles: [profile], readiness: scenario.readiness,
+                                pending: scenario.pending)
+            let host = NSHostingView(rootView: SectoriumWorkbenchView(store: fixture.store))
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 520),
+                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.contentView = host
+            window.makeKeyAndOrderFront(nil)
+            defer { window.orderOut(nil) }
+            settle(host)
+            fixture.store.deactivateWorkbench()
+            fixture.store.apply(devices: [fixture.device], profiles: [profile], readiness: scenario.readiness,
+                                pending: scenario.pending)
+            settle(host)
+            let scroll = try #require(descendants(of: host).compactMap { $0 as? NSScrollView }.first)
+            let button = try #require(descendants(of: host).compactMap { $0 as? NSButton }
+                .first { $0.accessibilityIdentifier() == scenario.action },
+                "Enabled action missing from window fixture: \(scenario.action), readiness=\(scenario.readiness), pending=\(String(describing: scenario.pending))")
+            #expect(button.isEnabled, "\(scenario.action) should be enabled in its attached fixture state")
+            #expect(button.window === window)
+            func focusRectInViewport(_ view: NSView) -> NSRect {
+                view.convert(view.bounds, to: scroll.contentView).insetBy(dx: -6, dy: -6)
+            }
+            let startsOutsideViewport = !scroll.contentView.bounds.contains(focusRectInViewport(button))
+            let originalResponder = try #require(descendants(of: host).compactMap { $0 as? NSButton }
+                .first { $0.accessibilityIdentifier() == "uma.sectorium.refresh" })
+            #expect(window.makeFirstResponder(originalResponder))
+            var traversed = false
+            for _ in 0..<96 {
+                window.selectNextKeyView(nil)
+                RunLoop.main.run(until: Date().addingTimeInterval(0.005))
+                if let responder = window.firstResponder as? NSView,
+                   accessibilityIdentifier(in: responder) == scenario.action {
+                    traversed = true
+                    #expect(scroll.contentView.bounds.contains(focusRectInViewport(button)),
+                            "Forward focus must bring enabled \(scenario.action) into the viewport from its initial position.")
+                    break
+                }
+            }
+            #expect(traversed, "Forward Tab must reach enabled \(scenario.action) in the real attached NSWindow fixture")
+            if scenario.action == "uma.sectorium.return-to-development" || scenario.action == "uma.sectorium.eject-drive" {
+                #expect(startsOutsideViewport, "Bottom storage action should begin outside the top viewport to exercise focus-driven scrolling.")
+            }
+            var restored = false
+            for _ in 0..<96 {
+                if window.firstResponder === originalResponder { restored = true; break }
+                window.selectPreviousKeyView(nil)
+                RunLoop.main.run(until: Date().addingTimeInterval(0.005))
+                if let responder = window.firstResponder as? NSView {
+                    #expect(scroll.contentView.bounds.contains(focusRectInViewport(responder)),
+                            "Every reverse-focused responder must remain visible while traversing from \(scenario.action).")
+                } else {
+                    Issue.record("Reverse traversal left the attached view responder route before restoring Refresh: \(String(describing: window.firstResponder))")
+                }
+            }
+            #expect(restored,
+                    "Reverse traversal must restore the original attached-window responder; current=\(String(describing: window.firstResponder)), original=\(String(describing: originalResponder)), initial=\(String(describing: window.initialFirstResponder)).")
+        }
+    }
+
+    @Test func sectoriumSamplingRequiresPageSelectionAndLocalConsent() throws {
+        let fixture = HESectoriumKeyboardFixture(isExternal: false)
+        defer { fixture.remove() }
+        fixture.store.selectDevice(fixture.device.id)
+        fixture.store.apply(devices: [fixture.device], profiles: [], readiness: .connected, pending: nil)
+        #expect(fixture.store.workbench.selectedDeviceID == fixture.device.id)
+        #expect(fixture.store.workbench.devices.first(where: { $0.id == fixture.device.id })?.identityVerified == true)
+        fixture.store.setLocalDeviceSamplingConsent(true, for: fixture.device.id)
+        #expect(!fixture.store.isLocalDeviceSamplingConsented(fixture.device.id),
+                "Local-disk consent cannot be set while the workbench page is inactive.")
+        fixture.store.activateWorkbench()
+
+        fixture.store.sampleSelectedDeviceIO()
+        #expect(fixture.ioSampler.sampledNames.isEmpty)
+        #expect(!fixture.store.isLocalDeviceSamplingConsented(fixture.device.id))
+
+        fixture.store.setLocalDeviceSamplingConsent(true, for: fixture.device.id)
+        #expect(fixture.store.isLocalDeviceSamplingConsented(fixture.device.id))
+        waitForIOCalls(fixture.ioSampler, count: 1)
+        #expect(fixture.ioSampler.sampledNames == [fixture.device.bsdName])
+        #expect(fixture.runner.targetedInfoNames == [fixture.device.bsdName])
+
+        fixture.store.setLocalDeviceSamplingConsent(false, for: fixture.device.id)
+        #expect(fixture.store.workbench.io.readBytesPerSecond == nil)
+        fixture.store.sampleSelectedDeviceIO()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.03))
+        #expect(fixture.ioSampler.sampledNames == [fixture.device.bsdName])
+
+        fixture.store.setLocalDeviceSamplingConsent(true, for: fixture.device.id)
+        waitForIOCalls(fixture.ioSampler, count: 2)
+        fixture.store.pauseSamplingForSleep()
+        fixture.store.sampleSelectedDeviceIO()
+        #expect(fixture.store.workbench.io.isFresh == false)
+        #expect(fixture.ioSampler.sampledNames.count == 2)
+        fixture.store.resumeSamplingAfterWake()
+        fixture.store.deactivateWorkbench()
+        #expect(!fixture.store.isLocalDeviceSamplingConsented(fixture.device.id))
+        fixture.store.sampleSelectedDeviceIO()
+        #expect(fixture.ioSampler.sampledNames.count == 2)
+    }
+
+    @Test func sectoriumIORatesBecomeUnknownAcrossCounterResetOrSamplingGap() {
+        let baseline = SectoriumDeviceIOCounters(readBytes: 100, writtenBytes: 200)
+        let later = SectoriumDeviceIOCounters(readBytes: 600, writtenBytes: 1_200)
+        let valid = HESectoriumStore.rateReading(previous: baseline, current: later, elapsed: 1)
+        #expect(valid.isFresh)
+        #expect(valid.readBytesPerSecond == 500)
+        #expect(valid.writtenBytesPerSecond == 1_000)
+
+        #expect(!HESectoriumStore.rateReading(previous: later, current: baseline, elapsed: 1).isFresh)
+        #expect(!HESectoriumStore.rateReading(previous: baseline, current: later, elapsed: 0.2).isFresh)
+        #expect(!HESectoriumStore.rateReading(previous: baseline, current: later, elapsed: 4).isFresh)
+    }
+
+    @Test func sectoriumIOSampleHistoryRetainsOnlyTheLatestSixtySecondsInMemory() {
+        let history = (0..<130).map { index in
+            SectoriumIOSampleHistoryEntry(deviceID: "selected", counters: .init(readBytes: UInt64(index), writtenBytes: UInt64(index)),
+                                          uptime: TimeInterval(index))
+        }
+        let retained = HESectoriumStore.prunedIOHistory(history, now: 129)
+        #expect(retained.count == 61)
+        #expect(retained.first?.uptime == 69)
+        #expect(retained.last?.uptime == 129)
+        #expect(HESectoriumStore.prunedIOHistory(history + [
+            .init(deviceID: "selected", counters: .init(readBytes: 200, writtenBytes: 200), uptime: 130)
+        ], now: 129).last?.uptime == 129)
+    }
+
+    @Test func sectoriumIOHistoryResetsOnDisconnectAndReconnect() throws {
+        let fixture = HESectoriumKeyboardFixture(isExternal: true)
+        defer { fixture.remove() }
+        fixture.store.selectDevice(fixture.device.id)
+        fixture.store.apply(devices: [fixture.device], profiles: [], readiness: .connected, pending: nil)
+        fixture.store.activateWorkbench()
+        fixture.store.sampleSelectedDeviceIO()
+        waitForIOCalls(fixture.ioSampler, count: 1)
+
+        fixture.store.apply(devices: [], profiles: [], readiness: .ejected, pending: nil)
+        fixture.store.apply(devices: [fixture.device], profiles: [], readiness: .connected, pending: nil)
+        fixture.store.sampleSelectedDeviceIO()
+        waitForIOCalls(fixture.ioSampler, count: 2)
+        #expect(!fixture.store.workbench.io.isFresh,
+                "A remounted or reappeared device must establish a new counter baseline after disconnect.")
+    }
+
+    @Test func sectoriumExternalSamplingRevalidatesAndSamplesOnlyTheSelectedWholeDisk() {
+        let fixture = HESectoriumKeyboardFixture(isExternal: true)
+        defer { fixture.remove() }
+        fixture.store.selectDevice(fixture.device.id)
+        fixture.store.apply(devices: [fixture.device], profiles: [], readiness: .connected, pending: nil)
+        fixture.store.activateWorkbench()
+        fixture.store.sampleSelectedDeviceIO()
+        waitForIOCalls(fixture.ioSampler, count: 1)
+
+        #expect(fixture.ioSampler.sampledNames == [fixture.device.bsdName])
+        #expect(fixture.runner.targetedInfoNames == [fixture.device.bsdName])
+        fixture.store.deactivateWorkbench()
+        fixture.store.sampleSelectedDeviceIO()
+        #expect(fixture.ioSampler.sampledNames == [fixture.device.bsdName])
+    }
+
+    @Test func staleSamplingCompletionCannotRestoreReadingOrBecomeTheNextBaseline() {
+        let fixture = HESectoriumKeyboardFixture(isExternal: true)
+        defer { fixture.remove() }
+        fixture.store.apply(devices: [fixture.device], profiles: [], readiness: .connected, pending: nil)
+        fixture.store.selectDevice(fixture.device.id)
+        fixture.store.apply(devices: [fixture.device], profiles: [], readiness: .connected, pending: nil)
+        fixture.ioSampler.holdNextSample()
+        fixture.store.activateWorkbench()
+        fixture.store.sampleSelectedDeviceIO()
+        #expect(fixture.ioSampler.waitForHeldSample(), "The controlled sampler did not reach its suspended return point.")
+
+        fixture.store.selectDevice(nil)
+        fixture.ioSampler.releaseHeldSample()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        #expect(fixture.store.workbench.io.readBytesPerSecond == nil)
+        #expect(!fixture.store.workbench.io.isFresh)
+
+        fixture.store.selectDevice(fixture.device.id)
+        fixture.store.apply(devices: [fixture.device], profiles: [], readiness: .connected, pending: nil)
+        fixture.store.sampleSelectedDeviceIO()
+        waitForIOCalls(fixture.ioSampler, count: 2)
+        #expect(!fixture.store.workbench.io.isFresh,
+                "A discarded stale completion must not seed the next selected-device rate baseline.")
     }
 
     @Test func hesSettingsActionsReceiveVisibleForwardAndReverseWindowFocus() throws {
@@ -572,6 +875,13 @@ import HESectoriumRuntime
             }
         }
         #expect(reverse == expected)
+    }
+
+    private func waitForIOCalls(_ sampler: HESectoriumKeyboardIOSampler, count: Int) {
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline && sampler.sampledNames.count < count {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
     }
 
     @Test func workerExpansionIsPreservedIndependentlyForEachProjectAndAcrossReopen() {
@@ -838,17 +1148,35 @@ private extension JSONEncoder {
 @MainActor private struct HESectoriumKeyboardFixture {
     let root: URL
     let store: HESectoriumStore
-    init() {
+    let device: SectoriumPhysicalDevice
+    let runner: HESectoriumKeyboardRunner
+    let ioSampler: HESectoriumKeyboardIOSampler
+    init(isExternal: Bool = true, identityVerified: Bool = true) {
         root = URL(fileURLWithPath: "/private/tmp/hesectorium-keyboard-\(UUID().uuidString)", isDirectory: true)
         try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let paths = HESectoriumPaths(root: root.appendingPathComponent("support", isDirectory: true))
+        let mediaUUID = UUID()
+        device = SectoriumPhysicalDevice(id: identityVerified ? mediaUUID.uuidString : "unverified-disk81",
+            bsdName: "disk81", name: "Fixture drive",
+            isExternal: isExternal, identityVerified: identityVerified, wholeDeviceBytes: 1024 * 1024 * 1024,
+            mountedVolumePaths: [], volumeUUIDs: [], readBytes: nil, writtenBytes: nil)
+        runner = HESectoriumKeyboardRunner(device: device)
+        ioSampler = HESectoriumKeyboardIOSampler()
         let service = HESectoriumService(paths: paths, backend: HESectoriumKeyboardBackend(),
             store: HESectoriumKeyboardStateStore(), operationLock: HESectoriumKeyboardLock(),
-            installer: HESectoriumInstaller(paths: paths, home: root), runner: HESectoriumKeyboardRunner(),
-            identityPolicy: .expected, agentStatusProvider: UnknownAgentStatusProvider())
-        store = HESectoriumStore(service: service)
+            installer: HESectoriumInstaller(paths: paths, home: root), runner: runner,
+            identityPolicy: .expected, agentStatusProvider: UnknownAgentStatusProvider(),
+            sectoriumDeviceObserver: HESectoriumKeyboardDeviceObserver(device: device),
+            sectoriumDeviceIOSampler: ioSampler)
+        store = HESectoriumStore(service: service, sampleIntervalNanoseconds: 60_000_000_000)
     }
     func remove() { try? FileManager.default.removeItem(at: root) }
+}
+
+private final class HESectoriumKeyboardDeviceObserver: SectoriumDeviceObserving {
+    let device: SectoriumPhysicalDevice
+    init(device: SectoriumPhysicalDevice) { self.device = device }
+    func observeDevices() throws -> [SectoriumPhysicalDevice] { [device] }
 }
 
 private final class HESectoriumKeyboardStateStore: DurableStateStore {
@@ -876,7 +1204,40 @@ private final class HESectoriumKeyboardBackend: StorageBackend {
 }
 
 private final class HESectoriumKeyboardRunner: HESectoriumCommandRunning {
+    let device: SectoriumPhysicalDevice?
+    private(set) var targetedInfoNames: [String] = []
+    init(device: SectoriumPhysicalDevice? = nil) { self.device = device }
     func run(_ executable: String, _ arguments: [String], cwd: URL) -> CommandOutcome {
-        .init(exitCode: 97, detail: "fixture forbids command execution")
+        if executable == "/usr/sbin/diskutil", arguments == ["info", "-plist", "/dev/\(device?.bsdName ?? "")"],
+           let device,
+           let data = try? PropertyListSerialization.data(fromPropertyList: [
+               "DeviceIdentifier": device.bsdName, "MediaUUID": device.id
+           ], format: .xml, options: 0) {
+            targetedInfoNames.append(device.bsdName)
+            return .init(exitCode: 0, detail: String(decoding: data, as: UTF8.self))
+        }
+        return .init(exitCode: 97, detail: "fixture forbids command execution")
+    }
+}
+
+private final class HESectoriumKeyboardIOSampler: SectoriumDeviceIOCounterSampling, @unchecked Sendable {
+    private let lock = NSLock()
+    private var names: [String] = []
+    private var holdNext = false
+    private let heldSample = DispatchSemaphore(value: 0)
+    private let releaseSample = DispatchSemaphore(value: 0)
+    var sampledNames: [String] { lock.lock(); defer { lock.unlock() }; return names }
+    func holdNextSample() { lock.lock(); holdNext = true; lock.unlock() }
+    func waitForHeldSample() -> Bool { heldSample.wait(timeout: .now() + 5) == .success }
+    func releaseHeldSample() { releaseSample.signal() }
+    func counters(forWholeBSDName bsdName: String, expectedMediaID: UUID) -> SectoriumDeviceIOCounters? {
+        lock.lock()
+        names.append(bsdName)
+        let index = names.count
+        let shouldHold = holdNext
+        holdNext = false
+        lock.unlock()
+        if shouldHold { heldSample.signal(); releaseSample.wait() }
+        return .init(readBytes: UInt64(index * 1_000), writtenBytes: UInt64(index * 2_000))
     }
 }

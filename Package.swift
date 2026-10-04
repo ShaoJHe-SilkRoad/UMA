@@ -27,7 +27,8 @@ let package = Package(
         .target(
             name: "HESectoriumRuntime",
             dependencies: ["HESectoriumCore"],
-            path: "Sources/HESectoriumRuntime"
+            path: "Sources/HESectoriumRuntime",
+            linkerSettings: [.linkedFramework("IOKit")]
         ),
         .target(
             name: "HESectoriumCLI",

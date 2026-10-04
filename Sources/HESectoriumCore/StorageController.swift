@@ -51,13 +51,14 @@ public struct StorageObservation: Equatable, Sendable {
 
 public struct StorageIdentityPolicy: Sendable {
     public let outerUUID: UUID
-    public let devUUID: UUID
+    public let devUUID: UUID?
     public let outerMountPoint: String
     public let devMountPoint: String
     public let devVolumeName: String
     public let imagePath: String
-
-    public init(outerUUID: UUID, devUUID: UUID, outerMountPoint: String = "/Volumes/HE",
+    /// Used only for a newly created sparsebundle before its APFS UUID exists.
+    /// The observed UUID is accepted only when Runtime proves the exact image/backing/APFS chain.
+    public init(outerUUID: UUID, devUUID: UUID?, outerMountPoint: String = "/Volumes/HE",
                 devMountPoint: String = "/Volumes/HE/DEV", devVolumeName: String = "DEV_APFS",
                 imagePath: String = "/Volumes/HE/.DEV-APFS.sparsebundle") {
         self.outerUUID = outerUUID; self.devUUID = devUUID; self.outerMountPoint = outerMountPoint
@@ -71,7 +72,7 @@ public struct StorageIdentityPolicy: Sendable {
     public func validate(_ value: StorageObservation) -> Result<Void, ReadinessFailure> {
         if case .failure(let failure) = validateOuter(value.outer) { return .failure(failure) }
         guard value.dev.uuid != nil else { return .failure(.devUUIDMissing) }
-        guard value.dev.uuid == devUUID else { return .failure(.devUUIDMismatch) }
+        if let devUUID, value.dev.uuid != devUUID { return .failure(.devUUIDMismatch) }
         guard value.dev.mountedVolume else { return .failure(.devNotMountedVolume) }
         guard value.dev.mountPoint == devMountPoint else { return .failure(.devMountMismatch) }
         guard value.dev.rootMatchesExpected else { return .failure(.devRootMismatch) }
@@ -79,7 +80,8 @@ public struct StorageIdentityPolicy: Sendable {
         guard value.dev.fileSystem.uppercased() == "APFS" else { return .failure(.devNotAPFS) }
         guard value.dev.writable else { return .failure(.devReadOnly) }
         guard value.image.path == imagePath, value.image.backingVolumeUUID == outerUUID,
-              value.image.attachedVolumeUUID == devUUID else { return .failure(.imageRelationMismatch) }
+              value.image.attachedVolumeUUID == value.dev.uuid,
+              (devUUID == nil || value.image.attachedVolumeUUID == devUUID) else { return .failure(.imageRelationMismatch) }
         return .success(())
     }
 
@@ -135,11 +137,26 @@ public struct StoragePersistentState: Equatable, Sendable {
     public var operationID: String?
     public var outerDisappearedAfterIntent: Bool
     public var outerReconnectAttempted: Bool
+    /// Non-automation operation marker shared with the Sectorium workbench.
+    public var workbenchOperation: String?
+    /// Durable validation/mutation boundary for safe workbench recovery.
+    public var workbenchPhase: String?
+    public var workbenchTarget: String?
+    public var workbenchCompletedStep: String?
+    public var workbenchTerminalResult: String?
     public init(revision: UInt64 = 0, ejectIntent: Bool, operationID: String? = nil,
-                outerDisappearedAfterIntent: Bool = false, outerReconnectAttempted: Bool = false) {
+                outerDisappearedAfterIntent: Bool = false, outerReconnectAttempted: Bool = false,
+                workbenchOperation: String? = nil, workbenchPhase: String? = nil,
+                workbenchTarget: String? = nil, workbenchCompletedStep: String? = nil,
+                workbenchTerminalResult: String? = nil) {
         self.revision = revision; self.ejectIntent = ejectIntent; self.operationID = operationID
         self.outerDisappearedAfterIntent = outerDisappearedAfterIntent
         self.outerReconnectAttempted = outerReconnectAttempted
+        self.workbenchOperation = workbenchOperation
+        self.workbenchPhase = workbenchPhase
+        self.workbenchTarget = workbenchTarget
+        self.workbenchCompletedStep = workbenchCompletedStep
+        self.workbenchTerminalResult = workbenchTerminalResult
     }
 }
 
@@ -162,6 +179,7 @@ public enum OperationFailure: Equatable, Sendable {
     case attachFailed(Int32, String), observationUnavailable, readiness(ReadinessFailure)
     case occupancyBusy(OccupancyScope, [Int32]), occupancyIncomplete(OccupancyScope, String)
     case stepFailed(EjectStep, Int32, String), outerStillPresent, finalStateUnknown(String)
+    case workbenchFailed(String)
 }
 public enum StepStatus: String, Equatable, Sendable { case succeeded, failed, skipped }
 public struct OperationStepResult: Equatable, Sendable {
@@ -185,9 +203,10 @@ public struct OperationResult: Equatable, Sendable {
 
 /// Orchestrates one shared protocol. Platform commands, persistent state and mutual exclusion are injected.
 public final class StorageController {
-    private let backend: StorageBackend
-    private let store: DurableStateStore
-    private let lock: OperationLock
+    // Internal so the whole-device protocol reuses this controller's single store and lock.
+    let backend: StorageBackend
+    let store: DurableStateStore
+    let lock: OperationLock
     public let identityPolicy: StorageIdentityPolicy
 
     public init(backend: StorageBackend, store: DurableStateStore, lock: OperationLock,
@@ -210,8 +229,12 @@ public final class StorageController {
             var steps: [OperationStepResult] = []
             let prior: StoragePersistentState
             do { prior = try store.load() } catch { return result(id, mode, steps, .stateUnavailable(String(describing: error))) }
+            guard prior.workbenchOperation == nil else { return result(id, mode, steps, .operationInProgress) }
             guard !prior.ejectIntent else { return result(id, mode, steps, .ejectAlreadyPending) }
-            let pending = StoragePersistentState(revision: prior.revision + 1, ejectIntent: true, operationID: id)
+            let pending = StoragePersistentState(revision: prior.revision + 1, ejectIntent: true, operationID: id,
+                workbenchOperation: prior.workbenchOperation, workbenchPhase: prior.workbenchPhase,
+                workbenchTarget: prior.workbenchTarget, workbenchCompletedStep: prior.workbenchCompletedStep,
+                workbenchTerminalResult: prior.workbenchTerminalResult)
             do {
                 guard try store.compareAndSwap(expectedRevision: prior.revision, newState: pending) else {
                     return result(id, mode, steps, .stateConflict)
@@ -254,7 +277,10 @@ public final class StorageController {
                     let current = try store.load()
                     let marked = StoragePersistentState(revision: current.revision + 1, ejectIntent: current.ejectIntent,
                         operationID: current.operationID, outerDisappearedAfterIntent: current.ejectIntent,
-                        outerReconnectAttempted: false)
+                        outerReconnectAttempted: false, workbenchOperation: current.workbenchOperation,
+                        workbenchPhase: current.workbenchPhase, workbenchTarget: current.workbenchTarget,
+                        workbenchCompletedStep: current.workbenchCompletedStep,
+                        workbenchTerminalResult: current.workbenchTerminalResult)
                     guard try store.compareAndSwap(expectedRevision: current.revision, newState: marked) else {
                         steps.append(.init(step: "recordOuterDisappearance", status: .failed, detail: "State revision conflict"))
                         return result(id, mode, steps, .stateConflict)
@@ -282,11 +308,15 @@ public final class StorageController {
         defer { lock.release() }
         do {
             let state = try store.load()
+            if state.workbenchOperation != nil { return result(id, .automatic, [], .operationInProgress) }
             switch event {
             case .outerDisappeared(let uuid) where uuid == identityPolicy.outerUUID && state.ejectIntent:
                 let marked = StoragePersistentState(revision: state.revision + 1, ejectIntent: true,
                     operationID: state.operationID, outerDisappearedAfterIntent: true,
-                    outerReconnectAttempted: false)
+                    outerReconnectAttempted: false, workbenchOperation: state.workbenchOperation,
+                    workbenchPhase: state.workbenchPhase, workbenchTarget: state.workbenchTarget,
+                    workbenchCompletedStep: state.workbenchCompletedStep,
+                    workbenchTerminalResult: state.workbenchTerminalResult)
                 guard try store.compareAndSwap(expectedRevision: state.revision, newState: marked) else {
                     return result(id, .automatic, [], .stateConflict)
                 }
@@ -305,7 +335,10 @@ public final class StorageController {
                 // cannot issue another attach; a later confirmed disconnect resets the claim.
                 let claimed = StoragePersistentState(revision: state.revision + 1, ejectIntent: true,
                     operationID: state.operationID, outerDisappearedAfterIntent: true,
-                    outerReconnectAttempted: true)
+                    outerReconnectAttempted: true, workbenchOperation: state.workbenchOperation,
+                    workbenchPhase: state.workbenchPhase, workbenchTarget: state.workbenchTarget,
+                    workbenchCompletedStep: state.workbenchCompletedStep,
+                    workbenchTerminalResult: state.workbenchTerminalResult)
                 guard try store.compareAndSwap(expectedRevision: state.revision, newState: claimed) else {
                     return result(id, .automatic, steps, .stateConflict)
                 }
@@ -324,7 +357,11 @@ public final class StorageController {
                     return result(id, .automatic, steps, .readiness(failure))
                 }
                 steps.append(.init(step: "verifyReadiness", status: .succeeded))
-                let recovered = StoragePersistentState(revision: claimed.revision + 1, ejectIntent: false)
+                let recovered = StoragePersistentState(revision: claimed.revision + 1, ejectIntent: false,
+                    outerReconnectAttempted: claimed.outerReconnectAttempted,
+                    workbenchOperation: claimed.workbenchOperation, workbenchPhase: claimed.workbenchPhase,
+                    workbenchTarget: claimed.workbenchTarget, workbenchCompletedStep: claimed.workbenchCompletedStep,
+                    workbenchTerminalResult: claimed.workbenchTerminalResult)
                 guard try store.compareAndSwap(expectedRevision: claimed.revision, newState: recovered) else {
                     return result(id, .automatic, steps, .stateConflict)
                 }
@@ -363,6 +400,7 @@ public final class StorageController {
         if requirePendingIntent && !state.ejectIntent {
             return result(id, mode, steps, .noPendingIntent)
         }
+        if state.workbenchOperation != nil { return result(id, mode, steps, .operationInProgress) }
 
         let outer = backend.observeOuter()
         if case .failure(let failure) = identityPolicy.validateOuter(outer) {
@@ -385,7 +423,11 @@ public final class StorageController {
         steps.append(.init(step: "verifyReadiness", status: .succeeded))
 
         if state.ejectIntent && mode == .manual {
-            let recovered = StoragePersistentState(revision: state.revision + 1, ejectIntent: false)
+            let recovered = StoragePersistentState(revision: state.revision + 1, ejectIntent: false,
+                outerReconnectAttempted: state.outerReconnectAttempted,
+                workbenchOperation: state.workbenchOperation, workbenchPhase: state.workbenchPhase,
+                workbenchTarget: state.workbenchTarget, workbenchCompletedStep: state.workbenchCompletedStep,
+                workbenchTerminalResult: state.workbenchTerminalResult)
             do {
                 guard try store.compareAndSwap(expectedRevision: state.revision, newState: recovered) else {
                     return result(id, mode, steps, .stateConflict)
