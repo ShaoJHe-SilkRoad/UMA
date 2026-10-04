@@ -184,18 +184,27 @@ private struct ThreadOSPromptKeyViewLoopAttachment: NSViewRepresentable {
             let shellBoundary = Self.allViews(in: root).first {
                 $0.accessibilityIdentifier() == "uma.threados.prompt.key-view-boundary"
             }
+            let shellViews = Self.allViews(in: root)
             let shellOutgoingTarget = shellBoundary.flatMap { _ in
-                Self.allViews(in: root).first {
+                shellViews.first {
                     $0.accessibilityIdentifier() == "uma.main.navigation" && $0.canBecomeKeyView
                 }
             }
-            guard shellBoundary == nil || shellOutgoingTarget != nil else { return false }
+            let shellSettings = shellBoundary.flatMap { _ in
+                shellViews.first {
+                    $0.accessibilityIdentifier() == "uma.main.settings" && $0.canBecomeKeyView
+                }
+            }
+            guard shellBoundary == nil || (shellOutgoingTarget != nil && shellSettings != nil) else { return false }
             let preferredAnchor = shellBoundary ?? window.initialFirstResponder ?? root
             let anchor = controls.contains(where: { $0 === preferredAnchor }) ? root : preferredAnchor
             guard anchor.window === window else { return false }
             preserveExplicitKeyViewLoop(in: window)
 
-            let linkedViews = [anchor] + controls
+            // The shell's AppKit route can be recalculated while SwiftUI builds
+            // its toolbar. Own the complete ThreadOS cycle, including both
+            // visible toolbar controls, so neither endpoint can point to itself.
+            let linkedViews = [anchor] + controls + [shellOutgoingTarget, shellSettings].compactMap { $0 }
             let linksMatch = originalLinks.map(\.view).elementsEqual(linkedViews, by: { $0 === $1 })
             if !linksMatch {
                 restoreOriginalLinks()
@@ -205,19 +214,15 @@ private struct ThreadOSPromptKeyViewLoopAttachment: NSViewRepresentable {
                     boundary.originalOutgoingKeyViewForPromptLoop = originalLinks[0].originalNextView
                 }
             }
-            let outgoingTarget = shellBoundary == nil ? originalLinks.last?.originalNextView : shellOutgoingTarget
+            let outgoingTarget = shellBoundary == nil ? originalLinks[controls.count].originalNextView : shellOutgoingTarget
+            let targets = [controls[0]] + Array(controls.dropFirst()) + [outgoingTarget]
+                + (shellBoundary == nil ? [] : [shellSettings, anchor])
             if linksMatch {
-                let expectedTargets = Array(controls.dropFirst()) + [outgoingTarget]
-                if zip(linkedViews, [controls[0]] + expectedTargets).allSatisfy({ $0.nextKeyView === $1 }) {
+                if zip(linkedViews, targets).allSatisfy({ $0.nextKeyView === $1 }) {
                     return true
                 }
             }
 
-            // Insert the composer controls into the existing key-view route.
-            // In the app shell, continue from Copy to the outer toolbar navigation
-            // control. The hidden boundary's original outgoing edge can point back
-            // into this SwiftUI subtree, which traps native forward Tab locally.
-            let targets = [controls[0]] + Array(controls.dropFirst()) + [outgoingTarget]
             for (view, next) in zip(linkedViews, targets) {
                 view.nextKeyView = next
             }

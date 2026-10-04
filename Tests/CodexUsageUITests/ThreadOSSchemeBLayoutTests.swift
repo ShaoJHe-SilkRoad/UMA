@@ -359,7 +359,6 @@ import HESectoriumRuntime
         #expect(scanActionCount == 0)
         #expect(refreshActionCount == 0)
         #expect(settingsActionCount == 1)
-        let incomingBoundaryLink = descendants(of: contentView).first { $0.nextKeyView === boundary }
         let threadOSRoute = keyViewRoute(in: window)
         let threadOSIdentifiers = threadOSRoute.compactMap(accessibilityIdentifier(in:))
             + keyViewAccessibilityIdentifiers(in: window)
@@ -374,7 +373,8 @@ import HESectoriumRuntime
         }
         #expect(!threadOSIdentifiers.contains("uma.main.scan"))
         #expect(!threadOSIdentifiers.contains("uma.main.refresh"))
-        #expect(incomingBoundaryLink === boundary.previousKeyView)
+        #expect(settingsButton.nextKeyView === boundary)
+        #expect(boundary.previousKeyView === settingsButton)
         #expect(threadOSRoute.contains { accessibilityLabel(in: $0) == "UMA navigation" })
 
         controller.showDestination(.agents)
@@ -541,13 +541,14 @@ import HESectoriumRuntime
         let clipboard = HESectoriumKeyboardClipboard()
         let controller = MainWindowController(restoresSavedFrame: false)
         controller.attach(
-            store: UsageStore.preview(language: .english),
+            store: UsageStore.preview(language: .simplifiedChinese),
             openSettings: {}, scanAll: {}, refreshAll: {},
             connectCodex: {}, disconnectCodex: {},
             claudeControlState: { .consentRequired }, connectClaude: {}, accuracySyncClaude: {},
             promptClipboard: clipboard
         )
         defer { controller.tearDown() }
+        controller.window?.appearance = NSAppearance(named: .darkAqua)
         controller.showDestination(.threadOS)
         let window = try #require(controller.window)
         let content = try #require(window.contentView)
@@ -561,6 +562,12 @@ import HESectoriumRuntime
         let settings = try #require(descendants(of: content).first {
             $0.accessibilityIdentifier() == "uma.main.settings"
         } as? NSButton)
+        let boundary = try #require(descendants(of: content).first {
+            $0.accessibilityIdentifier() == "uma.threados.prompt.key-view-boundary"
+        })
+        let leaderModel = try #require(descendants(of: content).first {
+            $0.accessibilityIdentifier() == "uma.threados.prompt.role.leader.model"
+        })
         click(copy, in: window)
         #expect(clipboard.writes.count == 1)
         #expect(window.firstResponder === copy)
@@ -571,6 +578,15 @@ import HESectoriumRuntime
         sendTab(to: window)
         #expect(window.firstResponder === settings,
                 "A second native Tab must continue through the toolbar.")
+        #expect(navigation.nextKeyView === settings)
+        #expect(settings.nextKeyView === boundary,
+                "The toolbar must return to the prompt route after Settings.")
+        sendTab(to: window)
+        #expect(window.firstResponder === leaderModel,
+                "Tab from Settings must pass the hidden boundary into the first prompt control.")
+        sendTab(to: window, reverse: true)
+        #expect(window.firstResponder === settings,
+                "Reverse Tab from the first prompt control must leave the composer.")
         sendTab(to: window, reverse: true)
         #expect(window.firstResponder === navigation)
         sendTab(to: window, reverse: true)
