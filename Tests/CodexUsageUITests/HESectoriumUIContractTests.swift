@@ -64,12 +64,24 @@ struct HESectoriumUIContractTests {
         #expect(workbench.contains("Text(operationSummary).accessibilityIdentifier(\"uma.sectorium.operation-summary\")"))
         #expect(workbench.contains("DisclosureGroup(text(\"Operation details\", \"操作详情\"))"))
         #expect(workbench.contains("其余操作尚未验证；请保持硬盘连接。"))
-        #expect(workbench.contains("isEnabled: model.canContinueWholeDeviceEject && !model.isBusy"))
-        #expect(workbench.contains("isEnabled: model.canReturnFromWholeDeviceEject && !model.isBusy"))
+        #expect(workbench.contains("isEnabled: model.canContinueWholeDeviceEject && model.inventoryState == .available && !model.isBusy"))
+        #expect(workbench.contains("isEnabled: model.canReturnFromWholeDeviceEject && model.inventoryState == .available && !model.isBusy"))
         #expect(workbench.contains("isEnabled: model.canBeginWholeDeviceEject && selectedDevice?.isExternal == true"))
         #expect(workbench.contains("uma.sectorium.eject-known-writers-closed"))
         #expect(workbench.contains(".disabled(!knownWritersClosed || !confirmation.dependenciesCanFinishOffTarget"))
         #expect(store.contains("confirmation.checkpoint(knownWritersClosed: knownWritersClosed)"))
+    }
+
+    @Test("Sectorium sheet owns its close route without adding it to global Settings")
+    func sectoriumSheetCloseContract() throws {
+        let workbench = try source("Sources/CodexUsageUI/Views/SectoriumWorkbenchView.swift")
+        let settings = try source("Sources/CodexUsageUI/Views/HESectoriumSettingsView.swift")
+        #expect(workbench.contains(".sheet(isPresented: $showingSettings, onDismiss:"))
+        #expect(workbench.contains("restoreSettingsFocus"))
+        #expect(settings.contains("if let onClose"))
+        #expect(settings.contains("uma.sectorium.settings.close"))
+        #expect(settings.contains(".onExitCommand { onClose?() }"))
+        #expect(workbench.contains("settingsButtonRef.button = $0"))
     }
 
     @Test("Global Settings exposes bounded management and explicit storage actions")

@@ -594,7 +594,7 @@ import HESectoriumRuntime
                 "A native reverse Tab must return from the toolbar to Copy.")
     }
 
-    @Test func sectoriumWorkbenchControlsAttachToRealWindowAndFitNarrowContent() throws {
+    @Test func sectoriumWorkbenchControlsAttachToRealWindowAndFitNarrowContent() async throws {
         _ = NSApplication.shared
         let fixture = HESectoriumKeyboardFixture(isExternal: false)
         defer { fixture.remove() }
@@ -606,6 +606,9 @@ import HESectoriumRuntime
         window.contentView = host
         window.makeKeyAndOrderFront(nil)
         defer { window.orderOut(nil) }
+        settle(host)
+        try await waitForAvailableInventory(fixture.store)
+        fixture.store.apply(devices: [fixture.device], profiles: [], readiness: .connected, pending: nil)
         settle(host)
 
         let workbenchScroll = try #require(descendants(of: host).compactMap { $0 as? NSScrollView }.first)
@@ -634,7 +637,7 @@ import HESectoriumRuntime
         var traversed = Set<String>()
         for _ in 0..<64 {
             window.selectNextKeyView(nil)
-            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            try await Task.sleep(for: .milliseconds(10))
             if let responder = window.firstResponder as? NSView,
                let identifier = accessibilityIdentifier(in: responder), identifiers.contains(identifier) {
                 traversed.insert(identifier)
@@ -647,7 +650,7 @@ import HESectoriumRuntime
         #expect(traversed.contains("uma.sectorium.local-sampling-consent"))
     }
 
-    @Test func sectoriumMutationButtonsRequireVerifiedIdentityAndNoPendingOperation() throws {
+    @Test func sectoriumMutationButtonsRequireVerifiedIdentityAndNoPendingOperation() async throws {
         _ = NSApplication.shared
         let scenarios: [(identityVerified: Bool, pending: String?)] = [
             (false, nil),
@@ -667,6 +670,7 @@ import HESectoriumRuntime
             window.makeKeyAndOrderFront(nil)
             defer { window.orderOut(nil) }
             settle(host)
+            try await waitForAvailableInventory(fixture.store)
             fixture.store.apply(devices: [fixture.device], profiles: [], readiness: .connected,
                                 pending: scenario.pending)
             let scroll = try #require(descendants(of: host).compactMap { $0 as? NSScrollView }.first)
@@ -698,7 +702,7 @@ import HESectoriumRuntime
         }
     }
 
-    @Test func sectoriumEnabledStorageActionsParticipateInAttachedWindowTabTraversal() throws {
+    @Test func sectoriumEnabledStorageActionsParticipateInAttachedWindowTabTraversal() async throws {
         _ = NSApplication.shared
         let scenarios: [(action: String, readiness: SectoriumWorkbenchReadiness, pending: String?)] = [
             ("uma.sectorium.start", .notStarted, nil),
@@ -725,6 +729,7 @@ import HESectoriumRuntime
             window.makeKeyAndOrderFront(nil)
             defer { window.orderOut(nil) }
             settle(host)
+            try await waitForAvailableInventory(fixture.store)
             fixture.store.deactivateWorkbench()
             fixture.store.apply(devices: [fixture.device], profiles: [profile], readiness: scenario.readiness,
                                 pending: scenario.pending)
@@ -760,7 +765,7 @@ import HESectoriumRuntime
             var traversed = false
             for _ in 0..<96 {
                 window.selectNextKeyView(nil)
-                RunLoop.main.run(until: Date().addingTimeInterval(0.005))
+                try await Task.sleep(for: .milliseconds(5))
                 if let responder = window.firstResponder as? NSView,
                    accessibilityIdentifier(in: responder) == scenario.action {
                     traversed = true
@@ -775,7 +780,7 @@ import HESectoriumRuntime
             for _ in 0..<96 {
                 if window.firstResponder === originalResponder { restored = true; break }
                 window.selectPreviousKeyView(nil)
-                RunLoop.main.run(until: Date().addingTimeInterval(0.005))
+                try await Task.sleep(for: .milliseconds(5))
                 if let responder = window.firstResponder as? NSView {
                     #expect(scroll.contentView.bounds.contains(focusRectInViewport(responder)),
                             "Every reverse-focused responder must remain visible while traversing from \(scenario.action).")
@@ -858,7 +863,7 @@ import HESectoriumRuntime
         }
     }
 
-    @Test func sectoriumNativeLocalConsentButtonTracksVerifiedDeviceState() throws {
+    @Test func sectoriumNativeLocalConsentButtonTracksVerifiedDeviceState() async throws {
         _ = NSApplication.shared
         let fixture = HESectoriumKeyboardFixture(isExternal: false)
         defer { fixture.remove() }
@@ -870,6 +875,7 @@ import HESectoriumRuntime
         window.makeKeyAndOrderFront(nil)
         defer { window.orderOut(nil) }
         settle(host)
+        try await waitForAvailableInventory(fixture.store)
         let unverified = SectoriumPhysicalDevice(id: fixture.device.id, bsdName: fixture.device.bsdName,
             name: fixture.device.name, isExternal: false, identityVerified: false,
             wholeDeviceBytes: fixture.device.wholeDeviceBytes, mountedVolumePaths: [], volumeUUIDs: [],
@@ -1045,6 +1051,141 @@ import HESectoriumRuntime
                 "A discarded stale completion must not seed the next selected-device rate baseline.")
     }
 
+    @Test func sectoriumRefreshInvalidatesReadyAndBlocksIdentityActionsUntilObservation() async throws {
+        _ = NSApplication.shared
+        let observer = HESectoriumHeldDeviceObserver()
+        let fixture = HESectoriumKeyboardFixture(observerOverride: observer)
+        observer.device = fixture.device
+        defer { observer.release(); fixture.remove() }
+        fixture.store.selectDevice(fixture.device.id)
+        for _ in 0..<40 {
+            if fixture.store.inventoryState == .available { break }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(fixture.store.inventoryState == .available)
+        fixture.store.apply(devices: [fixture.device], profiles: [], readiness: .ready, pending: nil)
+        observer.hold()
+        fixture.store.refresh()
+        #expect(fixture.store.inventoryState == .loading)
+        #expect(fixture.store.workbench.readiness != .ready)
+        #expect(!fixture.store.discoveredLegacyDisk)
+        #expect(observer.waitUntilEntered())
+        let host = NSHostingView(rootView: SectoriumWorkbenchView(store: fixture.store))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 540, height: 620),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        settle(host)
+        for identifier in ["uma.sectorium.create", "uma.sectorium.adopt", "uma.sectorium.start", "uma.sectorium.stop"] {
+            let control = try #require(descendants(of: host).first { $0.accessibilityIdentifier() == identifier } as? NSButton)
+            #expect(!control.isEnabled)
+        }
+        observer.release()
+        for _ in 0..<40 {
+            if fixture.store.inventoryState == .available { break }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(fixture.store.inventoryState == .available)
+        fixture.store.apply(devices: [fixture.device], profiles: [], readiness: .ready, pending: nil)
+        observer.fail()
+        fixture.store.refresh()
+        #expect(fixture.store.workbench.readiness != .ready)
+        for _ in 0..<40 {
+            if fixture.store.inventoryState == .unavailable { break }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(fixture.store.inventoryState == .unavailable)
+        #expect(fixture.store.workbench.devices.isEmpty)
+        #expect(fixture.store.workbench.readiness != .ready)
+    }
+
+    @Test func sectoriumLateFailedRefreshCannotReplaceNewerInventory() async throws {
+        let observer = HESectoriumHeldDeviceObserver()
+        let fixture = HESectoriumKeyboardFixture(observerOverride: observer)
+        observer.device = fixture.device
+        defer { observer.release(); fixture.remove() }
+        fixture.store.selectDevice(fixture.device.id)
+        for _ in 0..<40 {
+            if fixture.store.inventoryState == .available { break }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(fixture.store.inventoryState == .available)
+        observer.holdNextOnly()
+        fixture.store.refresh()
+        #expect(observer.waitUntilEntered())
+        fixture.store.refresh()
+        for _ in 0..<40 {
+            if fixture.store.inventoryState == .available { break }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(fixture.store.inventoryState == .available)
+        observer.fail()
+        observer.release()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(fixture.store.inventoryState == .available)
+        #expect(fixture.store.workbench.devices == [fixture.device])
+    }
+
+    @Test func sectoriumSettingsSheetClosesAndReturnsFocusInAttachedWindow() async throws {
+        _ = NSApplication.shared
+        let fixture = HESectoriumKeyboardFixture()
+        defer { fixture.remove() }
+        let host = NSHostingView(rootView: SectoriumWorkbenchView(store: fixture.store))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 540, height: 620),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        settle(host)
+        let settings = try #require(descendants(of: host).first {
+            $0.accessibilityIdentifier() == "uma.sectorium.settings"
+        })
+        click(settings, in: window)
+        settle(host)
+        let sheet = try #require(window.attachedSheet)
+        let content = try #require(sheet.contentView)
+        sheet.layoutIfNeeded()
+        settle(content)
+        let close = try #require(descendants(of: content).first {
+            $0.accessibilityIdentifier() == "uma.sectorium.settings.close"
+        }, "Sheet identifiers: \(descendants(of: content).map { $0.accessibilityIdentifier() })")
+        #expect(close.window === sheet)
+        click(close, in: sheet)
+        settle(host)
+        #expect(window.attachedSheet == nil)
+        for _ in 0..<20 {
+            if (window.firstResponder as? NSView).flatMap(accessibilityIdentifier(in:)) == "uma.sectorium.settings" { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect((window.firstResponder as? NSView).flatMap(accessibilityIdentifier(in:)) == "uma.sectorium.settings")
+
+        let reopenedSettings = try #require(descendants(of: host).first {
+            $0.accessibilityIdentifier() == "uma.sectorium.settings"
+        })
+        click(reopenedSettings, in: window)
+        settle(host)
+        let reopenedSheet = try #require(window.attachedSheet)
+        let reopenedContent = try #require(reopenedSheet.contentView)
+        settle(reopenedContent)
+        let reopenedClose = try #require(descendants(of: reopenedContent).first {
+            $0.accessibilityIdentifier() == "uma.sectorium.settings.close"
+        })
+        #expect(reopenedSheet.makeFirstResponder(reopenedClose))
+        let escape = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero,
+            modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: reopenedSheet.windowNumber, context: nil, characters: "\u{1b}",
+            charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
+        reopenedSheet.sendEvent(escape)
+        for _ in 0..<20 {
+            if window.attachedSheet == nil,
+               (window.firstResponder as? NSView).flatMap(accessibilityIdentifier(in:)) == "uma.sectorium.settings" { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(window.attachedSheet == nil)
+        #expect((window.firstResponder as? NSView).flatMap(accessibilityIdentifier(in:)) == "uma.sectorium.settings")
+    }
+
     @Test func hesSettingsActionsReceiveVisibleForwardAndReverseWindowFocus() throws {
         _ = NSApplication.shared
         let fixture = HESectoriumKeyboardFixture()
@@ -1123,6 +1264,14 @@ import HESectoriumRuntime
             draft.setWorkers(slots, for: role)
         }
         return draft
+    }
+
+    private func waitForAvailableInventory(_ store: HESectoriumStore) async throws {
+        for _ in 0..<80 {
+            if store.inventoryState == .available { break }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(store.inventoryState == .available, "The fixture inventory must finish before testing enabled native controls.")
     }
 
     private func settle(_ host: NSView) {
@@ -1368,7 +1517,8 @@ private enum HESectoriumKeyboardEjectMode { case none, ready, journaledReturn }
     let runner: HESectoriumKeyboardRunner
     let ioSampler: HESectoriumKeyboardIOSampler
     init(isExternal: Bool = true, identityVerified: Bool = true,
-         ejectMode: HESectoriumKeyboardEjectMode = .none) {
+         ejectMode: HESectoriumKeyboardEjectMode = .none,
+         observerOverride: SectoriumDeviceObserving? = nil) {
         root = URL(fileURLWithPath: "/private/tmp/hesectorium-keyboard-\(UUID().uuidString)", isDirectory: true)
         try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         paths = HESectoriumPaths(root: root.appendingPathComponent("support", isDirectory: true))
@@ -1414,7 +1564,7 @@ private enum HESectoriumKeyboardEjectMode { case none, ready, journaledReturn }
             store: stateStore, operationLock: HESectoriumKeyboardLock(),
             installer: HESectoriumInstaller(paths: paths, home: root), runner: runner,
             identityPolicy: .expected, agentStatusProvider: UnknownAgentStatusProvider(),
-            sectoriumDeviceObserver: HESectoriumKeyboardDeviceObserver(device: device),
+            sectoriumDeviceObserver: observerOverride ?? HESectoriumKeyboardDeviceObserver(device: device),
             sectoriumDeviceIOSampler: ioSampler, wholeDeviceEjectDriverOverride: ejectDriver)
         store = HESectoriumStore(service: service, sampleIntervalNanoseconds: 60_000_000_000)
     }
@@ -1442,6 +1592,38 @@ private final class HESectoriumKeyboardEjectDriver: WholeDeviceEjectDriving {
             image.attached && image.mountedVolumeIdentities.map(Set.init) == expected[image.identity]
                 && Set(image.volumeIdentities) == expected[image.identity]
         }
+    }
+}
+
+private final class HESectoriumHeldDeviceObserver: SectoriumDeviceObserving {
+    private let condition = NSCondition()
+    var device: SectoriumPhysicalDevice?
+    private var holding = false
+    private var holdRemaining: Int? = nil
+    private var entered = false
+    private var failing = false
+    func hold() { condition.lock(); holding = true; holdRemaining = nil; entered = false; condition.unlock() }
+    func holdNextOnly() { condition.lock(); holding = true; holdRemaining = 1; entered = false; condition.unlock() }
+    func fail() { condition.lock(); failing = true; condition.unlock() }
+    func release() { condition.lock(); holding = false; condition.broadcast(); condition.unlock() }
+    func waitUntilEntered() -> Bool {
+        condition.lock(); defer { condition.unlock() }
+        let deadline = Date().addingTimeInterval(2)
+        while !entered && Date() < deadline { _ = condition.wait(until: deadline) }
+        return entered
+    }
+    func observeDevices() throws -> [SectoriumPhysicalDevice] {
+        condition.lock()
+        let shouldHold = holding && (holdRemaining == nil || holdRemaining! > 0)
+        if let remaining = holdRemaining { holdRemaining = max(0, remaining - 1) }
+        entered = true
+        condition.broadcast()
+        while shouldHold && holding { condition.wait() }
+        let shouldFail = failing
+        let observedDevice = device
+        condition.unlock()
+        if shouldFail { throw SectoriumDeviceCatalogError.commandFailed("fixture permission denied") }
+        return observedDevice.map { [$0] } ?? []
     }
 }
 

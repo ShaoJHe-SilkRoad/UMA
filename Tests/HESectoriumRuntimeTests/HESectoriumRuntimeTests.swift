@@ -367,7 +367,7 @@ private struct Fixture {
     ])
     runner.outputs["/usr/sbin/diskutil info -plist /dev/disk31s1"] = runner.outputs["/usr/sbin/diskutil info -plist /Volumes/HE/DEV"]!
     runner.outputs["/usr/sbin/diskutil info -plist /dev/disk20s1"] = runner.outputs["/usr/sbin/diskutil info -plist /Volumes/HE"]!
-    runner.outputs["/usr/sbin/diskutil info -plist /dev/disk20"] = try diskInfo(["DeviceIdentifier": "disk20"])
+    runner.outputs["/usr/sbin/diskutil info -plist /dev/disk20"] = try diskInfo(["DeviceIdentifier": "disk20", "VirtualOrPhysical": "Physical"])
     runner.outputs["/usr/sbin/diskutil apfs list -plist"] = try diskInfo(["Containers": [[
         "ContainerReference": "disk31", "PhysicalStores": [["DeviceIdentifier": "disk30"]],
         "Volumes": [["APFSVolumeUUID": p.devUUID!.uuidString, "DeviceIdentifier": "disk31s1"]]

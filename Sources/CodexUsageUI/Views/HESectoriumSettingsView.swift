@@ -4,13 +4,27 @@ import SwiftUI
 public struct HESectoriumSettingsView: View {
     @StateObject private var model: HESectoriumStore
     private let isChinese: Bool
+    private let onClose: (() -> Void)?
 
-    public init(isChinese: Bool = false, store: HESectoriumStore? = nil) {
+    public init(isChinese: Bool = false, store: HESectoriumStore? = nil, onClose: (() -> Void)? = nil) {
         self.isChinese = isChinese
+        self.onClose = onClose
         _model = StateObject(wrappedValue: store ?? HESectoriumStore())
     }
 
     public var body: some View {
+        VStack(spacing: 0) {
+            if let onClose {
+                HStack {
+                    Text(text("Sectorium settings", "分区工设置")).font(.headline)
+                    Spacer()
+                    HESectoriumSettingsNativeButton(
+                        title: text("Close", "关闭"), identifier: "uma.sectorium.settings.close",
+                        isEnabled: true, action: onClose, onEscape: onClose
+                    )
+                }
+                .padding(.horizontal, 20).padding(.top, 16)
+            }
         Form {
             Section {
                 LabeledContent(text("Components", "组件"), value: installedText)
@@ -24,12 +38,12 @@ public struct HESectoriumSettingsView: View {
                         HESectoriumSettingsNativeButton(
                             title: text("Install HESectorium", "安装 HESectorium"),
                             identifier: "uma.settings.hesectorium.install", isEnabled: !model.isBusy,
-                            action: model.install
+                            action: model.install, onEscape: onClose
                         )
                         HESectoriumSettingsNativeButton(
                             title: text("Repair HESectorium", "修复 HESectorium"),
                             identifier: "uma.settings.hesectorium.repair", isEnabled: !model.isBusy,
-                            action: model.installRepair
+                            action: model.installRepair, onEscape: onClose
                         )
                     }
                     .disabled(model.isBusy)
@@ -37,28 +51,28 @@ public struct HESectoriumSettingsView: View {
                     HESectoriumSettingsNativeButton(
                         title: text("Repair HESectorium", "修复 HESectorium"),
                         identifier: "uma.settings.hesectorium.repair", isEnabled: !model.isBusy,
-                        action: model.installRepair
+                        action: model.installRepair, onEscape: onClose
                     )
                 }
                 HESectoriumSettingsNativeToggle(
                     title: text("Enable mount automation", "启用挂载自动化"),
                     identifier: "uma.settings.hesectorium.automation",
                     isOn: model.snapshot.automationEnabled, isEnabled: !model.isBusy,
-                    action: model.setAutomation
+                    action: model.setAutomation, onEscape: onClose
                 )
                 HStack {
                     HESectoriumSettingsNativeButton(
                         title: text("Mount DEV", "挂载 DEV"), identifier: "uma.settings.hesectorium.mount",
-                        isEnabled: !model.isBusy, action: model.mountDEV
+                        isEnabled: !model.isBusy, action: model.mountDEV, onEscape: onClose
                     )
                     HESectoriumSettingsNativeButton(
                         title: text("Safe Eject HE", "安全推出 HE"), identifier: "uma.settings.hesectorium.eject",
-                        isEnabled: !model.isBusy, action: model.safeEjectHE
+                        isEnabled: !model.isBusy, action: model.safeEjectHE, onEscape: onClose
                     )
                 }
                 HESectoriumSettingsNativeButton(
                     title: text("Refresh Status", "刷新状态"), identifier: "uma.settings.hesectorium.refresh",
-                    isEnabled: !model.isBusy, action: model.refresh
+                    isEnabled: !model.isBusy, action: model.refresh, onEscape: onClose
                 )
             } header: {
                 VStack(alignment: .leading, spacing: 4) {
@@ -83,6 +97,8 @@ public struct HESectoriumSettingsView: View {
         .scrollContentBackground(.hidden)
         .padding(14)
         .accessibilityIdentifier("uma.settings.hesectorium")
+        }
+        .onExitCommand { onClose?() }
         .onAppear { model.refresh() }
     }
 
@@ -157,6 +173,11 @@ public struct HESectoriumStatusControl: View {
 
 
 private final class HESectoriumKeyboardButton: NSButton {
+    var onEscape: (() -> Void)?
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53, let onEscape { onEscape(); return }
+        super.keyDown(with: event)
+    }
     override var acceptsFirstResponder: Bool { isEnabled }
     override var canBecomeKeyView: Bool { isEnabled && !isHidden && alphaValue > 0 }
 }
@@ -180,6 +201,7 @@ private struct HESectoriumSettingsNativeButton: NSViewRepresentable {
     let identifier: String
     let isEnabled: Bool
     let action: () -> Void
+    var onEscape: (() -> Void)? = nil
     func makeCoordinator() -> HESectoriumSettingsControlCoordinator {
         HESectoriumSettingsControlCoordinator { _ in action() }
     }
@@ -191,6 +213,7 @@ private struct HESectoriumSettingsNativeButton: NSViewRepresentable {
         button.focusRingType = .exterior
         button.setAccessibilityLabel(title)
         button.setAccessibilityIdentifier(identifier)
+        button.onEscape = onEscape
         return button
     }
     func updateNSView(_ button: NSButton, context: Context) {
@@ -199,6 +222,7 @@ private struct HESectoriumSettingsNativeButton: NSViewRepresentable {
         button.isEnabled = isEnabled
         button.setAccessibilityLabel(title)
         button.setAccessibilityIdentifier(identifier)
+        (button as? HESectoriumKeyboardButton)?.onEscape = onEscape
     }
 }
 
@@ -208,6 +232,7 @@ private struct HESectoriumSettingsNativeToggle: NSViewRepresentable {
     let isOn: Bool
     let isEnabled: Bool
     let action: (Bool) -> Void
+    var onEscape: (() -> Void)? = nil
     func makeCoordinator() -> HESectoriumSettingsControlCoordinator {
         HESectoriumSettingsControlCoordinator { sender in action(sender.state == .on) }
     }
@@ -218,6 +243,7 @@ private struct HESectoriumSettingsNativeToggle: NSViewRepresentable {
         button.focusRingType = .exterior
         button.setAccessibilityLabel(title)
         button.setAccessibilityIdentifier(identifier)
+        button.onEscape = onEscape
         return button
     }
     func updateNSView(_ button: NSButton, context: Context) {
@@ -227,6 +253,7 @@ private struct HESectoriumSettingsNativeToggle: NSViewRepresentable {
         button.isEnabled = isEnabled
         button.setAccessibilityLabel(title)
         button.setAccessibilityIdentifier(identifier)
+        (button as? HESectoriumKeyboardButton)?.onEscape = onEscape
     }
 }
 

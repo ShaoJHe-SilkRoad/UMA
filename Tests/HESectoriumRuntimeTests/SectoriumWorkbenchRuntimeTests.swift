@@ -56,6 +56,7 @@ private final class WorkbenchFixtureRunner: HESectoriumCommandRunning, HESectori
     private(set) var commands: [[String]] = []
     private(set) var secureInputs: [Data] = []
     var imageInventory: [[String: Any]]?
+    var diskInventory: [[String: Any]]?
     var additionalDiskInfos: [String: [String: Any]] = [:]
     var apfsContainers: [[String: Any]]?
     var imageBackingDevice = "disk81s1"
@@ -80,6 +81,10 @@ private final class WorkbenchFixtureRunner: HESectoriumCommandRunning, HESectori
            arguments[0] == "info", arguments[1] == "-plist",
            let info = additionalDiskInfos[arguments[2]],
            let data = try? PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0) {
+            return .init(exitCode: 0, detail: String(decoding: data, as: UTF8.self))
+        }
+        if executable == "/usr/sbin/diskutil", arguments == ["list", "-plist"], let diskInventory,
+           let data = try? PropertyListSerialization.data(fromPropertyList: ["AllDisksAndPartitions": diskInventory], format: .xml, options: 0) {
             return .init(exitCode: 0, detail: String(decoding: data, as: UTF8.self))
         }
         if executable == "/usr/sbin/diskutil", arguments == ["apfs", "list", "-plist"],
@@ -516,7 +521,7 @@ struct SectoriumWorkbenchRuntimeTests {
             "/dev/disk81s1": ["VolumeUUID": outerID.uuidString, "MountPoint": outer.path,
                 "FilesystemType": "ExFAT", "WritableVolume": true, "DeviceIdentifier": "disk81s1",
                 "PartOfWhole": "disk81"],
-            "/dev/disk81": ["DeviceIdentifier": "disk81"],
+            "/dev/disk81": ["DeviceIdentifier": "disk81", "VirtualOrPhysical": "Physical"],
             dev.path: ["VolumeUUID": devID.uuidString, "MountPoint": dev.path, "FilesystemType": "APFS",
                 "WritableVolume": true, "VolumeName": "DEV_APFS", "DeviceIdentifier": "disk31s1",
                 "APFSContainerReference": "disk31"],
@@ -600,7 +605,7 @@ struct SectoriumWorkbenchRuntimeTests {
             "/dev/disk81s1": ["VolumeUUID": fixture.service.coreController.identityPolicy.outerUUID.uuidString,
                 "MountPoint": fixture.mount.path, "FilesystemType": "ExFAT", "WritableVolume": true,
                 "DeviceIdentifier": "disk81s1", "PartOfWhole": "disk81"],
-            "/dev/disk81": ["DeviceIdentifier": "disk81"],
+            "/dev/disk81": ["DeviceIdentifier": "disk81", "VirtualOrPhysical": "Physical"],
             devMount.path: ["VolumeUUID": volumeID.uuidString, "MountPoint": devMount.path,
                 "FilesystemType": "APFS", "WritableVolume": true, "VolumeName": "Lifecycle Data",
                 "DeviceIdentifier": "disk31s1", "APFSContainerReference": "disk31"],
@@ -682,7 +687,7 @@ struct SectoriumWorkbenchRuntimeTests {
             "/dev/disk81s1": ["VolumeUUID": fixture.service.coreController.identityPolicy.outerUUID.uuidString,
                 "MountPoint": fixture.mount.path, "FilesystemType": "ExFAT", "WritableVolume": true,
                 "DeviceIdentifier": "disk81s1", "PartOfWhole": "disk81"],
-            "/dev/disk81": ["DeviceIdentifier": "disk81"],
+            "/dev/disk81": ["DeviceIdentifier": "disk81", "VirtualOrPhysical": "Physical"],
             actualMount: ["VolumeUUID": devUUID.uuidString, "MountPoint": actualMount,
                 "FilesystemType": "APFS", "WritableVolume": true, "VolumeName": "Actual APFS Name",
                 "DeviceIdentifier": "disk31s1", "APFSContainerReference": "disk31"],
@@ -1051,7 +1056,7 @@ struct SectoriumWorkbenchRuntimeTests {
             "/dev/disk81s1": ["VolumeUUID": profile.backingVolumeUUID.uuidString, "MountPoint": fixture.mount.path,
                                "FilesystemType": "ExFAT", "WritableVolume": true, "DeviceIdentifier": "disk81s1",
                                "PartOfWhole": "disk81"],
-            "/dev/disk81": ["DeviceIdentifier": "disk81"],
+            "/dev/disk81": ["DeviceIdentifier": "disk81", "VirtualOrPhysical": "Physical"],
             profile.devMountPoint: ["VolumeUUID": devUUID.uuidString, "MountPoint": profile.devMountPoint,
                                     "FilesystemType": "APFS", "WritableVolume": true, "VolumeName": profile.devVolumeName,
                                     "DeviceIdentifier": "disk31s1",
@@ -1352,4 +1357,148 @@ private final class WorkbenchAdoptionBackend: StorageBackend {
     func assessOccupancy(scope: OccupancyScope) -> OccupancyAssessment { .incomplete(reason: "not part of adoption") }
     func perform(_ step: EjectStep) -> CommandOutcome { .init(exitCode: 127, detail: "adoption fixture forbids mutation") }
     func finalOuterState() -> FinalOuterState { .unknown("adoption fixture") }
+}
+
+private final class SectoriumInventoryCommandFixture: HESectoriumCommandRunning {
+    var inventory: CommandOutcome
+    var calls: [[String]] = []
+    init(_ inventory: CommandOutcome) { self.inventory = inventory }
+    func run(_ executable: String, _ arguments: [String], cwd: URL) -> CommandOutcome {
+        calls.append([executable] + arguments)
+        return inventory
+    }
+}
+
+@Suite("Sectorium read-only inventory repair")
+struct SectoriumInventoryRepairTests {
+    @Test func completeProductionSizedPropertyListIsPreserved() throws {
+        let data = try PropertyListSerialization.data(fromPropertyList: [
+            "AllDisksAndPartitions": [], "Padding": String(repeating: "x", count: 14_000)
+        ], format: .xml, options: 0)
+        let outcome = ProcessCommandRunner.result(executable: "/usr/sbin/diskutil", arguments: ["list", "-plist"],
+                                                  exitCode: 0, stdout: data, stderr: Data())
+        #expect(outcome.succeeded)
+        #expect(outcome.detail.utf8.count > 8_192)
+        #expect((try PropertyListSerialization.propertyList(from: Data(outcome.detail.utf8), options: [], format: nil) as? [String: Any]) != nil)
+        let action = ProcessCommandRunner.result(executable: "/usr/sbin/diskutil", arguments: ["eject", "disk90"],
+                                                 exitCode: 0, stdout: data, stderr: Data())
+        #expect(action.detail.utf8.count <= 8_192)
+        let tooLarge = ProcessCommandRunner.result(executable: "/usr/sbin/diskutil", arguments: ["list", "-plist"],
+                                                   exitCode: 0, stdout: Data(repeating: 65, count: 1_048_577), stderr: Data())
+        #expect(!tooLarge.succeeded)
+    }
+
+    @Test func processPipesAreBoundedAndDrainedWithoutDeadlock() {
+        let runner = ProcessCommandRunner()
+        let cwd = FileManager.default.temporaryDirectory
+        let normal = runner.run("/bin/sh", ["-c", "printf ok; printf warning >&2"], cwd: cwd)
+        #expect(normal.succeeded)
+        #expect(normal.detail.contains("ok"))
+        for script in ["/usr/bin/head -c 32768 /dev/zero",
+                       "/usr/bin/head -c 32768 /dev/zero >&2",
+                       "/usr/bin/head -c 32768 /dev/zero; /usr/bin/head -c 32768 /dev/zero >&2"] {
+            let outcome = runner.run("/bin/sh", ["-c", script], cwd: cwd)
+            #expect(!outcome.succeeded)
+            #expect(outcome.detail == "command output exceeded bounded capture limit")
+        }
+        let failed = runner.run("/bin/sh", ["-c", "printf refused >&2; exit 7"], cwd: cwd)
+        #expect(failed.exitCode == 7)
+        #expect(failed.detail.contains("refused"))
+    }
+
+    @Test func unavailableAndMalformedAreNotEmptyInventory() {
+        for outcome in [CommandOutcome(exitCode: 1, detail: "permission denied"),
+                        CommandOutcome(exitCode: 0, detail: "not plist")] {
+            let runner = SectoriumInventoryCommandFixture(outcome)
+            let observer = SystemSectoriumDeviceObserver(runner: runner)
+            #expect(throws: SectoriumDeviceCatalogError.self) { try observer.observeDevices() }
+            #expect(runner.calls == [["/usr/sbin/diskutil", "list", "-plist"]])
+        }
+    }
+}
+
+@Suite("Sectorium existing-installation discovery fixtures")
+struct SectoriumLegacyDiscoveryRepairTests {
+    @Test func readOnlyLegacyChainAcceptsMissingEntityUUIDAndUniqueParentInventory() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        #expect(fixture.service.identityConfigurationReady)
+        let directObservation = fixture.backend.observe()
+        #expect(directObservation != nil, "Read-only commands: \(fixture.runner.commands)")
+        let discovered = fixture.service.discoveredLegacyDevelopmentDisk()
+        #expect(discovered, "Read-only commands: \(fixture.runner.commands)")
+        #expect(fixture.service.sectoriumProfiles().isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: fixture.service.paths.sectoriumProfiles.path))
+        #expect(fixture.runner.commands.allSatisfy { command in
+            !command.contains("attach") && !command.contains("eject") && !command.contains("unmount")
+                && !command.contains("create") && !command.contains("install")
+        })
+    }
+
+    @Test func conflictingOrAmbiguousReadOnlyChainCannotBecomeDiscovered() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let base = try #require(fixture.runner.imageInventory)
+        var conflicting = base[0]
+        var entities = try #require(conflicting["system-entities"] as? [[String: Any]])
+        entities[entities.count - 1]["volume-uuid"] = UUID().uuidString
+        conflicting["system-entities"] = entities
+        fixture.runner.imageInventory = [conflicting]
+        #expect(!fixture.service.discoveredLegacyDevelopmentDisk())
+        fixture.runner.imageInventory = base + base
+        #expect(!fixture.service.discoveredLegacyDevelopmentDisk())
+        fixture.runner.imageInventory = base
+        let inventory = try #require(fixture.runner.diskInventory)
+        fixture.runner.diskInventory = inventory + inventory
+        #expect(!fixture.service.discoveredLegacyDevelopmentDisk())
+        fixture.runner.diskInventory = inventory
+        let noConfig = HESectoriumService(paths: HESectoriumPaths(root: fixture.root.appendingPathComponent("no-config-support")),
+            backend: MacStorageBackend(paths: fixture.service.paths, runner: fixture.runner, policy: fixture.policy),
+            store: WorkbenchMemoryStore(), operationLock: WorkbenchMemoryLock(), runner: fixture.runner)
+        #expect(!noConfig.discoveredLegacyDevelopmentDisk())
+        #expect(fixture.service.sectoriumProfiles().isEmpty)
+    }
+
+    private func makeFixture() throws -> (root: URL, runner: WorkbenchFixtureRunner,
+                                         service: HESectoriumService, policy: StorageIdentityPolicy,
+                                         backend: MacStorageBackend) {
+        let requestedRoot = URL(fileURLWithPath: "/private/tmp/sectorium-discovery-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: requestedRoot, withIntermediateDirectories: true)
+        let root = requestedRoot.resolvingSymlinksInPath()
+        let outer = root.appendingPathComponent("outer", isDirectory: true)
+        let dev = outer.appendingPathComponent("dev", isDirectory: true)
+        let image = outer.appendingPathComponent("fixture.sparsebundle", isDirectory: true)
+        try FileManager.default.createDirectory(at: dev, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: image, withIntermediateDirectories: true)
+        let outerUUID = UUID(), devUUID = UUID()
+        let policy = StorageIdentityPolicy(outerUUID: outerUUID, devUUID: devUUID,
+            outerMountPoint: outer.path, devMountPoint: dev.path, devVolumeName: "Fixture DEV", imagePath: image.path)
+        let runner = WorkbenchFixtureRunner(mountPoint: outer.path, volumeUUID: outerUUID)
+        runner.imageBackingDevice = "disk90s1"
+        runner.diskInventory = [["DeviceIdentifier": "disk90", "Partitions": [["DeviceIdentifier": "disk90s1"]]]]
+        runner.additionalDiskInfos = [
+            "/dev/disk90s1": ["DeviceIdentifier": "disk90s1", "VolumeUUID": outerUUID.uuidString,
+                                "MountPoint": outer.path, "FilesystemType": "ExFAT", "WritableVolume": true],
+            "/dev/disk90": ["DeviceIdentifier": "disk90", "VirtualOrPhysical": "Physical"],
+            dev.path: ["DeviceIdentifier": "disk89s1", "VolumeUUID": devUUID.uuidString,
+                       "MountPoint": dev.path, "FilesystemType": "APFS", "WritableVolume": true,
+                       "VolumeName": "Fixture DEV", "APFSContainerReference": "disk89"],
+            "/dev/disk89s1": ["DeviceIdentifier": "disk89s1", "VolumeUUID": devUUID.uuidString,
+                                "MountPoint": dev.path, "FilesystemType": "APFS", "WritableVolume": true,
+                                "VolumeName": "Fixture DEV", "APFSContainerReference": "disk89"]
+        ]
+        runner.imageInventory = [["image-path": image.path, "system-entities": [
+            ["dev-entry": "/dev/disk88"], ["dev-entry": "/dev/disk88s2"],
+            ["dev-entry": "/dev/disk89"],
+            ["dev-entry": "/dev/disk89s1", "mount-point": dev.path]
+        ]]]
+        runner.apfsContainers = [["ContainerReference": "disk89",
+            "PhysicalStores": [["DeviceIdentifier": "disk88s2"]],
+            "Volumes": [["DeviceIdentifier": "disk89s1", "APFSVolumeUUID": devUUID.uuidString]]]]
+        let paths = HESectoriumPaths(root: root.appendingPathComponent("support"))
+        let backend = MacStorageBackend(paths: paths, runner: runner, policy: policy)
+        let service = HESectoriumService(paths: paths, backend: backend, store: WorkbenchMemoryStore(),
+            operationLock: WorkbenchMemoryLock(), runner: runner, identityPolicy: policy)
+        return (root, runner, service, policy, backend)
+    }
 }

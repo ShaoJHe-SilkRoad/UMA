@@ -309,8 +309,10 @@ public final class SystemSectoriumDeviceObserver: SectoriumDeviceObserving {
         guard inventory.succeeded, let diskData = inventory.detail.data(using: .utf8) else {
             throw SectoriumDeviceCatalogError.commandFailed("disk inventory unavailable")
         }
-        let root = (try? PropertyListSerialization.propertyList(from: diskData, options: [], format: nil)) as? [String: Any]
-        let inventoryRows = root?["AllDisksAndPartitions"] as? [[String: Any]] ?? []
+        guard let root = (try? PropertyListSerialization.propertyList(from: diskData, options: [], format: nil)) as? [String: Any],
+              let inventoryRows = root["AllDisksAndPartitions"] as? [[String: Any]] else {
+            throw SectoriumDeviceCatalogError.malformedDeviceInventory
+        }
         let wholeDisks = inventoryRows
             .compactMap { $0["DeviceIdentifier"] as? String }
             .filter { $0.range(of: #"^disk[0-9]+$"#, options: .regularExpression) != nil }

@@ -3,6 +3,10 @@ import Foundation
 import HESectoriumCore
 import HESectoriumRuntime
 
+public enum SectoriumInventoryState: Equatable {
+    case loading, available, empty, unavailable, malformed
+}
+
 struct SectoriumIOSampleHistoryEntry: Equatable {
     let deviceID: String
     let counters: SectoriumDeviceIOCounters
@@ -18,6 +22,8 @@ public final class HESectoriumStore: ObservableObject {
     @Published public private(set) var isBusy = false
     @Published public private(set) var lastResult = ""
     @Published public private(set) var workbench = SectoriumWorkbenchSnapshot()
+    @Published public private(set) var inventoryState: SectoriumInventoryState = .loading
+    @Published public private(set) var discoveredLegacyDisk = false
     @Published public private(set) var localSamplingConsentDeviceIDs: Set<String> = []
     @Published public private(set) var wholeDeviceEjectConfirmation: SectoriumWholeDeviceEjectConfirmation?
     @Published public private(set) var canBeginWholeDeviceEject = false
@@ -91,6 +97,23 @@ public final class HESectoriumStore: ObservableObject {
         canBeginWholeDeviceEject = false
         canContinueWholeDeviceEject = false
         canReturnFromWholeDeviceEject = false
+        inventoryState = .loading
+        discoveredLegacyDisk = false
+        invalidateCounterSample(clearReading: true)
+        workbench = SectoriumWorkbenchSnapshot(
+            devices: workbench.devices, selectedDeviceID: workbench.selectedDeviceID,
+            profiles: workbench.profiles, selectedProfileID: workbench.selectedProfileID,
+            readiness: .unknown("Refreshing device and development disk identity"),
+            pendingOperation: workbench.pendingOperation,
+            io: .init(readBytesPerSecond: nil, writtenBytesPerSecond: nil, isFresh: false),
+            operationSteps: workbench.operationSteps, safeToUnplug: false
+        )
+        snapshot = HESectoriumRuntimeSnapshot(
+            installed: snapshot.installed, automationEnabled: snapshot.automationEnabled,
+            readiness: .unknown, pendingEject: snapshot.pendingEject,
+            diagnostics: snapshot.diagnostics, latestActionSummary: snapshot.latestActionSummary,
+            agentLoadStatus: snapshot.agentLoadStatus, operationProgress: snapshot.operationProgress
+        )
         let service = self.service
         observationGeneration &+= 1
         let generation = observationGeneration
@@ -98,8 +121,10 @@ public final class HESectoriumStore: ObservableObject {
         let selectedProfileID = workbench.selectedProfileID
         Task.detached(priority: .utility) { [weak self] in
             let value = service.refreshStatus()
-            let devices = try? service.observeSectoriumDevices()
+            let observed = Result { try service.observeSectoriumDevices() }
+            let devices = try? observed.get()
             let profiles = service.sectoriumProfiles()
+            let legacy = service.discoveredLegacyDevelopmentDisk()
             let effectiveID = selectedID
             let readiness = devices.map { service.sectoriumReadiness(deviceID: effectiveID,
                 selectedProfileID: selectedProfileID, devices: $0, profiles: profiles) }
@@ -115,7 +140,16 @@ public final class HESectoriumStore: ObservableObject {
                 self.canBeginWholeDeviceEject = canBeginEject
                 self.canContinueWholeDeviceEject = canContinueEject
                 self.canReturnFromWholeDeviceEject = canReturnEject
-                if let devices { self.apply(devices: devices, profiles: profiles, readiness: readiness, pending: pending) }
+                self.discoveredLegacyDisk = legacy
+                switch observed {
+                case .success(let devices):
+                    self.inventoryState = devices.isEmpty ? .empty : .available
+                    self.apply(devices: devices, profiles: profiles, readiness: readiness, pending: pending)
+                case .failure(let error):
+                    self.inventoryState = (error as? SectoriumDeviceCatalogError) == .malformedDeviceInventory ? .malformed : .unavailable
+                    self.apply(devices: [], profiles: profiles,
+                               readiness: .unknown("Device inventory observation failed; refresh after checking disk access"), pending: pending)
+                }
             }
         }
     }

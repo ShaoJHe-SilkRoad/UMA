@@ -66,9 +66,11 @@ public final class ProcessCommandRunner: HESectoriumSecureCommandRunning, HESect
         if timeout != nil { process.terminationHandler = { _ in completion.signal() } }
         do {
             try process.run()
-            let group = DispatchGroup(); let captured = CapturedProcessOutput()
-            group.enter(); DispatchQueue.global().async { captured.setOut(out.fileHandleForReading.readDataToEndOfFile()); group.leave() }
-            group.enter(); DispatchQueue.global().async { captured.setErr(err.fileHandleForReading.readDataToEndOfFile()); group.leave() }
+            let group = DispatchGroup()
+            let metadata = Self.isReadOnlyPropertyList(executable: executable, arguments: arguments)
+            let captured = CapturedProcessOutput(limit: metadata ? 1_048_576 : 8_192)
+            group.enter(); DispatchQueue.global().async { captured.captureOut(from: out.fileHandleForReading); group.leave() }
+            group.enter(); DispatchQueue.global().async { captured.captureErr(from: err.fileHandleForReading); group.leave() }
             if !standardInput.isEmpty { try input.fileHandleForWriting.write(contentsOf: standardInput) }
             try? input.fileHandleForWriting.close()
             var timedOut = false
@@ -81,19 +83,80 @@ public final class ProcessCommandRunner: HESectoriumSecureCommandRunning, HESect
             } else {
                 process.waitUntilExit()
             }
-            group.wait(); let (outData, errData) = captured.values()
+            group.wait(); let (outData, errData, outExceeded, errExceeded) = captured.values()
             let detail = [String(data: outData, encoding: .utf8), String(data: errData, encoding: .utf8)]
                 .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
             if timedOut { return .init(exitCode: -1, detail: "command timed out; process terminated; \(String(detail.prefix(8000)))") }
-            return .init(exitCode: process.terminationStatus, detail: String(detail.prefix(8192)))
+            return Self.result(executable: executable, arguments: arguments, exitCode: process.terminationStatus,
+                               stdout: outData, stderr: errData,
+                               stdoutExceeded: outExceeded, stderrExceeded: errExceeded)
         } catch { return .init(exitCode: -1, detail: String(describing: error)) }
+    }
+
+    // Only supported read-only plist commands may retain the larger bounded payload.
+    static func isReadOnlyPropertyList(executable: String, arguments: [String]) -> Bool {
+        (executable == "/usr/sbin/diskutil" &&
+            (arguments == ["list", "-plist"] || arguments == ["apfs", "list", "-plist"] ||
+             (arguments.count == 3 && arguments[0] == "info" && arguments[1] == "-plist"))) ||
+            (executable == "/usr/bin/hdiutil" && arguments == ["info", "-plist"])
+    }
+
+    static func result(executable: String, arguments: [String], exitCode: Int32,
+                       stdout: Data, stderr: Data,
+                       stdoutExceeded: Bool = false, stderrExceeded: Bool = false) -> CommandOutcome {
+        let metadata = isReadOnlyPropertyList(executable: executable, arguments: arguments)
+        if stdoutExceeded || stderrExceeded {
+            return .init(exitCode: exitCode == 0 ? -1 : exitCode,
+                         detail: "command output exceeded bounded capture limit")
+        }
+        if metadata && exitCode == 0 {
+            guard stdout.count <= 1_048_576, let value = String(data: stdout, encoding: .utf8) else {
+                return .init(exitCode: -1, detail: "read-only metadata unavailable or too large")
+            }
+            return .init(exitCode: 0, detail: value)
+        }
+        let detail = [String(data: stdout, encoding: .utf8), String(data: stderr, encoding: .utf8)]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
+        return .init(exitCode: exitCode, detail: String(detail.prefix(8192)))
     }
 }
 private final class CapturedProcessOutput: @unchecked Sendable {
-    private let lock = NSLock(); private var out = Data(); private var err = Data()
-    func setOut(_ data: Data) { lock.lock(); out = data; lock.unlock() }
-    func setErr(_ data: Data) { lock.lock(); err = data; lock.unlock() }
-    func values() -> (Data, Data) { lock.lock(); defer { lock.unlock() }; return (out, err) }
+    private let lock = NSLock()
+    private let limit: Int
+    private var out = Data()
+    private var err = Data()
+    private var outExceeded = false
+    private var errExceeded = false
+
+    init(limit: Int) { self.limit = limit }
+
+    func captureOut(from handle: FileHandle) {
+        let result = Self.readAndDrain(handle, limit: limit)
+        lock.lock(); out = result.data; outExceeded = result.exceeded; lock.unlock()
+    }
+    func captureErr(from handle: FileHandle) {
+        let result = Self.readAndDrain(handle, limit: limit)
+        lock.lock(); err = result.data; errExceeded = result.exceeded; lock.unlock()
+    }
+    func values() -> (Data, Data, Bool, Bool) {
+        lock.lock(); defer { lock.unlock() }
+        return (out, err, outExceeded, errExceeded)
+    }
+    private static func readAndDrain(_ handle: FileHandle, limit: Int) -> (data: Data, exceeded: Bool) {
+        var retained = Data()
+        var exceeded = false
+        do {
+            while let chunk = try handle.read(upToCount: 16_384), !chunk.isEmpty {
+                let remaining = max(0, limit + 1 - retained.count)
+                if remaining > 0 { retained.append(contentsOf: chunk.prefix(remaining)) }
+                if chunk.count > remaining || retained.count > limit { exceeded = true }
+            }
+        } catch {
+            exceeded = true
+            try? handle.close()
+        }
+        return (retained, exceeded)
+    }
 }
 
 public enum HESectoriumInstalledStatus: Equatable, Sendable { case installed, missing, conflict(String) }
@@ -313,6 +376,21 @@ public final class MacStorageBackend: StorageBackend {
         guard let match = value.range(of: #"^disk[0-9]+"#, options: .regularExpression) else { return nil }
         let whole = String(value[match]); return validDiskID(whole) ? whole : nil
     }
+    private func verifiedWholeDisk(for partition: String, info: [String: Any]) -> String? {
+        if let reported = text(info, ["PartOfWhole"]) {
+            guard let whole = wholeDisk(partition), reported == whole else { return nil }
+            return reported
+        }
+        guard let inventory = plist(command("/usr/sbin/diskutil", ["list", "-plist"])),
+              let rows = inventory["AllDisksAndPartitions"] as? [[String: Any]] else { return nil }
+        let owners = rows.compactMap { row -> String? in
+            guard let whole = row["DeviceIdentifier"] as? String, validDiskID(whole), wholeDisk(whole) == whole,
+                  let parts = row["Partitions"] as? [[String: Any]],
+                  parts.contains(where: { $0["DeviceIdentifier"] as? String == partition }) else { return nil }
+            return whole
+        }
+        return owners.count == 1 ? owners[0] : nil
+    }
     private func sourceForFile(_ path: String) -> (device: String, mount: String)? {
         let outcome = command("/bin/df", ["-P", path])
         guard outcome.exitCode == 0 else { return nil }
@@ -357,10 +435,11 @@ public final class MacStorageBackend: StorageBackend {
         let matchingEntities = entities.filter { text($0, ["mount-point"]) == policy.devMountPoint }
         guard entityDevices.count == entities.count, Set(entityDevices).count == entityDevices.count,
               matchingEntities.count == 1, let entity = matchingEntities.first,
-              let imageUUID = text(entity, ["volume-uuid", "volume-UUID"]).flatMap(UUID.init(uuidString:)),
               let imageDev = text(entity, ["dev-entry"]), let imageWhole = wholeDisk(imageDev),
               let devInfo = diskInfo(imageDev),
-              text(devInfo, ["VolumeUUID", "APFSVolumeUUID"]).flatMap(UUID.init(uuidString:)) == imageUUID,
+              let imageUUID = text(devInfo, ["VolumeUUID", "APFSVolumeUUID"]).flatMap(UUID.init(uuidString:)),
+              (text(entity, ["volume-uuid", "volume-UUID"]) == nil ||
+               text(entity, ["volume-uuid", "volume-UUID"]).flatMap(UUID.init(uuidString:)) == imageUUID),
               text(devInfo, ["FilesystemType", "FilesystemName", "FileSystemPersonality"])?.uppercased().contains("APFS") == true,
               text(devInfo, ["MountPoint"]) == policy.devMountPoint,
               let devContainerRef = text(devInfo, ["APFSContainerReference"]),
@@ -369,7 +448,7 @@ public final class MacStorageBackend: StorageBackend {
         let matchingDevContainers = apfsContainers.filter { text($0, ["ContainerReference"]) == devContainerRef }
         guard matchingDevContainers.count == 1, let devContainer = matchingDevContainers.first,
               let imageStores = physicalStoreDevices(devContainer),
-              imageStores.intersection(imageWholeDevices).count == 1,
+              imageWholeDevices.contains(imageWhole), imageStores.isSubset(of: Set(entityDevices)),
               let containerVolumes = devContainer["Volumes"] as? [[String: Any]],
               containerVolumes.filter({
                   text($0, ["APFSVolumeUUID"])?.lowercased() == imageUUID.uuidString.lowercased() &&
@@ -380,9 +459,10 @@ public final class MacStorageBackend: StorageBackend {
               text(outerInfo, ["VolumeUUID", "APFSVolumeUUID"]).flatMap(UUID.init(uuidString:)) == policy.outerUUID,
               text(outerInfo, ["MountPoint"]) == policy.outerMountPoint,
               text(outerInfo, ["DeviceIdentifier"]) == backing.device,
-              let outerPhysical = text(outerInfo, ["PartOfWhole"]), validDiskID(outerPhysical),
+              let outerPhysical = verifiedWholeDisk(for: backing.device, info: outerInfo),
               let physicalInfo = diskInfo("/dev/\(outerPhysical)"),
-              text(physicalInfo, ["DeviceIdentifier"]) == outerPhysical else { return nil }
+              text(physicalInfo, ["DeviceIdentifier"]) == outerPhysical,
+              text(physicalInfo, ["VirtualOrPhysical"])?.lowercased() == "physical" else { return nil }
         if let outerContainerRef = text(outerInfo, ["APFSContainerReference"]) {
             let matchingOuterContainers = apfsContainers.filter { text($0, ["ContainerReference"]) == outerContainerRef }
             guard matchingOuterContainers.count == 1, let outerContainer = matchingOuterContainers.first,
@@ -631,6 +711,14 @@ public final class HESectoriumService: @unchecked Sendable {
               let data = try? Data(contentsOf: paths.sectoriumProfiles),
               let profiles = try? JSONDecoder().decode([SectoriumDevelopmentProfile].self, from: data) else { return nil }
         return profiles
+    }
+
+    /// Read-only compatibility discovery; it never registers or adopts a profile.
+    public func discoveredLegacyDevelopmentDisk() -> Bool {
+        guard identityConfigurationReady, sectoriumProfiles().isEmpty,
+              let observation = backend.observe() else { return false }
+        if case .success = coreController.identityPolicy.validate(observation) { return true }
+        return false
     }
 
     public func pendingSectoriumOperation() -> String? {

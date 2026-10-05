@@ -26,6 +26,7 @@ public struct SectoriumWorkbenchView: View {
     @StateObject private var model: HESectoriumStore
     private let isChinese: Bool
     @State private var showingSettings = false
+    @StateObject private var settingsButtonRef = SectoriumWeakButtonReference()
     @State private var showingCreate = false
     @State private var showingUnlock = false
     @State private var profileName = "Development"
@@ -55,13 +56,21 @@ public struct SectoriumWorkbenchView: View {
                     SectoriumWorkbenchButton(title: text("Refresh", "刷新"), identifier: "uma.sectorium.refresh",
                                              isEnabled: !model.isBusy) { model.refresh() }
                     SectoriumWorkbenchButton(title: text("Settings", "设置"), identifier: "uma.sectorium.settings",
-                                             isEnabled: true) { showingSettings = true }
+                                             isEnabled: true, action: {
+                                                 settingsButtonRef.ownerWindow = settingsButtonRef.button?.window
+                                                 showingSettings = true
+                                             }, onReady: {
+                                                 settingsButtonRef.button = $0
+                                             })
                 }
 
                 GroupBox(text("Physical drive", "物理硬盘")) {
                     VStack(alignment: .leading, spacing: 12) {
+                        if model.inventoryState == .loading && !model.workbench.devices.isEmpty {
+                            Text(inventoryMessage).foregroundStyle(.secondary)
+                        }
                         if model.workbench.devices.isEmpty {
-                            Text(text("No device inventory is available.", "暂时无法读取硬盘清单。"))
+                            Text(inventoryMessage)
                                 .foregroundStyle(.secondary)
                         } else {
                             Picker(text("Selected drive", "当前硬盘"), selection: Binding(
@@ -74,7 +83,7 @@ public struct SectoriumWorkbenchView: View {
                                 }
                             }
                             .accessibilityIdentifier("uma.sectorium.device-picker")
-                            .disabled(model.isBusy)
+                            .disabled(model.isBusy || model.inventoryState != .available)
                             if let device = selectedDevice {
                                 VStack(alignment: .leading, spacing: 5) {
                                     HStack(spacing: 10) {
@@ -94,7 +103,7 @@ public struct SectoriumWorkbenchView: View {
                                         title: text("Allow I/O sampling for this local disk", "允许采样此本地硬盘 I/O"),
                                         identifier: "uma.sectorium.local-sampling-consent",
                                         isConsented: model.isLocalDeviceSamplingConsented(device.id),
-                                        isEnabled: device.identityVerified && !model.isBusy
+                                        isEnabled: device.identityVerified && model.inventoryState == .available && !model.isBusy
                                     ) { consented in
                                         model.setLocalDeviceSamplingConsent(consented, for: device.id)
                                     }
@@ -135,6 +144,12 @@ public struct SectoriumWorkbenchView: View {
                             }
                         }
                         Text(readinessSummary).font(.callout).foregroundStyle(.secondary)
+                        if model.discoveredLegacyDisk {
+                            Text(text("Existing DEV_APFS verified; adopt it explicitly after selecting a drive with verified identity.",
+                                      "已验证现有 DEV_APFS；请在选择身份已核实的硬盘后明确接纳。"))
+                                .font(.callout).foregroundStyle(.secondary)
+                                .accessibilityIdentifier("uma.sectorium.legacy-discovery")
+                        }
                         if let technicalDetail = readinessTechnicalDetail {
                             DisclosureGroup(text("Technical details", "技术详情")) {
                                 Text(technicalDetail).font(.caption).textSelection(.enabled)
@@ -159,16 +174,16 @@ public struct SectoriumWorkbenchView: View {
                             SectoriumWorkbenchButton(title: text("Resume operation", "继续未完成操作"),
                                 identifier: "uma.sectorium.resume",
                                 isEnabled: model.workbench.pendingOperation.map { !$0.hasPrefix("eject:") } == true
-                                    && !model.isBusy,
+                                    && model.inventoryState == .available && !model.isBusy,
                                 action: model.resumePendingOperation)
                             if model.snapshot.pendingEject == true || model.workbench.pendingOperation?.hasPrefix("eject:") == true {
                                 SectoriumWorkbenchButton(title: text("Continue eject", "继续弹出"),
                                     identifier: "uma.sectorium.continue-eject",
-                                    isEnabled: model.canContinueWholeDeviceEject && !model.isBusy,
+                                    isEnabled: model.canContinueWholeDeviceEject && model.inventoryState == .available && !model.isBusy,
                                     action: model.prepareContinueWholeDeviceEjectConfirmation)
                                 SectoriumWorkbenchButton(title: text("Return to development", "返回开发环境"),
                                     identifier: "uma.sectorium.return-to-development",
-                                    isEnabled: model.canReturnFromWholeDeviceEject && !model.isBusy,
+                                    isEnabled: model.canReturnFromWholeDeviceEject && model.inventoryState == .available && !model.isBusy,
                                     action: model.returnToDevelopment)
                             }
                             SectoriumWorkbenchButton(title: text("Eject external drive", "弹出整块外接硬盘"),
@@ -231,7 +246,11 @@ public struct SectoriumWorkbenchView: View {
         }
         .sheet(isPresented: $showingCreate) { createSheet }
         .sheet(isPresented: $showingUnlock) { unlockSheet }
-        .sheet(isPresented: $showingSettings) { HESectoriumSettingsView(isChinese: isChinese, store: model) }
+        .sheet(isPresented: $showingSettings, onDismiss: restoreSettingsFocus) {
+            HESectoriumSettingsView(isChinese: isChinese, store: model) {
+                showingSettings = false
+            }
+        }
         .sheet(isPresented: Binding(get: { model.wholeDeviceEjectConfirmation != nil }, set: { if !$0 { model.cancelWholeDeviceEjectConfirmation() } })) {
             ejectConfirmationSheet
         }
@@ -240,11 +259,49 @@ public struct SectoriumWorkbenchView: View {
         }
     }
 
+    private func restoreSettingsFocus() {
+        // SwiftUI calls onDismiss while AppKit may still be completing the sheet teardown.
+        // One main-queue turn lets the original owner regain its key-view route.
+        guard let window = settingsButtonRef.ownerWindow else { return }
+        DispatchQueue.main.async {
+            guard window.attachedSheet == nil, let content = window.contentView,
+                  let button = Self.settingsButton(in: content),
+                  button.window === window, button.canBecomeKeyView else { return }
+            window.makeKeyAndOrderFront(nil)
+            guard window.makeFirstResponder(button) else { return }
+            DispatchQueue.main.async {
+                // SwiftUI can replace the responder during its final update. Retry only
+                // for this same attached control and still-detached owner window.
+                if window.firstResponder !== button, window.attachedSheet == nil,
+                   button.window === window, button.canBecomeKeyView {
+                    _ = window.makeFirstResponder(button)
+                }
+            }
+        }
+    }
+    private static func settingsButton(in view: NSView) -> NSButton? {
+        if view.accessibilityIdentifier() == "uma.sectorium.settings", let button = view as? NSButton {
+            return button
+        }
+        for child in view.subviews {
+            if let button = settingsButton(in: child) { return button }
+        }
+        return nil
+    }
+    private var inventoryMessage: String {
+        switch model.inventoryState {
+        case .loading: text("Loading drive inventory…", "正在读取硬盘清单…")
+        case .empty: text("No physical drives were reported. Refresh after reconnecting the drive.", "系统未报告物理硬盘。重新连接后请刷新。")
+        case .unavailable: text("Drive inventory is unavailable. Check disk access, then refresh.", "无法读取硬盘清单。请检查磁盘访问后刷新。")
+        case .malformed: text("Drive metadata could not be parsed. Refresh or check system diagnostics.", "无法解析硬盘资料。请刷新或检查系统诊断。")
+        case .available: text("Choose a drive to continue.", "请选择硬盘以继续。")
+        }
+    }
     private var selectedDevice: SectoriumPhysicalDevice? {
         model.workbench.devices.first { $0.id == model.workbench.selectedDeviceID }
     }
     private var storageMutationBlocked: Bool {
-        model.isBusy || model.workbench.pendingOperation != nil
+        model.isBusy || model.inventoryState != .available || model.workbench.pendingOperation != nil
     }
     private var selectedProfile: SectoriumDevelopmentProfile? {
         model.workbench.profiles.first { $0.id == model.workbench.selectedProfileID }
@@ -554,11 +611,17 @@ public struct SectoriumWorkbenchView: View {
     private func text(_ english: String, _ chinese: String) -> String { isChinese ? chinese : english }
 }
 
+private final class SectoriumWeakButtonReference: ObservableObject {
+    weak var button: NSButton?
+    weak var ownerWindow: NSWindow?
+}
+
 private struct SectoriumWorkbenchButton: NSViewRepresentable {
     let title: String
     let identifier: String
     let isEnabled: Bool
     let action: () -> Void
+    var onReady: ((NSButton) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(action: action) }
 
@@ -572,6 +635,7 @@ private struct SectoriumWorkbenchButton: NSViewRepresentable {
         button.focusRingType = .exterior
         button.setAccessibilityLabel(title)
         button.setAccessibilityIdentifier(identifier)
+        DispatchQueue.main.async { onReady?(button) }
         return button
     }
 
@@ -581,6 +645,7 @@ private struct SectoriumWorkbenchButton: NSViewRepresentable {
         (button as? SectoriumWorkbenchFocusableButton)?.setWorkbenchEnabled(isEnabled)
         button.setAccessibilityLabel(title)
         button.setAccessibilityIdentifier(identifier)
+        onReady?(button)
     }
 
     @MainActor final class Coordinator: NSObject {
