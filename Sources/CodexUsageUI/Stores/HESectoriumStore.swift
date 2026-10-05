@@ -24,6 +24,7 @@ public final class HESectoriumStore: ObservableObject {
     @Published public private(set) var workbench = SectoriumWorkbenchSnapshot()
     @Published public private(set) var inventoryState: SectoriumInventoryState = .loading
     @Published public private(set) var discoveredLegacyDisk = false
+    @Published public private(set) var legacyDevelopmentByDevice: [String: HESectoriumService.LegacyDevelopmentDisplay] = [:]
     @Published public private(set) var localSamplingConsentDeviceIDs: Set<String> = []
     @Published public private(set) var wholeDeviceEjectConfirmation: SectoriumWholeDeviceEjectConfirmation?
     @Published public private(set) var canBeginWholeDeviceEject = false
@@ -99,6 +100,7 @@ public final class HESectoriumStore: ObservableObject {
         canReturnFromWholeDeviceEject = false
         inventoryState = .loading
         discoveredLegacyDisk = false
+        legacyDevelopmentByDevice = [:]
         invalidateCounterSample(clearReading: true)
         workbench = SectoriumWorkbenchSnapshot(
             devices: workbench.devices, selectedDeviceID: workbench.selectedDeviceID,
@@ -124,7 +126,12 @@ public final class HESectoriumStore: ObservableObject {
             let observed = Result { try service.observeSectoriumDevices() }
             let devices = try? observed.get()
             let profiles = service.sectoriumProfiles()
-            let legacy = devices.map { service.discoveredLegacyDevelopmentDisk(deviceID: selectedID, devices: $0) } ?? false
+            let legacyByDevice: [String: HESectoriumService.LegacyDevelopmentDisplay] = devices.map { observed in
+                Dictionary(uniqueKeysWithValues: observed.filter { $0.isVirtual == false }.compactMap { device in
+                    service.legacyDevelopmentDisplay(deviceID: device.id, devices: observed).map { (device.id, $0) }
+                })
+            } ?? [:]
+            let legacy = selectedID.flatMap { legacyByDevice[$0] } != nil
             let effectiveID = selectedID
             let readiness = devices.map { service.sectoriumReadiness(deviceID: effectiveID,
                 selectedProfileID: selectedProfileID, devices: $0, profiles: profiles) }
@@ -144,12 +151,12 @@ public final class HESectoriumStore: ObservableObject {
                 case .success(let devices):
                     self.inventoryState = devices.contains(where: { $0.isVirtual == false }) ? .available : .empty
                     self.apply(devices: devices, profiles: profiles, readiness: readiness, pending: pending,
-                               discoveredLegacy: legacy)
+                               discoveredLegacy: legacy, legacyByDevice: legacyByDevice)
                 case .failure(let error):
                     self.inventoryState = (error as? SectoriumDeviceCatalogError) == .malformedDeviceInventory ? .malformed : .unavailable
                     self.apply(devices: [], profiles: profiles,
                                readiness: .unknown("Device inventory observation failed; refresh after checking disk access"),
-                               pending: pending, discoveredLegacy: false)
+                               pending: pending, discoveredLegacy: false, legacyByDevice: [:])
                 }
             }
         }
@@ -191,8 +198,11 @@ public final class HESectoriumStore: ObservableObject {
     }
 
     func apply(devices: [SectoriumPhysicalDevice], profiles: [SectoriumDevelopmentProfile],
-               readiness: SectoriumWorkbenchReadiness?, pending: String?, discoveredLegacy: Bool? = nil) {
+               readiness: SectoriumWorkbenchReadiness?, pending: String?, discoveredLegacy: Bool? = nil,
+               legacyByDevice: [String: HESectoriumService.LegacyDevelopmentDisplay]? = nil) {
         if let discoveredLegacy { discoveredLegacyDisk = discoveredLegacy }
+        if let legacyByDevice { legacyDevelopmentByDevice = legacyByDevice }
+        else if discoveredLegacy == false { legacyDevelopmentByDevice = [:] }
         invalidateCounterSample(clearReading: false)
         let selectedID = workbench.selectedDeviceID
         let selectedProfileID = workbench.selectedProfileID

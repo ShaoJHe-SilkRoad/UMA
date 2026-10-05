@@ -703,6 +703,75 @@ import HESectoriumRuntime
         }
     }
 
+    @Test func sectoriumTwoHardwareOverviewShowsVerifiedDEVCapacityAndSelection() async throws {
+        _ = NSApplication.shared
+        let fixture = HESectoriumKeyboardFixture(isExternal: true)
+        defer { fixture.remove() }
+        let he = fixture.device
+        let internalDrive = SectoriumPhysicalDevice(id: UUID().uuidString, bsdName: "disk0",
+            name: "APPLE SSD AP0256Z", isExternal: false, identityVerified: true,
+            wholeDeviceBytes: 251_000_193_024, mountedVolumePaths: [], volumeUUIDs: [],
+            readBytes: nil, writtenBytes: nil, isVirtual: false)
+        let heBackingUUID = UUID()
+        let external = SectoriumPhysicalDevice(id: heBackingUUID.uuidString, bsdName: he.bsdName, name: "ES3",
+            isExternal: true, identityVerified: true, wholeDeviceBytes: 1_024_209_543_168,
+            mountedVolumePaths: [fixture.root.path], volumeUUIDs: [heBackingUUID],
+            readBytes: nil, writtenBytes: nil,
+            volumeMembers: [.init(volumeUUID: heBackingUUID, bsdName: "disk81s1",
+                                  mountPoint: fixture.root.path, name: "HE")],
+            topologyComplete: true, isVirtual: false, identityBasis: .uniqueBackingVolumeUUID)
+        let legacy = HESectoriumService.LegacyDevelopmentDisplay(name: "DEV_APFS",
+            mountPoint: "/Volumes/HE/DEV", logicalCapacityBytes: 321_912_791_040)
+        fixture.store.apply(devices: [internalDrive, external], profiles: [], readiness: .connected,
+            pending: nil, discoveredLegacy: true, legacyByDevice: [external.id: legacy])
+        let host = NSHostingView(rootView: SectoriumWorkbenchView(store: fixture.store))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 900),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        settle(host)
+        try await waitForAvailableInventory(fixture.store)
+        fixture.store.apply(devices: [internalDrive, external], profiles: [], readiness: .connected,
+            pending: nil, discoveredLegacy: true, legacyByDevice: [external.id: legacy])
+        settle(host)
+        let labels = try renderedText(in: host)
+        #expect(labels.filter { $0.contains("APPLE SSD AP0256Z") }.count == 1)
+        #expect(labels.filter { $0.contains("ES3") }.count == 1)
+        #expect(labels.filter { $0.contains("DEV_APFS") && $0.contains("GiB") }.count == 1)
+        #expect(labels.contains { $0.contains("not yet managed") })
+        let detached = HESectoriumService.LegacyDevelopmentDisplay(name: "DEV_APFS", mountPoint: nil,
+            logicalCapacityBytes: nil, state: .unmounted)
+        fixture.store.apply(devices: [internalDrive, external], profiles: [], readiness: .notStarted,
+            pending: nil, discoveredLegacy: false, legacyByDevice: [external.id: detached])
+        settle(host)
+        let detachedLabels = try renderedText(in: host)
+        #expect(detachedLabels.filter { $0.contains("DEV_APFS") && $0.contains("image detached") }.count == 1)
+        #expect(!detachedLabels.contains { $0.contains("300.0 GiB") })
+        let uncertain = HESectoriumService.LegacyDevelopmentDisplay(name: "DEV_APFS", mountPoint: nil,
+            logicalCapacityBytes: nil, state: .unknown)
+        fixture.store.apply(devices: [internalDrive, external], profiles: [],
+            readiness: .unknown("Configured development disk state could not be verified"),
+            pending: nil, discoveredLegacy: false, legacyByDevice: [external.id: uncertain])
+        settle(host)
+        let unknownLabels = try renderedText(in: host)
+        #expect(unknownLabels.filter { $0.contains("DEV_APFS") && $0.contains("state unverified") }.count == 1)
+        fixture.store.apply(devices: [internalDrive, external], profiles: [], readiness: .connected,
+            pending: nil, discoveredLegacy: true, legacyByDevice: [external.id: legacy])
+        settle(host)
+        let buttons = descendants(of: host).compactMap { $0 as? NSButton }
+        let selectInternal = try #require(buttons.first { $0.accessibilityIdentifier() == "uma.sectorium.select-drive.disk0" })
+        #expect(selectInternal.isEnabled)
+        click(selectInternal, in: window)
+        #expect(fixture.store.workbench.selectedDeviceID == internalDrive.id)
+        fixture.store.apply(devices: [internalDrive, external], profiles: [], readiness: .noDevelopmentDisk,
+            pending: nil, discoveredLegacy: false, legacyByDevice: [external.id: legacy])
+        settle(host)
+        let after = try renderedText(in: host)
+        #expect(after.filter { $0.contains("ES3") }.count == 1)
+        #expect(after.filter { $0.contains("DEV_APFS") && $0.contains("GiB") }.count == 1)
+    }
+
     @Test func sectoriumMultipleImagesAndStaleSelectionStayBoundToOnePhysicalRoot() async throws {
         _ = NSApplication.shared
         let fixture = HESectoriumKeyboardFixture(isExternal: true)
@@ -741,10 +810,10 @@ import HESectoriumRuntime
         let firstLabels = try renderedText(in: host)
         #expect(firstLabels.filter { $0.contains("DEV_1") }.count == 1)
         #expect(firstLabels.filter { $0.contains("DEV_2") }.count == 1)
-        #expect(firstLabels.filter { $0.contains("DEV_APFS • virtual development disk") }.count == 1)
+        #expect(firstLabels.filter { $0.contains("DEV_APFS") }.count == 1)
         #expect(firstLabels.contains { $0.contains("disk81") })
-        #expect(!firstLabels.contains { $0.contains("disk82") })
-        #expect(!firstLabels.contains { $0.contains("OTHER_DEV") })
+        #expect(firstLabels.contains { $0.contains("disk82") })
+        #expect(firstLabels.contains { $0.contains("OTHER_DEV") })
         fixture.store.apply(devices: [fixture.device, sibling], profiles: profiles + [siblingProfile],
             readiness: .notStarted, pending: nil, discoveredLegacy: false)
         fixture.store.selectDevice(sibling.id)
@@ -755,8 +824,8 @@ import HESectoriumRuntime
         let siblingLabels = try renderedText(in: host)
         #expect(siblingLabels.filter { $0.contains("OTHER_DEV") }.count == 1)
         #expect(siblingLabels.contains { $0.contains("disk82") })
-        #expect(!siblingLabels.contains { $0.contains("disk81") })
-        #expect(!siblingLabels.contains { $0.contains("DEV_1") || $0.contains("DEV_2") || $0.contains("DEV_APFS") })
+        #expect(siblingLabels.contains { $0.contains("disk81") })
+        #expect(siblingLabels.contains { $0.contains("DEV_1") || $0.contains("DEV_2") })
         fixture.store.apply(devices: [fixture.device, sibling], profiles: profiles + [siblingProfile],
             readiness: .unknown("Drive attachment or topology changed; reselect the physical drive before management"),
             pending: nil)

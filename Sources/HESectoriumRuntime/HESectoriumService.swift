@@ -475,7 +475,13 @@ public final class MacStorageBackend: StorageBackend {
     /// A missing or malformed inventory is unknown, never interpreted as detached.
     func imageInventoryMatchCount(for imagePath: String) -> Int? {
         guard let images = plist(command("/usr/bin/hdiutil", ["info", "-plist"]))?["images"] as? [[String: Any]] else { return nil }
-        return images.filter { text($0, ["image-path"]) == imagePath }.count
+        var matches = 0
+        for image in images {
+            guard let path = image["image-path"] as? String, !path.isEmpty,
+                  path.hasPrefix("/"), URL(fileURLWithPath: path).standardizedFileURL.path == path else { return nil }
+            if path == imagePath { matches += 1 }
+        }
+        return matches
     }
     func attachedImageMountIdentity(for imagePath: String) -> (mountPoint: String, volumeName: String, volumeUUID: UUID)? {
         guard let images = plist(command("/usr/bin/hdiutil", ["info", "-plist"]))?["images"] as? [[String: Any]] else { return nil }
@@ -626,9 +632,7 @@ public final class MacStorageBackend: StorageBackend {
         return whole
     }
     public func imageIsDetached() -> Bool {
-        guard let inventory = plist(command("/usr/bin/hdiutil", ["info", "-plist"])),
-              let images = inventory["images"] as? [[String: Any]] else { return false }
-        return !images.contains { text($0, ["image-path"]) == policy.imagePath }
+        imageInventoryMatchCount(for: policy.imagePath) == 0
     }
     public func finalOuterState() -> FinalOuterState {
         guard let list = plist(command("/usr/sbin/diskutil", ["list", "-plist"])),
@@ -725,9 +729,28 @@ public final class HESectoriumService: @unchecked Sendable {
         return false
     }
 
-    /// Read-only legacy discovery bound to the currently selected physical parent.
-    /// Refresh never persists a profile or accepts an image on the user's behalf.
-    public func discoveredLegacyDevelopmentDisk(deviceID: String?, devices: [SectoriumPhysicalDevice]) -> Bool {
+    /// Read-only presentation facts. A configured child is not an adoption or
+    /// mutation credential, and an absent observation is not proof of detach.
+    public struct LegacyDevelopmentDisplay: Equatable, Sendable {
+        public enum State: Equatable, Sendable { case mounted, unmounted, unknown }
+        public let name: String
+        public let state: State
+        public let mountPoint: String?
+        public let logicalCapacityBytes: UInt64?
+        public let usedBytes: UInt64?
+        public let freeBytes: UInt64?
+        public init(name: String, mountPoint: String?, logicalCapacityBytes: UInt64?,
+                    state: State = .mounted, usedBytes: UInt64? = nil, freeBytes: UInt64? = nil) {
+            self.name = name; self.state = state; self.mountPoint = mountPoint
+            self.logicalCapacityBytes = logicalCapacityBytes
+            self.usedBytes = usedBytes; self.freeBytes = freeBytes
+        }
+    }
+
+    /// A configured legacy image may remain visible under its freshly verified
+    /// backing parent when detached. Only a complete validated image/APFS chain
+    /// supplies mounted state or current logical capacity.
+    public func legacyDevelopmentDisplay(deviceID: String?, devices: [SectoriumPhysicalDevice]) -> LegacyDevelopmentDisplay? {
         guard let deviceID, devices.filter({ $0.id == deviceID }).count == 1,
               let device = devices.first(where: { $0.id == deviceID }),
               device.isVirtual == false, device.identityVerified,
@@ -736,11 +759,31 @@ public final class HESectoriumService: @unchecked Sendable {
                 && !selectedAnchorMatches(device)),
               !sectoriumProfiles().contains(where: { $0.deviceID == deviceID }),
               identityConfigurationReady,
-              let observation = backend.observe(),
-              case .success = coreController.identityPolicy.validate(observation),
               let backing = verifiedBackingVolume(URL(fileURLWithPath: coreController.identityPolicy.outerMountPoint), on: device),
-              backing.uuid == coreController.identityPolicy.outerUUID else { return false }
-        return true
+              backing.uuid == coreController.identityPolicy.outerUUID else { return nil }
+        let policy = coreController.identityPolicy
+        if let observation = backend.observe() {
+            if case .success = policy.validate(observation), let devUUID = observation.dev.uuid {
+                let matching = devices.filter { $0.isVirtual == true }.flatMap(\.volumeMembers).filter {
+                    $0.volumeUUID == devUUID
+                }
+                let capacity = matching.count == 1 && matching[0].mountPoint == observation.dev.mountPoint
+                    ? matching[0].capacityBytes : nil
+                return .init(name: observation.dev.name, mountPoint: observation.dev.mountPoint,
+                             logicalCapacityBytes: capacity, state: .mounted)
+            }
+            return .init(name: policy.devVolumeName, mountPoint: nil,
+                         logicalCapacityBytes: nil, state: .unknown)
+        }
+        let inventoryCount = MacStorageBackend(paths: paths, runner: commandRunner, policy: policy)
+            .imageInventoryMatchCount(for: policy.imagePath)
+        return .init(name: policy.devVolumeName, mountPoint: nil, logicalCapacityBytes: nil,
+                     state: inventoryCount == 0 ? .unmounted : .unknown)
+    }
+
+    /// Compatibility predicate retains its original strict mounted-chain meaning.
+    public func discoveredLegacyDevelopmentDisk(deviceID: String?, devices: [SectoriumPhysicalDevice]) -> Bool {
+        legacyDevelopmentDisplay(deviceID: deviceID, devices: devices)?.state == .mounted
     }
 
     public func pendingSectoriumOperation() -> String? {
@@ -763,8 +806,14 @@ public final class HESectoriumService: @unchecked Sendable {
         }
         let deviceProfiles = profiles.filter { $0.deviceID == deviceID }
         guard !deviceProfiles.isEmpty else {
-            return discoveredLegacyDevelopmentDisk(deviceID: deviceID, devices: devices)
-                ? .connected : .noDevelopmentDisk
+            guard let legacy = legacyDevelopmentDisplay(deviceID: deviceID, devices: devices) else {
+                return .noDevelopmentDisk
+            }
+            switch legacy.state {
+            case .mounted: return .connected
+            case .unmounted: return .notStarted
+            case .unknown: return .unknown("Configured development disk state could not be verified")
+            }
         }
         let profile = selectedProfileID.flatMap { selectedID in
             deviceProfiles.first(where: { $0.id == selectedID })
@@ -853,9 +902,13 @@ public final class HESectoriumService: @unchecked Sendable {
         return selected.id == device.id && selected.bsdName == device.bsdName
             && selected.identityBasis == device.identityBasis
             && selected.isExternal == device.isExternal && selected.isVirtual == device.isVirtual
-            && selected.name == device.name && selected.wholeDeviceBytes == device.wholeDeviceBytes
+            && selected.wholeDeviceBytes == device.wholeDeviceBytes
             && selected.topologyComplete == device.topologyComplete
-            && selected.volumeMembers == device.volumeMembers
+            && selected.volumeMembers.count == device.volumeMembers.count
+            && zip(selected.volumeMembers, device.volumeMembers).allSatisfy { old, fresh in
+                old.volumeUUID == fresh.volumeUUID && old.bsdName == fresh.bsdName
+                    && old.mountPoint == fresh.mountPoint
+            }
             && selected.apfsContainers == device.apfsContainers
     }
 

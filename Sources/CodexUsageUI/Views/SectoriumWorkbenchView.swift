@@ -84,55 +84,66 @@ public struct SectoriumWorkbenchView: View {
                                 .accessibilityIdentifier("uma.sectorium.unassigned-device")
                         }
                         if !physicalDevices.isEmpty {
-                            Picker(text("Selected drive", "当前硬盘"), selection: Binding(
-                                get: { model.workbench.selectedDeviceID ?? "" },
-                                set: { model.selectDevice($0.isEmpty ? nil : $0) }
-                            )) {
-                                Text(text("Choose a drive", "选择硬盘")).tag("")
-                                ForEach(physicalDevices) { device in
-                                    Text(deviceLabel(device)).tag(device.id)
-                                }
-                            }
-                            .accessibilityIdentifier("uma.sectorium.device-picker")
-                            .disabled(model.isBusy || model.inventoryState != .available)
-                            if let device = selectedDevice {
-                                VStack(alignment: .leading, spacing: 5) {
-                                    HStack(spacing: 10) {
-                                        Label(device.name, systemImage: device.isExternal ? "externaldrive" : "internaldrive")
-                                        Text(device.bsdName).monospaced().foregroundStyle(.secondary)
-                                        if !device.identityVerified { Text(text("Identity unavailable", "身份未知")).foregroundStyle(.orange) }
+                            ForEach(physicalDevices) { device in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack {
+                                        Label(physicalTitle(device), systemImage: device.isExternal ? "externaldrive" : "internaldrive")
+                                            .font(.headline)
+                                        Spacer()
+                                        SectoriumWorkbenchButton(title: model.workbench.selectedDeviceID == device.id
+                                            ? text("Selected", "已选择") : text("Select", "选择"),
+                                            identifier: "uma.sectorium.select-drive.\(device.bsdName)",
+                                            isEnabled: !model.isBusy && model.inventoryState == .available
+                                                && model.workbench.selectedDeviceID != device.id) {
+                                                model.selectDevice(device.id)
+                                            }
                                     }
-                                    Text(device.wholeDeviceBytes.map(formatBytes) ?? text("Capacity unknown", "容量未知"))
-                                        .foregroundStyle(.secondary)
-                                    Text(identityDescription(device)).font(.caption).foregroundStyle(.secondary)
-                                    if !device.volumeMembers.isEmpty {
-                                        ForEach(device.volumeMembers, id: \.bsdName) { member in
-                                            Label(member.mountPoint.map { URL(fileURLWithPath: $0).lastPathComponent } ?? text("Unmounted volume", "未挂载的卷"),
-                                                  systemImage: "externaldrive.fill.badge.person.crop")
-                                                .font(.caption)
-                                                .accessibilityIdentifier("uma.sectorium.backing-volume")
+                                    Text(deviceLabel(device)).font(.caption).foregroundStyle(.secondary)
+                                    if !device.identityVerified {
+                                        Text(text("Identity unavailable; actions disabled.", "身份未知；操作不可用。"))
+                                            .font(.caption).foregroundStyle(.orange)
+                                    }
+                                    ForEach(device.volumeMembers, id: \.bsdName) { member in
+                                        Label(volumeDescription(member), systemImage: "externaldrive.fill.badge.person.crop")
+                                            .font(.caption)
+                                            .accessibilityIdentifier("uma.sectorium.backing-volume")
+                                    }
+                                    ForEach(model.workbench.profiles.filter { $0.deviceID == device.id }) { profile in
+                                        Label(profile.devVolumeName + " · "
+                                              + logicalCapacityDescription(profile.logicalCapacityBytes)
+                                              + text(" · registered virtual disk", " · 已登记虚拟盘"),
+                                              systemImage: "internaldrive")
+                                            .font(.caption)
+                                            .accessibilityIdentifier("uma.sectorium.related-development-disk")
+                                    }
+                                    if let legacy = model.legacyDevelopmentByDevice[device.id] {
+                                        Label(legacy.name + " · " + logicalCapacityDescription(legacy.logicalCapacityBytes)
+                                              + " · " + legacyStateDescription(legacy)
+                                              + text(" · not yet managed", " · 尚未接纳管理"),
+                                              systemImage: "internaldrive")
+                                            .font(.caption)
+                                            .accessibilityIdentifier("uma.sectorium.related-development-disk")
+                                        Text(text("Used/free: unknown", "已用/可用：未知"))
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    if !device.isExternal && !device.apfsContainers.isEmpty {
+                                        DisclosureGroup(text("System and recovery APFS details", "系统与恢复 APFS 详情")) {
+                                            ForEach(device.apfsContainers, id: \.bsdName) { container in
+                                                Text(apfsContainerDescription(container)).font(.caption)
+                                            }
                                         }
                                     }
-                                    ForEach(device.apfsContainers, id: \.bsdName) { container in
-                                        Label(apfsContainerDescription(container), systemImage: "square.stack.3d.up")
-                                            .font(.caption).foregroundStyle(.secondary)
-                                            .accessibilityIdentifier("uma.sectorium.apfs-container")
-                                    }
-                                    ForEach(selectedDeviceProfiles) { profile in
-                                        Label(profile.devVolumeName + text(" · registered virtual disk", " · 已登记虚拟盘"),
-                                              systemImage: "internaldrive")
-                                            .font(.caption)
-                                            .accessibilityIdentifier("uma.sectorium.related-development-disk")
-                                    }
-                                    if model.discoveredLegacyDisk {
-                                        Label(text("DEV_APFS · virtual development disk on this drive", "DEV_APFS · 此硬盘上的虚拟开发盘"),
-                                              systemImage: "internaldrive")
-                                            .font(.caption)
-                                            .accessibilityIdentifier("uma.sectorium.related-development-disk")
-                                    }
                                 }
+                                .padding(10)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+                                .accessibilityIdentifier("uma.sectorium.physical-drive")
+                            }
+                            if let device = selectedDevice {
+                                Text(identityDescription(device)).font(.caption).foregroundStyle(.secondary)
                                 if device.mountedVolumePaths.isEmpty {
-                                    Text(text("Connected, but no mounted storage location is available.", "硬盘已连接，但没有可用的已挂载存储位置。"))
+                                    Text(text("Connected, but no mounted storage location is available.",
+                                              "硬盘已连接，但没有可用的已挂载存储位置。"))
                                         .foregroundStyle(.secondary)
                                 }
                                 if !device.isExternal {
@@ -182,8 +193,8 @@ public struct SectoriumWorkbenchView: View {
                         }
                         Text(readinessSummary).font(.callout).foregroundStyle(.secondary)
                         if model.discoveredLegacyDisk {
-                            Text(text("Existing DEV_APFS is on this drive; adopt it explicitly to manage it.",
-                                      "此硬盘上已有 DEV_APFS；请明确接纳后管理。"))
+                            Text(text("A configured DEV_APFS belongs to this drive. Verify its current state and adopt explicitly before management.",
+                                      "已配置的 DEV_APFS 属于此硬盘。核实当前状态并明确接纳后方可管理。"))
                                 .font(.callout).foregroundStyle(.secondary)
                                 .accessibilityIdentifier("uma.sectorium.legacy-discovery")
                         }
@@ -437,7 +448,11 @@ public struct SectoriumWorkbenchView: View {
                        "现有 DEV_APFS 已挂载并核实属于此硬盘。明确接纳后方可管理。")
                 : text("A drive is selected. Create or adopt a development disk.", "已选择硬盘。可以创建或接纳开发盘。")
         case .noDevelopmentDisk: text("This drive has no registered development disk.", "此硬盘尚无已登记的开发盘。")
-        case .notStarted: text("The image is known and is not mounted.", "已识别镜像，但当前未挂载。")
+        case .notStarted:
+            model.discoveredLegacyDisk
+                ? text("The configured image is detached. Adopt it explicitly before management.",
+                       "已配置的镜像已分离。明确接纳后方可管理。")
+                : text("The image is known and is not mounted.", "已识别镜像，但当前未挂载。")
         case .awaitingUnlock: text("Unlock the image explicitly to start it.", "请明确解锁镜像后启动。")
         case .ready: text("The validated APFS development volume is available.", "已验证的 APFS 开发卷可用。")
         case .readOnly: text("The mounted volume is read-only.", "已挂载卷为只读。")
@@ -668,10 +683,38 @@ public struct SectoriumWorkbenchView: View {
         model.adoptDevelopmentDisk(deviceID: deviceID, imageURL: url)
     }
 
+    private func physicalTitle(_ device: SectoriumPhysicalDevice) -> String {
+        let mountedName = device.volumeMembers.first(where: { $0.mounted })?.name
+        if let mountedName, !mountedName.isEmpty, mountedName != device.name {
+            return "\(mountedName) · \(device.name)"
+        }
+        return device.name
+    }
     private func deviceLabel(_ device: SectoriumPhysicalDevice) -> String {
-        let location = device.isExternal ? text("External", "外接") : text("Local", "本地")
-        let size = device.wholeDeviceBytes.map(formatBytes) ?? text("unknown size", "容量未知")
-        return "\(device.name) · \(location) · \(size)"
+        let location = device.isExternal ? text("External physical drive", "外接物理硬盘")
+            : text("Internal physical drive", "内置物理硬盘")
+        let size = device.wholeDeviceBytes.map(formatBytes) ?? text("capacity unknown", "容量未知")
+        return "\(location) · \(size) · \(device.bsdName)"
+    }
+    private func volumeDescription(_ member: SectoriumVolumeMember) -> String {
+        let name = member.name ?? member.mountPoint.map { URL(fileURLWithPath: $0).lastPathComponent }
+            ?? text("Unnamed volume", "未命名卷")
+        return name + (member.mountPoint.map { text(" · mounted at ", " · 已挂载于 ") + $0 }
+                       ?? text(" · unmounted", " · 未挂载"))
+    }
+    private func legacyStateDescription(_ legacy: HESectoriumService.LegacyDevelopmentDisplay) -> String {
+        switch legacy.state {
+        case .mounted:
+            return legacy.mountPoint.map { text("mounted at ", "已挂载于 ") + $0 }
+                ?? text("mount verification needed", "挂载状态待核实")
+        case .unmounted: return text("image detached", "镜像已分离")
+        case .unknown: return text("state unverified", "状态未核实")
+        }
+    }
+    private func logicalCapacityDescription(_ bytes: UInt64?) -> String {
+        guard let bytes else { return text("logical capacity unknown", "逻辑容量未知") }
+        let gib = Double(bytes) / 1_073_741_824
+        return String(format: "%.1f GiB", gib) + text(" logical capacity", " 逻辑容量")
     }
     private func metric(_ title: String, _ value: UInt64?) -> some View {
         VStack(alignment: .leading, spacing: 3) {

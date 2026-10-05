@@ -177,15 +177,19 @@ public struct SectoriumVolumeMember: Equatable, Hashable, Sendable {
     public let volumeUUID: UUID
     public let bsdName: String
     public let mountPoint: String?
+    public let name: String?
+    public let capacityBytes: UInt64?
     public var mounted: Bool { mountPoint != nil }
 
-    public init(volumeUUID: UUID, bsdName: String, mountPoint: String?) {
+    public init(volumeUUID: UUID, bsdName: String, mountPoint: String?, name: String? = nil, capacityBytes: UInt64? = nil) {
         self.volumeUUID = volumeUUID; self.bsdName = bsdName; self.mountPoint = mountPoint
+        self.name = name; self.capacityBytes = capacityBytes
     }
 
     public init(bsdName: String, volumeUUID: UUID, mounted: Bool, mountPoint: String?) {
         self.volumeUUID = volumeUUID; self.bsdName = bsdName
         self.mountPoint = mounted ? mountPoint : nil
+        self.name = nil; self.capacityBytes = nil
     }
 }
 
@@ -308,6 +312,9 @@ public struct SectoriumDeviceCatalog {
             let name = (info["MediaName"] as? String) ?? (info["VolumeName"] as? String) ?? "Unnamed device"
             let bytes = (info["TotalSize"] as? NSNumber)?.uint64Value ?? (info["DiskSize"] as? NSNumber)?.uint64Value
             let partitions = entry["Partitions"] as? [[String: Any]] ?? []
+            // APFS volumes are listed separately from partitions by diskutil. They are
+            // display metadata only; physical parent identity still comes from direct partitions.
+            let apfsVolumes = entry["APFSVolumes"] as? [[String: Any]] ?? []
             var mounts: [String] = []
             var volumes: [UUID] = []
             var members: [SectoriumVolumeMember] = []
@@ -335,7 +342,9 @@ public struct SectoriumDeviceCatalog {
                     let memberMount = (partInfo["MountPoint"] as? String).flatMap { point in
                         point.hasPrefix("/Volumes/") && !point.split(separator: "/").contains("..") ? point : nil
                     }
-                    members.append(.init(volumeUUID: memberUUID, bsdName: partID, mountPoint: memberMount))
+                    members.append(.init(volumeUUID: memberUUID, bsdName: partID, mountPoint: memberMount,
+                                         name: partInfo["VolumeName"] as? String,
+                                         capacityBytes: (partInfo["TotalSize"] as? NSNumber)?.uint64Value))
                 } else {
                     topologyComplete = false
                 }
@@ -343,6 +352,22 @@ public struct SectoriumDeviceCatalog {
                     mounts.append(point)
                 }
                 if let memberUUID { volumes.append(memberUUID) }
+            }
+            if isVirtual == true {
+                for volume in apfsVolumes {
+                    guard let volumeID = volume["DeviceIdentifier"] as? String,
+                          volumeID.range(of: #"^disk[0-9]+s[0-9]+$"#, options: .regularExpression) != nil,
+                          let volumeInfo = deviceInformation[volumeID],
+                          Self.verifiedParentWholeDisk(volumeInfo) == bsd,
+                          let rawUUID = (volumeInfo["VolumeUUID"] as? String) ?? (volumeInfo["APFSVolumeUUID"] as? String),
+                          let uuid = UUID(uuidString: rawUUID) else { continue }
+                    let point = (volumeInfo["MountPoint"] as? String).flatMap { value in
+                        value.hasPrefix("/Volumes/") && !value.split(separator: "/").contains("..") ? value : nil
+                    }
+                    members.append(.init(volumeUUID: uuid, bsdName: volumeID, mountPoint: point,
+                                         name: volumeInfo["VolumeName"] as? String,
+                                         capacityBytes: (volumeInfo["TotalSize"] as? NSNumber)?.uint64Value))
+                }
             }
             let uniqueAnchors = members.filter { anchorCounts[$0.volumeUUID] == 1 }
             let anchor = stable == nil && isVirtual == false && members.count == 1
@@ -424,7 +449,9 @@ public final class SystemSectoriumDeviceObserver: SectoriumDeviceObserving {
         let wholeDisks = inventoryRows
             .compactMap { $0["DeviceIdentifier"] as? String }
             .filter { $0.range(of: #"^disk[0-9]+$"#, options: .regularExpression) != nil }
-        let volumeNodes = inventoryRows.flatMap { row in (row["Partitions"] as? [[String: Any]] ?? []) }
+        let volumeNodes = inventoryRows.flatMap { row in
+            (row["Partitions"] as? [[String: Any]] ?? []) + (row["APFSVolumes"] as? [[String: Any]] ?? [])
+        }
             .compactMap { $0["DeviceIdentifier"] as? String }
             .filter { $0.range(of: #"^disk[0-9]+s[0-9]+$"#, options: .regularExpression) != nil }
         var information: [String: [String: Any]] = [:]
