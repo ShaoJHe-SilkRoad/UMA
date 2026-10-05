@@ -299,6 +299,7 @@ public final class SectoriumWholeDeviceEjectDriver: WholeDeviceEjectDriving {
             var imageVolumes: Set<String> = []
             var mountedVolumes: Set<String> = []
             var validMountPoints = true
+            var missingImageVolumeIdentities: [(node: String, mount: String?)] = []
             for entity in entities {
                 guard let rawNode = entity["dev-entry"] as? String,
                       let node = Self.deviceNode(rawNode) else { return nil }
@@ -313,20 +314,41 @@ public final class SectoriumWholeDeviceEjectDriver: WholeDeviceEjectDriving {
                         guard Self.absolutePath(mount) != nil else { validMountPoints = false; continue }
                         mountedVolumes.insert(volume)
                     }
+                } else if node.range(of: #"^disk[0-9]+s[0-9]+$"#, options: .regularExpression) != nil {
+                    let mount = entity["mount-point"] as? String
+                    if let mount, Self.absolutePath(mount) == nil {
+                        validMountPoints = false; continue
+                    }
+                    missingImageVolumeIdentities.append((node, mount))
                 } else if entity["mount-point"] != nil {
                     validMountPoints = false
                 }
             }
             guard validMountPoints, Set(nodes).count == nodes.count else { return nil }
             let wholeNodes = nodes.filter { $0.range(of: #"^disk[0-9]+$"#, options: .regularExpression) != nil }
-            guard wholeNodes.count == 1, let wholeDisk = wholeNodes.first else { return nil }
+            guard let wholeDisk = verifiedImageWholeDisk(wholeNodes, entityNodes: Set(nodes)) else { return nil }
+            let synthesizedWholeDisks = wholeNodes.filter { $0 != wholeDisk }
+            var recoveredAPFSVolume = false
+            for missing in missingImageVolumeIdentities {
+                let belongsToSynthesized = synthesizedWholeDisks.contains { missing.node.hasPrefix($0 + "s") }
+                if !belongsToSynthesized && missing.mount == nil { continue }
+                guard let uuid = verifiedAPFSImageVolume(missing.node, mount: missing.mount,
+                    imageWholeDisk: wholeDisk, entityNodes: Set(nodes)),
+                    imageVolumes.insert("\(uuid.uuidString.lowercased())|\(missing.node)").inserted else { return nil }
+                recoveredAPFSVolume = true
+                if missing.mount != nil {
+                    mountedVolumes.insert("\(uuid.uuidString.lowercased())|\(missing.node)")
+                }
+            }
 
             let virtualMatches = devices.filter { $0.bsdName == wholeDisk }
             guard virtualMatches.count == 1, let virtual = virtualMatches.first,
-                  virtual.isVirtual == true, virtual.topologyComplete,
-                  Set(virtual.volumeMembers.map { "\($0.volumeUUID.uuidString.lowercased())|\($0.bsdName)" }) == imageVolumes else {
-                return nil
-            }
+                  virtual.isVirtual == true,
+                  (recoveredAPFSVolume
+                    ? !imageVolumes.isEmpty
+                    : virtual.topologyComplete && Set(virtual.volumeMembers.map {
+                        "\($0.volumeUUID.uuidString.lowercased())|\($0.bsdName)"
+                    }) == imageVolumes) else { return nil }
             let identity = "image:\(wholeDisk)"
             let image = WholeDeviceTopology.Image(identity: identity, attached: true,
                 volumeIdentities: imageVolumes.sorted(), mountedVolumeIdentities: mountedVolumes.sorted())
@@ -337,6 +359,52 @@ public final class SectoriumWholeDeviceEjectDriver: WholeDeviceEjectDriving {
         imageWholeDiskByIdentity = wholeDisks
         imageVolumesByIdentity = volumeSets
         return mapped.sorted { $0.identity < $1.identity }
+    }
+
+    private func verifiedImageWholeDisk(_ wholeNodes: [String], entityNodes: Set<String>) -> String? {
+        guard !wholeNodes.isEmpty, Set(wholeNodes).count == wholeNodes.count else { return nil }
+        if wholeNodes.count == 1 { return wholeNodes[0] }
+        let result = runner.run("/usr/sbin/diskutil", ["apfs", "list", "-plist"], cwd: cwd)
+        guard result.succeeded, let root = Self.plist(result.detail),
+              let containers = root["Containers"] as? [[String: Any]] ?? root["APFSContainers"] as? [[String: Any]] else { return nil }
+        let candidates = wholeNodes.filter { candidate in
+            wholeNodes.filter { $0 != candidate }.allSatisfy { child in
+                let matches = containers.filter { $0["ContainerReference"] as? String == child }
+                guard matches.count == 1,
+                      let stores = matches[0]["PhysicalStores"] as? [[String: Any]], stores.count == 1,
+                      let rawStore = stores[0]["DeviceIdentifier"] as? String ?? stores[0]["DeviceNode"] as? String,
+                      let store = Self.deviceNode(rawStore) else { return false }
+                return store.hasPrefix(candidate + "s") && entityNodes.contains(store)
+            }
+        }
+        return candidates.count == 1 ? candidates[0] : nil
+    }
+
+    /// hdiutil may omit APFS volume UUIDs. Recover them only through a unique
+    /// diskutil volume -> APFS container -> image physical-store chain.
+    private func verifiedAPFSImageVolume(_ node: String, mount: String?,
+                                         imageWholeDisk: String, entityNodes: Set<String>) -> UUID? {
+        let volumeResult = runner.run("/usr/sbin/diskutil", ["info", "-plist", "/dev/\(node)"], cwd: cwd)
+        let apfsResult = runner.run("/usr/sbin/diskutil", ["apfs", "list", "-plist"], cwd: cwd)
+        guard volumeResult.succeeded, apfsResult.succeeded,
+              node.range(of: #"^disk[0-9]+s[0-9]+$"#, options: .regularExpression) != nil,
+              let info = Self.plist(volumeResult.detail),
+              info["DeviceIdentifier"] as? String == node,
+              (mount.map { info["MountPoint"] as? String == $0 }
+                ?? ((info["MountPoint"] as? String)?.isEmpty != false)),
+              let rawUUID = info["VolumeUUID"] as? String ?? info["APFSVolumeUUID"] as? String,
+              let uuid = UUID(uuidString: rawUUID),
+              let containerID = info["APFSContainerReference"] as? String,
+              entityNodes.contains(containerID),
+              let apfs = Self.plist(apfsResult.detail),
+              let containers = apfs["Containers"] as? [[String: Any]] ?? apfs["APFSContainers"] as? [[String: Any]] else { return nil }
+        let matches = containers.filter { $0["ContainerReference"] as? String == containerID }
+        guard matches.count == 1, let stores = matches.first?["PhysicalStores"] as? [[String: Any]],
+              stores.count == 1,
+              let rawStore = stores[0]["DeviceIdentifier"] as? String ?? stores[0]["DeviceNode"] as? String,
+              let store = Self.deviceNode(rawStore),
+              store.hasPrefix(imageWholeDisk + "s"), entityNodes.contains(store) else { return nil }
+        return uuid
     }
 
     private static func absolutePath(_ raw: String) -> String? {
@@ -434,10 +502,20 @@ private struct SectoriumPhysicalBackingResolver {
     private func resolveDevice(_ bsd: String, visited: Set<String>, imageDepth: Int) -> Set<String>? {
         guard imageDepth <= maximumImageDepth, !visited.contains(bsd),
               let plist = commandPlist("/usr/sbin/diskutil", ["info", "-plist", "/dev/\(bsd)"]),
-              Self.deviceID(plist["DeviceIdentifier"] as? String ?? "") == bsd,
-              let kind = plist["VirtualOrPhysical"] as? String else { return nil }
+              Self.deviceID(plist["DeviceIdentifier"] as? String ?? "") == bsd else { return nil }
         var nextVisited = visited
         nextVisited.insert(bsd)
+
+        // Partition metadata commonly omits VirtualOrPhysical. Its explicit parent is
+        // the first trust edge; following the APFS container reference here can cycle
+        // from a physical store back into its own synthesized container.
+        if bsd.contains("s"), plist["ParentWholeDisk"] != nil || plist["PartOfWhole"] != nil {
+            guard let rawParent = SectoriumDeviceCatalog.verifiedParentWholeDisk(plist),
+           let parent = Self.deviceID(rawParent),
+           parent.range(of: #"^disk[0-9]+$"#, options: .regularExpression) != nil,
+           bsd.hasPrefix(parent + "s") else { return nil }
+            return resolveDevice(parent, visited: nextVisited, imageDepth: imageDepth)
+        }
 
         if let containerID = plist["APFSContainerReference"] as? String {
             guard !containerID.isEmpty,
@@ -451,10 +529,12 @@ private struct SectoriumPhysicalBackingResolver {
             return resolveDevice(store, visited: nextVisited, imageDepth: imageDepth)
         }
 
+        guard let kind = plist["VirtualOrPhysical"] as? String else { return nil }
         switch kind.lowercased() {
         case "physical":
-            if let parent = plist["PartOfWhole"] as? String {
-                guard let whole = Self.deviceID(parent), whole.range(of: #"^disk[0-9]+$"#, options: .regularExpression) != nil else { return nil }
+            if plist["ParentWholeDisk"] != nil || plist["PartOfWhole"] != nil {
+                guard let parent = SectoriumDeviceCatalog.verifiedParentWholeDisk(plist),
+                      let whole = Self.deviceID(parent), whole.range(of: #"^disk[0-9]+$"#, options: .regularExpression) != nil else { return nil }
                 return [whole]
             }
             guard bsd.range(of: #"^disk[0-9]+$"#, options: .regularExpression) != nil else { return nil }

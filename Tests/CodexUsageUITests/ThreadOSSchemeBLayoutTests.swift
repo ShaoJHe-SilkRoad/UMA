@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Vision
 import Testing
 import HESectoriumCore
 import HESectoriumRuntime
@@ -702,6 +703,72 @@ import HESectoriumRuntime
         }
     }
 
+    @Test func sectoriumMultipleImagesAndStaleSelectionStayBoundToOnePhysicalRoot() async throws {
+        _ = NSApplication.shared
+        let fixture = HESectoriumKeyboardFixture(isExternal: true)
+        defer { fixture.remove() }
+        fixture.store.selectDevice(fixture.device.id)
+        let profiles = (1...2).map { index in
+            SectoriumDevelopmentProfile(id: UUID().uuidString, name: "Development \(index)",
+                deviceID: fixture.device.id, backingVolumeUUID: UUID(), backingMountPoint: "/private/tmp/HE",
+                imagePath: "/private/tmp/HE/Development\(index).sparsebundle",
+                devVolumeName: "DEV_\(index)", devMountPoint: "/Volumes/DEV_\(index)",
+                encrypted: false, caseSensitive: false, logicalCapacityBytes: 1024, imageFormat: "UDSB")
+        }
+        fixture.store.apply(devices: [fixture.device], profiles: profiles, readiness: .notStarted, pending: nil)
+        let host = NSHostingView(rootView: SectoriumWorkbenchView(store: fixture.store))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 900),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        settle(host)
+        try await waitForAvailableInventory(fixture.store)
+        fixture.store.apply(devices: [fixture.device], profiles: profiles, readiness: .notStarted, pending: nil)
+        settle(host)
+        let sibling = SectoriumPhysicalDevice(id: UUID().uuidString, bsdName: "disk82",
+            name: fixture.device.name, isExternal: true, identityVerified: true,
+            wholeDeviceBytes: fixture.device.wholeDeviceBytes, mountedVolumePaths: [], volumeUUIDs: [],
+            readBytes: nil, writtenBytes: nil, isVirtual: false)
+        let siblingProfile = SectoriumDevelopmentProfile(id: UUID().uuidString, name: "Sibling",
+            deviceID: sibling.id, backingVolumeUUID: UUID(), backingMountPoint: "/private/tmp/OTHER",
+            imagePath: "/private/tmp/OTHER/Sibling.sparsebundle", devVolumeName: "OTHER_DEV",
+            devMountPoint: "/Volumes/OTHER_DEV", encrypted: false, caseSensitive: false,
+            logicalCapacityBytes: 1024, imageFormat: "UDSB")
+        fixture.store.apply(devices: [fixture.device, sibling], profiles: profiles + [siblingProfile],
+            readiness: .notStarted, pending: nil, discoveredLegacy: true)
+        settle(host)
+        let firstLabels = try renderedText(in: host)
+        #expect(firstLabels.filter { $0.contains("DEV_1") }.count == 1)
+        #expect(firstLabels.filter { $0.contains("DEV_2") }.count == 1)
+        #expect(firstLabels.filter { $0.contains("DEV_APFS • virtual development disk") }.count == 1)
+        #expect(firstLabels.contains { $0.contains("disk81") })
+        #expect(!firstLabels.contains { $0.contains("disk82") })
+        #expect(!firstLabels.contains { $0.contains("OTHER_DEV") })
+        fixture.store.apply(devices: [fixture.device, sibling], profiles: profiles + [siblingProfile],
+            readiness: .notStarted, pending: nil, discoveredLegacy: false)
+        fixture.store.selectDevice(sibling.id)
+        try await waitForAvailableInventory(fixture.store)
+        fixture.store.apply(devices: [fixture.device, sibling], profiles: profiles + [siblingProfile],
+            readiness: .notStarted, pending: nil, discoveredLegacy: false)
+        settle(host)
+        let siblingLabels = try renderedText(in: host)
+        #expect(siblingLabels.filter { $0.contains("OTHER_DEV") }.count == 1)
+        #expect(siblingLabels.contains { $0.contains("disk82") })
+        #expect(!siblingLabels.contains { $0.contains("disk81") })
+        #expect(!siblingLabels.contains { $0.contains("DEV_1") || $0.contains("DEV_2") || $0.contains("DEV_APFS") })
+        fixture.store.apply(devices: [fixture.device, sibling], profiles: profiles + [siblingProfile],
+            readiness: .unknown("Drive attachment or topology changed; reselect the physical drive before management"),
+            pending: nil)
+        settle(host)
+        let buttons = descendants(of: host).compactMap { $0 as? NSButton }
+        for action in ["uma.sectorium.create", "uma.sectorium.adopt", "uma.sectorium.start",
+                       "uma.sectorium.stop", "uma.sectorium.eject-drive"] {
+            let button = try #require(buttons.first { $0.accessibilityIdentifier() == action })
+            #expect(!button.isEnabled)
+        }
+    }
+
     @Test func sectoriumEnabledStorageActionsParticipateInAttachedWindowTabTraversal() async throws {
         _ = NSApplication.shared
         let scenarios: [(action: String, readiness: SectoriumWorkbenchReadiness, pending: String?)] = [
@@ -879,7 +946,7 @@ import HESectoriumRuntime
         let unverified = SectoriumPhysicalDevice(id: fixture.device.id, bsdName: fixture.device.bsdName,
             name: fixture.device.name, isExternal: false, identityVerified: false,
             wholeDeviceBytes: fixture.device.wholeDeviceBytes, mountedVolumePaths: [], volumeUUIDs: [],
-            readBytes: nil, writtenBytes: nil)
+            readBytes: nil, writtenBytes: nil, isVirtual: false)
         fixture.store.apply(devices: [unverified], profiles: [], readiness: .unknown("Identity unavailable"), pending: nil)
         settle(host)
         let consent = try #require(descendants(of: host).compactMap { $0 as? NSButton }
@@ -923,6 +990,38 @@ import HESectoriumRuntime
         click(consent, in: window)
         #expect(!fixture.store.isLocalDeviceSamplingConsented(fixture.device.id))
         #expect(fixture.ioSampler.sampledNames == [fixture.device.bsdName])
+    }
+
+    @Test func sectoriumConsentedInternalBackingAnchorNeverInvokesWholeMediaProvider() async throws {
+        let provider = HESectoriumKeyboardIOProviderSpy()
+        let fixture = HESectoriumKeyboardFixture(isExternal: false,
+            ioSamplerOverride: SectoriumDeviceIOSampler(provider: provider))
+        defer { fixture.remove() }
+        let backingID = UUID()
+        let anchored = SectoriumPhysicalDevice(id: backingID.uuidString, bsdName: fixture.device.bsdName,
+            name: fixture.device.name, isExternal: false, identityVerified: true,
+            wholeDeviceBytes: fixture.device.wholeDeviceBytes, mountedVolumePaths: [fixture.root.path],
+            volumeUUIDs: [backingID], readBytes: nil, writtenBytes: nil,
+            volumeMembers: [.init(volumeUUID: backingID, bsdName: "disk81s1", mountPoint: fixture.root.path)],
+            topologyComplete: true, isVirtual: false, identityBasis: .uniqueBackingVolumeUUID,
+            requiresFreshParentCheck: true)
+        #expect(anchored.identityVerified)
+        #expect(anchored.wholeMediaUUID == nil)
+        fixture.store.apply(devices: [anchored], profiles: [], readiness: .connected, pending: nil)
+        fixture.store.selectDevice(anchored.id)
+        fixture.store.activateWorkbench()
+        try await waitForAvailableInventory(fixture.store)
+        fixture.store.apply(devices: [anchored], profiles: [], readiness: .connected, pending: nil)
+        #expect(fixture.store.workbench.selectedDeviceID == anchored.id)
+        fixture.store.setLocalDeviceSamplingConsent(true, for: anchored.id)
+        #expect(fixture.store.isLocalDeviceSamplingConsented(anchored.id))
+        fixture.store.sampleSelectedDeviceIO()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(provider.requestedNames.isEmpty,
+            "An internal backing-volume anchor without whole-media UUID cannot reach the whole-media provider.")
+        #expect(fixture.runner.targetedInfoNames.isEmpty)
+        #expect(!fixture.store.workbench.io.isFresh)
+        fixture.store.deactivateWorkbench()
     }
 
     @Test func sectoriumSamplingRequiresPageSelectionAndLocalConsent() throws {
@@ -1274,6 +1373,18 @@ import HESectoriumRuntime
         #expect(store.inventoryState == .available, "The fixture inventory must finish before testing enabled native controls.")
     }
 
+    private func renderedText(in host: NSView) throws -> [String] {
+        host.layoutSubtreeIfNeeded()
+        let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let image = try #require(bitmap.cgImage)
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        try VNImageRequestHandler(cgImage: image).perform([request])
+        return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+    }
+
     private func settle(_ host: NSView) {
         for _ in 0..<3 {
             host.layoutSubtreeIfNeeded()
@@ -1518,7 +1629,8 @@ private enum HESectoriumKeyboardEjectMode { case none, ready, journaledReturn }
     let ioSampler: HESectoriumKeyboardIOSampler
     init(isExternal: Bool = true, identityVerified: Bool = true,
          ejectMode: HESectoriumKeyboardEjectMode = .none,
-         observerOverride: SectoriumDeviceObserving? = nil) {
+         observerOverride: SectoriumDeviceObserving? = nil,
+         ioSamplerOverride: SectoriumDeviceIOCounterSampling? = nil) {
         root = URL(fileURLWithPath: "/private/tmp/hesectorium-keyboard-\(UUID().uuidString)", isDirectory: true)
         try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         paths = HESectoriumPaths(root: root.appendingPathComponent("support", isDirectory: true))
@@ -1526,7 +1638,8 @@ private enum HESectoriumKeyboardEjectMode { case none, ready, journaledReturn }
         device = SectoriumPhysicalDevice(id: identityVerified ? mediaUUID.uuidString : "unverified-disk81",
             bsdName: "disk81", name: "Fixture drive",
             isExternal: isExternal, identityVerified: identityVerified, wholeDeviceBytes: 1024 * 1024 * 1024,
-            mountedVolumePaths: [], volumeUUIDs: [], readBytes: nil, writtenBytes: nil)
+            mountedVolumePaths: [], volumeUUIDs: [], readBytes: nil, writtenBytes: nil,
+            isVirtual: false)
         runner = HESectoriumKeyboardRunner(device: device)
         ioSampler = HESectoriumKeyboardIOSampler()
         let stateStore: DurableStateStore
@@ -1565,7 +1678,7 @@ private enum HESectoriumKeyboardEjectMode { case none, ready, journaledReturn }
             installer: HESectoriumInstaller(paths: paths, home: root), runner: runner,
             identityPolicy: .expected, agentStatusProvider: UnknownAgentStatusProvider(),
             sectoriumDeviceObserver: observerOverride ?? HESectoriumKeyboardDeviceObserver(device: device),
-            sectoriumDeviceIOSampler: ioSampler, wholeDeviceEjectDriverOverride: ejectDriver)
+            sectoriumDeviceIOSampler: ioSamplerOverride ?? ioSampler, wholeDeviceEjectDriverOverride: ejectDriver)
         store = HESectoriumStore(service: service, sampleIntervalNanoseconds: 60_000_000_000)
     }
     func remove() { try? FileManager.default.removeItem(at: root) }
@@ -1693,5 +1806,15 @@ private final class HESectoriumKeyboardIOSampler: SectoriumDeviceIOCounterSampli
         lock.unlock()
         if shouldHold { heldSample.signal(); releaseSample.wait() }
         return .init(readBytes: UInt64(index * 1_000), writtenBytes: UInt64(index * 2_000))
+    }
+}
+
+private final class HESectoriumKeyboardIOProviderSpy: SectoriumIORegistryProviding, @unchecked Sendable {
+    private let lock = NSLock()
+    private var names: [String] = []
+    var requestedNames: [String] { lock.lock(); defer { lock.unlock() }; return names }
+    func providerMappings(forWholeBSDName bsdName: String) throws -> [SectoriumIOMediaProviderMapping] {
+        lock.lock(); names.append(bsdName); lock.unlock()
+        return []
     }
 }

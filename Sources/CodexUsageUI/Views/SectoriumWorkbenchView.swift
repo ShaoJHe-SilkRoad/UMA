@@ -69,16 +69,27 @@ public struct SectoriumWorkbenchView: View {
                         if model.inventoryState == .loading && !model.workbench.devices.isEmpty {
                             Text(inventoryMessage).foregroundStyle(.secondary)
                         }
-                        if model.workbench.devices.isEmpty {
+                        if physicalDevices.isEmpty {
                             Text(inventoryMessage)
                                 .foregroundStyle(.secondary)
-                        } else {
+                        }
+                        ForEach(unassignedDevices) { device in
+                            Text(text("Unassigned device", "未归属设备") + " " + device.bsdName
+                                 + (device.hasAmbiguousPhysicalStores
+                                    ? text(" · multiple APFS physical stores; no mother drive was chosen.",
+                                           " · 存在多个 APFS 物理存储，未指定母盘。")
+                                    : text(" · physical ownership is unverified; actions are unavailable.",
+                                           " · 物理归属未核实，操作不可用。")))
+                                .font(.caption).foregroundStyle(.orange)
+                                .accessibilityIdentifier("uma.sectorium.unassigned-device")
+                        }
+                        if !physicalDevices.isEmpty {
                             Picker(text("Selected drive", "当前硬盘"), selection: Binding(
                                 get: { model.workbench.selectedDeviceID ?? "" },
                                 set: { model.selectDevice($0.isEmpty ? nil : $0) }
                             )) {
                                 Text(text("Choose a drive", "选择硬盘")).tag("")
-                                ForEach(model.workbench.devices) { device in
+                                ForEach(physicalDevices) { device in
                                     Text(deviceLabel(device)).tag(device.id)
                                 }
                             }
@@ -93,6 +104,32 @@ public struct SectoriumWorkbenchView: View {
                                     }
                                     Text(device.wholeDeviceBytes.map(formatBytes) ?? text("Capacity unknown", "容量未知"))
                                         .foregroundStyle(.secondary)
+                                    Text(identityDescription(device)).font(.caption).foregroundStyle(.secondary)
+                                    if !device.volumeMembers.isEmpty {
+                                        ForEach(device.volumeMembers, id: \.bsdName) { member in
+                                            Label(member.mountPoint.map { URL(fileURLWithPath: $0).lastPathComponent } ?? text("Unmounted volume", "未挂载的卷"),
+                                                  systemImage: "externaldrive.fill.badge.person.crop")
+                                                .font(.caption)
+                                                .accessibilityIdentifier("uma.sectorium.backing-volume")
+                                        }
+                                    }
+                                    ForEach(device.apfsContainers, id: \.bsdName) { container in
+                                        Label(apfsContainerDescription(container), systemImage: "square.stack.3d.up")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                            .accessibilityIdentifier("uma.sectorium.apfs-container")
+                                    }
+                                    ForEach(selectedDeviceProfiles) { profile in
+                                        Label(profile.devVolumeName + text(" · registered virtual disk", " · 已登记虚拟盘"),
+                                              systemImage: "internaldrive")
+                                            .font(.caption)
+                                            .accessibilityIdentifier("uma.sectorium.related-development-disk")
+                                    }
+                                    if model.discoveredLegacyDisk {
+                                        Label(text("DEV_APFS · virtual development disk on this drive", "DEV_APFS · 此硬盘上的虚拟开发盘"),
+                                              systemImage: "internaldrive")
+                                            .font(.caption)
+                                            .accessibilityIdentifier("uma.sectorium.related-development-disk")
+                                    }
                                 }
                                 if device.mountedVolumePaths.isEmpty {
                                     Text(text("Connected, but no mounted storage location is available.", "硬盘已连接，但没有可用的已挂载存储位置。"))
@@ -145,8 +182,8 @@ public struct SectoriumWorkbenchView: View {
                         }
                         Text(readinessSummary).font(.callout).foregroundStyle(.secondary)
                         if model.discoveredLegacyDisk {
-                            Text(text("Existing DEV_APFS verified; adopt it explicitly after selecting a drive with verified identity.",
-                                      "已验证现有 DEV_APFS；请在选择身份已核实的硬盘后明确接纳。"))
+                            Text(text("Existing DEV_APFS is on this drive; adopt it explicitly to manage it.",
+                                      "此硬盘上已有 DEV_APFS；请明确接纳后管理。"))
                                 .font(.callout).foregroundStyle(.secondary)
                                 .accessibilityIdentifier("uma.sectorium.legacy-discovery")
                         }
@@ -159,17 +196,17 @@ public struct SectoriumWorkbenchView: View {
                         }
                         VStack(alignment: .leading, spacing: 8) {
                             SectoriumWorkbenchButton(title: text("Create development disk", "创建开发盘"),
-                                identifier: "uma.sectorium.create", isEnabled: selectedDevice?.identityVerified == true && !storageMutationBlocked) {
+                                identifier: "uma.sectorium.create", isEnabled: selectedDevice?.identityVerified == true && !staleAttachment && !storageMutationBlocked) {
                                     showingCreate = true
                                 }
                             SectoriumWorkbenchButton(title: text("Adopt existing disk", "接纳已有开发盘"),
-                                identifier: "uma.sectorium.adopt", isEnabled: selectedDevice?.identityVerified == true && !storageMutationBlocked,
+                                identifier: "uma.sectorium.adopt", isEnabled: selectedDevice?.identityVerified == true && !staleAttachment && !storageMutationBlocked,
                                 action: adoptExisting)
                             SectoriumWorkbenchButton(title: text("Start", "启动"), identifier: "uma.sectorium.start",
-                                isEnabled: selectedProfile?.hasVerifiedImageFormat == true && !storageMutationBlocked && model.workbench.readiness != .ready,
+                                isEnabled: selectedDevice?.identityVerified == true && !staleAttachment && selectedProfile?.hasVerifiedImageFormat == true && !storageMutationBlocked && model.workbench.readiness != .ready,
                                 action: startSelectedProfile)
                             SectoriumWorkbenchButton(title: text("Stop", "停止"), identifier: "uma.sectorium.stop",
-                                isEnabled: selectedProfile != nil && !storageMutationBlocked && model.workbench.readiness == .ready,
+                                isEnabled: selectedDevice?.identityVerified == true && !staleAttachment && selectedProfile != nil && !storageMutationBlocked && model.workbench.readiness == .ready,
                                 action: model.prepareStopDevelopmentDiskConfirmation)
                             SectoriumWorkbenchButton(title: text("Resume operation", "继续未完成操作"),
                                 identifier: "uma.sectorium.resume",
@@ -189,7 +226,7 @@ public struct SectoriumWorkbenchView: View {
                             SectoriumWorkbenchButton(title: text("Eject external drive", "弹出整块外接硬盘"),
                                 identifier: "uma.sectorium.eject-drive",
                                 isEnabled: model.canBeginWholeDeviceEject && selectedDevice?.isExternal == true
-                                    && selectedDevice?.identityVerified == true && !storageMutationBlocked && !model.isBusy,
+                                    && selectedDevice?.identityVerified == true && !staleAttachment && !storageMutationBlocked && !model.isBusy,
                                 action: model.prepareWholeDeviceEjectConfirmation)
                         }
                         VStack(alignment: .leading, spacing: 8) {
@@ -297,8 +334,41 @@ public struct SectoriumWorkbenchView: View {
         case .available: text("Choose a drive to continue.", "请选择硬盘以继续。")
         }
     }
+    private var physicalDevices: [SectoriumPhysicalDevice] {
+        model.workbench.devices.filter { $0.isVirtual == false }
+    }
+    private var unassignedDevices: [SectoriumPhysicalDevice] {
+        model.workbench.devices.filter { $0.isVirtual == nil || $0.hasAmbiguousPhysicalStores }
+    }
     private var selectedDevice: SectoriumPhysicalDevice? {
-        model.workbench.devices.first { $0.id == model.workbench.selectedDeviceID }
+        physicalDevices.first { $0.id == model.workbench.selectedDeviceID }
+    }
+    private func apfsContainerDescription(_ detail: SectoriumAPFSContainerDetail) -> String {
+        let role: String
+        switch detail.partitionContent {
+        case "Apple_APFS_ISC": role = text("system support", "系统支持")
+        case "Apple_APFS_Recovery": role = text("recovery", "恢复")
+        default: role = text("system and data", "系统与数据")
+        }
+        return text("APFS container", "APFS 容器") + " " + detail.bsdName + " · " + role
+    }
+    private func identityDescription(_ device: SectoriumPhysicalDevice) -> String {
+        switch device.identityBasis {
+        case .wholeMediaUUID:
+            return text("Whole media identity verified", "已核实整盘身份")
+        case .uniqueBackingVolumeUUID:
+            return text("Identity bound to one verified backing volume; whole-drive I/O is unavailable without a media identity.",
+                        "身份绑定至一个已核实的后备卷；缺少介质身份时整盘 I/O 不可用。")
+        case .unavailable:
+            return text("A stable physical identity or unique backing volume is unavailable. Storage actions remain disabled.",
+                        "缺少稳定的物理身份或唯一后备卷；存储操作保持禁用。")
+        }
+    }
+    private var staleAttachment: Bool {
+        if case .unknown(let detail) = model.workbench.readiness {
+            return detail == "Drive attachment or topology changed; reselect the physical drive before management"
+        }
+        return false
     }
     private var storageMutationBlocked: Bool {
         model.isBusy || model.inventoryState != .available || model.workbench.pendingOperation != nil
@@ -361,7 +431,11 @@ public struct SectoriumWorkbenchView: View {
         switch model.workbench.readiness {
         case .operationInProgress, .partialFailure, .unknown: ""
         case .noDevice: text("Select a physical drive to continue.", "请选择物理硬盘以继续。")
-        case .connected: text("A drive is selected. Create or adopt a development disk.", "已选择硬盘。可以创建或接纳开发盘。")
+        case .connected:
+            model.discoveredLegacyDisk
+                ? text("The existing DEV_APFS is mounted and verified on this drive. Adopt it explicitly before management.",
+                       "现有 DEV_APFS 已挂载并核实属于此硬盘。明确接纳后方可管理。")
+                : text("A drive is selected. Create or adopt a development disk.", "已选择硬盘。可以创建或接纳开发盘。")
         case .noDevelopmentDisk: text("This drive has no registered development disk.", "此硬盘尚无已登记的开发盘。")
         case .notStarted: text("The image is known and is not mounted.", "已识别镜像，但当前未挂载。")
         case .awaitingUnlock: text("Unlock the image explicitly to start it.", "请明确解锁镜像后启动。")

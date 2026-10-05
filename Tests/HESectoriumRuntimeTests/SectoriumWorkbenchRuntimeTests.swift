@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Testing
 import HESectoriumCore
 @testable import HESectoriumRuntime
@@ -20,7 +21,7 @@ private final class WorkbenchMemoryLock: OperationLock {
 }
 
 private final class WorkbenchFixtureObserver: SectoriumDeviceObserving {
-    let device: SectoriumPhysicalDevice
+    var device: SectoriumPhysicalDevice
     init(device: SectoriumPhysicalDevice) { self.device = device }
     func observeDevices() throws -> [SectoriumPhysicalDevice] { [device] }
 }
@@ -60,6 +61,8 @@ private final class WorkbenchFixtureRunner: HESectoriumCommandRunning, HESectori
     var additionalDiskInfos: [String: [String: Any]] = [:]
     var apfsContainers: [[String: Any]]?
     var imageBackingDevice = "disk81s1"
+    var mountParentWholeDisk: String?
+    var mountPartOfWholeDisk: String?
     var imageFormatOutput = CommandOutcome(exitCode: 0, detail: "UDSB\n")
     var encryptionOutput = CommandOutcome(exitCode: 127, detail: "fixture encryption observation unavailable")
     var attachOutcome = CommandOutcome(exitCode: 127, detail: "fixture command not configured")
@@ -70,12 +73,19 @@ private final class WorkbenchFixtureRunner: HESectoriumCommandRunning, HESectori
 
     func run(_ executable: String, _ arguments: [String], cwd: URL) -> CommandOutcome {
         commands.append([executable] + arguments)
-        if executable == "/usr/sbin/diskutil", arguments == ["info", "-plist", mountPoint],
-           let data = try? PropertyListSerialization.data(fromPropertyList: [
-               "VolumeUUID": volumeUUID.uuidString, "MountPoint": mountPoint,
-               "FilesystemType": "ExFAT", "WritableVolume": true, "VolumeName": "Fixture HE"
-           ], format: .xml, options: 0) {
-            return .init(exitCode: 0, detail: String(decoding: data, as: UTF8.self))
+        if executable == "/usr/sbin/diskutil", arguments == ["info", "-plist", mountPoint] {
+            var info: [String: Any] = [
+                "VolumeUUID": volumeUUID.uuidString, "MountPoint": mountPoint,
+                "FilesystemType": "ExFAT", "WritableVolume": true, "VolumeName": "Fixture HE"
+            ]
+            if let mountParentWholeDisk {
+                info["ParentWholeDisk"] = mountParentWholeDisk
+                if let mountPartOfWholeDisk { info["PartOfWhole"] = mountPartOfWholeDisk }
+                info["DeviceIdentifier"] = mountParentWholeDisk + "s1"
+            }
+            if let data = try? PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0) {
+                return .init(exitCode: 0, detail: String(decoding: data, as: UTF8.self))
+            }
         }
         if executable == "/usr/sbin/diskutil", arguments.count == 3,
            arguments[0] == "info", arguments[1] == "-plist",
@@ -217,6 +227,30 @@ struct SectoriumWorkbenchRuntimeTests {
         #expect(sampler.counters(forWholeBSDName: "disk81s1", expectedMediaID: mediaID) == nil)
     }
 
+    @Test("A backing-volume anchor never invokes the whole-media I/O provider")
+    func anchoredIdentityDoesNotSampleWholeMedia() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let backing = try #require(fixture.device.volumeUUIDs.first)
+        let anchored = SectoriumPhysicalDevice(id: backing.uuidString, bsdName: "disk81",
+            name: "External Fixture", isExternal: true, identityVerified: true,
+            wholeDeviceBytes: 1000, mountedVolumePaths: [fixture.mount.path], volumeUUIDs: [backing],
+            readBytes: nil, writtenBytes: nil,
+            volumeMembers: [.init(volumeUUID: backing, bsdName: "disk81s1", mountPoint: fixture.mount.path)],
+            topologyComplete: true, isVirtual: false, identityBasis: .uniqueBackingVolumeUUID,
+            wholeMediaUUID: nil, requiresFreshParentCheck: true)
+        let provider = WorkbenchIORegistryFixture(mappings: [])
+        let service = HESectoriumService(paths: fixture.service.paths,
+            backend: WorkbenchNoopBackend(), store: WorkbenchMemoryStore(),
+            operationLock: WorkbenchMemoryLock(), runner: fixture.runner,
+            identityPolicy: .expected, sectoriumDeviceObserver: fixture.observer,
+            sectoriumDeviceIOSampler: SectoriumDeviceIOSampler(provider: provider))
+        let before = fixture.runner.commands.count
+        #expect(service.sampleSectoriumDeviceCounters(for: anchored) == nil)
+        #expect(provider.requestedNames.isEmpty)
+        #expect(fixture.runner.commands.count == before)
+    }
+
     @Test("BSD-name reuse cannot bind replacement media counters to selected media A")
     func reusedBSDNameRejectsReplacementMediaCounters() throws {
         let selectedA = UUID(), replacementB = UUID()
@@ -342,7 +376,8 @@ struct SectoriumWorkbenchRuntimeTests {
             "Statistics": ["Bytes (Read)": NSNumber(value: 1000), "Bytes (Write)": NSNumber(value: 2500)]
         ]])
         let devices = try SectoriumDeviceCatalog().parse(diskInventory: disk, ioRegistry: io, deviceInformation: [
-            "disk8": ["MediaUUID": mediaID, "DeviceLocation": "External", "MediaName": "Fixture", "TotalSize": 5000],
+            "disk8": ["MediaUUID": mediaID, "DeviceLocation": "External", "VirtualOrPhysical": "Physical",
+                      "MediaName": "Fixture", "TotalSize": 5000],
             "disk8s1": ["VolumeUUID": volumeID, "MountPoint": "/Volumes/Fixture"]
         ])
 
@@ -357,11 +392,225 @@ struct SectoriumWorkbenchRuntimeTests {
         #expect(device.writtenBytes == nil)
     }
 
+    @Test("Physical picker groups synthesized APFS and image disks under the two hardware roots")
+    func physicalRootsAndUniqueBackingAnchor() throws {
+        let backing = UUID(uuidString: "63CB46D8-620B-48AF-9F23-C0129D692013")!
+        let rows: [[String: Any]] = [
+            ["DeviceIdentifier": "disk0", "Partitions": (1...3).map { ["DeviceIdentifier": "disk0s\($0)",
+                "Content": $0 == 1 ? "Apple_APFS_ISC" : $0 == 3 ? "Apple_APFS_Recovery" : "Apple_APFS"] }],
+            ["DeviceIdentifier": "disk1"], ["DeviceIdentifier": "disk2"], ["DeviceIdentifier": "disk3"],
+            ["DeviceIdentifier": "disk4", "Partitions": [["DeviceIdentifier": "disk4s1"], ["DeviceIdentifier": "disk4s2"]]],
+            ["DeviceIdentifier": "disk5", "Partitions": [["DeviceIdentifier": "disk5s1"]]],
+            ["DeviceIdentifier": "disk6", "Partitions": [["DeviceIdentifier": "disk6s1"]]]
+        ]
+        var info: [String: [String: Any]] = [:]
+        info["disk0"] = ["VirtualOrPhysical": "Unknown", "WholeDisk": true, "Internal": true,
+                         "Content": "GUID_partition_scheme", "MediaName": "Internal SSD"]
+        for n in 1...5 { info["disk\(n)"] = ["VirtualOrPhysical": "Virtual", "WholeDisk": true,
+                                               "MediaName": n == 4 ? "Disk Image" : "APFS Container"] }
+        for n in 1...3 { info["disk\(n)"]?["APFSPhysicalStores"] = [["APFSPhysicalStore": "disk0s\(n)"]] }
+        info["disk6"] = ["VirtualOrPhysical": "Physical", "WholeDisk": true, "Internal": false,
+                         "MediaName": "External Fixture", "TotalSize": 1_000_000]
+        info["disk6s1"] = ["DeviceIdentifier": "disk6s1", "ParentWholeDisk": "disk6",
+                           "VolumeUUID": backing.uuidString, "MountPoint": "/Volumes/Fixture"]
+        let data = try plistData(["AllDisksAndPartitions": rows])
+        let devices = try SectoriumDeviceCatalog().parse(diskInventory: data, ioRegistry: Data(), deviceInformation: info)
+        let selectable = devices.filter { $0.isVirtual == false }
+        #expect(selectable.map(\.bsdName).sorted() == ["disk0", "disk6"])
+        #expect(selectable.first { $0.bsdName == "disk0" }?.apfsContainers.count == 3)
+        let external = try #require(selectable.first { $0.bsdName == "disk6" })
+        #expect(external.identityVerified)
+        #expect(external.identityBasis == .uniqueBackingVolumeUUID)
+        #expect(external.id == backing.uuidString)
+        #expect(external.wholeMediaUUID == nil)
+        #expect(external.volumeMembers.map(\.volumeUUID) == [backing])
+        #expect(devices.filter { $0.isVirtual == true }.count == 5)
+        let renumbered = [["DeviceIdentifier": "disk60", "Partitions": [["DeviceIdentifier": "disk60s1"]]]]
+        let renumberedInfo: [String: [String: Any]] = [
+            "disk60": ["VirtualOrPhysical": "Physical", "Internal": false],
+            "disk60s1": ["DeviceIdentifier": "disk60s1", "ParentWholeDisk": "disk60",
+                           "VolumeUUID": backing.uuidString, "MountPoint": "/Volumes/Fixture"]]
+        let fresh = try SectoriumDeviceCatalog().parse(diskInventory: plistData(["AllDisksAndPartitions": renumbered]),
+            ioRegistry: Data(), deviceInformation: renumberedInfo)
+        #expect(fresh.first?.id == external.id)
+        info["disk7"] = ["VirtualOrPhysical": "Physical", "Internal": false]
+        info["disk7s1"] = ["DeviceIdentifier": "disk7s1", "ParentWholeDisk": "disk7", "VolumeUUID": backing.uuidString]
+        let clonedRows = rows + [["DeviceIdentifier": "disk7", "Partitions": [["DeviceIdentifier": "disk7s1"]]]]
+        let cloned = try SectoriumDeviceCatalog().parse(diskInventory: plistData(["AllDisksAndPartitions": clonedRows]),
+            ioRegistry: Data(), deviceInformation: info)
+        #expect(cloned.filter { ["disk6", "disk7"].contains($0.bsdName) }.allSatisfy { !$0.identityVerified })
+        info["disk7s1"] = nil
+        info["disk6s1"]?["ParentWholeDisk"] = "disk7"
+        let wrongParent = try SectoriumDeviceCatalog().parse(diskInventory: data, ioRegistry: Data(), deviceInformation: info)
+        #expect(wrongParent.first { $0.bsdName == "disk6" }?.identityVerified == false)
+    }
+
+    @Test("Contradictory ownership fields cannot verify a catalog anchor or cross the create gate")
+    func conflictingParentClaimsRefuseBeforeCreate() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let backing = try #require(fixture.device.volumeUUIDs.first)
+        let inventoryRows: [[String: Any]] = [["DeviceIdentifier": "disk81",
+            "Partitions": [["DeviceIdentifier": "disk81s1"]]]]
+        let inventory = try plistData(["AllDisksAndPartitions": inventoryRows])
+        let diskInfo: [String: [String: Any]] = [
+            "disk81": ["VirtualOrPhysical": "Physical", "Internal": false],
+            "disk81s1": ["DeviceIdentifier": "disk81s1", "ParentWholeDisk": "disk81",
+                          "PartOfWhole": "disk82", "VolumeUUID": backing.uuidString,
+                          "MountPoint": fixture.mount.path]]
+        let catalog = try SectoriumDeviceCatalog().parse(diskInventory: inventory,
+            ioRegistry: Data(), deviceInformation: diskInfo)
+        #expect(catalog.first?.identityVerified == false)
+        #expect(catalog.first?.identityBasis == .unavailable)
+        #expect(catalog.first?.topologyComplete == false)
+        #expect(SectoriumDeviceCatalog.verifiedParentWholeDisk(diskInfo["disk81s1"]!) == nil)
+
+        let selected = SectoriumPhysicalDevice(id: backing.uuidString, bsdName: "disk81", name: "Fixture Drive",
+            isExternal: true, identityVerified: true, wholeDeviceBytes: 64_000_000_000,
+            mountedVolumePaths: [fixture.mount.path], volumeUUIDs: [backing],
+            readBytes: nil, writtenBytes: nil,
+            volumeMembers: [.init(volumeUUID: backing, bsdName: "disk81s1", mountPoint: fixture.mount.path)],
+            topologyComplete: true, isVirtual: false, identityBasis: .uniqueBackingVolumeUUID,
+            requiresFreshParentCheck: true)
+        fixture.observer.device = selected
+        fixture.service.selectSectoriumDevice(selected.id, observedBSDName: selected.bsdName, observedDevice: selected)
+        fixture.runner.mountParentWholeDisk = "disk81"
+        fixture.runner.mountPartOfWholeDisk = "disk82"
+        let result = fixture.service.createDevelopmentDisk(deviceID: selected.id,
+            parentDirectory: fixture.mount, name: "Contradiction", capacityGiB: 1,
+            caseSensitive: false, password: nil)
+        #expect(!result.succeeded)
+        #expect(fixture.service.sectoriumProfiles().isEmpty)
+        #expect(!fixture.runner.commands.contains { $0.first == "/usr/bin/hdiutil" && $0.contains("create") })
+        #expect(!FileManager.default.fileExists(atPath: fixture.mount.appendingPathComponent("Contradiction.sparsebundle").path))
+    }
+
+    @Test("Legacy safe eject refuses conflicting parent fields before dispatch")
+    func conflictingParentClaimsRefuseLegacyEject() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.mountParentWholeDisk = "disk81"
+        fixture.runner.mountPartOfWholeDisk = "disk82"
+        let backend = MacStorageBackend(paths: fixture.service.paths, runner: fixture.runner,
+            policy: fixture.service.coreController.identityPolicy)
+        let outcome = backend.perform(.ejectOuterHE)
+        #expect(!outcome.succeeded)
+        #expect(!fixture.runner.commands.contains { $0.first == "/usr/sbin/diskutil" && $0.contains("eject") })
+    }
+
+    @Test("Same-named physical roots remain distinct and unknown kind is unassigned")
+    func sameNamedPhysicalRootsAndUnknownKind() throws {
+        let first = UUID(), second = UUID()
+        let rows: [[String: Any]] = [["DeviceIdentifier": "disk80"],
+            ["DeviceIdentifier": "disk81"], ["DeviceIdentifier": "disk82"], ["DeviceIdentifier": "disk83"]]
+        let devices = try SectoriumDeviceCatalog().parse(diskInventory: plistData(["AllDisksAndPartitions": rows]),
+            ioRegistry: Data(), deviceInformation: [
+                "disk80": ["VirtualOrPhysical": "Physical", "MediaName": "Same Name", "MediaUUID": first.uuidString],
+                "disk81": ["VirtualOrPhysical": "Physical", "MediaName": "Same Name", "MediaUUID": second.uuidString],
+                "disk82": ["VirtualOrPhysical": "Unknown", "MediaName": "Same Name",
+                           "MediaUUID": UUID().uuidString],
+                "disk83": ["VirtualOrPhysical": "Virtual", "MediaName": "Ambiguous APFS",
+                           "APFSPhysicalStores": [["APFSPhysicalStore": "disk80s1"],
+                                                   ["APFSPhysicalStore": "disk81s1"]]]])
+        #expect(devices.filter { $0.isVirtual == false }.count == 2)
+        #expect(Set(devices.filter { $0.isVirtual == false }.map(\.id)).count == 2)
+        #expect(devices.first { $0.bsdName == "disk82" }?.isVirtual == nil)
+        #expect(devices.first { $0.bsdName == "disk82" }?.identityVerified == false)
+        #expect(devices.first { $0.bsdName == "disk83" }?.isVirtual == true)
+        #expect(devices.first { $0.bsdName == "disk83" }?.hasAmbiguousPhysicalStores == true)
+    }
+
+    @Test("A selected backing-volume anchor refuses a fresh BSD attachment change")
+    func anchoredSelectionRejectsReconnectBeforeCreate() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let volume = try #require(fixture.device.volumeUUIDs.first)
+        func anchored(_ bsd: String) -> SectoriumPhysicalDevice {
+            SectoriumPhysicalDevice(id: volume.uuidString, bsdName: bsd, name: "Fixture Drive",
+                isExternal: true, identityVerified: true, wholeDeviceBytes: 64_000_000_000,
+                mountedVolumePaths: [fixture.mount.path], volumeUUIDs: [volume],
+                readBytes: nil, writtenBytes: nil,
+                volumeMembers: [.init(volumeUUID: volume, bsdName: bsd + "s1", mountPoint: fixture.mount.path)],
+                topologyComplete: true, isVirtual: false, identityBasis: .uniqueBackingVolumeUUID,
+                requiresFreshParentCheck: true)
+        }
+        let selected = anchored("disk81")
+        fixture.observer.device = selected
+        fixture.service.selectSectoriumDevice(selected.id, observedBSDName: selected.bsdName, observedDevice: selected)
+        let changedTopology = SectoriumPhysicalDevice(id: selected.id, bsdName: selected.bsdName,
+            name: selected.name, isExternal: true, identityVerified: true,
+            wholeDeviceBytes: 63_000_000_000, mountedVolumePaths: selected.mountedVolumePaths,
+            volumeUUIDs: selected.volumeUUIDs, readBytes: nil, writtenBytes: nil,
+            volumeMembers: selected.volumeMembers, topologyComplete: true, isVirtual: false,
+            identityBasis: .uniqueBackingVolumeUUID, requiresFreshParentCheck: true)
+        fixture.observer.device = changedTopology
+        #expect(fixture.service.sectoriumReadiness(deviceID: selected.id, devices: [changedTopology], profiles: [])
+            == .unknown("Drive attachment or topology changed; reselect the physical drive before management"))
+        let reattached = anchored("disk82")
+        fixture.observer.device = reattached
+        #expect(fixture.service.sectoriumReadiness(deviceID: selected.id, devices: [reattached], profiles: [])
+            == .unknown("Drive attachment or topology changed; reselect the physical drive before management"))
+        let result = fixture.service.createDevelopmentDisk(deviceID: selected.id,
+            parentDirectory: fixture.mount, name: "AfterReconnect", capacityGiB: 1,
+            caseSensitive: false, password: nil)
+        #expect(!result.succeeded)
+        #expect(fixture.service.sectoriumProfiles().isEmpty)
+        #expect(!fixture.runner.commands.contains { $0.first == "/usr/bin/hdiutil" && $0.contains("create") })
+    }
+
+    @Test("An anchored drive permits create only after explicit fresh reselection following renumber")
+    func freshReselectionAfterRenumberAllowsAnchoredCreate() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let volume = try #require(fixture.device.volumeUUIDs.first)
+        func anchored(_ bsd: String) -> SectoriumPhysicalDevice {
+            SectoriumPhysicalDevice(id: volume.uuidString, bsdName: bsd, name: "Fixture Drive",
+                isExternal: true, identityVerified: true, wholeDeviceBytes: 64_000_000_000,
+                mountedVolumePaths: [fixture.mount.path], volumeUUIDs: [volume],
+                readBytes: nil, writtenBytes: nil,
+                volumeMembers: [.init(volumeUUID: volume, bsdName: bsd + "s1", mountPoint: fixture.mount.path)],
+                topologyComplete: true, isVirtual: false, identityBasis: .uniqueBackingVolumeUUID,
+                requiresFreshParentCheck: true)
+        }
+        let old = anchored("disk81"), current = anchored("disk82")
+        fixture.observer.device = old
+        fixture.service.selectSectoriumDevice(old.id, observedBSDName: old.bsdName, observedDevice: old)
+        fixture.observer.device = current
+        fixture.runner.mountParentWholeDisk = "disk82"
+        let stale = fixture.service.createDevelopmentDisk(deviceID: current.id, parentDirectory: fixture.mount,
+            name: "Stale", capacityGiB: 1, caseSensitive: false, password: nil)
+        #expect(!stale.succeeded)
+        #expect(fixture.service.sectoriumProfiles().isEmpty)
+        #expect(fixture.service.resumePendingSectoriumOperation().succeeded)
+        fixture.service.selectSectoriumDevice(current.id, observedBSDName: current.bsdName, observedDevice: current)
+        let fresh = fixture.service.createDevelopmentDisk(deviceID: current.id, parentDirectory: fixture.mount,
+            name: "Fresh", capacityGiB: 1, caseSensitive: false, password: nil)
+        #expect(fresh.succeeded)
+        #expect(fixture.service.sectoriumProfiles().count == 1)
+        #expect(!FileManager.default.fileExists(atPath: fixture.mount.appendingPathComponent("Stale.sparsebundle").path))
+    }
+
+    @Test("Duplicated whole-media identity cannot bind either physical drive")
+    func duplicatedWholeMediaIdentityRefused() throws {
+        let repeated = UUID().uuidString
+        let inventory = try plistData(["AllDisksAndPartitions": [
+            ["DeviceIdentifier": "disk8"], ["DeviceIdentifier": "disk9"]]])
+        let devices = try SectoriumDeviceCatalog().parse(diskInventory: inventory, ioRegistry: Data(),
+            deviceInformation: [
+                "disk8": ["MediaUUID": repeated, "VirtualOrPhysical": "Physical", "Internal": false],
+                "disk9": ["MediaUUID": repeated, "VirtualOrPhysical": "Physical", "Internal": false]
+            ])
+        #expect(devices.count == 2)
+        #expect(devices.allSatisfy { !$0.identityVerified && $0.identityBasis == .unavailable })
+        #expect(Set(devices.map(\.id)).count == 2)
+    }
+
     @Test("Missing or malformed whole-device counters remain unknown")
     func unavailableCountersAreUnknown() throws {
         let disk = try plistData(["AllDisksAndPartitions": [["DeviceIdentifier": "disk9"]]])
         let devices = try SectoriumDeviceCatalog().parse(diskInventory: disk, ioRegistry: Data(), deviceInformation: [
-            "disk9": ["MediaUUID": "4F0636A2-5A2E-4BAB-9B10-3D0BE8DD6B1D", "Internal": false]
+            "disk9": ["MediaUUID": "4F0636A2-5A2E-4BAB-9B10-3D0BE8DD6B1D", "Internal": false,
+                      "VirtualOrPhysical": "Physical"]
         ])
         let device = try #require(devices.first)
         #expect(device.identityVerified)
@@ -437,27 +686,66 @@ struct SectoriumWorkbenchRuntimeTests {
         try FileManager.default.createDirectory(at: dev, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: image, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: requestedRoot) }
-        let outerID = UUID(), devID = UUID(), mediaID = UUID()
+        let outerID = UUID(), devID = UUID()
         let policy = StorageIdentityPolicy(outerUUID: outerID, devUUID: devID, outerMountPoint: outer.path,
             devMountPoint: dev.path, devVolumeName: "DEV_APFS", imagePath: image.path)
-        let device = SectoriumPhysicalDevice(id: mediaID.uuidString, bsdName: "disk91", name: "Fixture HE",
+        let device = SectoriumPhysicalDevice(id: outerID.uuidString, bsdName: "disk91", name: "Fixture HE",
             isExternal: true, identityVerified: true, wholeDeviceBytes: nil, mountedVolumePaths: [outer.path],
-            volumeUUIDs: [outerID], readBytes: nil, writtenBytes: nil)
+            volumeUUIDs: [outerID], readBytes: nil, writtenBytes: nil,
+            volumeMembers: [.init(volumeUUID: outerID, bsdName: "disk91s1", mountPoint: outer.path)],
+            topologyComplete: true, isVirtual: false, identityBasis: .uniqueBackingVolumeUUID,
+            requiresFreshParentCheck: true)
         let observation = StorageObservation(
             outer: .init(uuid: outerID, mountPoint: outer.path, fileSystem: "ExFAT", writable: true,
                          name: "HE", rootMatchesExpected: true),
             dev: .init(uuid: devID, mountPoint: dev.path, fileSystem: "APFS", writable: true,
                        name: "DEV_APFS", rootMatchesExpected: true),
             image: .init(backingVolumeUUID: outerID, attachedVolumeUUID: devID, path: image.path))
+        let payload = image.appendingPathComponent("bands.dat")
+        let paths = HESectoriumPaths(root: root.appendingPathComponent("support", isDirectory: true))
+        let config = paths.config
+        let profilesFile = paths.sectoriumProfiles
+        try FileManager.default.createDirectory(at: config.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("fixture image payload".utf8).write(to: payload)
+        let identityConfiguration: [String: String] = [
+            "outerUUID": StorageIdentityPolicy.expected.outerUUID.uuidString,
+            "devUUID": StorageIdentityPolicy.expected.devUUID!.uuidString,
+            "outerMountPoint": "/Volumes/HE", "devMountPoint": "/Volumes/HE/DEV",
+            "devVolumeName": "DEV_APFS", "imagePath": "/Volumes/HE/.DEV-APFS.sparsebundle"
+        ]
+        try JSONSerialization.data(withJSONObject: identityConfiguration, options: [.sortedKeys]).write(to: config)
+        try Data("[]".utf8).write(to: profilesFile)
+        for path in [payload, config, profilesFile] {
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
+        }
+        let protected = [payload, config, profilesFile]
+        func preimages() throws -> [(String, NSNumber)] {
+            try protected.map { path in
+                let digest = SHA256.hash(data: try Data(contentsOf: path)).map { String(format: "%02x", $0) }.joined()
+                let mode = try FileManager.default.attributesOfItem(atPath: path.path)[.posixPermissions] as? NSNumber
+                return (digest, mode ?? -1)
+            }
+        }
+        let beforePreimages = try preimages()
         let runner = WorkbenchFixtureRunner(mountPoint: outer.path, volumeUUID: outerID)
         runner.imageInventory = [["image-path": image.path]]
+        runner.mountParentWholeDisk = "disk92"
         let store = WorkbenchMemoryStore()
         let service = HESectoriumService(paths: HESectoriumPaths(root: root.appendingPathComponent("support")),
             backend: WorkbenchAdoptionBackend(observation: observation), store: store,
             operationLock: WorkbenchMemoryLock(), runner: runner, identityPolicy: policy,
             sectoriumDeviceObserver: WorkbenchFixtureObserver(device: device))
-        service.selectSectoriumDevice(device.id)
+        service.selectSectoriumDevice(device.id, observedBSDName: device.bsdName, observedDevice: device)
 
+        let originalImageChildren = try FileManager.default.contentsOfDirectory(atPath: image.path)
+        let wrongParent = service.adoptDevelopmentDisk(deviceID: device.id, imageURL: image)
+        #expect(!wrongParent.succeeded)
+        #expect(service.sectoriumProfiles().isEmpty)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: image.path) == originalImageChildren)
+        #expect(try preimages().map(\.0) == beforePreimages.map(\.0))
+        #expect(try preimages().map(\.1) == beforePreimages.map(\.1))
+        #expect(service.resumePendingSectoriumOperation().succeeded)
+        runner.mountParentWholeDisk = "disk91"
         let result = service.adoptDevelopmentDisk(deviceID: device.id, imageURL: image)
         #expect(result.succeeded, "\(String(describing: result.failure))")
         let profile = try #require(service.sectoriumProfiles().first)
@@ -1270,7 +1558,7 @@ struct SectoriumWorkbenchRuntimeTests {
 
     private func makeWorkbenchFixture(isolatedDevelopmentMount: Bool = false) throws -> (root: URL, mount: URL, device: SectoriumPhysicalDevice,
                                                     runner: WorkbenchFixtureRunner, store: WorkbenchMemoryStore,
-                                                    service: HESectoriumService) {
+                                                    observer: WorkbenchFixtureObserver, service: HESectoriumService) {
         let requestedRoot = URL(fileURLWithPath: "/private/tmp/sectorium-workbench-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: requestedRoot, withIntermediateDirectories: false)
         let root = requestedRoot.resolvingSymlinksInPath()
@@ -1288,11 +1576,11 @@ struct SectoriumWorkbenchRuntimeTests {
             devMountPoint: isolatedDevelopmentMount ? isolatedDEV.path : "/Volumes/Fixture-DEV",
             devVolumeName: isolatedDevelopmentMount ? "Development" : "Fixture-DEV",
             imagePath: mount.appendingPathComponent(isolatedDevelopmentMount ? "Development.sparsebundle" : "Fixture.sparsebundle").path)
+        let observer = WorkbenchFixtureObserver(device: device)
         let service = HESectoriumService(paths: HESectoriumPaths(root: root.appendingPathComponent("support")),
             backend: WorkbenchNoopBackend(), store: store, operationLock: WorkbenchMemoryLock(),
-            runner: runner, identityPolicy: policy,
-            sectoriumDeviceObserver: WorkbenchFixtureObserver(device: device))
-        return (root, mount, device, runner, store, service)
+            runner: runner, identityPolicy: policy, sectoriumDeviceObserver: observer)
+        return (root, mount, device, runner, store, observer, service)
     }
 
     private func plistData(_ value: Any) throws -> Data {
@@ -1433,6 +1721,56 @@ struct SectoriumLegacyDiscoveryRepairTests {
             !command.contains("attach") && !command.contains("eject") && !command.contains("unmount")
                 && !command.contains("create") && !command.contains("install")
         })
+    }
+
+    @Test func legacyDiscoveryBelongsOnlyToSelectedVerifiedMotherDrive() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let mother = "disk90"
+        fixture.runner.mountParentWholeDisk = mother
+        let backing = SectoriumVolumeMember(volumeUUID: fixture.policy.outerUUID,
+            bsdName: "disk90s1", mountPoint: fixture.policy.outerMountPoint)
+        let device = SectoriumPhysicalDevice(id: fixture.policy.outerUUID.uuidString, bsdName: mother,
+            name: "External Fixture", isExternal: true, identityVerified: true,
+            wholeDeviceBytes: 1000, mountedVolumePaths: [fixture.policy.outerMountPoint],
+            volumeUUIDs: [fixture.policy.outerUUID], readBytes: nil, writtenBytes: nil,
+            volumeMembers: [backing], topologyComplete: true, isVirtual: false,
+            identityBasis: .uniqueBackingVolumeUUID)
+        #expect(fixture.service.discoveredLegacyDevelopmentDisk(deviceID: device.id, devices: [device]))
+        #expect(fixture.service.sectoriumReadiness(deviceID: device.id, devices: [device], profiles: []) == .connected)
+        let unrelated = (1...3).map { index in
+            SectoriumDevelopmentProfile(name: "Other\(index)", deviceID: UUID().uuidString,
+                backingVolumeUUID: UUID(), backingMountPoint: "/Volumes/Other",
+                imagePath: "/Volumes/Other/Other\(index).sparsebundle",
+                devVolumeName: "Other\(index)", devMountPoint: "/Volumes/Other-DEV",
+                encrypted: nil, caseSensitive: nil, logicalCapacityBytes: nil)
+        }
+        try FileManager.default.createDirectory(at: fixture.service.paths.sectoriumProfiles.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try JSONEncoder().encode(unrelated).write(to: fixture.service.paths.sectoriumProfiles, options: .atomic)
+        #expect(fixture.service.discoveredLegacyDevelopmentDisk(deviceID: device.id, devices: [device]))
+        #expect(fixture.service.sectoriumReadiness(deviceID: device.id, devices: [device], profiles: unrelated) == .connected)
+        fixture.service.selectSectoriumDevice(device.id, observedBSDName: mother, observedDevice: device)
+        let reattached = SectoriumPhysicalDevice(id: device.id, bsdName: "disk92", name: "External Fixture",
+            isExternal: true, identityVerified: true, wholeDeviceBytes: 1000,
+            mountedVolumePaths: [fixture.policy.outerMountPoint], volumeUUIDs: [fixture.policy.outerUUID],
+            readBytes: nil, writtenBytes: nil,
+            volumeMembers: [.init(volumeUUID: fixture.policy.outerUUID, bsdName: "disk92s1",
+                                  mountPoint: fixture.policy.outerMountPoint)],
+            topologyComplete: true, isVirtual: false, identityBasis: .uniqueBackingVolumeUUID)
+        fixture.runner.mountParentWholeDisk = "disk92"
+        #expect(!fixture.service.discoveredLegacyDevelopmentDisk(deviceID: device.id, devices: [reattached]))
+        #expect(fixture.service.sectoriumReadiness(deviceID: device.id, devices: [reattached], profiles: [])
+            == .unknown("Drive attachment or topology changed; reselect the physical drive before management"))
+        fixture.runner.mountParentWholeDisk = mother
+        let other = SectoriumPhysicalDevice(id: UUID().uuidString, bsdName: "disk91", name: "Other",
+            isExternal: true, identityVerified: true, wholeDeviceBytes: 1000,
+            mountedVolumePaths: [], volumeUUIDs: [], readBytes: nil, writtenBytes: nil, isVirtual: false)
+        #expect(!fixture.service.discoveredLegacyDevelopmentDisk(deviceID: other.id, devices: [device, other]))
+        #expect(fixture.service.sectoriumReadiness(deviceID: other.id, devices: [device, other], profiles: []) == .noDevelopmentDisk)
+        fixture.runner.mountParentWholeDisk = "disk91"
+        #expect(!fixture.service.discoveredLegacyDevelopmentDisk(deviceID: device.id, devices: [device]))
+        #expect(Set(fixture.service.sectoriumProfiles().map(\.id)) == Set(unrelated.map(\.id)))
     }
 
     @Test func conflictingOrAmbiguousReadOnlyChainCannotBecomeDiscovered() throws {

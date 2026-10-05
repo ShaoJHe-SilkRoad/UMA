@@ -377,8 +377,9 @@ public final class MacStorageBackend: StorageBackend {
         let whole = String(value[match]); return validDiskID(whole) ? whole : nil
     }
     private func verifiedWholeDisk(for partition: String, info: [String: Any]) -> String? {
-        if let reported = text(info, ["PartOfWhole"]) {
-            guard let whole = wholeDisk(partition), reported == whole else { return nil }
+        if info["ParentWholeDisk"] != nil || info["PartOfWhole"] != nil {
+            guard let reported = SectoriumDeviceCatalog.verifiedParentWholeDisk(info),
+                  let whole = wholeDisk(partition), reported == whole else { return nil }
             return reported
         }
         guard let inventory = plist(command("/usr/sbin/diskutil", ["list", "-plist"])),
@@ -583,7 +584,8 @@ public final class MacStorageBackend: StorageBackend {
             guard let disk = imageWholeDisk() else { return .init(exitCode: -2, detail: "Could not verify attached image device") }
             return command("/usr/sbin/diskutil", ["eject", "/dev/\(disk)"])
         case .ejectOuterHE:
-            guard let disk = text(diskInfo(policy.outerMountPoint), ["PartOfWhole"]), disk.range(of: #"^disk[0-9]+$"#, options: .regularExpression) != nil else {
+            guard let info = diskInfo(policy.outerMountPoint),
+                  let disk = SectoriumDeviceCatalog.verifiedParentWholeDisk(info) else {
                 return .init(exitCode: -2, detail: "Could not verify physical HE disk")
             }
             return command("/usr/sbin/diskutil", ["eject", "/dev/\(disk)"])
@@ -653,6 +655,8 @@ public final class HESectoriumService: @unchecked Sendable {
     private let progressLock = NSLock(); private var currentProgress: HESectoriumOperationProgress = .idle
     private var activeProgress: [String: Int] = [:]
     private var selectedSectoriumDeviceID: String?
+    private var selectedSectoriumBSDName: String?
+    private var selectedSectoriumObservedDevice: SectoriumPhysicalDevice?
     private var selectedSectoriumProfileID: String?
     private var configurationValid: Bool
     private let explicitIdentityPolicy: Bool
@@ -687,7 +691,7 @@ public final class HESectoriumService: @unchecked Sendable {
     /// Samples only a previously selected, identity-verified whole disk. The fresh targeted
     /// diskutil identity check prevents a reused BSD name from redirecting sampling.
     public func sampleSectoriumDeviceCounters(for device: SectoriumPhysicalDevice) -> SectoriumDeviceIOCounters? {
-        guard device.identityVerified, let expectedID = UUID(uuidString: device.id),
+        guard device.identityVerified, let expectedID = device.wholeMediaUUID,
               device.bsdName.range(of: #"^disk[0-9]+$"#, options: .regularExpression) != nil else { return nil }
         let outcome = commandRunner.run("/usr/sbin/diskutil", ["info", "-plist", "/dev/\(device.bsdName)"],
                                         cwd: paths.workingDirectory)
@@ -721,6 +725,24 @@ public final class HESectoriumService: @unchecked Sendable {
         return false
     }
 
+    /// Read-only legacy discovery bound to the currently selected physical parent.
+    /// Refresh never persists a profile or accepts an image on the user's behalf.
+    public func discoveredLegacyDevelopmentDisk(deviceID: String?, devices: [SectoriumPhysicalDevice]) -> Bool {
+        guard let deviceID, devices.filter({ $0.id == deviceID }).count == 1,
+              let device = devices.first(where: { $0.id == deviceID }),
+              device.isVirtual == false, device.identityVerified,
+              !(device.identityBasis == .uniqueBackingVolumeUUID
+                && selectedSectoriumDeviceID == deviceID
+                && !selectedAnchorMatches(device)),
+              !sectoriumProfiles().contains(where: { $0.deviceID == deviceID }),
+              identityConfigurationReady,
+              let observation = backend.observe(),
+              case .success = coreController.identityPolicy.validate(observation),
+              let backing = verifiedBackingVolume(URL(fileURLWithPath: coreController.identityPolicy.outerMountPoint), on: device),
+              backing.uuid == coreController.identityPolicy.outerUUID else { return false }
+        return true
+    }
+
     public func pendingSectoriumOperation() -> String? {
         serial.lock(); defer { serial.unlock() }
         guard let state = try? store.load() else { return nil }
@@ -734,8 +756,16 @@ public final class HESectoriumService: @unchecked Sendable {
         guard let deviceID else { return .noDevice }
         guard let device = devices.first(where: { $0.id == deviceID }) else { return .ejected }
         guard device.identityVerified else { return .unknown("Physical device identity is unavailable") }
+        if device.identityBasis == .uniqueBackingVolumeUUID,
+           selectedSectoriumDeviceID == deviceID,
+           !selectedAnchorMatches(device) {
+            return .unknown("Drive attachment or topology changed; reselect the physical drive before management")
+        }
         let deviceProfiles = profiles.filter { $0.deviceID == deviceID }
-        guard !deviceProfiles.isEmpty else { return .noDevelopmentDisk }
+        guard !deviceProfiles.isEmpty else {
+            return discoveredLegacyDevelopmentDisk(deviceID: deviceID, devices: devices)
+                ? .connected : .noDevelopmentDisk
+        }
         let profile = selectedProfileID.flatMap { selectedID in
             deviceProfiles.first(where: { $0.id == selectedID })
         } ?? (selectedProfileID == nil && deviceProfiles.count == 1 ? deviceProfiles[0] : nil)
@@ -757,9 +787,12 @@ public final class HESectoriumService: @unchecked Sendable {
         return .unknown("Development disk state could not be verified")
     }
 
-    public func selectSectoriumDevice(_ id: String?) {
+    public func selectSectoriumDevice(_ id: String?, observedBSDName: String? = nil,
+                                      observedDevice: SectoriumPhysicalDevice? = nil) {
         serial.lock(); defer { serial.unlock() }
         selectedSectoriumDeviceID = id
+        selectedSectoriumBSDName = id == nil ? nil : observedBSDName
+        selectedSectoriumObservedDevice = observedDevice?.id == id ? observedDevice : nil
         let matches = sectoriumProfiles().filter { $0.deviceID == id }
         selectedSectoriumProfileID = matches.count == 1 ? matches.first?.id : nil
     }
@@ -813,10 +846,26 @@ public final class HESectoriumService: @unchecked Sendable {
         return matches.first { $0.id == selectedSectoriumProfileID }
     }
 
+    private func selectedAnchorMatches(_ device: SectoriumPhysicalDevice) -> Bool {
+        guard selectedSectoriumDeviceID == device.id,
+              selectedSectoriumBSDName == device.bsdName,
+              let selected = selectedSectoriumObservedDevice else { return false }
+        return selected.id == device.id && selected.bsdName == device.bsdName
+            && selected.identityBasis == device.identityBasis
+            && selected.isExternal == device.isExternal && selected.isVirtual == device.isVirtual
+            && selected.name == device.name && selected.wholeDeviceBytes == device.wholeDeviceBytes
+            && selected.topologyComplete == device.topologyComplete
+            && selected.volumeMembers == device.volumeMembers
+            && selected.apfsContainers == device.apfsContainers
+    }
+
     private func verifiedDevice(_ identifier: String) -> SectoriumPhysicalDevice? {
         guard let devices = try? observeSectoriumDevices() else { return nil }
         let matches = devices.filter { $0.id == identifier }
         guard matches.count == 1, let device = matches.first, device.identityVerified else { return nil }
+        if device.identityBasis == .uniqueBackingVolumeUUID {
+            guard selectedAnchorMatches(device) else { return nil }
+        }
         return device
     }
 
@@ -831,6 +880,15 @@ public final class HESectoriumService: @unchecked Sendable {
               let raw = (info["VolumeUUID"] as? String) ?? (info["APFSVolumeUUID"] as? String),
               let uuid = UUID(uuidString: raw), device.volumeUUIDs.contains(uuid),
               let observedMount = info["MountPoint"] as? String, observedMount == mount else { return nil }
+        if device.requiresFreshParentCheck || device.identityBasis == .uniqueBackingVolumeUUID {
+            guard (device.identityBasis != .uniqueBackingVolumeUUID || UUID(uuidString: device.id) == uuid),
+                  device.volumeMembers.filter({ $0.volumeUUID == uuid }).count == 1,
+                  let member = device.volumeMembers.first(where: { $0.volumeUUID == uuid }),
+                  info["DeviceIdentifier"] as? String == member.bsdName,
+                  SectoriumDeviceCatalog.verifiedParentWholeDisk(info) == device.bsdName else {
+                return nil
+            }
+        }
         return (uuid, mount)
     }
 
@@ -1411,9 +1469,11 @@ public final class HESectoriumService: @unchecked Sendable {
     }
 
     public func prepareWholeDeviceEjectConfirmation() -> SectoriumWholeDeviceEjectConfirmation? {
-        guard let selectedSectoriumDeviceID else { return nil }
+        guard let selectedSectoriumDeviceID,
+              let bound = verifiedDevice(selectedSectoriumDeviceID) else { return nil }
         let driver = makeWholeDeviceEjectDriver()
-        guard let observed = driver.observe(physicalIdentity: selectedSectoriumDeviceID) else { return nil }
+        guard let observed = driver.observe(physicalIdentity: selectedSectoriumDeviceID),
+              observed.bsdName == bound.bsdName else { return nil }
         let dependenciesSafe = SectoriumOffTargetDependencyCheck.canFinishOffTarget(paths: paths,
             targetBSDName: observed.bsdName, runner: commandRunner)
         return SectoriumWholeDeviceEjectConfirmation(topology: observed,
@@ -1469,7 +1529,9 @@ public final class HESectoriumService: @unchecked Sendable {
     public func ejectSelectedExternalDevice(checkpoint: WholeDeviceEjectCheckpoint) -> OperationResult {
         let driver = makeWholeDeviceEjectDriver()
         guard let selectedSectoriumDeviceID,
-              let observed = driver.observe(physicalIdentity: selectedSectoriumDeviceID) else {
+              let bound = verifiedDevice(selectedSectoriumDeviceID),
+              let observed = driver.observe(physicalIdentity: selectedSectoriumDeviceID),
+              observed.bsdName == bound.bsdName else {
             return workbenchFailure(UUID().uuidString, [], "Selected external device identity or complete related-member inventory is unavailable")
         }
         let dependencySafe = SectoriumOffTargetDependencyCheck.canFinishOffTarget(paths: paths,

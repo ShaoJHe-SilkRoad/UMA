@@ -117,7 +117,11 @@ private final class EjectFixtureRunner: HESectoriumTimedCommandRunning {
                 isExternal: device.isExternal, identityVerified: device.identityVerified,
                 wholeDeviceBytes: device.wholeDeviceBytes, mountedVolumePaths: [],
                 volumeUUIDs: volumeUUIDs, readBytes: nil, writtenBytes: nil,
-                volumeMembers: members, topologyComplete: device.topologyComplete, isVirtual: device.isVirtual)
+                volumeMembers: members, topologyComplete: device.topologyComplete, isVirtual: device.isVirtual,
+                identityBasis: device.identityBasis, wholeMediaUUID: device.wholeMediaUUID,
+                requiresFreshParentCheck: device.requiresFreshParentCheck,
+                apfsContainers: device.apfsContainers,
+                hasAmbiguousPhysicalStores: device.hasAmbiguousPhysicalStores)
         }
     }
 
@@ -253,6 +257,10 @@ struct SectoriumWholeDeviceEjectDriverTests {
         let driver = SectoriumWholeDeviceEjectDriver(observer: observer, runner: runner,
             workingDirectory: FileManager.default.temporaryDirectory)
         #expect(driver.observe(physicalIdentity: mediaUUID.uuidString) == nil)
+        runner.diskInfoByBSD["disk90s1"] = ["DeviceIdentifier": "disk90s1",
+            "VirtualOrPhysical": "Physical", "ParentWholeDisk": "disk90", "PartOfWhole": "disk91",
+            "APFSContainerReference": "root-container"]
+        #expect(driver.observe(physicalIdentity: mediaUUID.uuidString) == nil)
         #expect(!runner.calls.contains { $0.first == "/usr/sbin/diskutil" && $0.dropFirst().first == "eject" })
     }
 
@@ -357,6 +365,52 @@ struct SectoriumWholeDeviceEjectDriverTests {
             "An image whose physical backing cannot be resolved must make the whole inventory unknown")
     }
 
+    @Test("A mounted APFS image volume without hdiutil UUID needs an exact image-store chain")
+    func apfsImageChainWithMissingHdiutilUUID() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("r3-image-chain-\(UUID().uuidString)")
+        let outer = root.appendingPathComponent("outer", isDirectory: true)
+        let image = outer.appendingPathComponent("Fixture.sparsebundle", isDirectory: true)
+        try FileManager.default.createDirectory(at: image, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let physicalID = UUID(), backingID = UUID(), devID = UUID()
+        let physical = SectoriumPhysicalDevice(id: physicalID.uuidString, bsdName: "disk81", name: "Physical",
+            isExternal: true, identityVerified: true, wholeDeviceBytes: nil, mountedVolumePaths: [outer.path],
+            volumeUUIDs: [backingID], readBytes: nil, writtenBytes: nil,
+            volumeMembers: [.init(bsdName: "disk81s1", volumeUUID: backingID, mounted: true, mountPoint: outer.path)],
+            topologyComplete: true, isVirtual: false)
+        let virtual = SectoriumPhysicalDevice(id: "unverified-disk90", bsdName: "disk90", name: "Image",
+            isExternal: false, identityVerified: false, wholeDeviceBytes: nil, mountedVolumePaths: [],
+            volumeUUIDs: [], readBytes: nil, writtenBytes: nil, topologyComplete: false, isVirtual: true)
+        let observer = EjectFixtureObserver([physical, virtual])
+        let runner = EjectFixtureRunner(observer: observer)
+        runner.dfSourceByPath[image.path] = "/dev/disk81s1"
+        runner.imageInventory = [["image-path": image.path, "system-entities": [
+            ["dev-entry": "/dev/disk90"], ["dev-entry": "/dev/disk90s2"],
+            ["dev-entry": "/dev/disk91"],
+            ["dev-entry": "/dev/disk91s1", "mount-point": "/Volumes/Fixture-DEV"]]]]
+        runner.diskInfoByBSD["disk91s1"] = ["DeviceIdentifier": "disk91s1",
+            "MountPoint": "/Volumes/Fixture-DEV", "VolumeUUID": devID.uuidString,
+            "APFSContainerReference": "disk91"]
+        runner.apfsContainers = [["ContainerReference": "disk91",
+            "PhysicalStores": [["DeviceIdentifier": "disk90s2"]]]]
+        let driver = SectoriumWholeDeviceEjectDriver(observer: observer, runner: runner, workingDirectory: root)
+        let topology = try #require(driver.observe(physicalIdentity: physicalID.uuidString))
+        #expect(topology.images.count == 1)
+        #expect(topology.images[0].volumeIdentities == ["\(devID.uuidString.lowercased())|disk91s1"])
+        var detachedRow = runner.imageInventory[0]
+        var detachedEntities = try #require(detachedRow["system-entities"] as? [[String: Any]])
+        detachedEntities[detachedEntities.count - 1].removeValue(forKey: "mount-point")
+        detachedRow["system-entities"] = detachedEntities
+        runner.imageInventory = [detachedRow]
+        runner.diskInfoByBSD["disk91s1"]?.removeValue(forKey: "MountPoint")
+        let unmounted = try #require(driver.observe(physicalIdentity: physicalID.uuidString))
+        #expect(unmounted.images[0].volumeIdentities == topology.images[0].volumeIdentities)
+        #expect(unmounted.images[0].mountedVolumeIdentities == [])
+        runner.apfsContainers = [["ContainerReference": "disk91",
+            "PhysicalStores": [["DeviceIdentifier": "disk99s2"]]]]
+        #expect(driver.observe(physicalIdentity: physicalID.uuidString) == nil)
+    }
+
     @Test("After Stop, profile-free multi-volume external eject persists and returns in a fresh controller")
     func profileFreeMultiVolumeEjectAndReturn() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("whole-eject-\(UUID().uuidString)", isDirectory: true)
@@ -422,6 +476,44 @@ struct SectoriumWholeDeviceEjectDriverTests {
             lock: KernelOperationLock(url: root.appendingPathComponent("lock")))
         #expect(freshController.returnFromWholeDeviceEject(driver: returningDriver))
         #expect(try JSONStateStore(url: stateURL).load().ejectIntent == false)
+    }
+
+    @Test("No-whole-media anchored eject retains intent and returns through a fresh controller")
+    func anchoredEjectAndFreshReturn() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("anchored-eject-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let backing = UUID()
+        func physical(mounted: Bool) -> SectoriumPhysicalDevice {
+            SectoriumPhysicalDevice(id: backing.uuidString, bsdName: "disk81", name: "Anchored Fixture",
+                isExternal: true, identityVerified: true, wholeDeviceBytes: nil,
+                mountedVolumePaths: mounted ? ["/Volumes/Fixture"] : [], volumeUUIDs: [backing],
+                readBytes: nil, writtenBytes: nil,
+                volumeMembers: [.init(bsdName: "disk81s1", volumeUUID: backing,
+                                      mounted: mounted, mountPoint: mounted ? "/Volumes/Fixture" : nil)],
+                topologyComplete: true, isVirtual: false,
+                identityBasis: .uniqueBackingVolumeUUID, wholeMediaUUID: nil,
+                requiresFreshParentCheck: true)
+        }
+        let observer = EjectFixtureObserver([physical(mounted: true)])
+        let runner = EjectFixtureRunner(observer: observer)
+        let stateURL = root.appendingPathComponent("state.json")
+        let driver = SectoriumWholeDeviceEjectDriver(observer: observer, runner: runner, workingDirectory: root)
+        let topology = try #require(driver.observe(physicalIdentity: backing.uuidString))
+        let controller = StorageController(backend: EjectFixtureBackend(), store: JSONStateStore(url: stateURL),
+            lock: KernelOperationLock(url: root.appendingPathComponent("lock")))
+        let result = controller.ejectWholeExternalDevice(physicalIdentity: backing.uuidString,
+            checkpoint: confirmed(topology), driver: driver)
+        #expect(result.succeeded)
+        #expect(try JSONStateStore(url: stateURL).load().ejectIntent)
+        #expect(runner.calls.contains(["/usr/sbin/diskutil", "eject", "/dev/disk81"]))
+        observer.devices = [physical(mounted: true)]
+        let freshDriver = SectoriumWholeDeviceEjectDriver(observer: observer, runner: runner,
+            workingDirectory: root, independentReturnValidator: { _ in true })
+        let freshController = StorageController(backend: EjectFixtureBackend(), store: JSONStateStore(url: stateURL),
+            lock: KernelOperationLock(url: root.appendingPathComponent("lock")))
+        #expect(freshController.returnFromWholeDeviceEject(driver: freshDriver))
+        #expect(try !JSONStateStore(url: stateURL).load().ejectIntent)
     }
 
     @Test("Missing virtual topology, local targets and dependency uncertainty fail closed before mutation")

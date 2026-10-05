@@ -124,7 +124,7 @@ public final class HESectoriumStore: ObservableObject {
             let observed = Result { try service.observeSectoriumDevices() }
             let devices = try? observed.get()
             let profiles = service.sectoriumProfiles()
-            let legacy = service.discoveredLegacyDevelopmentDisk()
+            let legacy = devices.map { service.discoveredLegacyDevelopmentDisk(deviceID: selectedID, devices: $0) } ?? false
             let effectiveID = selectedID
             let readiness = devices.map { service.sectoriumReadiness(deviceID: effectiveID,
                 selectedProfileID: selectedProfileID, devices: $0, profiles: profiles) }
@@ -140,15 +140,16 @@ public final class HESectoriumStore: ObservableObject {
                 self.canBeginWholeDeviceEject = canBeginEject
                 self.canContinueWholeDeviceEject = canContinueEject
                 self.canReturnFromWholeDeviceEject = canReturnEject
-                self.discoveredLegacyDisk = legacy
                 switch observed {
                 case .success(let devices):
-                    self.inventoryState = devices.isEmpty ? .empty : .available
-                    self.apply(devices: devices, profiles: profiles, readiness: readiness, pending: pending)
+                    self.inventoryState = devices.contains(where: { $0.isVirtual == false }) ? .available : .empty
+                    self.apply(devices: devices, profiles: profiles, readiness: readiness, pending: pending,
+                               discoveredLegacy: legacy)
                 case .failure(let error):
                     self.inventoryState = (error as? SectoriumDeviceCatalogError) == .malformedDeviceInventory ? .malformed : .unavailable
                     self.apply(devices: [], profiles: profiles,
-                               readiness: .unknown("Device inventory observation failed; refresh after checking disk access"), pending: pending)
+                               readiness: .unknown("Device inventory observation failed; refresh after checking disk access"),
+                               pending: pending, discoveredLegacy: false)
                 }
             }
         }
@@ -159,8 +160,8 @@ public final class HESectoriumStore: ObservableObject {
         canContinueWholeDeviceEject = false
         canReturnFromWholeDeviceEject = false
         invalidateCounterSample(clearReading: true)
-        service.selectSectoriumDevice(id)
-        let selected = workbench.devices.first { $0.id == id }
+        let selected = workbench.devices.first { $0.id == id && $0.isVirtual == false }
+        service.selectSectoriumDevice(id, observedBSDName: selected?.bsdName, observedDevice: selected)
         let deviceProfiles = workbench.profiles.filter { $0.deviceID == id }
         let selectedProfileID = deviceProfiles.count == 1 ? deviceProfiles.first?.id : nil
         service.selectSectoriumProfile(selectedProfileID)
@@ -190,7 +191,8 @@ public final class HESectoriumStore: ObservableObject {
     }
 
     func apply(devices: [SectoriumPhysicalDevice], profiles: [SectoriumDevelopmentProfile],
-               readiness: SectoriumWorkbenchReadiness?, pending: String?) {
+               readiness: SectoriumWorkbenchReadiness?, pending: String?, discoveredLegacy: Bool? = nil) {
+        if let discoveredLegacy { discoveredLegacyDisk = discoveredLegacy }
         invalidateCounterSample(clearReading: false)
         let selectedID = workbench.selectedDeviceID
         let selectedProfileID = workbench.selectedProfileID

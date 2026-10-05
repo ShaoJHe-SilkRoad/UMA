@@ -191,16 +191,36 @@ public struct SectoriumVolumeMember: Equatable, Hashable, Sendable {
 
 public typealias SectoriumPhysicalVolumeMember = SectoriumVolumeMember
 
+public enum SectoriumDeviceIdentityBasis: String, Equatable, Sendable {
+    case wholeMediaUUID, uniqueBackingVolumeUUID, unavailable
+}
+
+public struct SectoriumAPFSContainerDetail: Equatable, Sendable {
+    public let bsdName: String
+    public let partitionContent: String
+    public init(bsdName: String, partitionContent: String) {
+        self.bsdName = bsdName; self.partitionContent = partitionContent
+    }
+}
+
 public struct SectoriumPhysicalDevice: Identifiable, Equatable, Sendable {
-    /// Stable media identity from diskutil. Unidentified devices remain visible but cannot be mutated.
+    /// Stable identity from a whole media UUID or a unique, directly owned backing volume.
+    /// A BSD name is never a mutation identity.
     public let id: String
     public let bsdName: String
     public let name: String
     public let isExternal: Bool
     public let identityVerified: Bool
+    public let identityBasis: SectoriumDeviceIdentityBasis
+    /// Only a whole-media UUID may be used to correlate I/O counters.
+    public let wholeMediaUUID: UUID?
+    /// System observations require a fresh partition-to-whole check before mutation.
+    public let requiresFreshParentCheck: Bool
     public let isVirtual: Bool?
     public let topologyComplete: Bool
     public let volumeMembers: [SectoriumVolumeMember]
+    public let apfsContainers: [SectoriumAPFSContainerDetail]
+    public let hasAmbiguousPhysicalStores: Bool
     public let wholeDeviceBytes: UInt64?
     public let mountedVolumePaths: [String]
     public let volumeUUIDs: [UUID]
@@ -210,10 +230,19 @@ public struct SectoriumPhysicalDevice: Identifiable, Equatable, Sendable {
     public init(id: String, bsdName: String, name: String, isExternal: Bool, identityVerified: Bool,
                 wholeDeviceBytes: UInt64?, mountedVolumePaths: [String], volumeUUIDs: [UUID],
                 readBytes: UInt64?, writtenBytes: UInt64?, volumeMembers: [SectoriumVolumeMember] = [],
-                topologyComplete: Bool = false, isVirtual: Bool? = nil) {
+                topologyComplete: Bool = false, isVirtual: Bool? = nil,
+                identityBasis: SectoriumDeviceIdentityBasis? = nil, wholeMediaUUID: UUID? = nil,
+                requiresFreshParentCheck: Bool = false,
+                apfsContainers: [SectoriumAPFSContainerDetail] = [],
+                hasAmbiguousPhysicalStores: Bool = false) {
         self.id = id; self.bsdName = bsdName; self.name = name; self.isExternal = isExternal
         self.identityVerified = identityVerified; self.isVirtual = isVirtual
+        self.identityBasis = identityBasis ?? (identityVerified ? .wholeMediaUUID : .unavailable)
+        self.wholeMediaUUID = wholeMediaUUID ?? (self.identityBasis == .wholeMediaUUID ? UUID(uuidString: id) : nil)
+        self.requiresFreshParentCheck = requiresFreshParentCheck
         self.topologyComplete = topologyComplete; self.volumeMembers = volumeMembers
+        self.apfsContainers = apfsContainers
+        self.hasAmbiguousPhysicalStores = hasAmbiguousPhysicalStores
         self.wholeDeviceBytes = wholeDeviceBytes
         self.mountedVolumePaths = mountedVolumePaths; self.volumeUUIDs = volumeUUIDs
         self.readBytes = readBytes; self.writtenBytes = writtenBytes
@@ -230,6 +259,17 @@ public enum SectoriumDeviceCatalogError: Error, Equatable, Sendable {
 public struct SectoriumDeviceCatalog {
     public init() {}
 
+    /// Both diskutil ownership fields are claims about the same whole disk. Neither
+    /// may take precedence when they disagree or contain malformed metadata.
+    public static func verifiedParentWholeDisk(_ info: [String: Any]) -> String? {
+        let claims = ["ParentWholeDisk", "PartOfWhole"].compactMap { info[$0] }
+        guard !claims.isEmpty, claims.allSatisfy({ $0 is String }),
+              let parent = claims.first as? String,
+              parent.range(of: #"^disk[0-9]+$"#, options: .regularExpression) != nil,
+              claims.allSatisfy({ ($0 as? String) == parent }) else { return nil }
+        return parent
+    }
+
     public func parse(diskInventory: Data, ioRegistry: Data,
                       deviceInformation: [String: [String: Any]] = [:]) throws -> [SectoriumPhysicalDevice] {
         guard let plist = try? PropertyListSerialization.propertyList(from: diskInventory, options: [], format: nil),
@@ -237,12 +277,32 @@ public struct SectoriumDeviceCatalog {
               let disks = root["AllDisksAndPartitions"] as? [[String: Any]] else {
             throw SectoriumDeviceCatalogError.malformedDeviceInventory
         }
-        return disks.compactMap { entry in
+        // A cloned backing UUID cannot identify either physical parent. Count all direct
+        // volume occurrences before assigning an anchor; never pick the first match.
+        let anchorCounts: [UUID: Int] = disks.reduce(into: [:]) { counts, row in
+            guard let bsd = row["DeviceIdentifier"] as? String else { return }
+            for partition in row["Partitions"] as? [[String: Any]] ?? [] {
+                guard let child = partition["DeviceIdentifier"] as? String,
+                      child.hasPrefix(bsd + "s"),
+                      let info = deviceInformation[child],
+                      Self.verifiedParentWholeDisk(info) == bsd,
+                      let raw = (info["VolumeUUID"] as? String) ?? (info["APFSVolumeUUID"] as? String),
+                      let uuid = UUID(uuidString: raw) else { continue }
+                counts[uuid, default: 0] += 1
+            }
+        }
+        let candidates: [SectoriumPhysicalDevice] = disks.compactMap { entry in
             guard let bsd = entry["DeviceIdentifier"] as? String,
                   bsd.range(of: #"^disk[0-9]+$"#, options: .regularExpression) != nil else { return nil }
             let info = deviceInformation[bsd] ?? entry["DeviceInfo"] as? [String: Any] ?? entry
-            let stable = ["DiskUUID", "MediaUUID", "DeviceUUID"].compactMap { info[$0] as? String }
+            let stable = ["MediaUUID", "DeviceUUID", "DiskUUID"].compactMap { info[$0] as? String }
                 .compactMap(UUID.init(uuidString:)).first
+            let explicitKind = (info["VirtualOrPhysical"] as? String)?.lowercased()
+            let isVirtual: Bool? = explicitKind == "virtual" ? true : explicitKind == "physical" ? false
+                : ((info["Internal"] as? Bool) == true
+                    && (info["WholeDisk"] as? Bool) == true
+                    && (info["Content"] as? String) == "GUID_partition_scheme"
+                    && info["APFSPhysicalStores"] == nil ? false : nil)
             let external = (info["DeviceLocation"] as? String)?.lowercased() == "external"
                 || (info["Internal"] as? Bool) == false
             let name = (info["MediaName"] as? String) ?? (info["VolumeName"] as? String) ?? "Unnamed device"
@@ -252,6 +312,13 @@ public struct SectoriumDeviceCatalog {
             var volumes: [UUID] = []
             var members: [SectoriumVolumeMember] = []
             var topologyComplete = !partitions.isEmpty
+            let invalidOwnershipClaim = partitions.contains { partition in
+                guard let child = partition["DeviceIdentifier"] as? String,
+                      let claim = deviceInformation[child],
+                      claim["ParentWholeDisk"] != nil || claim["PartOfWhole"] != nil else { return false }
+                return Self.verifiedParentWholeDisk(claim) != bsd
+            }
+            if invalidOwnershipClaim { topologyComplete = false }
             for key in ["VolumeUUID", "APFSVolumeUUID"] {
                 if let raw = info[key] as? String, let uuid = UUID(uuidString: raw) { volumes.append(uuid) }
             }
@@ -277,16 +344,57 @@ public struct SectoriumDeviceCatalog {
                 }
                 if let memberUUID { volumes.append(memberUUID) }
             }
+            let uniqueAnchors = members.filter { anchorCounts[$0.volumeUUID] == 1 }
+            let anchor = stable == nil && isVirtual == false && members.count == 1
+                && uniqueAnchors.count == 1 && topologyComplete ? uniqueAnchors.first?.volumeUUID : nil
+            let identity = invalidOwnershipClaim ? nil : (stable ?? anchor)
+            let containerDetails: [SectoriumAPFSContainerDetail] = partitions.compactMap { partition in
+                guard let partitionID = partition["DeviceIdentifier"] as? String,
+                      let content = partition["Content"] as? String,
+                      content.hasPrefix("Apple_APFS") else { return nil }
+                let matches = disks.compactMap { row -> String? in
+                    guard let childID = row["DeviceIdentifier"] as? String,
+                          let childInfo = deviceInformation[childID],
+                          (childInfo["VirtualOrPhysical"] as? String)?.lowercased() == "virtual",
+                          let stores = childInfo["APFSPhysicalStores"] as? [[String: Any]],
+                          stores.count == 1,
+                          stores[0]["APFSPhysicalStore"] as? String == partitionID else { return nil }
+                    return childID
+                }
+                guard matches.count == 1, let match = matches.first else { return nil }
+                return .init(bsdName: match, partitionContent: content)
+            }
+            let basis: SectoriumDeviceIdentityBasis = identity == nil ? .unavailable
+                : stable != nil ? .wholeMediaUUID : .uniqueBackingVolumeUUID
             return SectoriumPhysicalDevice(
-                id: stable?.uuidString ?? "unverified-\(bsd)", bsdName: bsd, name: name,
-                isExternal: external, identityVerified: stable != nil, wholeDeviceBytes: bytes,
+                id: identity?.uuidString ?? "unverified-\(bsd)", bsdName: bsd, name: name,
+                isExternal: external, identityVerified: identity != nil && isVirtual == false, wholeDeviceBytes: bytes,
                 mountedVolumePaths: Array(Set(mounts)).sorted(), volumeUUIDs: Array(Set(volumes)).sorted { $0.uuidString < $1.uuidString },
                 readBytes: nil, writtenBytes: nil,
                 volumeMembers: members.sorted { $0.bsdName < $1.bsdName },
                 topologyComplete: topologyComplete && Set(members.map(\.bsdName)).count == partitions.count
                     && Set(members.map(\.volumeUUID)).count == members.count,
-                isVirtual: (info["VirtualOrPhysical"] as? String).map { $0.lowercased() == "virtual" }
+                isVirtual: isVirtual, identityBasis: basis, wholeMediaUUID: stable,
+                requiresFreshParentCheck: true,
+                apfsContainers: containerDetails.sorted { $0.bsdName < $1.bsdName },
+                hasAmbiguousPhysicalStores: isVirtual == true
+                    && ((info["APFSPhysicalStores"] as? [[String: Any]])?.count ?? 0) > 1
             )
+        }
+        let identityCounts = candidates.reduce(into: [String: Int]()) { counts, device in
+            if device.identityVerified { counts[device.id, default: 0] += 1 }
+        }
+        return candidates.map { device in
+            guard device.identityVerified, identityCounts[device.id, default: 0] > 1 else { return device }
+            return SectoriumPhysicalDevice(id: "unverified-\(device.bsdName)", bsdName: device.bsdName,
+                name: device.name, isExternal: device.isExternal, identityVerified: false,
+                wholeDeviceBytes: device.wholeDeviceBytes, mountedVolumePaths: device.mountedVolumePaths,
+                volumeUUIDs: device.volumeUUIDs, readBytes: nil, writtenBytes: nil,
+                volumeMembers: device.volumeMembers, topologyComplete: device.topologyComplete,
+                isVirtual: device.isVirtual, identityBasis: .unavailable,
+                requiresFreshParentCheck: device.requiresFreshParentCheck,
+                apfsContainers: device.apfsContainers,
+                hasAmbiguousPhysicalStores: device.hasAmbiguousPhysicalStores)
         }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 }

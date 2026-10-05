@@ -126,6 +126,26 @@ struct HESectoriumUIContractTests {
         #expect(!settingsOrShellStartsStorageAction(toolbar))
     }
 
+    @Test("Unknown ownership is unassigned and stale attachment disables storage entry actions")
+    func physicalSelectionAndStaleActionContract() throws {
+        let view = try source("Sources/CodexUsageUI/Views/SectoriumWorkbenchView.swift")
+        let store = try source("Sources/CodexUsageUI/Stores/HESectoriumStore.swift")
+        #expect(view.contains("model.workbench.devices.filter { $0.isVirtual == false }"))
+        #expect(view.contains("$0.isVirtual == nil || $0.hasAmbiguousPhysicalStores"))
+        #expect(view.contains("uma.sectorium.unassigned-device"))
+        #expect(store.contains("workbench.devices.first { $0.id == id && $0.isVirtual == false }"))
+        for identifier in ["uma.sectorium.create", "uma.sectorium.adopt",
+                           "uma.sectorium.start", "uma.sectorium.stop", "uma.sectorium.eject-drive"] {
+            guard let range = view.range(of: "identifier: \"\(identifier)\"") else {
+                Issue.record("Missing action \(identifier)")
+                continue
+            }
+            #expect(String(view[range.upperBound...].prefix(260)).contains("!staleAttachment"))
+        }
+        #expect(view.contains("ForEach(selectedDeviceProfiles)"))
+        #expect(view.contains("if model.discoveredLegacyDisk"))
+    }
+
     @Test("Runtime UI actions are asynchronous and guarded against repeat clicks")
     func asynchronousActions() throws {
         let store = try source("Sources/CodexUsageUI/Stores/HESectoriumStore.swift")
