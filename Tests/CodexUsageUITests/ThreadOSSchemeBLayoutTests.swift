@@ -22,6 +22,58 @@ import HESectoriumRuntime
         #expect(SectoriumCapacityInput.recommendedGiB(availableBytes: UInt64.max) == 16_384)
     }
 
+    @Test func sectoriumReadyExternalPrioritizesSafeEjectAndKeepsStopSecondary() {
+        func plan(external: Bool, readiness: SectoriumWorkbenchReadiness = .ready,
+                  identityVerified: Bool = true, pending: String? = nil,
+                  canEject: Bool = true) -> SectoriumWorkbenchActionPlan {
+            .make(.init(hasDrive: true, identityVerified: identityVerified, external: external,
+                stale: false, inventoryAvailable: true, busy: false, readiness: readiness,
+                hasProfile: true, profileFormatVerified: true, legacyState: .none,
+                pendingOperation: pending, canBeginEject: canEject,
+                canContinueEject: false, canReturnFromEject: false))
+        }
+        let external = plan(external: true)
+        #expect(external.primary == .eject)
+        #expect(external.secondary.contains(.stop))
+        #expect(!external.secondary.contains(.eject))
+
+        let internalDrive = plan(external: false)
+        #expect(internalDrive.primary == .stop)
+        #expect(!internalDrive.secondary.contains(.eject))
+
+        #expect(plan(external: true, identityVerified: false).primary == nil)
+        #expect(plan(external: true, readiness: .partialFailure("fixture" )).primary == nil)
+        #expect(plan(external: true, pending: "start:interrupted").primary == .resume)
+        #expect(plan(external: true, canEject: false).primary == .stop)
+    }
+
+    @Test func sectoriumOrderingPrefersExternalThenStableNames() {
+        let externalZ = SectoriumPhysicalDevice(id: "z", bsdName: "disk8", name: "Zeta",
+            isExternal: true, identityVerified: true, wholeDeviceBytes: nil, mountedVolumePaths: [],
+            volumeUUIDs: [], readBytes: nil, writtenBytes: nil, isVirtual: false)
+        let externalA = SectoriumPhysicalDevice(id: "a", bsdName: "disk7", name: "Alpha",
+            isExternal: true, identityVerified: true, wholeDeviceBytes: nil, mountedVolumePaths: [],
+            volumeUUIDs: [], readBytes: nil, writtenBytes: nil, isVirtual: false)
+        let internalDrive = SectoriumPhysicalDevice(id: "i", bsdName: "disk0", name: "System",
+            isExternal: false, identityVerified: true, wholeDeviceBytes: nil, mountedVolumePaths: [],
+            volumeUUIDs: [], readBytes: nil, writtenBytes: nil, isVirtual: false)
+        #expect(SectoriumWorkbenchDeviceOrdering.externalFirst([internalDrive, externalZ, externalA]).map(\.id) == ["a", "z", "i"])
+    }
+
+    @Test func sectoriumUnsetSelectionPrefersVerifiedExternalAndKeepsDeliberateChoice() {
+        let fixture = HESectoriumKeyboardFixture(isExternal: true)
+        defer { fixture.remove() }
+        let internalDrive = SectoriumPhysicalDevice(id: "internal-fixture", bsdName: "disk0",
+            name: "System", isExternal: false, identityVerified: true, wholeDeviceBytes: nil,
+            mountedVolumePaths: [], volumeUUIDs: [], readBytes: nil, writtenBytes: nil, isVirtual: false)
+        fixture.store.apply(devices: [internalDrive, fixture.device], profiles: [], readiness: .connected, pending: nil)
+        #expect(fixture.store.workbench.selectedDeviceID == fixture.device.id)
+        fixture.store.selectDevice(internalDrive.id)
+        fixture.store.deactivateWorkbench()
+        fixture.store.apply(devices: [fixture.device, internalDrive], profiles: [], readiness: .connected, pending: nil)
+        #expect(fixture.store.workbench.selectedDeviceID == internalDrive.id)
+    }
+
     @Test func promptRouteRetryStopsForAnIncompleteMountedRoute() {
         var attempts = 0
         let retry = ThreadOSPromptKeyViewRouteRetryController(
@@ -711,8 +763,10 @@ import HESectoriumRuntime
 
     @Test func sectoriumMultipleImagesAndStaleSelectionStayBoundToOnePhysicalRoot() async throws {
         _ = NSApplication.shared
-        let fixture = HESectoriumKeyboardFixture(isExternal: true)
+        let observer = HESectoriumMultiDeviceObserver(devices: [])
+        let fixture = HESectoriumKeyboardFixture(isExternal: true, observerOverride: observer)
         defer { fixture.remove() }
+        observer.devices = [fixture.device]
         fixture.store.selectDevice(fixture.device.id)
         let profiles = (1...2).map { index in
             SectoriumDevelopmentProfile(id: UUID().uuidString, name: "Development \(index)",
@@ -743,6 +797,7 @@ import HESectoriumRuntime
             imagePath: "/private/tmp/OTHER/Sibling.sparsebundle", devVolumeName: "OTHER_DEV",
             devMountPoint: "/Volumes/OTHER_DEV", encrypted: false, caseSensitive: false,
             logicalCapacityBytes: 1024, imageFormat: "UDSB")
+        observer.devices = [fixture.device, sibling]
         fixture.store.apply(devices: [fixture.device, sibling], profiles: profiles + [siblingProfile],
             readiness: .notStarted, pending: nil, discoveredLegacy: true)
         settle(host)
@@ -820,7 +875,8 @@ import HESectoriumRuntime
                 "The selected physical root marker must be visible: \(rendered)")
 
         let selectInternal = try #require(descendants(of: host).compactMap { $0 as? NSButton }
-            .first { $0.accessibilityIdentifier() == "uma.sectorium.select-drive.disk0" })
+            .first { $0.accessibilityIdentifier() == "uma.sectorium.select-drive.disk0" },
+            "Internal drive selection must stay available while internal details are collapsed.")
         #expect(selectInternal.isEnabled && selectInternal.window === window)
         click(selectInternal, in: window)
         #expect(store.workbench.selectedDeviceID == internalDrive.id)

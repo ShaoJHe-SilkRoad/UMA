@@ -341,6 +341,8 @@ public enum RuntimeError: Error, LocalizedError {
 }
 
 public final class MacStorageBackend: StorageBackend {
+    private enum DevMountEvidence { case mountedAtTarget, verifiedOuterBacking, unknown }
+
     private let policy: StorageIdentityPolicy; private let paths: HESectoriumPaths; private let runner: HESectoriumCommandRunning
     public init(paths: HESectoriumPaths, runner: HESectoriumCommandRunning = ProcessCommandRunner(), policy: StorageIdentityPolicy = .expected) {
         self.paths = paths; self.runner = runner; self.policy = policy
@@ -421,6 +423,18 @@ public final class MacStorageBackend: StorageBackend {
         let name = text(info, ["VolumeName", "MediaName"]) ?? "unknown"
         return .init(uuid: uuid, mountPoint: mount, fileSystem: fs, writable: writable, mountedVolume: mounted, name: name,
                      rootMatchesExpected: canonical(path) == path && mount == path)
+    }
+    private func devMountEvidence() -> DevMountEvidence {
+        let observed = volume(policy.devMountPoint)
+        guard observed.mountedVolume, observed.uuid != nil,
+              observed.fileSystem != "unknown", observed.name != "unknown" else { return .unknown }
+        if observed.mountPoint == policy.devMountPoint {
+            return observed.rootMatchesExpected ? .mountedAtTarget : .unknown
+        }
+        if observed.mountPoint == policy.outerMountPoint, observed.uuid == policy.outerUUID {
+            return .verifiedOuterBacking
+        }
+        return .unknown
     }
     private func imageObservation() -> ImageIdentity? {
         guard let images = plist(command("/usr/bin/hdiutil", ["info", "-plist"]))?["images"] as? [[String: Any]] else { return nil }
@@ -534,8 +548,21 @@ public final class MacStorageBackend: StorageBackend {
             return .init(exitCode: -2, detail: "Expected HE image and existing DEV mountpoint are unavailable")
         }
         if let seen = observe(), case .success = policy.validate(seen) { return .success }
-        guard directoryEntryCount(policy.devMountPoint) == 0 else {
-            return .init(exitCode: -2, detail: "Underlying DEV directory is non-empty or its metadata count is unavailable")
+        switch devMountEvidence() {
+        case .mountedAtTarget:
+            return .init(exitCode: -2,
+                detail: "A DEV volume is already mounted at the target but its configured image identity could not be verified; leave it untouched and review the identity before retrying")
+        case .unknown:
+            return .init(exitCode: -2,
+                detail: "Could not verify that the DEV target is an unmounted directory on the selected outer volume; refresh its identity and review the operation details before retrying")
+        case .verifiedOuterBacking:
+            break
+        }
+        guard let entryCount = directoryEntryCount(policy.devMountPoint) else {
+            return .init(exitCode: -2, detail: "Could not verify whether the existing DEV mountpoint is empty; refresh its identity and inspect the operation details before retrying")
+        }
+        guard entryCount == 0 else {
+            return .init(exitCode: -2, detail: "The existing DEV mountpoint is not empty; preserve its contents and verify the selected drive before retrying")
         }
         if let password {
             guard let input = hdiutilPassphraseInput(password),
@@ -1364,6 +1391,13 @@ public final class HESectoriumService: @unchecked Sendable {
                                    : "Selected backing volume and sparsebundle format verified; image remains detached and APFS identity is pending Start validation"))
             return .init(operationID: id, mode: .manual, steps: steps)
         }
+    }
+
+    /// Registers only the configured legacy image after the ordinary adoption path
+    /// revalidates the selected physical device and full image/APFS identity.
+    public func adoptConfiguredLegacyDevelopmentDisk(deviceID: String) -> OperationResult {
+        adoptDevelopmentDisk(deviceID: deviceID,
+            imageURL: URL(fileURLWithPath: coreController.identityPolicy.imagePath, isDirectory: true))
     }
 
     public func startDevelopmentDisk(password: String? = nil) -> OperationResult {

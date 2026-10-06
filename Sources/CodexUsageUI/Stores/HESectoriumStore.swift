@@ -125,14 +125,15 @@ public final class HESectoriumStore: ObservableObject {
             let value = service.refreshStatus()
             let observed = Result { try service.observeSectoriumDevices() }
             let devices = try? observed.get()
+            let effectiveID = selectedID.flatMap { id in devices?.first(where: { $0.id == id && $0.isVirtual == false })?.id }
+                ?? (selectedID == nil ? devices.flatMap(SectoriumWorkbenchDeviceOrdering.defaultSelection(from:))?.id : nil)
             let profiles = service.sectoriumProfiles()
             let legacyByDevice: [String: HESectoriumService.LegacyDevelopmentDisplay] = devices.map { observed in
                 Dictionary(uniqueKeysWithValues: observed.filter { $0.isVirtual == false }.compactMap { device in
                     service.legacyDevelopmentDisplay(deviceID: device.id, devices: observed).map { (device.id, $0) }
                 })
             } ?? [:]
-            let legacy = selectedID.flatMap { legacyByDevice[$0] } != nil
-            let effectiveID = selectedID
+            let legacy = effectiveID.flatMap { legacyByDevice[$0] } != nil
             let readiness = devices.map { service.sectoriumReadiness(deviceID: effectiveID,
                 selectedProfileID: selectedProfileID, devices: $0, profiles: profiles) }
             let pending = service.pendingSectoriumOperation()
@@ -204,7 +205,9 @@ public final class HESectoriumStore: ObservableObject {
         if let legacyByDevice { legacyDevelopmentByDevice = legacyByDevice }
         else if discoveredLegacy == false { legacyDevelopmentByDevice = [:] }
         invalidateCounterSample(clearReading: false)
-        let selectedID = workbench.selectedDeviceID
+        let previousSelectedID = workbench.selectedDeviceID
+        let selectedID = devices.first(where: { $0.id == previousSelectedID && $0.isVirtual == false })?.id
+            ?? (previousSelectedID == nil ? SectoriumWorkbenchDeviceOrdering.defaultSelection(from: devices)?.id : nil)
         let selectedProfileID = workbench.selectedProfileID
         let selected = devices.first(where: { $0.id == selectedID })
         workbench = SectoriumWorkbenchSnapshot(
@@ -217,6 +220,9 @@ public final class HESectoriumStore: ObservableObject {
             operationSteps: workbench.operationSteps,
             safeToUnplug: workbench.safeToUnplug && selected == nil && pending == nil
         )
+        if previousSelectedID == nil, let selected, selected.identityVerified {
+            service.selectSectoriumDevice(selected.id, observedBSDName: selected.bsdName, observedDevice: selected)
+        }
     }
 
     /// Called by the active workbench's bounded sampling loop. Tests may invoke this through
@@ -296,15 +302,24 @@ public final class HESectoriumStore: ObservableObject {
     }
 
     public func createDevelopmentDisk(deviceID: String, parentDirectory: URL, name: String, capacityGiB: Int,
-                                      caseSensitive: Bool, password: String?) {
+                                      caseSensitive: Bool, password: String?, startAfterCreation: Bool = false) {
         performWorkbench({ service in
-            service.createDevelopmentDisk(deviceID: deviceID, parentDirectory: parentDirectory, name: name,
-                                          capacityGiB: capacityGiB, caseSensitive: caseSensitive, password: password)
+            let created = service.createDevelopmentDisk(deviceID: deviceID, parentDirectory: parentDirectory, name: name,
+                capacityGiB: capacityGiB, caseSensitive: caseSensitive, password: password)
+            guard created.succeeded, startAfterCreation else { return created }
+            let started = service.startDevelopmentDisk(password: password)
+            return OperationResult(operationID: started.operationID, mode: started.mode,
+                steps: created.steps + started.steps, failure: started.failure)
         }, successReadiness: .notStarted)
     }
 
     public func adoptDevelopmentDisk(deviceID: String, imageURL: URL) {
         performWorkbench({ service in service.adoptDevelopmentDisk(deviceID: deviceID, imageURL: imageURL) }, successReadiness: .notStarted)
+    }
+    public func adoptConfiguredLegacyDevelopmentDisk(deviceID: String) {
+        performWorkbench({ service in
+            service.adoptConfiguredLegacyDevelopmentDisk(deviceID: deviceID)
+        }, successReadiness: .notStarted)
     }
     public func startDevelopmentDisk(password: String? = nil) {
         performWorkbench({ $0.startDevelopmentDisk(password: password) }, successReadiness: .ready)

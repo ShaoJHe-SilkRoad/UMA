@@ -306,9 +306,18 @@ private final class CancellationOutcome: @unchecked Sendable {
     #expect(FileManager.default.fileExists(atPath: pipeMarker.path),
             "The deliberately short-lived fixture descendant must finish before the test completes.")
 
-    func object(_ result: ChildResult, expectedStatus: Int32, succeeded: Bool) throws -> [String: Any] {
+    let expectedFailedActionDiagnostic = "Sectorium: operation did not complete. Keep the drive connected, refresh its identity, and review the operation details before retrying.\n"
+
+    func object(_ result: ChildResult, expectedStatus: Int32, succeeded: Bool,
+                expectsFailedActionDiagnostic: Bool = false) throws -> [String: Any] {
         #expect(result.status == expectedStatus)
-        #expect(result.stderr.isEmpty)
+        if expectsFailedActionDiagnostic {
+            #expect(!succeeded)
+            #expect(result.stderr == expectedFailedActionDiagnostic)
+            #expect(result.stderr.split(whereSeparator: \.isNewline).count == 1)
+        } else {
+            #expect(result.stderr.isEmpty)
+        }
         let data = try #require(result.stdout.data(using: .utf8))
         let value = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect((value["succeeded"] as? Bool) == succeeded)
@@ -316,17 +325,17 @@ private final class CancellationOutcome: @unchecked Sendable {
     }
 
     let refusedMountChild = try run("refused-mount")
-    let refusedMount = try object(refusedMountChild, expectedStatus: 1, succeeded: false)
+    let refusedMount = try object(refusedMountChild, expectedStatus: 1, succeeded: false, expectsFailedActionDiagnostic: true)
     #expect(refusedMount["failure"] is String)
 
     let postcheckMountChild = try run("postcheck-mount")
-    let postcheckMount = try object(postcheckMountChild, expectedStatus: 1, succeeded: false)
+    let postcheckMount = try object(postcheckMountChild, expectedStatus: 1, succeeded: false, expectsFailedActionDiagnostic: true)
     #expect(postcheckMount["failure"] is String)
     let postcheckSteps = try #require(postcheckMount["steps"] as? [[String: Any]])
     #expect(postcheckSteps.contains { ($0["step"] as? String)?.localizedCaseInsensitiveContains("attach") == true && ($0["status"] as? String) == "succeeded" })
 
     let failedEjectChild = try run("failed-eject")
-    let failedEject = try object(failedEjectChild, expectedStatus: 1, succeeded: false)
+    let failedEject = try object(failedEjectChild, expectedStatus: 1, succeeded: false, expectsFailedActionDiagnostic: true)
     #expect(failedEject["failure"] is String)
     let ejectSteps = try #require(failedEject["steps"] as? [[String: Any]])
     #expect(ejectSteps.contains { ($0["status"] as? String) == "failed" })

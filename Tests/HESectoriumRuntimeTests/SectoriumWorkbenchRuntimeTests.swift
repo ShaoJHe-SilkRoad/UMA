@@ -59,6 +59,7 @@ private final class WorkbenchFixtureRunner: HESectoriumCommandRunning, HESectori
     var imageInventory: [[String: Any]]?
     var diskInventory: [[String: Any]]?
     var additionalDiskInfos: [String: [String: Any]] = [:]
+    var detachedDiskInfos: [String: [String: Any]] = [:]
     var apfsContainers: [[String: Any]]?
     var imageBackingDevice = "disk81s1"
     var mountParentWholeDisk: String?
@@ -86,6 +87,12 @@ private final class WorkbenchFixtureRunner: HESectoriumCommandRunning, HESectori
             if let data = try? PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0) {
                 return .init(exitCode: 0, detail: String(decoding: data, as: UTF8.self))
             }
+        }
+        if executable == "/usr/sbin/diskutil", arguments.count == 3,
+           arguments[0] == "info", arguments[1] == "-plist",
+           let info = detachedDiskInfos[arguments[2]], imageInventory?.isEmpty != false,
+           let data = try? PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0) {
+            return .init(exitCode: 0, detail: String(decoding: data, as: UTF8.self))
         }
         if executable == "/usr/sbin/diskutil", arguments.count == 3,
            arguments[0] == "info", arguments[1] == "-plist",
@@ -347,6 +354,7 @@ struct SectoriumWorkbenchRuntimeTests {
         let policy = StorageIdentityPolicy(outerUUID: outerID, devUUID: UUID(), outerMountPoint: outer.path,
             devMountPoint: dev.path, devVolumeName: "Fixture-DEV", imagePath: image.path)
         let runner = PassphraseStorageFixtureRunner(outerMountPoint: outer.path, outerUUID: outerID)
+        runner.detachedDEVPath = dev.path
         let backend = MacStorageBackend(paths: paths, runner: runner, policy: policy)
 
         #expect(FileManager.default.fileExists(atPath: policy.imagePath))
@@ -394,8 +402,9 @@ struct SectoriumWorkbenchRuntimeTests {
 
     @Test("Two physical roots and one observed DEV logical capacity survive virtual filtering")
     func actualDriveShapeAndMissingMetadata() throws {
-        let he = UUID(uuidString: "2FE2A779-0DC8-3468-8E3C-E113598C46CE")!
-        let dev = UUID(uuidString: "0476F9CC-86A3-40D8-A8D4-83D882522CAD")!
+        // Sanitized structural fixture; identifiers are synthetic while disk topology mirrors the recorded shape.
+        let he = UUID(uuidString: "11111111-2222-4333-8444-555555555555")!
+        let dev = UUID(uuidString: "66666666-7777-4888-8999-AAAAAAAAAAAA")!
         let rows: [[String: Any]] = [
             ["DeviceIdentifier": "disk0", "Partitions": [["DeviceIdentifier": "disk0s1"]]],
             ["DeviceIdentifier": "disk4", "Partitions": [["DeviceIdentifier": "disk4s2"]]],
@@ -898,6 +907,9 @@ struct SectoriumWorkbenchRuntimeTests {
                 "WritableVolume": true, "VolumeName": "DEV_APFS", "DeviceIdentifier": "disk31s1",
                 "APFSContainerReference": "disk31"]
         ]
+        runner.detachedDiskInfos[dev.path] = ["VolumeUUID": outerID.uuidString, "MountPoint": outer.path,
+            "FilesystemType": "ExFAT", "WritableVolume": true, "VolumeName": "Legacy Fixture HE",
+            "DeviceIdentifier": "disk81s1", "PartOfWhole": "disk81"]
         runner.apfsContainers = [["ContainerReference": "disk31",
             "PhysicalStores": [["DeviceIdentifier": "disk30"]],
             "Volumes": [["APFSVolumeUUID": devID.uuidString, "DeviceIdentifier": "disk31s1"]]]]
@@ -981,6 +993,11 @@ struct SectoriumWorkbenchRuntimeTests {
             "/dev/disk31s1": ["VolumeUUID": volumeID.uuidString, "MountPoint": devMount.path,
                 "FilesystemType": "APFS", "WritableVolume": true, "VolumeName": "Lifecycle Data",
                 "DeviceIdentifier": "disk31s1", "APFSContainerReference": "disk31"]
+        ]
+        fixture.runner.detachedDiskInfos[devMount.path] = [
+            "VolumeUUID": fixture.service.coreController.identityPolicy.outerUUID.uuidString,
+            "MountPoint": fixture.mount.path, "FilesystemType": "ExFAT", "WritableVolume": true,
+            "VolumeName": "Fixture HE", "DeviceIdentifier": "disk81s1", "PartOfWhole": "disk81"
         ]
         fixture.runner.apfsContainers = [["ContainerReference": "disk31",
             "PhysicalStores": [["DeviceIdentifier": "disk30"]],
@@ -1625,6 +1642,11 @@ struct SectoriumWorkbenchRuntimeTests {
             logicalCapacityBytes: profile.logicalCapacityBytes, validation: profile.validation)
         let profilesURL = HESectoriumPaths(root: fixture.root.appendingPathComponent("support")).sectoriumProfiles
         try JSONEncoder().encode([isolatedProfile]).write(to: profilesURL, options: .atomic)
+        fixture.runner.detachedDiskInfos[isolatedDevMount.path] = [
+            "VolumeUUID": fixture.service.coreController.identityPolicy.outerUUID.uuidString,
+            "MountPoint": fixture.mount.path, "FilesystemType": "ExFAT", "WritableVolume": true,
+            "VolumeName": "Fixture HE", "DeviceIdentifier": "disk81s1", "PartOfWhole": "disk81"
+        ]
         fixture.runner.attachOutcome = .init(exitCode: 130, detail: "fixture attach cancelled")
 
         let start = fixture.service.startDevelopmentDisk()
@@ -1672,6 +1694,7 @@ struct SectoriumWorkbenchRuntimeTests {
 private final class PassphraseStorageFixtureRunner: HESectoriumSecureCommandRunning {
     let outerMountPoint: String
     let outerUUID: UUID
+    var detachedDEVPath: String?
     private(set) var secureInputs: [Data] = []
     private(set) var secureArguments: [[String]] = []
     private(set) var allArguments: [[String]] = []
@@ -1681,6 +1704,15 @@ private final class PassphraseStorageFixtureRunner: HESectoriumSecureCommandRunn
     func run(_ executable: String, _ arguments: [String], cwd: URL) -> CommandOutcome {
         allArguments.append([executable] + arguments)
         if executable == "/usr/sbin/diskutil", arguments == ["info", "-plist", outerMountPoint],
+           let data = try? PropertyListSerialization.data(fromPropertyList: [
+               "VolumeUUID": outerUUID.uuidString, "MountPoint": outerMountPoint,
+               "FilesystemType": "APFS", "WritableVolume": true, "VolumeName": "Fixture",
+               "DeviceIdentifier": "disk81s1", "PartOfWhole": "disk81"
+           ], format: .xml, options: 0) {
+            return .init(exitCode: 0, detail: String(decoding: data, as: UTF8.self))
+        }
+        if executable == "/usr/sbin/diskutil", arguments.count == 3,
+           arguments[0] == "info", arguments[1] == "-plist", arguments[2] == detachedDEVPath,
            let data = try? PropertyListSerialization.data(fromPropertyList: [
                "VolumeUUID": outerUUID.uuidString, "MountPoint": outerMountPoint,
                "FilesystemType": "APFS", "WritableVolume": true, "VolumeName": "Fixture",

@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import HESectoriumCore
+import HESectoriumCLI
 @testable import HESectoriumRuntime
 #if canImport(CryptoKit)
 import CryptoKit
@@ -58,6 +59,52 @@ private func diskInfo(_ values: [String: Any]) throws -> CommandOutcome {
     .init(exitCode: 0, detail: try plistText(values))
 }
 
+private func mountedAPFSPreflightFixture(unverifiableDevIdentity: Bool = false) throws
+    -> (fixture: Fixture, dev: URL, image: URL, runner: ScriptedRunner, backend: MacStorageBackend) {
+    let f = try Fixture()
+    let outerUUID = UUID(uuidString: "11111111-2222-4333-8444-555555555555")!
+    let devUUID = UUID(uuidString: "66666666-7777-4888-8999-AAAAAAAAAAAA")!
+    let outer = f.root.appendingPathComponent("HE", isDirectory: true)
+    let dev = outer.appendingPathComponent("DEV", isDirectory: true)
+    let image = outer.appendingPathComponent(".DEV-APFS.sparsebundle", isDirectory: true)
+    try FileManager.default.createDirectory(at: dev, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: image, withIntermediateDirectories: false)
+    let policy = StorageIdentityPolicy(outerUUID: outerUUID, devUUID: devUUID,
+        outerMountPoint: outer.path, devMountPoint: dev.path, devVolumeName: "DEV_APFS", imagePath: image.path)
+    let runner = ScriptedRunner()
+    let outerInfo = try diskInfo([
+        "VolumeUUID": outerUUID.uuidString, "MountPoint": outer.path, "FilesystemType": "ExFAT",
+        "WritableVolume": true, "VolumeName": "HE", "DeviceIdentifier": "disk6s1", "ParentWholeDisk": "disk6"
+    ])
+    var devInfoValues: [String: Any] = [
+        "MountPoint": dev.path, "FilesystemType": "APFS", "WritableVolume": true,
+        "VolumeName": "DEV_APFS", "DeviceIdentifier": "disk5s1", "APFSContainerReference": "disk5"
+    ]
+    if !unverifiableDevIdentity { devInfoValues["VolumeUUID"] = devUUID.uuidString }
+    let devInfo = try diskInfo(devInfoValues)
+    runner.outputs["/usr/sbin/diskutil info -plist \(outer.path)"] = outerInfo
+    runner.outputs["/usr/sbin/diskutil info -plist \(dev.path)"] = devInfo
+    runner.outputs["/usr/sbin/diskutil info -plist /dev/disk5s1"] = devInfo
+    runner.outputs["/usr/sbin/diskutil info -plist /dev/disk6s1"] = outerInfo
+    runner.outputs["/usr/sbin/diskutil info -plist /dev/disk6"] = try diskInfo([
+        "DeviceIdentifier": "disk6", "ParentWholeDisk": "disk6", "VirtualOrPhysical": "Physical"
+    ])
+    runner.outputs["/usr/sbin/diskutil apfs list -plist"] = try diskInfo(["Containers": [[
+        "ContainerReference": "disk5", "PhysicalStores": [["DeviceIdentifier": "disk99"]],
+        "Volumes": [["APFSVolumeUUID": devUUID.uuidString, "DeviceIdentifier": "disk5s1"]]
+    ]]])
+    runner.outputs["/usr/bin/hdiutil info -plist"] = try diskInfo(["images": [[
+        "image-path": image.path, "system-entities": [
+            ["dev-entry": "/dev/disk4"], ["dev-entry": "/dev/disk4s1"],
+            ["dev-entry": "/dev/disk4s2"], ["dev-entry": "/dev/disk5"],
+            ["dev-entry": "/dev/disk5s1", "mount-point": dev.path, "volume-uuid": devUUID.uuidString]
+        ]
+    ]]])
+    runner.outputs["/bin/df -P \(image.path)"] = .init(exitCode: 0,
+        detail: "Filesystem 512-blocks Used Available Capacity iused ifree %iused Mounted on\n/dev/disk6s1 1000 100 900 10% 1 2 1% \(outer.path)\n")
+    return (f, dev, image, runner, MacStorageBackend(paths: f.paths, runner: runner, policy: policy))
+}
+
 private func fixtureSHA256(_ data: Data) -> String {
     #if canImport(CryptoKit)
     return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
@@ -77,18 +124,46 @@ private struct Fixture {
         paths = .init(root: root.appendingPathComponent("support", isDirectory: true)); home = root.appendingPathComponent("home", isDirectory: true)
         let source = root.appendingPathComponent("assets", isDirectory: true); try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
         let control = source.appendingPathComponent("HESectoriumControl"); try Data("fixture-control".utf8).write(to: control)
-        let mount = source.appendingPathComponent("dev-apfs-mount"); try Data("#!/bin/sh\nexec \"__UMA_CONTROL_PATH__\" mount\n".utf8).write(to: mount)
-        let eject = source.appendingPathComponent("he-eject"); try Data("#!/bin/sh\nexec \"__UMA_CONTROL_PATH__\" eject\n".utf8).write(to: eject)
+        let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let mount = source.appendingPathComponent("dev-apfs-mount")
+        try Data(contentsOf: repository.appendingPathComponent("Configuration/HESectorium/dev-apfs-mount")).write(to: mount)
+        let eject = source.appendingPathComponent("he-eject")
+        try Data(contentsOf: repository.appendingPathComponent("Configuration/HESectorium/he-eject")).write(to: eject)
         let agent = source.appendingPathComponent("agent.plist")
         try Data("<plist><string>com.juliushe.dev-apfs-mounter</string><string>__UMA_CONTROL_PATH__</string><string>__UMA_LOG_OUT__</string><string>__UMA_LOG_ERR__</string></plist>".utf8).write(to: agent)
         let config = source.appendingPathComponent("identity.json")
         let identity = """
-        {"outerUUID":"2FE2A779-0DC8-3468-8E3C-E113598C46CE","devUUID":"0476F9CC-86A3-40D8-A8D4-83D882522CAD","outerMountPoint":"/Volumes/HE","devMountPoint":"/Volumes/HE/DEV","devVolumeName":"DEV_APFS","imagePath":"/Volumes/HE/.DEV-APFS.sparsebundle"}
+        {"outerUUID":"\(StorageIdentityPolicy.expected.outerUUID.uuidString)","devUUID":"\(StorageIdentityPolicy.expected.devUUID!.uuidString)","outerMountPoint":"/Volumes/HE","devMountPoint":"/Volumes/HE/DEV","devVolumeName":"DEV_APFS","imagePath":"/Volumes/HE/.DEV-APFS.sparsebundle"}
         """
         try Data(identity.utf8).write(to: config)
         assets = .init(control: control, devMountWrapper: mount, ejectWrapper: eject, launchAgent: agent, identityConfig: config)
     }
     func remove() { try? FileManager.default.removeItem(at: root) }
+}
+
+@Test func dispatcherReportUsesRealOperationResultAndPreservesJSONAndExitStatus() throws {
+    let failed = OperationResult(operationID: "fixture-failed", mode: .manual,
+        steps: [.init(step: "attach", status: .failed, detail: "synthetic fixture failure")],
+        failure: .attachFailed(1, "synthetic fixture failure"))
+    var failedOut: [String] = []; var failedErr: [String] = []
+    let failedExit = HESectoriumCommandDispatcher.report(failed,
+        writeStdout: { failedOut.append($0) }, writeStderr: { failedErr.append($0) })
+    #expect(failedExit == 1)
+    #expect(failedOut.count == 1)
+    let failedJSON = try #require(JSONSerialization.jsonObject(with: Data(failedOut[0].utf8)) as? [String: Any])
+    #expect(failedJSON["succeeded"] as? Bool == false)
+    #expect(failedErr == ["Sectorium: operation did not complete. Keep the drive connected, refresh its identity, and review the operation details before retrying.\n"])
+
+    let succeeded = OperationResult(operationID: "fixture-succeeded", mode: .manual,
+        steps: [.init(step: "attach", status: .succeeded)])
+    var succeededOut: [String] = []; var succeededErr: [String] = []
+    let succeededExit = HESectoriumCommandDispatcher.report(succeeded,
+        writeStdout: { succeededOut.append($0) }, writeStderr: { succeededErr.append($0) })
+    #expect(succeededExit == 0)
+    #expect(succeededOut.count == 1)
+    let succeededJSON = try #require(JSONSerialization.jsonObject(with: Data(succeededOut[0].utf8)) as? [String: Any])
+    #expect(succeededJSON["succeeded"] as? Bool == true)
+    #expect(succeededErr.isEmpty)
 }
 
 @Test func secureDirectoryMapsSystemTempAliasesAndRejectsNestedSymlinks() throws {
@@ -393,6 +468,223 @@ private struct Fixture {
     #expect(backend.observe() == nil)
 }
 
+@Test func capturedMountedHEDEVAPFSChainIsIdempotentWithoutProbingOccupiedMountpoint() throws {
+    let f = try Fixture(); defer { f.remove() }
+    // Sanitized structural fixture: synthetic UUIDs retain the observed parent/volume relationships;
+    // this is not an exact replay of native host identifiers or plists.
+    let outerUUID = UUID(uuidString: "11111111-2222-4333-8444-555555555555")!
+    let devUUID = UUID(uuidString: "66666666-7777-4888-8999-AAAAAAAAAAAA")!
+    let outer = f.root.appendingPathComponent("HE", isDirectory: true)
+    let dev = outer.appendingPathComponent("DEV", isDirectory: true)
+    let image = outer.appendingPathComponent(".DEV-APFS.sparsebundle", isDirectory: true)
+    try FileManager.default.createDirectory(at: dev, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: image, withIntermediateDirectories: false)
+    // The marker proves the already-mounted path returns on verified identity before
+    // the detached-mountpoint metadata-only empty-directory safety check.
+    try Data("preserve".utf8).write(to: dev.appendingPathComponent("existing.txt"))
+    let policy = StorageIdentityPolicy(outerUUID: outerUUID, devUUID: devUUID,
+        outerMountPoint: outer.path, devMountPoint: dev.path, devVolumeName: "DEV_APFS", imagePath: image.path)
+    let runner = ScriptedRunner()
+    runner.outputs["/usr/sbin/diskutil info -plist \(outer.path)"] = try diskInfo([
+        "VolumeUUID": outerUUID.uuidString, "MountPoint": outer.path, "FilesystemType": "ExFAT",
+        "WritableVolume": true, "VolumeName": "HE", "DeviceIdentifier": "disk6s1", "ParentWholeDisk": "disk6"
+    ])
+    let devInfo = try diskInfo([
+        "VolumeUUID": devUUID.uuidString, "MountPoint": dev.path, "FilesystemType": "APFS",
+        "WritableVolume": true, "VolumeName": "DEV_APFS", "DeviceIdentifier": "disk5s1",
+        "APFSContainerReference": "disk5"
+    ])
+    runner.outputs["/usr/sbin/diskutil info -plist \(dev.path)"] = devInfo
+    runner.outputs["/usr/sbin/diskutil info -plist /dev/disk5s1"] = devInfo
+    runner.outputs["/usr/sbin/diskutil info -plist /dev/disk6s1"] = runner.outputs["/usr/sbin/diskutil info -plist \(outer.path)"]
+    runner.outputs["/usr/sbin/diskutil info -plist /dev/disk6"] = try diskInfo([
+        "DeviceIdentifier": "disk6", "ParentWholeDisk": "disk6", "VirtualOrPhysical": "Physical"
+    ])
+    runner.outputs["/usr/sbin/diskutil apfs list -plist"] = try diskInfo(["Containers": [[
+        "ContainerReference": "disk5", "PhysicalStores": [["DeviceIdentifier": "disk4s2"]],
+        "Volumes": [["APFSVolumeUUID": devUUID.uuidString, "DeviceIdentifier": "disk5s1"]]
+    ]]])
+    runner.outputs["/usr/bin/hdiutil info -plist"] = try diskInfo(["images": [[
+        "image-path": image.path, "system-entities": [
+            ["dev-entry": "/dev/disk4"], ["dev-entry": "/dev/disk4s1"],
+            ["dev-entry": "/dev/disk4s2"], ["dev-entry": "/dev/disk5"],
+            ["dev-entry": "/dev/disk5s1", "mount-point": dev.path, "volume-uuid": devUUID.uuidString]
+        ]
+    ]]])
+    runner.outputs["/bin/df -P \(image.path)"] = .init(exitCode: 0,
+        detail: "Filesystem 512-blocks Used Available Capacity iused ifree %iused Mounted on\n/dev/disk6s1 1000 100 900 10% 1 2 1% \(outer.path)\n")
+
+    let backend = MacStorageBackend(paths: f.paths, runner: runner, policy: policy)
+    let result = backend.attachImage()
+
+    #expect(result.succeeded)
+    #expect(!runner.invocations.contains { ($0.0 == "/usr/sbin/diskutil" && $0.1.first == "image")
+        || ($0.0 == "/usr/bin/hdiutil" && $0.1.first == "attach") })
+    #expect(try Data(contentsOf: dev.appendingPathComponent("existing.txt")) == Data("preserve".utf8))
+
+    runner.outputs["/usr/sbin/diskutil apfs list -plist"] = try diskInfo(["Containers": [[
+        "ContainerReference": "disk5", "PhysicalStores": [["DeviceIdentifier": "disk99"]],
+        "Volumes": [["APFSVolumeUUID": devUUID.uuidString, "DeviceIdentifier": "disk5s1"]]
+    ]]])
+    let contradicted = backend.attachImage()
+    #expect(!contradicted.succeeded)
+    #expect(contradicted.detail.contains("already mounted"))
+    #expect(!runner.invocations.contains { ($0.0 == "/usr/sbin/diskutil" && $0.1.first == "image")
+        || ($0.0 == "/usr/bin/hdiutil" && $0.1.first == "attach") })
+}
+
+@Test func mountedMismatchedAPFSChainWithEmptyDEVRootRefusesBeforeAttach() throws {
+    let fixture = try mountedAPFSPreflightFixture()
+    defer { fixture.fixture.remove() }
+    #expect(try FileManager.default.contentsOfDirectory(atPath: fixture.dev.path).isEmpty)
+
+    let result = fixture.backend.attachImage()
+
+    #expect(!result.succeeded)
+    #expect(result.detail.contains("already mounted"))
+    #expect(!fixture.runner.invocations.contains {
+        ($0.0 == "/usr/sbin/diskutil" && $0.1.first == "image")
+            || ($0.0 == "/usr/bin/hdiutil" && $0.1.first == "attach")
+    })
+}
+
+@Test func mountedDEVTargetWithUnverifiableIdentityRefusesBeforeAttach() throws {
+    let fixture = try mountedAPFSPreflightFixture(unverifiableDevIdentity: true)
+    defer { fixture.fixture.remove() }
+    #expect(try FileManager.default.contentsOfDirectory(atPath: fixture.dev.path).isEmpty)
+
+    let result = fixture.backend.attachImage()
+
+    #expect(!result.succeeded)
+    #expect(result.detail.contains("Could not verify that the DEV target"))
+    #expect(!fixture.runner.invocations.contains {
+        ($0.0 == "/usr/sbin/diskutil" && $0.1.first == "image")
+            || ($0.0 == "/usr/bin/hdiutil" && $0.1.first == "attach")
+    })
+}
+
+@Test func detachedEmptyDEVMountpointStillAttachesConfiguredImage() throws {
+    let f = try Fixture(); defer { f.remove() }
+    let outer = f.root.appendingPathComponent("HE", isDirectory: true)
+    let dev = outer.appendingPathComponent("DEV", isDirectory: true)
+    let image = outer.appendingPathComponent(".DEV-APFS.sparsebundle", isDirectory: true)
+    try FileManager.default.createDirectory(at: dev, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: image, withIntermediateDirectories: false)
+    let outerUUID = UUID(uuidString: "11111111-2222-4333-8444-555555555555")!
+    let policy = StorageIdentityPolicy(outerUUID: outerUUID,
+        devUUID: UUID(uuidString: "66666666-7777-4888-8999-AAAAAAAAAAAA")!,
+        outerMountPoint: outer.path, devMountPoint: dev.path, devVolumeName: "DEV_APFS", imagePath: image.path)
+    let runner = ScriptedRunner()
+    runner.outputs["/usr/sbin/diskutil info -plist \(outer.path)"] = try diskInfo([
+        "VolumeUUID": outerUUID.uuidString, "MountPoint": outer.path, "FilesystemType": "ExFAT",
+        "WritableVolume": true, "VolumeName": "HE", "DeviceIdentifier": "disk6s1", "ParentWholeDisk": "disk6"
+    ])
+    runner.outputs["/usr/sbin/diskutil info -plist \(dev.path)"] = try diskInfo([
+        "VolumeUUID": outerUUID.uuidString, "MountPoint": outer.path, "FilesystemType": "ExFAT",
+        "WritableVolume": true, "VolumeName": "HE", "DeviceIdentifier": "disk6s1", "ParentWholeDisk": "disk6"
+    ])
+    runner.outputs["/usr/bin/hdiutil info -plist"] = try diskInfo(["images": []])
+    let attach = "/usr/sbin/diskutil image attach --nobrowse --mountPoint \(dev.path) \(image.path)"
+    runner.outputs[attach] = .init(exitCode: 0)
+    let backend = MacStorageBackend(paths: f.paths, runner: runner, policy: policy)
+
+    let result = backend.attachImage()
+
+    #expect(result.succeeded)
+    #expect(runner.invocations.filter { $0.0 == "/usr/sbin/diskutil" && $0.1.first == "image" }.count == 1)
+}
+
+@Test func absentOrMalformedDEVObservationRefusesBeforeAttach() throws {
+    let f = try Fixture(); defer { f.remove() }
+    let outer = f.root.appendingPathComponent("HE", isDirectory: true)
+    let dev = outer.appendingPathComponent("DEV", isDirectory: true)
+    let image = outer.appendingPathComponent(".DEV-APFS.sparsebundle", isDirectory: true)
+    try FileManager.default.createDirectory(at: dev, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: image, withIntermediateDirectories: false)
+    let outerUUID = UUID(uuidString: "11111111-2222-4333-8444-555555555555")!
+    let policy = StorageIdentityPolicy(outerUUID: outerUUID,
+        devUUID: UUID(uuidString: "66666666-7777-4888-8999-AAAAAAAAAAAA")!,
+        outerMountPoint: outer.path, devMountPoint: dev.path, devVolumeName: "DEV_APFS", imagePath: image.path)
+    let runner = ScriptedRunner()
+    runner.outputs["/usr/sbin/diskutil info -plist \(outer.path)"] = try diskInfo([
+        "VolumeUUID": outerUUID.uuidString, "MountPoint": outer.path, "FilesystemType": "ExFAT",
+        "WritableVolume": true, "VolumeName": "HE", "DeviceIdentifier": "disk6s1", "ParentWholeDisk": "disk6"
+    ])
+    runner.outputs["/usr/bin/hdiutil info -plist"] = try diskInfo(["images": []])
+    let backend = MacStorageBackend(paths: f.paths, runner: runner, policy: policy)
+    let devKey = "/usr/sbin/diskutil info -plist \(dev.path)"
+    for observation in [
+        CommandOutcome(exitCode: 1, detail: "fixture identity observation unavailable"),
+        CommandOutcome(exitCode: 0, detail: "fixture identity observation malformed")
+    ] {
+        runner.outputs[devKey] = observation
+        let result = backend.attachImage()
+        #expect(!result.succeeded)
+        #expect(result.detail.contains("Could not verify that the DEV target"))
+    }
+    #expect(!runner.invocations.contains {
+        ($0.0 == "/usr/sbin/diskutil" && $0.1.first == "image")
+            || ($0.0 == "/usr/bin/hdiutil" && $0.1.first == "attach")
+    })
+}
+
+@Test func unavailableMountpointMetadataHasDistinctSafeGuidanceBeforeAttach() throws {
+    let f = try Fixture(); defer { f.remove() }
+    let outer = f.root.appendingPathComponent("HE", isDirectory: true)
+    try FileManager.default.createDirectory(at: outer, withIntermediateDirectories: true)
+    let dev = outer.appendingPathComponent("DEV")
+    try Data("fixture file blocks directory metadata open".utf8).write(to: dev)
+    let image = outer.appendingPathComponent(".DEV-APFS.sparsebundle", isDirectory: true)
+    try FileManager.default.createDirectory(at: image, withIntermediateDirectories: false)
+    let policy = StorageIdentityPolicy(outerUUID: UUID(), devUUID: nil, outerMountPoint: outer.path,
+        devMountPoint: dev.path, devVolumeName: "DEV_APFS", imagePath: image.path)
+    let runner = ScriptedRunner()
+    runner.outputs["/usr/sbin/diskutil info -plist \(outer.path)"] = try diskInfo([
+        "VolumeUUID": policy.outerUUID.uuidString, "MountPoint": outer.path, "FilesystemType": "ExFAT",
+        "WritableVolume": true, "VolumeName": "HE", "DeviceIdentifier": "disk6s1", "ParentWholeDisk": "disk6"
+    ])
+    runner.outputs["/usr/sbin/diskutil info -plist \(dev.path)"] = try diskInfo([
+        "VolumeUUID": policy.outerUUID.uuidString, "MountPoint": outer.path, "FilesystemType": "ExFAT",
+        "WritableVolume": true, "VolumeName": "HE", "DeviceIdentifier": "disk6s1", "ParentWholeDisk": "disk6"
+    ])
+    runner.outputs["/usr/bin/hdiutil info -plist"] = try diskInfo(["images": []])
+    let backend = MacStorageBackend(paths: f.paths, runner: runner, policy: policy)
+
+    let result = backend.attachImage()
+
+    #expect(!result.succeeded)
+    #expect(result.detail.contains("Could not verify"))
+    #expect(result.detail.contains("refresh its identity"))
+    #expect(!runner.invocations.contains { ($0.0 == "/usr/sbin/diskutil" && $0.1.first == "image")
+        || ($0.0 == "/usr/bin/hdiutil" && $0.1.first == "attach") })
+}
+
+@Test func sourceCompatibilityWrapperKeepsMachineJSONAndAddsOneHumanFailureLine() throws {
+    let f = try Fixture(); defer { f.remove() }
+    let wrapper = f.assets.devMountWrapper
+    let control = f.root.appendingPathComponent("fixture-control", isDirectory: false)
+    try Data("#!/bin/sh\nprintf '%s\\n' '{\"succeeded\":false}'\nprintf '%s\\n' 'Sectorium: operation did not complete. Keep the drive connected, refresh its identity, and review the operation details before retrying.' >&2\nexit 1\n".utf8).write(to: control)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: control.path)
+    let template = try String(contentsOf: wrapper, encoding: .utf8)
+    try Data(template.replacingOccurrences(of: "__UMA_CONTROL_PATH__", with: control.path).utf8).write(to: wrapper)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: wrapper.path)
+
+    let process = Process()
+    let stdout = Pipe(), stderr = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/bin/sh")
+    process.arguments = [wrapper.path]
+    process.currentDirectoryURL = f.root
+    process.standardOutput = stdout; process.standardError = stderr
+    try process.run()
+    process.waitUntilExit()
+    let output = String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    let error = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    #expect(process.terminationStatus == 1)
+    #expect(output == "{\"succeeded\":false}\n")
+    #expect(error.components(separatedBy: "Sectorium: operation did not complete.").count == 2)
+    #expect(!error.contains("attachFailed"))
+}
+
 @Test func storageBackendRefusesAttachBeforeFreshOuterValidation() throws {
     let f = try Fixture(); defer { f.remove() }
     let mount = f.root.appendingPathComponent("outer", isDirectory: true)
@@ -429,11 +721,15 @@ private struct Fixture {
         "VolumeUUID": outerUUID.uuidString, "MountPoint": mount.path, "FilesystemType": "ExFAT",
         "WritableVolume": true, "VolumeName": "HE", "DeviceIdentifier": "disk20s1"
     ])
+    runner.outputs["/usr/sbin/diskutil info -plist \(dev.path)"] = try diskInfo([
+        "VolumeUUID": outerUUID.uuidString, "MountPoint": mount.path, "FilesystemType": "ExFAT",
+        "WritableVolume": true, "VolumeName": "HE", "DeviceIdentifier": "disk20s1"
+    ])
     let backend = MacStorageBackend(paths: f.paths, runner: runner, policy: policy)
     let result = backend.attachImage()
 
     #expect(!result.succeeded)
-    #expect(result.detail.contains("non-empty"))
+    #expect(result.detail.contains("not empty"))
     #expect(try Data(contentsOf: dev.appendingPathComponent("existing.txt")) == Data("preserve".utf8))
     #expect(!runner.invocations.contains { $0.0 == "/usr/sbin/diskutil" && $0.1.first == "image" })
 }

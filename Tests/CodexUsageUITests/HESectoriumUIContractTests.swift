@@ -20,16 +20,40 @@ struct HESectoriumUIContractTests {
                   canContinueEject: continueEject, canReturnFromEject: returnFromEject)
         }
         let mountedLegacy = SectoriumWorkbenchActionPlan.make(input(legacy: .mounted, beginEject: true))
-        #expect(mountedLegacy.primary == .adopt)
-        #expect(mountedLegacy.secondary == [.eject])
+        #expect(mountedLegacy.primary == .eject)
+        #expect(mountedLegacy.secondary == [.adopt])
+        #expect(!mountedLegacy.secondary.contains(.stop))
+        let mountedLegacyWithoutEjectCheckpoint = SectoriumWorkbenchActionPlan.make(input(legacy: .mounted))
+        #expect(mountedLegacyWithoutEjectCheckpoint.primary == .adopt)
+        #expect(!mountedLegacyWithoutEjectCheckpoint.secondary.contains(.stop))
+        let mountedLocalLegacy = SectoriumWorkbenchActionPlan.make(input(external: false, legacy: .mounted, beginEject: true))
+        #expect(mountedLocalLegacy.primary == .adopt)
+        #expect(!mountedLocalLegacy.secondary.contains(.eject))
+
+        let pendingMountedLegacy = SectoriumWorkbenchActionPlan.make(input(
+            .operationInProgress("eject:pending"), legacy: .mounted, pending: "eject:pending",
+            beginEject: true))
+        #expect(pendingMountedLegacy.primary == nil && pendingMountedLegacy.secondary.isEmpty)
+        let busyMountedLegacy = SectoriumWorkbenchActionPlan.make(input(
+            .busy, busy: true, legacy: .mounted, beginEject: true))
+        #expect(busyMountedLegacy.primary == nil && busyMountedLegacy.secondary.isEmpty)
+        let staleMountedLegacy = SectoriumWorkbenchActionPlan.make(input(
+            stale: true, legacy: .mounted, beginEject: true))
+        #expect(staleMountedLegacy.primary == nil && staleMountedLegacy.secondary.isEmpty)
+        let unidentifiedMountedLegacy = SectoriumWorkbenchActionPlan.make(input(
+            identity: false, legacy: .mounted, beginEject: true))
+        #expect(unidentifiedMountedLegacy.primary == nil && unidentifiedMountedLegacy.secondary.isEmpty)
 
         let detachedLegacy = SectoriumWorkbenchActionPlan.make(input(.notStarted, legacy: .detached))
         #expect(detachedLegacy.primary == .adopt)
         #expect(!detachedLegacy.secondary.contains(.create))
+        #expect(SectoriumLegacyPresentationPolicy.currentLegacyState(inventoryAvailable: true, busy: false,
+            pending: false, stale: false, identityVerified: true, readiness: .noDevelopmentDisk,
+            observed: .detached) == .detached)
 
         let ready = SectoriumWorkbenchActionPlan.make(input(.ready, profile: true, beginEject: true))
-        #expect(ready.primary == .stop)
-        #expect(ready.secondary == [.create, .eject])
+        #expect(ready.primary == .eject)
+        #expect(ready.secondary == [.create, .stop])
 
         let stopped = SectoriumWorkbenchActionPlan.make(input(.notStarted, profile: true))
         #expect(stopped.primary == .start)
@@ -314,6 +338,7 @@ struct HESectoriumUIContractTests {
         #expect(dispatcher.contains("case \"mount\": return report(service.mountDEV()"))
         #expect(dispatcher.contains("case \"eject\": return report(service.safeEjectHE()"))
         #expect(dispatcher.contains("return result.succeeded ? 0 : 1"))
+        #expect(dispatcher.contains("writeStderr(\"Sectorium: operation did not complete."))
         #expect(dispatcher.contains("return code == 0 && !value.succeeded ? 1 : code"))
     }
 

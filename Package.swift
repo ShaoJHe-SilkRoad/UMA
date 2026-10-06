@@ -131,7 +131,7 @@ let package = Package(
         ),
         .testTarget(
             name: "HESectoriumRuntimeTests",
-            dependencies: ["HESectoriumRuntime", "HESectoriumCore"],
+            dependencies: ["HESectoriumRuntime", "HESectoriumCore", "HESectoriumCLI"],
             path: "Tests/HESectoriumRuntimeTests"
         )
     ]

@@ -20,6 +20,9 @@ public enum HESectoriumCommandDispatcher {
             "failure": result.failure.map(String.init(describing:)) as Any? ?? NSNull(),
             "steps": result.steps.map { ["step": $0.step, "status": $0.status.rawValue, "detail": $0.detail] }
         ], writeStdout: writeStdout, writeStderr: writeStderr)
+        if !result.succeeded {
+            writeStderr("Sectorium: operation did not complete. Keep the drive connected, refresh its identity, and review the operation details before retrying.\n")
+        }
         return result.succeeded ? 0 : 1
     }
 

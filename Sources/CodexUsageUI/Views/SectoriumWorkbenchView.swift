@@ -26,6 +26,21 @@ enum SectoriumWorkbenchAction: String, CaseIterable, Equatable {
     case create, adopt, start, stop, resume, continueEject, returnToDevelopment, eject
 }
 
+enum SectoriumWorkbenchDeviceOrdering {
+    static func externalFirst(_ devices: [SectoriumPhysicalDevice]) -> [SectoriumPhysicalDevice] {
+        devices.sorted {
+            if $0.isExternal != $1.isExternal { return $0.isExternal }
+            let byName = $0.name.localizedStandardCompare($1.name)
+            if byName != .orderedSame { return byName == .orderedAscending }
+            return $0.bsdName.localizedStandardCompare($1.bsdName) == .orderedAscending
+        }
+    }
+
+    static func defaultSelection(from devices: [SectoriumPhysicalDevice]) -> SectoriumPhysicalDevice? {
+        externalFirst(devices.filter { $0.isVirtual == false && $0.identityVerified }).first
+    }
+}
+
 enum SectoriumLegacyPresentationPolicy {
     static func currentLegacyState(inventoryAvailable: Bool, busy: Bool, pending: Bool,
                                    stale: Bool, identityVerified: Bool,
@@ -35,7 +50,7 @@ enum SectoriumLegacyPresentationPolicy {
         guard inventoryAvailable, !busy, !pending, !stale, identityVerified else { return .none }
         if observed == .unknown { return .unknown }
         switch (readiness, observed) {
-        case (.connected, .mounted), (.notStarted, .detached): return observed
+        case (.connected, .mounted), (.notStarted, .detached), (.noDevelopmentDisk, .detached): return observed
         default: return .none
         }
     }
@@ -110,13 +125,16 @@ struct SectoriumWorkbenchActionPlan: Equatable {
 
         let primary: SectoriumWorkbenchAction?
         var reason: UnavailableReason?
-        if input.legacyState == .mounted || input.legacyState == .detached {
+        if input.legacyState == .mounted,
+           input.readiness == .connected, input.external, input.canBeginEject {
+            primary = .eject
+        } else if input.legacyState == .mounted || input.legacyState == .detached {
             primary = .adopt
         } else if input.legacyState == .unknown {
             return .init(primary: nil, secondary: [], recovery: [], unavailableReason: .stateUnknown)
         } else if input.hasProfile {
             switch input.readiness {
-            case .ready: primary = .stop
+            case .ready: primary = input.external && input.canBeginEject ? .eject : .stop
             case .notStarted, .awaitingUnlock:
                 primary = input.profileFormatVerified ? .start : nil
                 if primary == nil { reason = .imageFormatUnknown }
@@ -137,14 +155,18 @@ struct SectoriumWorkbenchActionPlan: Equatable {
         if input.readiness == .connected || input.readiness == .noDevelopmentDisk
             || input.readiness == .notStarted || input.readiness == .awaitingUnlock || input.readiness == .ready {
             if primary != .create && input.legacyState == .none { secondary.append(.create) }
-            if !input.hasProfile && input.legacyState == .none { secondary.append(.adopt) }
+            if !input.hasProfile && (input.legacyState == .none
+                || (input.legacyState == .mounted && primary == .eject)) {
+                secondary.append(.adopt)
+            }
         }
         if input.external && input.canBeginEject
             && (input.readiness == .connected || input.readiness == .noDevelopmentDisk
                 || input.readiness == .notStarted || input.readiness == .awaitingUnlock
                 || input.readiness == .ready || input.readiness == .readOnly) {
-            secondary.append(.eject)
+            if primary != .eject { secondary.append(.eject) }
         }
+        if primary == .eject && input.hasProfile { secondary.append(.stop) }
         return .init(primary: primary, secondary: secondary, recovery: [], unavailableReason: reason)
     }
 }
@@ -157,11 +179,13 @@ public struct SectoriumWorkbenchView: View {
     @State private var showingDriveDetails = false
     @StateObject private var settingsButtonRef = SectoriumWeakButtonReference()
     @State private var showingCreate = false
+    @State private var showingLegacyAdoptionConfirmation = false
     @State private var showingUnlock = false
     @State private var profileName = "Development"
     @State private var capacityGiB = 100
     @State private var caseSensitive = false
     @State private var encrypted = false
+    @State private var startAfterCreation = false
     @State private var password = ""
     @State private var unlockPassword = ""
     @State private var knownWritersClosed = false
@@ -233,37 +257,11 @@ public struct SectoriumWorkbenchView: View {
                                                 .frame(maxWidth: 72)
                                         }
                                     }
-                                    Text(deviceLabel(device)).font(.callout).foregroundStyle(.secondary)
-                                    if !device.identityVerified {
-                                        Text(text("Visible; management unavailable until identity is verified.",
-                                                  "硬盘可见；身份核实前无法管理。"))
-                                            .font(.callout).foregroundStyle(.orange)
-                                    }
-                                    ForEach(device.volumeMembers, id: \.bsdName) { member in
-                                        Label(volumeDescription(member), systemImage: "externaldrive.fill.badge.person.crop")
-                                            .font(.callout)
-                                            .accessibilityIdentifier("uma.sectorium.backing-volume")
-                                    }
-                                    ForEach(model.workbench.profiles.filter { $0.deviceID == device.id }) { profile in
-                                        Label(profile.devVolumeName + " · "
-                                              + logicalCapacityDescription(profile.logicalCapacityBytes)
-                                              + text(" · registered virtual disk", " · 已登记虚拟盘"),
-                                              systemImage: "internaldrive")
-                                            .font(.callout)
-                                            .accessibilityIdentifier("uma.sectorium.related-development-disk")
-                                    }
-                                    if let legacy = model.legacyDevelopmentByDevice[device.id] {
-                                        Label(legacy.name + " · " + logicalCapacityDescription(legacy.logicalCapacityBytes)
-                                              + " · " + legacyStateDescription(legacy),
-                                              systemImage: "internaldrive")
-                                            .font(.callout)
-                                            .accessibilityIdentifier("uma.sectorium.related-development-disk")
-                                    }
-                                    if !device.isExternal && !device.apfsContainers.isEmpty {
-                                        DisclosureGroup(text("System and recovery APFS details", "系统与恢复 APFS 详情")) {
-                                            ForEach(device.apfsContainers, id: \.bsdName) { container in
-                                                Text(apfsContainerDescription(container)).font(.caption)
-                                            }
+                                    if device.isExternal {
+                                        physicalDeviceDetails(device)
+                                    } else {
+                                        DisclosureGroup(text("Internal drive details", "内置硬盘详情")) {
+                                            physicalDeviceDetails(device)
                                         }
                                     }
                                 }
@@ -365,6 +363,16 @@ public struct SectoriumWorkbenchView: View {
         .sheet(isPresented: Binding(get: { model.stopConfirmation != nil }, set: { if !$0 { model.cancelStopConfirmation() } })) {
             stopConfirmationSheet
         }
+        .alert(text("Adopt existing development disk?", "接纳已有开发盘？"), isPresented: $showingLegacyAdoptionConfirmation) {
+            Button(text("Cancel", "取消"), role: .cancel) {}
+            Button(text("Adopt verified DEV_APFS", "接纳已核实的 DEV_APFS")) {
+                guard let device = selectedDevice else { return }
+                model.adoptConfiguredLegacyDevelopmentDisk(deviceID: device.id)
+            }
+        } message: {
+            Text(text("UMA will register the configured DEV_APFS image only after rechecking this selected drive and the complete image-to-volume identity. No files will be moved or deleted.",
+                      "UMA 仅会在重新核验所选硬盘及完整镜像与宗卷身份后登记已配置的 DEV_APFS 镜像；不会移动或删除文件。"))
+        }
     }
 
     @ViewBuilder private var actionControls: some View {
@@ -426,6 +434,36 @@ public struct SectoriumWorkbenchView: View {
         } else if selectedDevice != nil {
             Text(text("Local drives cannot be physically ejected here.", "此处不能物理弹出本地硬盘。"))
                 .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private func physicalDeviceDetails(_ device: SectoriumPhysicalDevice) -> some View {
+        Text(deviceLabel(device)).font(.callout).foregroundStyle(.secondary)
+        if !device.identityVerified {
+            Text(text("Visible; management unavailable until identity is verified.",
+                      "硬盘可见；身份核实前无法管理。"))
+                .font(.callout).foregroundStyle(.orange)
+        }
+        ForEach(device.volumeMembers, id: \.bsdName) { member in
+            Label(volumeDescription(member), systemImage: "externaldrive.fill.badge.person.crop")
+                .font(.callout).accessibilityIdentifier("uma.sectorium.backing-volume")
+        }
+        ForEach(model.workbench.profiles.filter { $0.deviceID == device.id }) { profile in
+            Label(profile.devVolumeName + " · " + logicalCapacityDescription(profile.logicalCapacityBytes)
+                  + text(" · registered virtual disk", " · 已登记虚拟盘"), systemImage: "internaldrive")
+                .font(.callout).accessibilityIdentifier("uma.sectorium.related-development-disk")
+        }
+        if let legacy = model.legacyDevelopmentByDevice[device.id] {
+            Label(legacy.name + " · " + logicalCapacityDescription(legacy.logicalCapacityBytes)
+                  + " · " + legacyStateDescription(legacy), systemImage: "internaldrive")
+                .font(.callout).accessibilityIdentifier("uma.sectorium.related-development-disk")
+        }
+        if !device.isExternal && !device.apfsContainers.isEmpty {
+            DisclosureGroup(text("System and recovery APFS details", "系统与恢复 APFS 详情")) {
+                ForEach(device.apfsContainers, id: \.bsdName) { container in
+                    Text(apfsContainerDescription(container)).font(.caption)
+                }
+            }
         }
     }
 
@@ -537,7 +575,12 @@ public struct SectoriumWorkbenchView: View {
     private func perform(_ action: SectoriumWorkbenchAction) {
         switch action {
         case .create: showingCreate = true
-        case .adopt: adoptExisting()
+        case .adopt:
+            if presentationLegacyState == .mounted || presentationLegacyState == .detached {
+                showingLegacyAdoptionConfirmation = true
+            } else {
+                adoptExisting()
+            }
         case .start: startSelectedProfile()
         case .stop: model.prepareStopDevelopmentDiskConfirmation()
         case .resume: model.resumePendingOperation()
@@ -598,7 +641,7 @@ public struct SectoriumWorkbenchView: View {
         }
     }
     private var physicalDevices: [SectoriumPhysicalDevice] {
-        model.workbench.devices.filter { $0.isVirtual == false }
+        SectoriumWorkbenchDeviceOrdering.externalFirst(model.workbench.devices.filter { $0.isVirtual == false })
     }
     private var unassignedDevices: [SectoriumPhysicalDevice] {
         model.workbench.devices.filter { $0.isVirtual == nil || $0.hasAmbiguousPhysicalStores }
@@ -781,6 +824,7 @@ public struct SectoriumWorkbenchView: View {
             }
             Toggle(text("Case-sensitive APFS", "区分大小写的 APFS"), isOn: $caseSensitive)
             Toggle(text("Encrypt this disk", "加密此开发盘"), isOn: $encrypted)
+            Toggle(text("Start after creation", "创建后启动"), isOn: $startAfterCreation)
             if encrypted {
                 SecureField(text("Password (not saved)", "密码（不会保存）"), text: $password)
                     .accessibilityIdentifier("uma.sectorium.create.password")
@@ -793,7 +837,8 @@ public struct SectoriumWorkbenchView: View {
             HStack {
                 Spacer()
                 Button(text("Cancel", "取消")) { showingCreate = false; password = "" }
-                Button(text("Choose location and create", "选择位置并创建"), action: createDevelopmentDisk)
+                Button(text(startAfterCreation ? "Choose location, create and start" : "Choose location and create",
+                            startAfterCreation ? "选择位置、创建并启动" : "选择位置并创建"), action: createDevelopmentDisk)
                     .disabled(model.isBusy || profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         || !SectoriumCapacityInput.isValid(capacityGiB) || (encrypted && password.isEmpty))
                     .keyboardShortcut(.defaultAction)
@@ -962,7 +1007,8 @@ public struct SectoriumWorkbenchView: View {
         }
         model.createDevelopmentDisk(deviceID: deviceID, parentDirectory: directory, name: profileName,
                                     capacityGiB: capacityGiB, caseSensitive: caseSensitive,
-                                    password: encrypted ? password : nil)
+                                    password: encrypted ? password : nil,
+                                    startAfterCreation: startAfterCreation)
         showingCreate = false; password = ""
     }
 
