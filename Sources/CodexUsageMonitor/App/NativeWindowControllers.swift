@@ -230,7 +230,10 @@ final class MainWindowController: NSWindowController {
         connectClaude: @escaping () -> Void,
         accuracySyncClaude: @escaping () -> Void,
         hesectoriumStore: HESectoriumStore? = nil,
-        promptClipboard: (any ThreadOSSettingsClipboard)? = nil
+        promptClipboard: (any ThreadOSSettingsClipboard)? = nil,
+        promptPreferences: ApplicationPreferences = .production,
+        appStorageDefaults: UserDefaults = .standard,
+        claudeSettings: ClaudeBrowserSettingsModel? = nil
     ) {
         guard attachedStore == nil else { return }
         // NSHostingController may negotiate its minimum content size while it
@@ -238,22 +241,30 @@ final class MainWindowController: NSWindowController {
         // that hosting transition rather than letting it collapse to minimum.
         let frameBeforeHosting = window?.frame
         attachedStore = store
-        window?.contentViewController = NSHostingController(
-            rootView: MainWindowRootView(
-                store: store,
-                navigation: navigation,
-                openSettings: openSettings,
-                scanAll: scanAll,
-                refreshAll: refreshAll,
-                connectCodex: connectCodex,
-                disconnectCodex: disconnectCodex,
-                claudeControlState: claudeControlState,
-                connectClaude: connectClaude,
-                accuracySyncClaude: accuracySyncClaude,
-                hesectoriumStore: hesectoriumStore,
-                promptClipboard: promptClipboard
-            )
+        let root = MainWindowRootView(
+            store: store,
+            navigation: navigation,
+            openSettings: openSettings,
+            scanAll: scanAll,
+            refreshAll: refreshAll,
+            connectCodex: connectCodex,
+            disconnectCodex: disconnectCodex,
+            claudeControlState: claudeControlState,
+            connectClaude: connectClaude,
+            accuracySyncClaude: accuracySyncClaude,
+            hesectoriumStore: hesectoriumStore,
+            promptClipboard: promptClipboard,
+            promptPreferences: promptPreferences,
+            claudeSettings: claudeSettings
         )
+        if appStorageDefaults === UserDefaults.standard {
+            // Preserve the production hosting type and its existing diagnostics.
+            window?.contentViewController = NSHostingController(rootView: root)
+        } else {
+            window?.contentViewController = NSHostingController(
+                rootView: root.defaultAppStorage(appStorageDefaults)
+            )
+        }
         if let frameBeforeHosting {
             window?.setFrame(frameBeforeHosting, display: false)
         }

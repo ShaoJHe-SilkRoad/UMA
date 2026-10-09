@@ -17,7 +17,6 @@ struct SharedBasicUsageSummaryView: View {
                     HStack(alignment: .firstTextBaseline) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(window.title).font(.callout.weight(.medium))
-                            Text(window.resetText).font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 12)
                         Text("\(localized("Remaining", "剩余")): \(window.isEstimated ? "≈\(window.remainingText)" : window.remainingText)")

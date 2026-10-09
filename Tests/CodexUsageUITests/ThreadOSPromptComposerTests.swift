@@ -1,9 +1,44 @@
 import Foundation
+import CryptoKit
 import Testing
 @testable import CodexUsageUI
 
+enum UMA015OriginalProducerGolden {
+    static let selections: [ThreadOSPromptRole: ThreadOSPromptSelection] = [
+        .leader: .init(model: "gpt-6-sol", effort: "xhigh"),
+        .coderCluster: .init(model: "gpt-6.1-sol", effort: "low"),
+        .reviewerCluster: .init(model: "gpt-5.6-sol", effort: "high"),
+        .qa: .init(model: "gpt-6-astra", effort: "medium")
+    ]
+
+    static func load() throws -> String {
+        let url = try #require(Bundle.module.url(forResource: "uma015-current-command-baseline", withExtension: "json"))
+        let data = try Data(contentsOf: url)
+        #expect(data.count == 629)
+        #expect(SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            == "ed96fe62ffd10961d349bf875de283e3aa8cb01fe9720168201fd59dc6674097")
+        return String(decoding: data, as: UTF8.self)
+    }
+}
+
 @MainActor
 struct ThreadOSPromptComposerTests {
+    @Test("current team command matches the executed original producer for eight controlled inputs")
+    func currentCommandMatchesOriginalProducer() throws {
+        let form = ThreadOSPromptComposerForm(preferences: .inMemory())
+        for role in ThreadOSPromptRole.allCases {
+            let selection = try #require(UMA015OriginalProducerGolden.selections[role])
+            form.selectModel(selection.model, for: role)
+            form.selectEffort(selection.effort, for: role)
+            #expect(form.selection(for: role) == selection)
+        }
+        let expected = try UMA015OriginalProducerGolden.load()
+        #expect(form.generatedInstruction == expected)
+        let clipboard = ClipboardSpy()
+        #expect(form.generateAndCopy(language: .english, to: clipboard) == .copied)
+        #expect(clipboard.writes == [expected])
+    }
+
     private struct StoredSelection: Codable {
         let role: ThreadOSPromptRole
         let model: String

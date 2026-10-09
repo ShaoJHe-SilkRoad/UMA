@@ -24,8 +24,22 @@ struct CodexDashboardProjection: Equatable, Sendable {
         let kind: ProviderProductQuotaKind
         let title: String
         let state: QuotaState
+        let precision: ProviderProductPrecision
         let resetAt: Date?
         let capturedAt: Date?
+
+        /// One source for the visible quota value and its accessibility text.
+        func displayText(language: AppLanguage) -> String {
+            switch state {
+            case let .finite(value):
+                let approximation = precision == .estimated ? "≈" : ""
+                return "\(approximation)\(Int(value.rounded()))%"
+            case .unlimited: return language == .simplifiedChinese ? "无限额" : "Unlimited"
+            case .unavailable: return language == .simplifiedChinese ? "未报告" : "Not reported"
+            case .invalid: return language == .simplifiedChinese ? "无效" : "Invalid"
+            case .stale: return language == .simplifiedChinese ? "已过期" : "Stale"
+            }
+        }
     }
 
     enum HistoryAvailability: Equatable, Sendable {
@@ -99,23 +113,25 @@ struct CodexDashboardProjection: Equatable, Sendable {
             providerCapturedAt: provider?.capturedAt
         )
 
-        if provider?.freshness == .unavailable {
-            historyAvailability = .unavailable
-        } else if let dailyUsage = snapshot.accountDailyUsage, !dailyUsage.isEmpty,
+        if let dailyUsage = snapshot.accountDailyUsage, !dailyUsage.isEmpty,
+           provider?.freshness == .fresh,
+           snapshot.providerSource?.isAvailable == true,
            snapshot.providerSource?.freshness == .fresh {
             historyAvailability = .accountDailyBuckets(
                 dailyUsage,
                 capturedAt: snapshot.providerSource?.capturedAt
             )
-        } else {
-            switch snapshot.localSource?.freshness {
-        case .fresh:
-            historyAvailability = .aggregateOnly(capturedAt: snapshot.localSource?.capturedAt)
-        case .stale:
-            historyAvailability = .staleWithoutDailyBuckets(capturedAt: snapshot.localSource?.capturedAt)
-        case .unavailable, .none:
-            historyAvailability = .unavailable
+        } else if let local = snapshot.localSource, local.isAvailable {
+            switch local.freshness {
+            case .fresh where snapshot.apiCostEstimate != nil:
+                historyAvailability = .aggregateOnly(capturedAt: local.capturedAt)
+            case .stale:
+                historyAvailability = .staleWithoutDailyBuckets(capturedAt: local.capturedAt)
+            case .fresh, .unavailable:
+                historyAvailability = .unavailable
             }
+        } else {
+            historyAvailability = .unavailable
         }
 
         let knownMetrics = snapshot.metrics.map { metric in
@@ -159,7 +175,8 @@ struct CodexDashboardProjection: Equatable, Sendable {
         providerCapturedAt: Date?
     ) -> Quota {
         guard let quota else {
-            return Quota(id: "missing-\(title)", kind: kind, title: title, state: .unavailable, resetAt: nil, capturedAt: providerCapturedAt)
+            return Quota(id: "missing-\(title)", kind: kind, title: title, state: .unavailable,
+                         precision: .unavailable, resetAt: nil, capturedAt: providerCapturedAt)
         }
 
         let state: QuotaState
@@ -181,7 +198,9 @@ struct CodexDashboardProjection: Equatable, Sendable {
         case .remainingCredits:
             state = .unavailable
         } }
-        return Quota(id: quota.id, kind: kind, title: quota.compactLabel, state: state, resetAt: quota.resetsAt, capturedAt: providerCapturedAt)
+        return Quota(id: quota.id, kind: kind, title: quota.compactLabel, state: state,
+                     precision: quota.precision, resetAt: quota.resetsAt,
+                     capturedAt: providerCapturedAt)
     }
 
     private static func period(for id: String) -> MetricPeriod {

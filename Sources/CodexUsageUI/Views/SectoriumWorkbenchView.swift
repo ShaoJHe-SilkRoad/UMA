@@ -342,7 +342,7 @@ public struct SectoriumWorkbenchView: View {
             }
             .padding(22)
         }
-        .frame(minWidth: 360, minHeight: 470)
+        .frame(minWidth: 360, minHeight: 438)
         .accessibilityIdentifier("uma.sectorium.workbench")
         .onAppear { model.activateWorkbench() }
         .onDisappear { model.deactivateWorkbench() }
@@ -708,7 +708,7 @@ public struct SectoriumWorkbenchView: View {
     private var selectedDeviceProfiles: [SectoriumDevelopmentProfile] {
         model.workbench.profiles.filter { $0.deviceID == model.workbench.selectedDeviceID }
     }
-    private var readinessTitle: String {
+    var readinessTitle: String {
         if model.isBusy { return text("Busy", "忙碌") }
         if model.workbench.pendingOperation != nil || model.snapshot.pendingEject == true {
             return text("In progress", "操作中")
@@ -726,6 +726,9 @@ public struct SectoriumWorkbenchView: View {
         case .partialFailure: return text("Partially completed", "部分完成")
         case .unknown: return text("Unknown", "未知")
         case .ejected: return text("Ejected", "已弹出")
+        case .awaitingUnlock: return text("Unlock required", "需要解锁")
+        case .noDevice: return text("Choose a drive", "请选择硬盘")
+        case .readOnly: return text("Read-only", "只读")
         default: break
         }
         if presentationLegacy?.state == .mounted {
@@ -746,12 +749,23 @@ public struct SectoriumWorkbenchView: View {
         case .unknown: text("Unknown", "未知")
         }
     }
-    private var readinessSummary: String {
+    var readinessSummary: String {
         if model.isBusy || model.workbench.pendingOperation != nil || model.snapshot.pendingEject == true {
             return text("A storage operation needs attention. Keep the selected drive connected and review its result.",
                         "存储操作仍待处理。请保持所选硬盘连接并查看结果。")
         }
         if model.inventoryState != .available { return inventoryMessage }
+        switch model.workbench.readiness {
+        case .operationInProgress:
+            return text("A storage operation needs attention. Review the details.", "存储操作待处理，请查看详情。")
+        case .partialFailure:
+            return text("The operation stopped before completion. Keep the drive connected.", "操作未能完成，请保持硬盘连接。")
+        case .unknown:
+            return text("Storage state could not be verified. Review the details.", "暂时无法验证存储状态，请查看详情。")
+        case .noDevice, .awaitingUnlock, .readOnly, .ejected:
+            return readinessDetail
+        default: break
+        }
         if presentationLegacy?.state == .mounted, let legacy = presentationLegacy, let device = selectedDevice {
             return text("\(legacy.name) is mounted on \(physicalTitle(device)). Adopt it to manage this development disk.",
                         "\(legacy.name) 已挂载在 \(physicalTitle(device)) 上。接纳后即可管理此开发盘。")
@@ -760,12 +774,7 @@ public struct SectoriumWorkbenchView: View {
             return text("\(legacy.name) is detached from \(physicalTitle(device)). Adopt it before managing it.",
                         "\(legacy.name) 已从 \(physicalTitle(device)) 分离。接纳后即可管理。")
         }
-        return switch model.workbench.readiness {
-        case .operationInProgress: text("A storage operation needs attention. Review the details.", "存储操作待处理，请查看详情。")
-        case .partialFailure: text("The operation stopped before completion. Keep the drive connected.", "操作未能完成，请保持硬盘连接。")
-        case .unknown: text("Storage state could not be verified. Review the details.", "暂时无法验证存储状态，请查看详情。")
-        default: readinessDetail
-        }
+        return readinessDetail
     }
     private var operationSummary: String {
         let completed = model.workbench.operationSteps.filter { $0.status == .succeeded }.count
@@ -1034,10 +1043,16 @@ public struct SectoriumWorkbenchView: View {
 
     private func physicalTitle(_ device: SectoriumPhysicalDevice) -> String {
         let mountedName = device.volumeMembers.first(where: { $0.mounted })?.name
+        let title: String
         if let mountedName, !mountedName.isEmpty, mountedName != device.name {
-            return "\(mountedName) · \(device.name)"
+            title = "\(mountedName) · \(device.name)"
+        } else {
+            title = device.name
         }
-        return device.name
+        guard !device.isExternal, !title.localizedCaseInsensitiveContains(device.bsdName) else {
+            return title
+        }
+        return "\(title) · \(device.bsdName)"
     }
     private func deviceLabel(_ device: SectoriumPhysicalDevice) -> String {
         let location = device.isExternal ? text("External physical drive", "外接物理硬盘")
@@ -1087,10 +1102,15 @@ enum SectoriumExistingImagePicker {
         panel.allowsMultipleSelection = false
         panel.prompt = prompt
         panel.showsHiddenFiles = true
-        if let observedMount = mountedVolumePaths.first(where: { !$0.isEmpty && $0.hasPrefix("/") }) {
-            panel.directoryURL = URL(fileURLWithPath: observedMount, isDirectory: true)
+        if let observedMount = suggestedDirectoryURL(mountedVolumePaths: mountedVolumePaths) {
+            panel.directoryURL = observedMount
         }
         return panel
+    }
+
+    static func suggestedDirectoryURL(mountedVolumePaths: [String]) -> URL? {
+        mountedVolumePaths.first(where: { !$0.isEmpty && $0.hasPrefix("/") })
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
     }
 
     @MainActor
@@ -1105,7 +1125,7 @@ private final class SectoriumWeakButtonReference: ObservableObject {
     weak var ownerWindow: NSWindow?
 }
 
-private struct SectoriumWorkbenchButton: NSViewRepresentable {
+struct SectoriumWorkbenchButton: NSViewRepresentable {
     let title: String
     let identifier: String
     let isEnabled: Bool

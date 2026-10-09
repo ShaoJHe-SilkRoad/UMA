@@ -1263,11 +1263,7 @@ private struct QuotaRow: View {
                     : UsageQuotaVisualMetrics.secondaryBarHeight
             )
 
-            HStack {
-                Text(language.remaining)
-                Spacer()
-                Text(period.resetText)
-            }
+            Text(language.remaining)
             .font(
                 AppTypography.font(
                     isPrimary ? 11.5 : 8.5,

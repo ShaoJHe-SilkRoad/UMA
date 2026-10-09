@@ -32,7 +32,7 @@ struct M5RMXFinalProductIntegrationTests {
         #expect(settings.contains("presentation.remainingDisplayText"))
         #expect(settings.contains("presentation.sourceDescription"))
         #expect(settings.contains("Text(language.remaining)"))
-        #expect(settings.contains("window.resetText.isEmpty"))
+        #expect(!settings.contains("window.resetText"))
         #expect(!settings.contains("Current usage"))
         #expect(!settings.contains("当前用量"))
     }

@@ -305,6 +305,59 @@ import HESectoriumRuntime
         #expect(controls.count == 9)
     }
 
+    @Test func promptComposerRebuildsKeyViewLoopAfterSameWindowControlReplacement() throws {
+        _ = NSApplication.shared
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 552),
+            styleMask: [.titled, .closable], backing: .buffered, defer: false
+        )
+        let firstHost = NSHostingView(rootView: ThreadOSPromptComposerView(
+            language: .english, preferences: .inMemory()
+        ))
+        window.contentView = firstHost
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        settle(firstHost)
+
+        let copyIdentifier = "uma.threados.prompt.generate-copy"
+        let oldCopy = try #require(descendants(of: firstHost).first {
+            $0.accessibilityIdentifier() == copyIdentifier
+        })
+        let replacementHost = NSHostingView(rootView: ThreadOSPromptComposerView(
+            language: .english, preferences: .inMemory()
+        ))
+        window.contentView = replacementHost
+        settle(replacementHost)
+
+        let identifiers = ThreadOSPromptRole.allCases.flatMap { role in
+            ["uma.threados.prompt.role.\(role.rawValue).model", "uma.threados.prompt.role.\(role.rawValue).effort"]
+        } + [copyIdentifier]
+        let replacementViews = descendants(of: replacementHost)
+        let controls = try identifiers.map { identifier in
+            try #require(replacementViews.first { $0.accessibilityIdentifier() == identifier })
+        }
+        #expect(controls.count == 9)
+        #expect(controls.last !== oldCopy)
+        #expect(oldCopy.window == nil)
+        #expect(window.contentView === replacementHost)
+        #expect(window.initialFirstResponder === replacementHost)
+        #expect(replacementHost.nextKeyView === controls[0])
+        #expect(controls.allSatisfy { $0.window === window && $0.canBecomeKeyView })
+        for (current, next) in zip(controls, controls.dropFirst()) {
+            #expect(current.nextKeyView === next)
+        }
+        #expect(window.makeFirstResponder(window))
+        for control in controls {
+            window.selectNextKeyView(nil)
+            #expect((window.firstResponder as? NSView) === control)
+        }
+        #expect(window.makeFirstResponder(controls[controls.count - 1]))
+        for control in controls.reversed().dropFirst() {
+            window.selectPreviousKeyView(nil)
+            #expect((window.firstResponder as? NSView) === control)
+        }
+    }
+
     @Test func stackedComposerKeyboardFocusKeepsControlsVisibleInShortScrollViewport() throws {
         _ = NSApplication.shared
         let contentView = NSHostingView(rootView: ThreadOSPromptComposerView(
@@ -864,11 +917,14 @@ import HESectoriumRuntime
         #expect(store.workbench.selectedDeviceID == fixture.device.id)
         #expect(store.workbench.profiles.contains(where: { $0.id == profile.id }))
         let rendered = try recognizedText(in: host)
-        let internalLine = try #require(rendered.first { $0.text.localizedCaseInsensitiveContains("disk0") }, "Missing rendered internal drive: \(rendered)")
+        let internalLine = try #require(rendered.first { $0.text.localizedCaseInsensitiveContains("Internal system drive") }, "Missing rendered internal drive: \(rendered)")
+        #expect(internalLine.text.localizedCaseInsensitiveContains("disk0") ||
+                internalLine.text.localizedCaseInsensitiveContains("disko"),
+                "The collapsed internal title must display its disk identity; OCR can confuse zero with O.")
         let externalLine = try #require(rendered.first { $0.text.localizedCaseInsensitiveContains("disk81") }, "Missing rendered external drive: \(rendered)")
         let childLine = try #require(rendered.first { $0.text.contains("DEV_APFS") && $0.text.contains("299.8 GiB") }, "Missing rendered child name/capacity: \(rendered)")
-        #expect(internalLine.frame.midY > externalLine.frame.midY,
-                "The two physical roots must appear separately in their rendered order: \(rendered)")
+        #expect(externalLine.frame.midY > internalLine.frame.midY,
+                "The selected external root must precede the separate internal root: \(rendered)")
         #expect(externalLine.frame.midY > childLine.frame.midY,
                 "The development child must render under the external parent's hardware facts: \(rendered)")
         #expect(rendered.contains { $0.text.localizedCaseInsensitiveContains("Selected") },
@@ -886,7 +942,7 @@ import HESectoriumRuntime
         }
         settle(host)
         let refreshed = try recognizedText(in: host)
-        #expect(refreshed.contains { $0.text.localizedCaseInsensitiveContains("disk0") })
+        #expect(refreshed.contains { $0.text.localizedCaseInsensitiveContains("Internal system drive") })
         #expect(refreshed.contains { $0.text.localizedCaseInsensitiveContains("disk81") })
         let retainedChild = try #require(refreshed.first { $0.text.contains("DEV_APFS") && $0.text.contains("299.8 GiB") },
                                          "Selecting the internal drive must not detach the child from the external parent's rendered row: \(refreshed)")
@@ -911,7 +967,9 @@ import HESectoriumRuntime
         #expect(SectoriumExistingImagePicker.selectedURL(from: panel, response: .cancel) == nil)
 
         let noObservedMount = SectoriumExistingImagePicker.makePanel(mountedVolumePaths: [], prompt: "Adopt")
-        #expect(noObservedMount.directoryURL == nil, "Without a current mount observation the chooser must not invent a location.")
+        #expect(SectoriumExistingImagePicker.suggestedDirectoryURL(mountedVolumePaths: []) == nil,
+                "Without a current mount observation UMA must not set a chooser location; AppKit may supply its own default.")
+        #expect(SectoriumExistingImagePicker.selectedURL(from: noObservedMount, response: .cancel) == nil)
     }
 
     @Test func sectoriumReadinessPresentationUsesCurrentFailureBeforeCachedLegacyNames() async throws {
@@ -932,14 +990,9 @@ import HESectoriumRuntime
         fixture.store.apply(devices: [fixture.device], profiles: [], readiness: .connected,
                             pending: nil, discoveredLegacy: true, legacyByDevice: [fixture.device.id: legacy])
         settle(host)
-        let titleView = try #require(descendants(of: host).first {
-            $0.accessibilityIdentifier() == "uma.sectorium.readiness-title"
-        })
-        let summaryView = try #require(descendants(of: host).first {
-            $0.accessibilityIdentifier() == "uma.sectorium.readiness-summary"
-        })
-        #expect(accessibilityLabel(in: titleView)?.contains("Started, not yet managed") == true)
-        let mountedSummary = try #require(accessibilityLabel(in: summaryView))
+        let presentation = SectoriumWorkbenchView(store: fixture.store)
+        #expect(presentation.readinessTitle.contains("Started, not yet managed"))
+        let mountedSummary = presentation.readinessSummary
         #expect(mountedSummary.contains("DEV_NEBULA"))
         #expect(mountedSummary.contains(fixture.device.name))
         #expect(!mountedSummary.contains("HE"))
@@ -957,15 +1010,15 @@ import HESectoriumRuntime
             fixture.store.apply(devices: [fixture.device], profiles: [], readiness: readiness,
                                 pending: nil, discoveredLegacy: true, legacyByDevice: [fixture.device.id: legacy])
             settle(host)
-            #expect(accessibilityLabel(in: titleView)?.contains(expectedTitle) == true)
-            #expect(accessibilityLabel(in: summaryView)?.localizedCaseInsensitiveContains(expectedSummary) == true)
+            #expect(presentation.readinessTitle.contains(expectedTitle))
+            #expect(presentation.readinessSummary.localizedCaseInsensitiveContains(expectedSummary))
         }
         fixture.store.apply(devices: [fixture.device], profiles: [], readiness: .connected,
                             pending: "start:interrupted", discoveredLegacy: true,
                             legacyByDevice: [fixture.device.id: legacy])
         settle(host)
-        #expect(accessibilityLabel(in: titleView)?.contains("In progress") == true)
-        #expect(accessibilityLabel(in: summaryView)?.localizedCaseInsensitiveContains("needs attention") == true)
+        #expect(presentation.readinessTitle.contains("In progress"))
+        #expect(presentation.readinessSummary.localizedCaseInsensitiveContains("needs attention"))
     }
 
     @Test func sectoriumEnabledStorageActionsParticipateInAttachedWindowTabTraversal() async throws {

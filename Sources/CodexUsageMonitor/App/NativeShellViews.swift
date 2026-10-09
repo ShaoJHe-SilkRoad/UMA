@@ -107,6 +107,91 @@ private final class MainToolbarFocusableButton: NSButton {
 }
 
 @MainActor
+private final class MainAgentSettingsFocusBridge {
+    weak var button: NSButton?
+    private var keyObserver: NSObjectProtocol?
+    private var focusRetryTimer: Timer?
+
+    isolated deinit {
+        if let keyObserver { NotificationCenter.default.removeObserver(keyObserver) }
+        focusRetryTimer?.invalidate()
+    }
+
+    func restoreAfterSheetDismiss() {
+        guard let window = button?.window else { return }
+        if let keyObserver { NotificationCenter.default.removeObserver(keyObserver) }
+        keyObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.retryWhileKey() }
+        }
+        retryWhileKey()
+    }
+
+    private func retryWhileKey() {
+        focusRetryTimer?.invalidate()
+        guard button?.window?.isKeyWindow == true else { return }
+        let deadline = Date().addingTimeInterval(0.5)
+        focusRetryTimer = Timer.scheduledTimer(withTimeInterval: 0.025, repeats: true) { [weak self] timer in
+            let restored = MainActor.assumeIsolated { () -> Bool in
+                guard let self, let button = self.button,
+                      let window = button.window, window.isKeyWindow else { return false }
+                return window.makeFirstResponder(button)
+            }
+            if restored || Date() >= deadline {
+                timer.invalidate()
+                if restored { MainActor.assumeIsolated { self?.finishReturnFocus() } }
+            }
+        }
+    }
+
+    private func finishReturnFocus() {
+        focusRetryTimer?.invalidate()
+        focusRetryTimer = nil
+        if let keyObserver { NotificationCenter.default.removeObserver(keyObserver) }
+        keyObserver = nil
+    }
+}
+
+private struct MainAgentSettingsButton: NSViewRepresentable {
+    let label: String
+    let enabled: Bool
+    let focusBridge: MainAgentSettingsFocusBridge
+    let action: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+
+    func makeNSView(context: Context) -> NSButton {
+        let button = MainToolbarFocusableButton(title: "", target: context.coordinator,
+            action: #selector(Coordinator.activate(_:)))
+        button.isBordered = false
+        button.imagePosition = .imageOnly
+        button.focusRingType = .exterior
+        button.refusesFirstResponder = false
+        focusBridge.button = button
+        updateNSView(button, context: context)
+        return button
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) {
+        context.coordinator.action = action
+        button.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: label)
+        button.isEnabled = enabled
+        button.setAccessibilityLabel(label)
+        button.setAccessibilityIdentifier("uma.agent.selected-settings")
+        button.toolTip = label
+        focusBridge.button = button
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var action: () -> Void
+        init(action: @escaping () -> Void) { self.action = action }
+        @objc func activate(_ sender: NSButton) { action() }
+    }
+}
+
+@MainActor
 final class MainSurfaceNavigationState: ObservableObject {
     @Published var destination: MainSurfaceDestination = .agents
     @Published var selectedAgent: ProviderProductID = .codex
@@ -126,6 +211,12 @@ struct MainWindowRootView: View {
     var hesectoriumStore: HESectoriumStore? = nil
     var promptClipboard: (any ThreadOSSettingsClipboard)? = nil
     var promptPreferences: ApplicationPreferences = .production
+    var claudeSettings: ClaudeBrowserSettingsModel? = nil
+    var referenceDate: Date? = nil
+    var agentRailDisplayNames: [ProviderProductID: String] = [:]
+    var initiallyExpandedResetProviderID: ProviderProductID? = nil
+    @State private var sheetProviderID: ProviderProductID?
+    @State private var agentSettingsFocusBridge = MainAgentSettingsFocusBridge()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -151,9 +242,16 @@ struct MainWindowRootView: View {
                 )
             }
         }
-        .frame(minWidth: 760, minHeight: 520)
+        .frame(minWidth: 760, minHeight: 488)
         .background(UMAVisualStyle.canvas)
         .environment(\.locale, store.language.locale)
+        .sheet(item: $sheetProviderID, onDismiss: {
+            agentSettingsFocusBridge.restoreAfterSheetDismiss()
+        }) { providerID in
+            AgentSpecificSettingsSheet(store: store, providerID: providerID.settingsProviderID, claudeSettings: claudeSettings) {
+                sheetProviderID = nil
+            }
+        }
     }
 
     private var toolbar: some View {
@@ -201,10 +299,19 @@ struct MainWindowRootView: View {
     private var agentsWorkspace: some View {
         HSplitView {
             VStack(alignment: .leading, spacing: 8) {
-                Text(localized("Agents", "智能体"))
-                    .font(.headline)
-                    .padding(.horizontal, 10)
-                    .padding(.top, 12)
+                HStack {
+                    Text(localized("Agents", "智能体")).font(.headline)
+                    Spacer(minLength: 4)
+                    MainAgentSettingsButton(
+                        label: localized("Selected agent settings", "所选智能体设置"),
+                        enabled: !workspaceProviders.isEmpty,
+                        focusBridge: agentSettingsFocusBridge,
+                        action: { sheetProviderID = selectedProviderID }
+                    )
+                    .frame(width: 20, height: 20)
+                }
+                .padding(.horizontal, 10)
+                .padding(.top, 12)
                 if workspaceProviders.isEmpty {
                     VStack(spacing: 8) {
                         Text(localized("No active agents", "没有活跃的智能体"))
@@ -214,28 +321,33 @@ struct MainWindowRootView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ScrollView {
-                        LazyVStack(spacing: 3) {
-                            ForEach(workspaceProviders) { provider in
-                                Button {
-                                    navigation.selectedAgent = provider.id
-                                } label: {
-                                    AgentGlanceRow(
-                                        provider: provider,
-                                        style: .mainList,
-                                        selected: selectedProviderID == provider.id,
-                                        language: store.language
-                                    )
+                    GeometryReader { available in
+                        ScrollView {
+                            VStack(spacing: 3) {
+                                ForEach(workspaceProviders) { provider in
+                                    Button {
+                                        navigation.selectedAgent = provider.id
+                                    } label: {
+                                        AgentGlanceRow(
+                                            provider: provider,
+                                            style: .mainList,
+                                            selected: selectedProviderID == provider.id,
+                                            language: store.language,
+                                            referenceDate: referenceDate,
+                                            displayNameOverride: agentRailDisplayNames[provider.id]
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityIdentifier("uma.agent.list.\(provider.id.rawValue)")
                                 }
-                                .buttonStyle(.plain)
-                                .accessibilityIdentifier("uma.agent.list.\(provider.id.rawValue)")
                             }
+                            .padding(.horizontal, 6)
                         }
-                        .padding(.horizontal, 6)
+                        .frame(height: available.size.height)
                     }
                 }
             }
-            .frame(minWidth: 210, idealWidth: 240, maxWidth: 285)
+            .frame(minWidth: 224, idealWidth: 240, maxWidth: 248)
             .background(UMAVisualStyle.canvas)
 
             AgentWorkspaceSurface(
@@ -246,7 +358,8 @@ struct MainWindowRootView: View {
                 disconnectCodex: disconnectCodex,
                 claudeControlState: claudeControlState,
                 connectClaude: connectClaude,
-                claudeAccuracySync: accuracySyncClaude
+                claudeAccuracySync: accuracySyncClaude,
+                referenceDate: referenceDate
             )
             .frame(minWidth: 500)
         }

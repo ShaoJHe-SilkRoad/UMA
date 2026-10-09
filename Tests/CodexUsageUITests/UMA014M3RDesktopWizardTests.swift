@@ -15,15 +15,13 @@ struct UMA014M3RDesktopWizardTests {
         #expect(DesktopAgentLogoAsset.resolve(providerID: "codex-impostor.local") == nil)
     }
 
-    @Test("Regular restores the accepted Wizard composition and keeps Minimalist unchanged")
+    @Test("Regular exposes current Wizard fields and keeps Minimalist unchanged")
     func regularPresentationContract() throws {
         let regular = DesktopAssistantContentContract.visibleFields(for: .regular)
-        #expect(regular.contains(.providerConnectionMark))
-        #expect(regular.contains(.providerName))
-        #expect(regular.contains(.planTier))
-        #expect(regular.contains(.selectedWindow))
-        #expect(regular.contains(.reset))
-        #expect(regular.contains(.percentage))
+        #expect(regular == [
+            .providerConnectionMark, .providerName, .planTier,
+            .selectedWindow, .percentage
+        ])
         #expect(
             DesktopAssistantContentContract.visibleFields(for: .minimalist)
                 == [.providerConnectionMark, .percentage]

@@ -555,14 +555,14 @@ public struct ThreadOSSettingsView: View {
             }.frame(width: 34, height: 34)
             VStack(alignment: .leading, spacing: 2) {
                 Text(window.title).font(.caption.weight(.medium)).lineLimit(1)
-                Text(accountStripResetText(state, original: window.resetText)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                Text(accountStripStateText(state)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading).padding(8)
         .background(.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(.quaternary, lineWidth: 1))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(accountStripAccessibilityText(state, title: window.title, reset: window.resetText))
+        .accessibilityLabel(accountStripAccessibilityText(state, title: window.title))
     }
     private func accountStripFact(_ value: String, _ label: String, _ detail: String, accessibility: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -586,11 +586,11 @@ public struct ThreadOSSettingsView: View {
     private func accountStripRemainingText(_ state: BasicSharedUsagePresentation.AccountStripQuotaState) -> String {
         switch state { case let .finite(value): "\(value)%"; case .unlimited: "∞"; case let .stale(value), let .estimated(value): value.map { "\($0)%" } ?? "—"; case .unavailable: "—" }
     }
-    private func accountStripResetText(_ state: BasicSharedUsagePresentation.AccountStripQuotaState, original: String) -> String {
-        switch state { case .finite, .unlimited: original; case .stale: title("Stale retained data", "已过期保留数据"); case .estimated: title("Estimated quota", "估算配额"); case .unavailable: title("Unavailable", "不可用") }
+    private func accountStripStateText(_ state: BasicSharedUsagePresentation.AccountStripQuotaState) -> String {
+        switch state { case .finite, .unlimited: title("Remaining", "剩余"); case .stale: title("Stale retained data", "已过期保留数据"); case .estimated: title("Estimated quota", "估算配额"); case .unavailable: title("Unavailable", "不可用") }
     }
-    private func accountStripAccessibilityText(_ state: BasicSharedUsagePresentation.AccountStripQuotaState, title: String, reset: String) -> String {
-        switch state { case .finite, .unlimited: "\(title), \(accountStripRemainingText(state)), \(reset)"; case .stale: "\(title), \(accountStripRemainingText(state)), \(localized(language, "stale retained account quota", "已过期保留账户配额"))"; case .estimated: "\(title), \(accountStripRemainingText(state)), \(localized(language, "estimated account quota", "估算账户配额"))"; case .unavailable: "\(title), \(localized(language, "account quota unavailable", "账户配额不可用"))" }
+    private func accountStripAccessibilityText(_ state: BasicSharedUsagePresentation.AccountStripQuotaState, title: String) -> String {
+        switch state { case .finite, .unlimited: "\(title), \(accountStripRemainingText(state))"; case .stale: "\(title), \(accountStripRemainingText(state)), \(localized(language, "stale retained account quota", "已过期保留账户配额"))"; case .estimated: "\(title), \(accountStripRemainingText(state)), \(localized(language, "estimated account quota", "估算账户配额"))"; case .unavailable: "\(title), \(localized(language, "account quota unavailable", "账户配额不可用"))" }
     }
     private var projectPicker: some View {
         Picker(title("Project", "项目"), selection: Binding(get: { factoriumV2.selectedProject }, set: { factoriumV2.select(project: $0) })) {

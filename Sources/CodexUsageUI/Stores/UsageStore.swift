@@ -33,6 +33,7 @@ public final class UsageStore: ObservableObject {
     private let registry: AgentConnectorRegistry?
     private let primaryConnectorID: AgentConnectorID?
     private let previewOnly: Bool
+    private let previewSeedCards: [SharedUsageCardPresentation]
     private let previewDisplaysFixtureData: Bool
     private let allowsLaunchScan: Bool
     private let consentDefaults: UserDefaults?
@@ -103,6 +104,7 @@ public final class UsageStore: ObservableObject {
         language: AppLanguage = .simplifiedChinese,
         presentationCards: [SharedUsageCardPresentation] = [],
         accountDailyUsage: [AgentAccountUsageDay] = [],
+        previewCapturedAt: Date? = nil,
         chineseLoginProviderName: String? = nil,
         includesAgentSettings: Bool = false
     ) -> UsageStore {
@@ -146,7 +148,64 @@ public final class UsageStore: ObservableObject {
         if !accountDailyUsage.isEmpty {
             store.snapshot.accountDailyUsage = accountDailyUsage
         }
+        if let previewCapturedAt, scenario.displaysFixtureData {
+            store.snapshot.updatedAt = previewCapturedAt
+            store.snapshot.providerSource = UsageSourceStatus(
+                label: "Preview fixture", scope: "preview only",
+                capturedAt: previewCapturedAt, isAvailable: true
+            )
+            store.snapshot.localSource = UsageSourceStatus(
+                label: "Preview fixture", scope: "preview only",
+                capturedAt: previewCapturedAt, isAvailable: true, coverage: 100
+            )
+        }
         return store
+    }
+
+    /// Test presentation input only. Ordinary preview and production callers
+    /// retain their existing snapshot construction and connector ownership.
+    func configureMatchedPreviewSnapshot(_ input: UsageSnapshot) {
+        guard previewOnly else { return }
+        snapshot = input
+    }
+
+    /// Isolated preview-only source-state fixture; production stores cannot
+    /// receive a synthetic history channel through this method.
+    func configurePreviewHistorySource(
+        freshness: UsageSourceStatus.Freshness,
+        includeAggregate: Bool
+    ) {
+        guard previewOnly else { return }
+        snapshot.localSource = UsageSourceStatus(
+            label: "Preview fixture", scope: "preview only",
+            capturedAt: snapshot.updatedAt, isAvailable: freshness != .unavailable,
+            coverage: includeAggregate ? 100 : nil, freshness: freshness
+        )
+        if !includeAggregate { snapshot.apiCostEstimate = nil }
+    }
+
+    /// Isolated preview-only activity-channel fixture. No production store can
+    /// receive synthetic local tasks or freshness through this method.
+    func configurePreviewActivitySource(
+        freshness: UsageSourceStatus.Freshness,
+        isAvailable: Bool,
+        includeTasks: Bool,
+        firstTaskTitle: String? = nil
+    ) {
+        guard previewOnly else { return }
+        snapshot.localSource = UsageSourceStatus(
+            label: "Preview local activity", scope: "preview only",
+            capturedAt: snapshot.updatedAt, isAvailable: isAvailable,
+            coverage: nil, freshness: freshness
+        )
+        if !includeTasks { snapshot.recentTasks = [] }
+        if let firstTaskTitle, includeTasks, !snapshot.recentTasks.isEmpty {
+            let original = snapshot.recentTasks[0]
+            snapshot.recentTasks[0] = RecentTask(
+                id: original.id, title: firstTaskTitle, time: original.time,
+                tokenText: original.tokenText, progress: original.progress
+            )
+        }
     }
 
     init(
@@ -202,6 +261,7 @@ public final class UsageStore: ObservableObject {
                     )
             )
         self.language = selectedLanguage
+        self.previewSeedCards = previewPresentationCards
         self.presentationCards = previewPresentationCards
         self.productInventory = ProviderProductStatePolicy.previewInventory(
             cards: previewPresentationCards,
@@ -568,7 +628,19 @@ public final class UsageStore: ObservableObject {
     }
 
     private func applyMonitoringPreferences() {
-        guard agentSettings != nil else { return }
+        guard let agentSettings else { return }
+        if previewOnly && !previewSeedCards.isEmpty {
+            // A preview has no connector publication to rebuild from. Keep its
+            // seeded data intact across a real settings-sheet off/on cycle.
+            let visible = previewSeedCards.filter { card in
+                guard let id = AgentConnectorID(rawValue: card.id) else { return false }
+                return agentSettings.isMonitoringEnabled(for: id)
+            }
+            presentationCards = visible
+            productInventory = ProviderProductStatePolicy.previewInventory(
+                cards: visible, language: language)
+            return
+        }
         rebuildPresentation()
     }
 

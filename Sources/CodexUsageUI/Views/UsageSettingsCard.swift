@@ -470,6 +470,7 @@ private struct AgentSpecificSettingsContent: View {
                     }
                 )
             )
+            .accessibilityIdentifier("uma.agent.settings.monitoring.\(providerID.rawValue)")
 
             if providerID == AgentPreferenceRecord.codexProviderID {
                 Divider().opacity(0.35)
@@ -592,9 +593,7 @@ private struct ResolvedProviderUsageSummary: View {
                     .monospacedDigit()
             }
             if let window = presentation.selectedWindow {
-                Text(window.resetText.isEmpty
-                    ? window.compactLabel
-                    : "\(window.compactLabel) · \(window.resetText)")
+                Text(window.compactLabel)
                     .font(AppTypography.font(8.5, language: language))
                     .foregroundStyle(.secondary)
             }
@@ -2010,5 +2009,83 @@ private struct LanguageSettingRow: View {
                 }
             }
         }
+    }
+}
+
+
+/// Native main-window entry into the existing provider-specific settings
+/// content. The coordinator and preference keys are shared with UsageSettingsCard.
+public struct AgentSpecificSettingsSheet: View {
+    @ObservedObject private var store: UsageStore
+    private let providerID: String
+    private let close: () -> Void
+    private let claudeSettings: ClaudeBrowserSettingsModel?
+    private let antigravitySettings: AntigravitySettingsModel?
+    private let workBuddySettings: WorkBuddySettingsModel?
+    private let workBuddyLogin: WorkBuddyLoginCoordinator?
+    private let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
+    @AppStorage("display.showUsageSummaryCard") private var showUsageSummary = true
+    @AppStorage("display.showRecentTasksCard") private var showRecentTasks = false
+    @AppStorage("display.showAPICostCard") private var showAPICost = false
+
+    public init(
+        store: UsageStore, providerID: String,
+        claudeSettings: ClaudeBrowserSettingsModel? = nil,
+        antigravitySettings: AntigravitySettingsModel? = nil,
+        workBuddySettings: WorkBuddySettingsModel? = nil,
+        workBuddyLogin: WorkBuddyLoginCoordinator? = nil,
+        workBuddyAccountWebSync: WorkBuddyAccountWebSessionController? = nil,
+        close: @escaping () -> Void
+    ) {
+        self.store = store
+        self.providerID = providerID
+        self.claudeSettings = claudeSettings
+        self.antigravitySettings = antigravitySettings
+        self.workBuddySettings = workBuddySettings
+        self.workBuddyLogin = workBuddyLogin
+        self.workBuddyAccountWebSync = workBuddyAccountWebSync
+        self.close = close
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(store.language.agentSettings).font(.headline)
+                Spacer()
+                Button(store.language == .simplifiedChinese ? "完成" : "Done", action: close)
+                    .keyboardShortcut(.cancelAction)
+            }
+            if let coordinator = store.agentSettings,
+               let id = AgentConnectorID(rawValue: providerID) {
+                ScrollView {
+                    AgentSpecificSettingsContent(
+                        coordinator: coordinator,
+                        providerID: id,
+                        language: store.language,
+                        showUsageSummary: $showUsageSummary,
+                        showRecentTasks: $showRecentTasks,
+                        showAPICost: $showAPICost,
+                        claudeSettings: self.claudeSettings,
+                        antigravitySettings: self.antigravitySettings,
+                        workBuddySettings: self.workBuddySettings,
+                        workBuddyLogin: self.workBuddyLogin,
+                        workBuddyAccountWebSync: self.workBuddyAccountWebSync,
+                        presentation: store.presentationCards.first { card in
+                            ProviderProductID.allCases.first { $0.settingsProviderID == providerID }
+                                .flatMap(ProviderProductStatePolicy.connectorID(for:))?.rawValue == card.id
+                        },
+                        checkAgain: { Task { await store.checkLocalSessionAgain() } },
+                        syncWorkBuddyAccount: { Task { await store.syncWorkBuddyAccountNow() } },
+                        disconnectWorkBuddyAccount: { Task { await store.disconnectWorkBuddyAccount() } }
+                    )
+                }
+            } else {
+                Text(store.language == .simplifiedChinese ? "此智能体的设置不可用。" : "Settings for this agent are unavailable.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(18)
+        .frame(minWidth: 340, idealWidth: 420, minHeight: 300, idealHeight: 480)
+        .accessibilityIdentifier("uma.agent.settings-sheet")
     }
 }

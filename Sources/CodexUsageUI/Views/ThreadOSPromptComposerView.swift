@@ -73,6 +73,20 @@ private final class ThreadOSPromptFocusableButton: NSButton {
     override var acceptsFirstResponder: Bool { isEnabled }
     override var canBecomeKeyView: Bool { isEnabled && !isHidden && alphaValue > 0 }
 
+    override func keyDown(with event: NSEvent) {
+        // A focused Copy button accepts ordinary Return/Enter, including Shift.
+        // Command, Control and Option combinations retain normal key handling.
+        // Keep this scoped to the actual first responder; a global key
+        // equivalent would copy while an unrelated control owns focus.
+        if (event.keyCode == 36 || event.keyCode == 76), isEnabled,
+           window?.firstResponder === self,
+           event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
+            performClick(self)
+            return
+        }
+        super.keyDown(with: event)
+    }
+
     override func becomeFirstResponder() -> Bool {
         let becameFirstResponder = super.becomeFirstResponder()
         if becameFirstResponder { revealPromptFocusInEnclosingScrollView() }
@@ -200,6 +214,11 @@ private struct ThreadOSPromptKeyViewLoopAttachment: NSViewRepresentable {
             let anchor = controls.contains(where: { $0 === preferredAnchor }) ? root : preferredAnchor
             guard anchor.window === window else { return false }
             preserveExplicitKeyViewLoop(in: window)
+            // Replacing the SwiftUI content inside the same NSWindow clears its
+            // initial responder. Restore the new root before linking Tab routes.
+            if window.initialFirstResponder == nil {
+                window.initialFirstResponder = anchor
+            }
 
             // The shell's AppKit route can be recalculated while SwiftUI builds
             // its toolbar. Own the complete ThreadOS cycle, including both

@@ -8,6 +8,14 @@ public enum ProviderProductID: String, CaseIterable, Identifiable, Sendable {
     case antigravity
 
     public var id: String { rawValue }
+    public var settingsProviderID: String {
+        switch self {
+        case .codex: AgentPreferenceRecord.codexProviderID.rawValue
+        case .claude: AgentPreferenceRecord.claudeProviderID.rawValue
+        case .workBuddy: AgentPreferenceRecord.workBuddyProviderID.rawValue
+        case .antigravity: AgentPreferenceRecord.antigravityProviderID.rawValue
+        }
+    }
     public var displayName: String {
         switch self {
         case .codex: "Codex"

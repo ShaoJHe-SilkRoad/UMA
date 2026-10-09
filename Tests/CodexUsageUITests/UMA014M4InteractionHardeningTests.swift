@@ -17,7 +17,8 @@ struct UMA014M4InteractionHardeningTests {
         #expect(coordinator.contains("private let settingsWindowController"))
         #expect(coordinator.contains("settingsWindowController.showCanonicalWindow()"))
         #expect(menus.contains("coordinator?.showSettingsWindow()"))
-        #expect(main.contains("Button(action: openSettings)"))
+        let settingsEntry = try #require(main.components(separatedBy: "identifier: \"uma.main.settings\"").dropFirst().first)
+        #expect(settingsEntry.components(separatedBy: ".frame").first?.contains("action: openSettings") == true)
         #expect(quick.contains("headerButton(localized(\"Settings\""))
         #expect(!main.contains("SettingsWindowController()"))
         #expect(!quick.contains("SettingsWindowController()"))
@@ -88,7 +89,8 @@ struct UMA014M4InteractionHardeningTests {
     func accessibilityAndSystemSettingsReturnStaySynchronized() throws {
         let surfaces = try source("Sources/CodexUsageUI/Views/AgentSurfaceViews.swift")
 
-        #expect(surfaces.contains("let reset = resetDate.map"))
+        #expect(!surfaces.contains("let reset = resetDate.map"))
+        #expect(!surfaces.contains("language.resetDescription(for: reset"))
         #expect(surfaces.contains("NSApplication.didBecomeActiveNotification"))
         #expect(surfaces.contains("model.refreshLaunchAtLoginState()"))
         #expect(surfaces.contains("launchAtLoginError = nil"))

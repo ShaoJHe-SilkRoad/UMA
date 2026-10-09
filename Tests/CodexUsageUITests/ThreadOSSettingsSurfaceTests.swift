@@ -590,8 +590,11 @@ import Testing
                 let effort = try #require(identifiers["uma.threados.prompt.role.\(role.rawValue).effort"])
                 #expect(model.window === window && !model.refusesFirstResponder)
                 #expect(effort.window === window && !effort.refusesFirstResponder)
-                #expect(model.accessibilityLabel() == (language == .simplifiedChinese ? "模型" : "Model"))
-                #expect(effort.accessibilityLabel() == (language == .simplifiedChinese ? "思考档位" : "Thinking"))
+                let roleLabel = role.label(for: language)
+                let modelLabel = language == .simplifiedChinese ? "模型" : "Model"
+                let effortLabel = language == .simplifiedChinese ? "思考档位" : "Thinking"
+                #expect(model.accessibilityLabel() == "\(roleLabel) — \(modelLabel)")
+                #expect(effort.accessibilityLabel() == "\(roleLabel) — \(effortLabel)")
                 #expect(model.itemArray.map { $0.title } == [
                     "GPT-6.1 Sol", "GPT-6 Sol", "GPT-6 Luna", "GPT-6 Astra", "GPT-5.6 Sol", "GPT-5.6 Terra"
                 ])

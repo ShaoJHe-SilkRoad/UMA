@@ -116,7 +116,7 @@ struct UMA014M3RSettingsRebuildTests {
         #expect(settings.contains("uma.settings.general.language"))
         #expect(settings.contains("uma.settings.appearance.theme"))
         #expect(settings.contains("uma.settings.appearance.menu-value"))
-        #expect(settings.contains("uma.settings.appearance.quick-reset"))
+        #expect(!settings.contains("uma.settings.appearance.quick-reset"))
     }
 
     @Test("Canonical Settings controller keeps one window across repeated routes")

@@ -271,7 +271,8 @@ final class AppShellCoordinator {
                 self?.runtime?.claudeSettings.agentControlState ?? .onlineVerificationUnavailable
             },
             connectClaude: { [weak self] in self?.connectClaude() },
-            accuracySyncClaude: { [weak self] in self?.accuracySyncClaude() }
+            accuracySyncClaude: { [weak self] in self?.accuracySyncClaude() },
+            claudeSettings: runtime.claudeSettings
         )
         settingsWindowController.attach(
             store: runtime.store, preferences: runtime.preferences, dataPaths: runtime.dataPaths

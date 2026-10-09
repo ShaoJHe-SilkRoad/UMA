@@ -7,11 +7,36 @@ struct ApplicationMenuDiagnosticState: Sendable {
 
 @MainActor
 final class ApplicationMenuController: NSObject, NSMenuItemValidation {
-    private weak var coordinator: AppShellCoordinator?
     private weak var installedMenu: NSMenu?
+    private let routes: IsolatedRoutes
+
+    /// In-memory menu actions for a source-hosted acceptance window. Production
+    /// construction continues to use the bound AppShellCoordinator below.
+    struct IsolatedRoutes {
+        let canRefreshAll: () -> Bool
+        let openSettings: () -> Void
+        let openMainWindow: () -> Void
+        let showQuickPanel: () -> Void
+        let toggleDesktopAssistant: () -> Void
+        let refreshAll: () -> Void
+    }
 
     init(coordinator: AppShellCoordinator) {
-        self.coordinator = coordinator
+        routes = IsolatedRoutes(
+            canRefreshAll: { [weak coordinator] in coordinator?.canRefreshAll == true },
+            openSettings: { [weak coordinator] in coordinator?.showSettingsWindow() },
+            openMainWindow: { [weak coordinator] in coordinator?.showMainWindow() },
+            showQuickPanel: { [weak coordinator] in coordinator?.showQuickPanel() },
+            toggleDesktopAssistant: { [weak coordinator] in coordinator?.toggleDesktopAssistant() },
+            refreshAll: { [weak coordinator] in
+                Task { @MainActor in await coordinator?.refreshAll() }
+            }
+        )
+        super.init()
+    }
+
+    init(isolatedRoutes: IsolatedRoutes) {
+        routes = isolatedRoutes
         super.init()
     }
 
@@ -61,7 +86,7 @@ final class ApplicationMenuController: NSObject, NSMenuItemValidation {
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(refreshAll) {
-            return coordinator?.canRefreshAll == true
+            return routes.canRefreshAll()
         }
         return menuItem.isEnabled
     }
@@ -157,14 +182,10 @@ final class ApplicationMenuController: NSObject, NSMenuItemValidation {
     }
 
     @objc private func showAbout() { NSApp.orderFrontStandardAboutPanel(nil) }
-    @objc private func openSettings() { coordinator?.showSettingsWindow() }
-    @objc private func openMainWindow() { coordinator?.showMainWindow() }
-    @objc private func showQuickPanel() { coordinator?.showQuickPanel() }
-    @objc private func toggleDesktopAssistant() { coordinator?.toggleDesktopAssistant() }
-    @objc private func refreshAll() {
-        Task { @MainActor [weak coordinator] in
-            await coordinator?.refreshAll()
-        }
-    }
+    @objc private func openSettings() { routes.openSettings() }
+    @objc private func openMainWindow() { routes.openMainWindow() }
+    @objc private func showQuickPanel() { routes.showQuickPanel() }
+    @objc private func toggleDesktopAssistant() { routes.toggleDesktopAssistant() }
+    @objc private func refreshAll() { routes.refreshAll() }
     @objc private func quit() { NSApp.terminate(nil) }
 }

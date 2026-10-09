@@ -14,6 +14,11 @@
 set -euo pipefail
 
 readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [[ "${1:-}" == "--native-app-host" ]]; then
+    shift
+    exec /bin/bash "$REPO_ROOT/script/native_app_host.sh" "$@"
+fi
 readonly DEVELOPER_DIR_REQUIRED="/Applications/Xcode-beta.app/Contents/Developer"
 readonly TOOLCHAIN="$DEVELOPER_DIR_REQUIRED/Toolchains/XcodeDefault.xctoolchain"
 readonly SDK="$DEVELOPER_DIR_REQUIRED/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk"
@@ -59,7 +64,13 @@ readonly interop_dir="$(dirname "$testing_interop")"
 
 export DEVELOPER_DIR="$DEVELOPER_DIR_REQUIRED"
 export SDKROOT="$SDK"
-exec /usr/bin/xcrun swift test \
+swift_subcommand=test
+if [[ "${1:-}" == "--native-build-tests" ]]; then
+    shift
+    swift_subcommand=build
+    set -- --build-tests "$@"
+fi
+exec /usr/bin/xcrun swift "$swift_subcommand" \
     --package-path "$REPO_ROOT" \
     --disable-sandbox \
     --disable-keychain \

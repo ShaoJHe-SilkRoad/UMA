@@ -122,18 +122,18 @@ struct M5AG1ClaudeAssistantTests {
         #expect(assistant.sourceDescription == shared.sourceDescription)
         #expect(assistant.freshnessState == .cached)
         #expect(assistant.observationAgeText == "Updated 5 min ago")
-        #expect(assistant.detailText == "7D · 2h · Cached")
+        #expect(assistant.detailText == "7D · Cached")
         for required in [
             "Claude Code",
             "Cached",
             "seven-day window",
             "38 percent remaining",
-            "Resets in 2 hr",
             "Existing Claude login",
             "Updated 5 min ago",
         ] {
             #expect(assistant.toolTip.contains(required))
         }
+        #expect(!assistant.toolTip.contains(assistant.resetText))
         #expect(!assistant.toolTip.contains("Fresh"))
     }
 
@@ -159,7 +159,7 @@ struct M5AG1ClaudeAssistantTests {
     }
 
     @Test
-    func englishAndChineseAccessibilityKeepStateSourceResetAndAge() {
+    func englishAndChineseAccessibilityKeepStateSourceAndAgeWithoutResetTime() {
         let shared = card(
             id: "claude.browserSync",
             provider: "Claude Code",
@@ -206,6 +206,8 @@ struct M5AG1ClaudeAssistantTests {
         #expect(!chinese.accessibilityLabel.contains("正在重新连接"))
         #expect(!english.accessibilityLabel.contains("Fresh"))
         #expect(!chinese.accessibilityLabel.contains("新鲜"))
+        #expect(!english.accessibilityLabel.contains(english.resetText))
+        #expect(!chinese.accessibilityLabel.contains(chinese.resetText))
     }
 
     @Test

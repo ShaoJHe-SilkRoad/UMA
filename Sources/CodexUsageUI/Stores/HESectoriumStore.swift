@@ -142,24 +142,31 @@ public final class HESectoriumStore: ObservableObject {
                 && service.prepareContinueWholeDeviceEjectConfirmation() != nil
             let canReturnEject = pending?.hasPrefix("eject:") == true
                 && service.canReturnFromWholeDeviceEject()
-            await MainActor.run {
-                guard let self, self.observationGeneration == generation else { return }
-                self.snapshot = value
-                self.canBeginWholeDeviceEject = canBeginEject
-                self.canContinueWholeDeviceEject = canContinueEject
-                self.canReturnFromWholeDeviceEject = canReturnEject
-                switch observed {
-                case .success(let devices):
-                    self.inventoryState = devices.contains(where: { $0.isVirtual == false }) ? .available : .empty
-                    self.apply(devices: devices, profiles: profiles, readiness: readiness, pending: pending,
-                               discoveredLegacy: legacy, legacyByDevice: legacyByDevice)
-                case .failure(let error):
-                    self.inventoryState = (error as? SectoriumDeviceCatalogError) == .malformedDeviceInventory ? .malformed : .unavailable
-                    self.apply(devices: [], profiles: profiles,
-                               readiness: .unknown("Device inventory observation failed; refresh after checking disk access"),
-                               pending: pending, discoveredLegacy: false, legacyByDevice: [:])
+            // Deliver the result through the AppKit event loop, including
+            // nested loops used by native foreground controls.
+            let completionTimer = CFRunLoopTimerCreateWithHandler(kCFAllocatorDefault,
+                CFAbsoluteTimeGetCurrent(), 0, 0, 0) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.observationGeneration == generation else { return }
+                    self.snapshot = value
+                    self.canBeginWholeDeviceEject = canBeginEject
+                    self.canContinueWholeDeviceEject = canContinueEject
+                    self.canReturnFromWholeDeviceEject = canReturnEject
+                    switch observed {
+                    case .success(let devices):
+                        self.inventoryState = devices.contains(where: { $0.isVirtual == false }) ? .available : .empty
+                        self.apply(devices: devices, profiles: profiles, readiness: readiness, pending: pending,
+                                   discoveredLegacy: legacy, legacyByDevice: legacyByDevice)
+                    case .failure(let error):
+                        self.inventoryState = (error as? SectoriumDeviceCatalogError) == .malformedDeviceInventory ? .malformed : .unavailable
+                        self.apply(devices: [], profiles: profiles,
+                                   readiness: .unknown("Device inventory observation failed; refresh after checking disk access"),
+                                   pending: pending, discoveredLegacy: false, legacyByDevice: [:])
+                    }
                 }
             }
+            CFRunLoopAddTimer(CFRunLoopGetMain(), completionTimer, .commonModes)
+            CFRunLoopWakeUp(CFRunLoopGetMain())
         }
     }
 

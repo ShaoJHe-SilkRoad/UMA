@@ -49,7 +49,6 @@ public enum DesktopAssistantVisibleField: Equatable, Sendable {
     case planTier
     case selectedWindow
     case percentage
-    case reset
 }
 
 public enum DesktopAssistantContentContract {
@@ -63,8 +62,7 @@ public enum DesktopAssistantContentContract {
                 .providerName,
                 .planTier,
                 .selectedWindow,
-                .percentage,
-                .reset
+                .percentage
             ]
         case .minimalist:
             [.providerConnectionMark, .percentage]
@@ -230,7 +228,6 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
             selectedWindowAccessibilityLabel: selectedWindowAccessibilityLabel,
             usageValue: usageValue,
             freshnessState: self.freshnessState,
-            resetText: resetText,
             sourceDescription: sourceDescription,
             observationAgeText: observationAgeText,
             language: language
@@ -434,7 +431,6 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         selectedWindowAccessibilityLabel: String,
         usageValue: DesktopAssistantUsageValue,
         freshnessState: DesktopAssistantFreshnessState,
-        resetText: String,
         sourceDescription: String?,
         observationAgeText: String?,
         language: AppLanguage
@@ -490,7 +486,6 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
             freshness,
             selectedWindowAccessibilityLabel,
             usage,
-            resetText,
             sourceDescription,
             observationAgeText,
         ].compactMap { value in
@@ -597,9 +592,6 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         guard card.sourceDescription != nil else { return nil }
         let values: [String] = [
             card.selectedWindow?.compactLabel,
-            (card.selectedWindow?.resetText).map {
-                compactResetText($0, language: language)
-            },
             freshnessState == .stale && card.isEstimated != true
                 ? localizedRetainedExactFreshness(language: language)
                 : localizedFreshness(freshnessState, language: language),
@@ -608,31 +600,6 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
             return value
         }
         return values.joined(separator: " · ")
-    }
-
-    private static func compactResetText(
-        _ resetText: String,
-        language: AppLanguage
-    ) -> String {
-        switch language {
-        case .english:
-            return resetText
-                .replacingOccurrences(of: "Resets in ", with: "")
-                .replacingOccurrences(of: " hours", with: "h")
-                .replacingOccurrences(of: " hour", with: "h")
-                .replacingOccurrences(of: " hrs", with: "h")
-                .replacingOccurrences(of: " hr", with: "h")
-                .replacingOccurrences(of: " days", with: "d")
-                .replacingOccurrences(of: " day", with: "d")
-                .replacingOccurrences(of: " minutes", with: "m")
-                .replacingOccurrences(of: " minute", with: "m")
-                .replacingOccurrences(of: " mins", with: "m")
-                .replacingOccurrences(of: " min", with: "m")
-        case .simplifiedChinese:
-            return resetText
-                .replacingOccurrences(of: "后重置", with: "")
-                .replacingOccurrences(of: " ", with: "")
-        }
     }
 
     private static func makeStructuredCreditAccessibilityLabel(
@@ -897,10 +864,7 @@ private struct DesktopAssistantCardView: View {
                 }
                 .lineLimit(1)
                 Text(
-                    card.detailText
-                        ?? (card.resetText.isEmpty
-                        ? card.selectedWindowShortLabel
-                        : "\(card.selectedWindowShortLabel) · \(card.resetText)")
+                    card.detailText ?? card.selectedWindowShortLabel
                 )
                 .font(
                     AppTypography.font(
