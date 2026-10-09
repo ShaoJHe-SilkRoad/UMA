@@ -7,15 +7,15 @@
   <key>Development</key>
   <dict>
     <key>ApplicationName</key>
-    <string>UMA 0.14 Dev</string>
+    <string>UMA 0.15 Dev</string>
     <key>BundleIdentifier</key>
     <string>com.silkrd.uma.dev.uma014</string>
     <key>DefaultBuildNumber</key>
     <string>1</string>
     <key>MarketingVersion</key>
-    <string>0.14.1</string>
+    <string>0.15.0</string>
     <key>PackageStem</key>
-    <string>uma-0.14-m1-dev</string>
+    <string>uma-0.15-m1-dev</string>
   </dict>
   <key>FrozenProduction</key>
   <dict>
@@ -40,9 +40,9 @@
     <key>BundleIdentifier</key>
     <string>com.silkrd.uma</string>
 		<key>BuildNumber</key>
-		<string>2026100601</string>
+		<string>2026100901</string>
     <key>PackageStem</key>
-    <string>uma-0.14-rc</string>
+    <string>uma-0.15-rc</string>
     <key>MinimumSystemVersion</key>
     <string>14.0</string>
     <key>FrozenHostBuild</key>

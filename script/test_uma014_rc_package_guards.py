@@ -131,7 +131,7 @@ class RCGuards(unittest.TestCase):
 
     def test_canonical_metadata_and_invalid_build(self):
         authority, metadata, version = rc.version_metadata(rc.ROOT)
-        self.assertEqual(version, '0.14.1')
+        self.assertEqual(version, '0.15.0')
         self.assertEqual(metadata['BuildNumber'], authority['ReleaseCandidate']['BuildNumber'])
         self.assertRegex(metadata['BuildNumber'], r'^[1-9]\d*$')
         self.assertEqual(metadata['BundleIdentifier'], 'com.silkrd.uma')
@@ -139,6 +139,30 @@ class RCGuards(unittest.TestCase):
         authority['ReleaseCandidate']['BuildNumber'] = '-1'
         (self.root / 'Configuration/UMAProductVersion.plist').write_bytes(plistlib.dumps(authority))
         with self.assertRaisesRegex(rc.Refusal, 'BUILD_INVALID'):
+            rc.version_metadata(self.root)
+
+    def test_version_stem_is_bound_to_canonical_major_minor(self):
+        authority, _, _ = rc.version_metadata(rc.ROOT)
+        (self.root / 'Configuration').mkdir()
+        (self.root / 'Package.swift').write_text((rc.ROOT / 'Package.swift').read_text())
+        metadata_path = self.root / 'Configuration/UMAProductVersion.plist'
+        for version, stem in [('0.14.1', 'uma-0.14-rc'), ('0.15.0', 'uma-0.15-rc')]:
+            with self.subTest(version=version):
+                authority['Development']['MarketingVersion'] = version
+                authority['ReleaseCandidate']['PackageStem'] = stem
+                metadata_path.write_bytes(plistlib.dumps(authority))
+                _, accepted, observed = rc.version_metadata(self.root)
+                self.assertEqual(observed, version)
+                self.assertEqual(accepted['PackageStem'], stem)
+                destination = self.root / (stem + '-20261009T120000Z')
+                pattern = rc.re.escape(accepted['PackageStem']) + r'-\d{8}T\d{6}Z'
+                self.assertEqual(rc.output_path(str(destination), self.root, pattern), destination)
+                with self.assertRaises(rc.Refusal):
+                    rc.output_path(str(self.root / 'uma-9.99-rc-20261009T120000Z'), self.root, pattern)
+                self.assertFalse(destination.exists())
+        authority['ReleaseCandidate']['PackageStem'] = 'uma-0.14-rc'
+        metadata_path.write_bytes(plistlib.dumps(authority))
+        with self.assertRaisesRegex(rc.Refusal, 'RC_STEM_INVALID'):
             rc.version_metadata(self.root)
 
     def test_storage_requires_every_gate(self):

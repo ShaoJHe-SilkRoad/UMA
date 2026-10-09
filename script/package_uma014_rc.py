@@ -81,7 +81,8 @@ def version_metadata(root):
     require(re.fullmatch(r'[1-9]\d*', rc['BuildNumber']), 'BUILD_INVALID')
     require(rc['BundleIdentifier'] == 'com.silkrd.uma' and rc['ApplicationName'] == 'UMA',
             'RC_IDENTITY_INVALID')
-    require(rc['PackageStem'] == 'uma-0.14-rc', 'RC_STEM_INVALID')
+    expected_stem = 'uma-' + '.'.join(version.split('.')[:2]) + '-rc'
+    require(rc['PackageStem'] == expected_stem, 'RC_STEM_INVALID')
     require(re.fullmatch(r'\d+\.\d+', rc['MinimumSystemVersion']), 'MINIMUM_OS_INVALID')
     require(re.fullmatch(r'[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}',
                          rc['FrozenHostRuntimeGenerationID']), 'HOST_GENERATION_INVALID')
@@ -336,10 +337,10 @@ def main():
     parser.add_argument('--build-root', required=True)
     args = parser.parse_args()
     # All guards run before any output directory or compiler process is created.
-    output = output_path(args.output, PACKAGES, r'uma-0\.14-rc-\d{8}T\d{6}Z')
-    build = output_path(args.build_root, BUILDS, r'rc-build-\d{8}T\d{6}Z')
     branch = source_state(ROOT, args.commit, args.tree, args.branch)
     authority, rc, version = version_metadata(ROOT)
+    output = output_path(args.output, PACKAGES, re.escape(rc['PackageStem']) + r'-\d{8}T\d{6}Z')
+    build = output_path(args.build_root, BUILDS, r'rc-build-\d{8}T\d{6}Z')
     storage = verify_storage()
     require(DEVELOPER.is_dir(), 'XCODE_TOOLCHAIN_UNAVAILABLE')
     env = dict(os.environ, DEVELOPER_DIR=str(DEVELOPER))

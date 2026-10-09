@@ -588,7 +588,7 @@ private struct ThreadOSPromptInstructionPreview: NSViewRepresentable {
         scroll.autohidesScrollers = true
         scroll.borderType = .noBorder
         scroll.drawsBackground = true
-        scroll.backgroundColor = .textBackgroundColor
+        scroll.backgroundColor = UMAVisualStyle.editorColor
         scroll.setAccessibilityIdentifier("uma.threados.prompt.preview")
         let text = ThreadOSPromptPreviewTextView(frame: .zero)
         text.isEditable = false
@@ -600,7 +600,7 @@ private struct ThreadOSPromptInstructionPreview: NSViewRepresentable {
         text.isAutomaticSpellingCorrectionEnabled = false
         text.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
         text.textColor = .labelColor
-        text.backgroundColor = .textBackgroundColor
+        text.backgroundColor = UMAVisualStyle.editorColor
         text.textContainerInset = NSSize(width: 10, height: 10)
         text.isHorizontallyResizable = false
         text.isVerticallyResizable = true
@@ -717,7 +717,7 @@ public struct ThreadOSPromptComposerView: View {
             )
             .frame(height: ThreadOSPromptWorkbenchMetrics.previewHeight)
             .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(nsColor: .separatorColor), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(UMAVisualStyle.separator.opacity(0.8), lineWidth: 1))
             .padding(.bottom, ThreadOSPromptWorkbenchMetrics.previewGap)
             ThreadOSPromptCopyButton(
                 title: copy.generateAndCopy,

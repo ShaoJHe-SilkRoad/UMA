@@ -100,11 +100,11 @@ private struct AgentWorkspaceModuleSurface: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(14)
-            .background(Color(nsColor: .controlBackgroundColor))
+            .background(UMAVisualStyle.surface)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.42), lineWidth: 0.5)
+                    .strokeBorder(UMAVisualStyle.separator.opacity(0.65), lineWidth: 0.5)
             }
     }
 }
@@ -294,14 +294,14 @@ public struct AgentGlanceRow: View {
     @ViewBuilder
     private var rowBackground: some View {
         ZStack {
-            Color(nsColor: .controlBackgroundColor)
+            (style == .mainList ? UMAVisualStyle.surface : Color(nsColor: .controlBackgroundColor))
                 .opacity(
                     reduceTransparency
                         ? 0.94
                         : (style == .quickPanel ? 0.34 : 0.52)
                 )
             if selected {
-                Color.primary.opacity(0.055)
+                Color(nsColor: .controlAccentColor).opacity(0.075)
             }
             if showsRemainingRail {
                 CompactUsageFill(
@@ -538,7 +538,7 @@ public struct AgentWorkspaceSurface: View {
                 .padding(.vertical, 18)
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(UMAVisualStyle.canvas)
         .accessibilityIdentifier("uma.agent.workspace.\(providerID.rawValue)")
         .alert(
             localized("Enable Claude Local Smart?", "启用 Claude 本地智能？"),

@@ -267,7 +267,9 @@ public struct SectoriumWorkbenchView: View {
                                 }
                                 .padding(.horizontal, 8).padding(.vertical, 6)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+                                .background(UMAVisualStyle.surface, in: RoundedRectangle(cornerRadius: 8))
+                                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(UMAVisualStyle.separator.opacity(0.65), lineWidth: 0.5)
+                    .allowsHitTesting(false))
                                 .accessibilityElement(children: .contain)
                                 .accessibilityIdentifier("uma.sectorium.physical-drive")
                             }

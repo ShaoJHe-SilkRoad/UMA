@@ -125,6 +125,7 @@ struct MainWindowRootView: View {
     let accuracySyncClaude: () -> Void
     var hesectoriumStore: HESectoriumStore? = nil
     var promptClipboard: (any ThreadOSSettingsClipboard)? = nil
+    var promptPreferences: ApplicationPreferences = .production
 
     var body: some View {
         VStack(spacing: 0) {
@@ -140,6 +141,7 @@ struct MainWindowRootView: View {
                         navigation.selectedAgent = .codex
                         navigation.destination = .agents
                     },
+                    preferences: promptPreferences,
                     clipboard: promptClipboard ?? SystemThreadOSSettingsClipboard()
                 )
             case .sectorium:
@@ -150,6 +152,7 @@ struct MainWindowRootView: View {
             }
         }
         .frame(minWidth: 760, minHeight: 520)
+        .background(UMAVisualStyle.canvas)
         .environment(\.locale, store.language.locale)
     }
 
@@ -192,6 +195,7 @@ struct MainWindowRootView: View {
         }
         .padding(.horizontal, 14)
         .frame(height: 48)
+        .background(UMAVisualStyle.toolbar)
     }
 
     private var agentsWorkspace: some View {
@@ -232,7 +236,7 @@ struct MainWindowRootView: View {
                 }
             }
             .frame(minWidth: 210, idealWidth: 240, maxWidth: 285)
-            .background(Color(nsColor: .windowBackgroundColor))
+            .background(UMAVisualStyle.canvas)
 
             AgentWorkspaceSurface(
                 store: store,

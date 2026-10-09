@@ -335,7 +335,7 @@ struct UMA014M1NativeShellTests {
         }
     }
 
-    @Test("Dedicated 0.14 Dev package is unsigned, Dock eligible, and isolated")
+    @Test("Dedicated Dev package is unsigned, Dock eligible, and isolated")
     func devPackageContract() throws {
         let script = try source("script/package_uma014_m1_dev.sh")
         let authorityData = try Data(
@@ -354,7 +354,7 @@ struct UMA014M1NativeShellTests {
         #expect(script.contains("Development.ApplicationName"))
         #expect(script.contains("Development.BundleIdentifier"))
         #expect(
-            development["ApplicationName"] as? String == "UMA 0.14 Dev"
+            development["ApplicationName"] as? String == "UMA 0.15 Dev"
         )
         #expect(
             development["BundleIdentifier"] as? String
