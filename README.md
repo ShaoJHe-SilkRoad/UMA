@@ -2,8 +2,8 @@
 
 # AUV — Agent Usage Viewer
 
-> **0.15.1 release draft — not published.** Native validation is incomplete following a computer-use connection failure. Downloads and guide URLs below identify planned publication targets, not an available 0.15.1 release.
-> **0.15.1 发布草稿，尚未发布。** 电脑操作连接中断，原生窗口验收未完成。以下下载与指南链接是预定发布目标。
+> **AUV 0.15.1 · build 2026101002.** Formerly UMA; existing settings and technical identities are preserved. See the release assets for the archive checksum and actual signing/notarization record.
+> **AUV 0.15.1 · 构建 2026101002。** 原名 UMA，保留原有设置和技术身份。下载哈希及签名／公证状态见发布附件；已测与未测范围见下文。
 
 [中文](#中文) · [English](#english) · [0.15.1 release](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.15.1)
 
@@ -61,7 +61,7 @@ macOS 14 或更高；本次可下载构建为 **Apple silicon (arm64)**。从 [0
 
 复制失败时选择仍保留；修正不支持的已保存值须由用户明确选择。接收宿主限制应原样报告，不以 ACK 或发送成功冒充生效。存储出现部分失败时保留记录并查诊断，不给出“可以拔线”的假结论。
 
-本候选新增聚焦检查通过；旧 Factorium 草稿四项测试在原始基线与候选中均失败，完整检查不是全通过。原生窗口验收未完成，发布仍暂停。
+本版新增聚焦检查通过；旧 Factorium 草稿四项测试在原始基线与候选中均失败，完整检查不是全通过。Founder 已批准当前版本发布；尚未完成的原生窗口检查仍按实际范围列出，不计作通过。
 
 源码检查使用已配置 Xcode 的 SwiftPM；`swift test --disable-sandbox` 是测试，不会安装。Canonical 发布脚本是 `script/package_uma014_rc.py`，要求准确提交/树/分支和干净源码归档。开发启动脚本会构建并运行应用，不应当作只读检查。更多本版范围见[发布说明](docs/releases/0.15.1.md)。
 
@@ -81,7 +81,7 @@ ThreadOS prepares an exact, target-free instruction for four independently selec
 
 Low, Medium, High and Ex High remain unchanged. Ultra uses the exact value `ultra`. Catalog `sol-luna-ultra-20261010.1` permits it for GPT-6.1 Sol, GPT-6 Sol, GPT-6 Astra, GPT-5.6 Sol and GPT-5.6 Terra; not GPT-6 Luna. Read-only local CLI metadata provides client-specific supported/unsupported/unverified states. Missing, stale or offline metadata permits deterministic catalog-supported pending requests. Known incompatibility is blocked while preserving selections, without silently downgrading or changing another role.
 
-The receiver must verify its own client. Ultra may increase usage and delegate additional agents on eligible hosts. It is not Fast, a separate model, or evidence of native activation. No live Ultra inference was run for this release. [ThreadOS guide](https://shaotinghe.com/threados/) · [Receiver compatibility](https://github.com/ShaoJHe-SilkRoad/ThreadOS/blob/main/docs/ULTRA_COMPATIBILITY.md).
+The receiver must verify its own client. Ultra may increase usage and delegate additional agents on eligible hosts. It is not Fast, a separate model, or evidence of native activation. No live Ultra inference was run for this release. [ThreadOS guide](https://shaotinghe.com/threados/) · [Ultra compatibility and limits](docs/releases/0.15.1.md).
 
 ### Sectorium: early development
 
@@ -103,6 +103,6 @@ Clipboard failure preserves selections. Correct unsupported saved values explici
 
 ### Development
 
-New focused checks passed. Four legacy Factorium draft tests fail on both the exact input baseline and candidate; broader checks are not all green. Required native validation and publication remain pending.
+New focused checks passed. Four legacy Factorium draft tests fail on both the exact input baseline and candidate; broader checks are not all green. The Founder approved publication of the current version. Outstanding native checks remain disclosed and are not counted as passes.
 
 Use the configured Xcode SwiftPM toolchain for focused tests. `script/package_uma014_rc.py` builds an exact committed, clean source archive; it does not install. The development launch script has build/run side effects and is not a read-only audit tool. [0.15.1 notes](docs/releases/0.15.1.md) · [Product guides](https://shaotinghe.com/threados/) · [Existing repository](https://github.com/ShaoJHe-SilkRoad/UMA).
