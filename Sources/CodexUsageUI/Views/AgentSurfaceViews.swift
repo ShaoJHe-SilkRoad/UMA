@@ -1730,14 +1730,17 @@ public final class GlobalSettingsNavigationState: ObservableObject {
 public struct GlobalSettingsSurface: View {
     @ObservedObject private var navigation: GlobalSettingsNavigationState
     @StateObject private var model: GlobalSettingsViewModel
+    private let hesectoriumStore: HESectoriumStore?
 
     public init(
         preferences: ApplicationPreferences,
         store: UsageStore,
         navigation: GlobalSettingsNavigationState,
-        dataPaths: ApplicationDataPaths = .current()
+        dataPaths: ApplicationDataPaths = .current(),
+        hesectoriumStore: HESectoriumStore? = nil
     ) {
         self.navigation = navigation
+        self.hesectoriumStore = hesectoriumStore
         _model = StateObject(
             wrappedValue: GlobalSettingsViewModel(
                 preferences: preferences, store: store, dataPaths: dataPaths
@@ -1746,29 +1749,33 @@ public struct GlobalSettingsSurface: View {
     }
 
     public var body: some View {
-        HStack(spacing: 0) {
-            List(GlobalSettingsPane.allCases, selection: $navigation.pane) { item in
-                HStack(spacing: 7) {
-                    Image(systemName: symbol(item))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 14)
-                    Text(paneTitle(item))
-                        .font(.system(size: 13))
-                }
+        GeometryReader { viewport in
+            HStack(spacing: 0) {
+                List(GlobalSettingsPane.allCases, selection: $navigation.pane) { item in
+                    HStack(spacing: 7) {
+                        Image(systemName: symbol(item))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 14)
+                        Text(paneTitle(item))
+                            .font(.system(size: 13))
+                    }
                     .tag(item)
+                }
+                .listStyle(.sidebar)
+                .frame(width: 180)
+                .accessibilityIdentifier("uma.settings.sidebar")
+
+                Divider().frame(width: 1)
+
+                // Bound the detail to the actual window viewport. Intrinsic
+                // form widths must never push the sidebar out of the window.
+                settingsDetail
+                    .frame(width: max(0, viewport.size.width - 181), height: viewport.size.height)
+                    .accessibilityIdentifier("uma.settings.detail.\(navigation.pane.id)")
             }
-            .listStyle(.sidebar)
-            .frame(minWidth: 170, idealWidth: 180, maxWidth: 200)
-            .accessibilityIdentifier("uma.settings.sidebar")
-
-            Divider()
-
-            settingsDetail
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityIdentifier("uma.settings.detail.\(navigation.pane.id)")
+            .frame(width: viewport.size.width, height: viewport.size.height, alignment: .topLeading)
         }
-        .frame(minWidth: 560, minHeight: 400)
         .environment(\.locale, model.language.locale)
         .onAppear(perform: model.refreshLaunchAtLoginState)
         .onReceive(
@@ -1783,6 +1790,15 @@ public struct GlobalSettingsSurface: View {
 
     @ViewBuilder
     private var settingsDetail: some View {
+        switch navigation.pane {
+        case .hesectorium:
+                HESectoriumSettingsView(isChinese: model.language == .simplifiedChinese, store: hesectoriumStore)
+        default:
+            standardSettingsDetail
+        }
+    }
+
+    private var standardSettingsDetail: some View {
         Form {
             switch navigation.pane {
             case .general:
@@ -1980,7 +1996,8 @@ public struct GlobalSettingsSurface: View {
                     .accessibilityIdentifier("uma.settings.wizard.reset-position")
                 }
             case .hesectorium:
-                HESectoriumSettingsView(isChinese: model.language == .simplifiedChinese)
+                // This pane owns its own scrolling Form above.
+                EmptyView()
             case .privacy:
                 settingsSection(
                     title: localized("Privacy & Data", "隐私与数据"),
