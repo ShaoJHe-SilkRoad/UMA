@@ -1053,7 +1053,7 @@ private struct MonitorHeaderView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("UMA")
+                Text("AUV")
                     .font(AppTypography.font(20, weight: .bold, language: store.language))
                     .lineLimit(1)
                     .layoutPriority(UsagePanelHeaderLayout.titleLayoutPriority)

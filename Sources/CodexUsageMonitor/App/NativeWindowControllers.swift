@@ -179,7 +179,7 @@ final class MainWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "UMA"
+        window.title = "AUV"
         window.minSize = Layout.minimumOuterSize
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
@@ -206,7 +206,7 @@ final class MainWindowController: NSWindowController {
         // before the ready host replaces it during attachment.
         let frameBeforeStartingHost = window.frame
         window.contentViewController = NSHostingController(
-            rootView: NativeShellStartingView(title: "UMA")
+            rootView: NativeShellStartingView(title: "AUV")
         )
         window.setFrame(frameBeforeStartingHost, display: false)
         super.init(window: window)
@@ -373,7 +373,7 @@ final class SettingsWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "UMA Settings"
+        window.title = "AUV Settings"
         window.minSize = Layout.minimumSize
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed

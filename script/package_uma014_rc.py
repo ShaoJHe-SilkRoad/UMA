@@ -142,6 +142,7 @@ def copy_swiftpm_resource_bundle(bin_path, resources, source_root):
         'models.v1.json': ('threados.model-catalog.v1', 'astra-20260904.1'),
         'models.v2.json': ('threados.model-catalog.v1', 'sol-luna-20260922.1'),
         'models.v3.json': ('threados.model-catalog.v1', 'sol-luna-20261001.1'),
+        'models.v4.json': ('threados.model-catalog.v1', 'sol-luna-ultra-20261010.1'),
     }
     require(bundle.is_dir(), 'SWIFTPM_RESOURCE_BUNDLE_MISSING')
     require(not contains_symlink(bundle), 'SWIFTPM_RESOURCE_BUNDLE_SYMLINK_REJECTED')
@@ -403,7 +404,7 @@ def main():
         shutil.copyfile(source / 'Assets/AgentLogos' / target.name, target)
         target.chmod(0o644)
     info = {'CFBundleExecutable': 'CodexUsageMonitor', 'CFBundleIdentifier': rc['BundleIdentifier'],
-            'CFBundleName': rc['ApplicationName'], 'CFBundleDisplayName': rc['ApplicationName'],
+            'CFBundleName': rc['ApplicationName'], 'CFBundleDisplayName': 'AUV',
             'CFBundlePackageType': 'APPL', 'CFBundleShortVersionString': version,
             'CFBundleVersion': rc['BuildNumber'], 'LSMinimumSystemVersion': rc['MinimumSystemVersion'],
             'NSPrincipalClass': 'NSApplication', 'CFBundleIconFile': 'AppIcon',

@@ -65,7 +65,7 @@ final class QuickPanelPopoverController: NSObject, NSWindowDelegate {
         super.init()
         configurePanel()
         installContent(
-            Text("UMA is starting…")
+            Text("AUV is starting…")
                 .frame(width: Self.contentWidth, height: Self.minimumContentHeight)
         )
     }
@@ -186,7 +186,7 @@ final class QuickPanelPopoverController: NSObject, NSWindowDelegate {
 
     func markRuntimeAttachmentFailed() {
         installContent(
-            Text("UMA could not start its shared runtime.")
+            Text("AUV could not start its shared runtime.")
                 .foregroundStyle(.secondary)
                 .frame(width: Self.contentWidth, height: Self.minimumContentHeight)
         )

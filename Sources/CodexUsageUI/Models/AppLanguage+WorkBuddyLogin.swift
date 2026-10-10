@@ -7,14 +7,14 @@ extension AppLanguage {
 
     var workBuddyLoginPrivacySummary: String {
         self == .simplifiedChinese
-            ? "UMA 只会验证 WorkBuddy 应用身份、打开官方应用并记录此辅助流程的安全状态。UMA 不会读取账号、凭据、二维码、会话、浏览器内容或 Credits。"
-            : "UMA only validates the WorkBuddy app identity, opens the official app, and records safe flow state. UMA does not read accounts, credentials, QR codes, sessions, browser content, or Credits."
+            ? "AUV 只会验证 WorkBuddy 应用身份、打开官方应用并记录此辅助流程的安全状态。AUV 不会读取账号、凭据、二维码、会话、浏览器内容或 Credits。"
+            : "AUV only validates the WorkBuddy app identity, opens the official app, and records safe flow state. AUV does not read accounts, credentials, QR codes, sessions, browser content, or Credits."
     }
 
     var workBuddyLoginPrivacyConfirmation: String {
         self == .simplifiedChinese
-            ? "我同意 UMA 打开官方 WorkBuddy 应用"
-            : "I consent to UMA opening the official WorkBuddy app"
+            ? "我同意 AUV 打开官方 WorkBuddy 应用"
+            : "I consent to AUV opening the official WorkBuddy app"
     }
 
     var workBuddyOfficialInstallWarning: String {
@@ -70,25 +70,25 @@ extension AppLanguage {
             [
                 "In WorkBuddy, choose the provider-owned sign-in control.",
                 "Complete the provider-owned browser or WeChat sign-in yourself.",
-                "Return to UMA and choose Check Again."
+                "Return to AUV and choose Check Again."
             ]
         case (.english, .enterprise):
             [
                 "In WorkBuddy, choose your enterprise sign-in entry.",
                 "Complete your organization’s provider-owned browser or WeChat sign-in yourself.",
-                "Return to UMA and choose Check Again."
+                "Return to AUV and choose Check Again."
             ]
         case (.simplifiedChinese, .personal):
             [
                 "在 WorkBuddy 中选择官方登录入口。",
                 "请自行完成官方浏览器或微信登录。",
-                "返回 UMA，然后选择“再次检查”。"
+                "返回 AUV，然后选择“再次检查”。"
             ]
         case (.simplifiedChinese, .enterprise):
             [
                 "在 WorkBuddy 中选择企业登录入口。",
                 "请自行完成组织提供的官方浏览器或微信登录。",
-                "返回 UMA，然后选择“再次检查”。"
+                "返回 AUV，然后选择“再次检查”。"
             ]
         }
     }
@@ -111,8 +111,8 @@ extension AppLanguage {
 
     var workBuddyFlowLaunched: String {
         self == .simplifiedChinese
-            ? "已打开官方登录流程；UMA 尚未验证登录。"
-            : "The official login flow was opened. UMA has not verified authentication."
+            ? "已打开官方登录流程；AUV 尚未验证登录。"
+            : "The official login flow was opened. AUV has not verified authentication."
     }
 
     var workBuddyAwaitingCompletion: String {
@@ -123,8 +123,8 @@ extension AppLanguage {
 
     var workBuddySafeCompletionResult: String {
         self == .simplifiedChinese
-            ? "登录流程已完成。UMA 无法安全验证身份验证或同步 Credits，因为没有受支持的本地 WorkBuddy Credits 来源。"
-            : "Login flow completed. UMA cannot safely verify authentication or sync Credits because no supported local WorkBuddy Credits source is available."
+            ? "登录流程已完成。AUV 无法安全验证身份验证或同步 Credits，因为没有受支持的本地 WorkBuddy Credits 来源。"
+            : "Login flow completed. AUV cannot safely verify authentication or sync Credits because no supported local WorkBuddy Credits source is available."
     }
 
     func workBuddyLoginFailure(_ failure: WorkBuddyLoginFailure) -> String {

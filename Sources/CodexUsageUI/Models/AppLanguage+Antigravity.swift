@@ -35,8 +35,8 @@ extension AppLanguage {
 
     var antigravityPrivacySummary: String {
         self == .english
-            ? "Reads normalized remaining quota from the official CLI. UMA does not receive credentials, browser data, conversations, prompts, responses, or raw provider output."
-            : "通过官方 CLI 读取标准化剩余额度。UMA 不接收凭据、浏览器数据、对话、提示、回复或原始提供商输出。"
+            ? "Reads normalized remaining quota from the official CLI. AUV does not receive credentials, browser data, conversations, prompts, responses, or raw provider output."
+            : "通过官方 CLI 读取标准化剩余额度。AUV 不接收凭据、浏览器数据、对话、提示、回复或原始提供商输出。"
     }
 
     func antigravityState(

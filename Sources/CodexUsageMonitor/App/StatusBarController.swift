@@ -309,7 +309,7 @@ final class StatusBarController: NSObject {
         guard let button = statusItem.button else { return }
         let image = NSImage(
             systemSymbolName: "gauge.with.dots.needle.67percent",
-            accessibilityDescription: "UMA"
+            accessibilityDescription: "AUV"
         )
         image?.isTemplate = true
         button.image = image
@@ -318,7 +318,7 @@ final class StatusBarController: NSObject {
         button.target = self
         button.action = #selector(handleStatusItemAction)
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        button.toolTip = "UMA"
+        button.toolTip = "AUV"
     }
 
     private func observeUsageChanges() {
@@ -334,11 +334,11 @@ final class StatusBarController: NSObject {
         statusItem.button?.title = showsRemainingValue
             ? (store?.menuPercent.map { " " + String($0) + "%" } ?? " —")
             : ""
-        statusItem.button?.toolTip = store?.language.appTitle ?? "UMA"
+        statusItem.button?.toolTip = store?.language.appTitle ?? "AUV"
         statusItem.button?.setAccessibilityLabel(
             store?.menuPercent.map {
-                store?.language.remainingAccessibilityLabel(percent: $0) ?? "UMA"
-            } ?? store?.language.appTitle ?? "UMA"
+                store?.language.remainingAccessibilityLabel(percent: $0) ?? "AUV"
+            } ?? store?.language.appTitle ?? "AUV"
         )
     }
 

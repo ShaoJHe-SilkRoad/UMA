@@ -13,8 +13,8 @@ extension AppLanguage {
 
     var workBuddyAccountWebDisclosure: String {
         self == .simplifiedChinese
-            ? "UMA 将在隔离的 WorkBuddy 网页会话中打开官方网站，并只读取“套餐与用量”页上的 Credits 余额字段。UMA 不会导出 Cookie、令牌、身份、完整 HTML 或浏览器存储。启用自动刷新时，UMA 每分钟进行一次限定的官方账号页面读取。"
-            : "UMA opens the official site in an isolated WorkBuddy web session and reads only Credit balance fields from Plan and Usage. UMA does not export cookies, tokens, identity, full HTML, or browser storage. When Auto Refresh is enabled, UMA performs one bounded official account-page read every minute."
+            ? "AUV 将在隔离的 WorkBuddy 网页会话中打开官方网站，并只读取“套餐与用量”页上的 Credits 余额字段。AUV 不会导出 Cookie、令牌、身份、完整 HTML 或浏览器存储。启用自动刷新时，AUV 每分钟进行一次限定的官方账号页面读取。"
+            : "AUV opens the official site in an isolated WorkBuddy web session and reads only Credit balance fields from Plan and Usage. AUV does not export cookies, tokens, identity, full HTML, or browser storage. When Auto Refresh is enabled, AUV performs one bounded official account-page read every minute."
     }
 
     var workBuddyAccountWebConsent: String {
@@ -239,7 +239,7 @@ extension AppLanguage {
         case (.simplifiedChinese, .timedOut): "请求超时"
         case (.simplifiedChinese, .webContentUnavailable): "页面不可用"
         case (.simplifiedChinese, .websiteDataClearFailed):
-            "无法清除 UMA 自有网页数据"
+            "无法清除 AUV 自有网页数据"
         }
     }
 }

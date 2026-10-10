@@ -212,7 +212,7 @@ public enum AppTypography {
     public static func configurePreviewPointSizeScale(_ scale: CGFloat) {
         let processName = ProcessInfo.processInfo.processName
         guard processName == "PreviewRendererTool"
-                || processName == "UMA-G2-Review"
+                || processName == "AUV-G2-Review"
         else {
             return
         }

@@ -201,7 +201,7 @@ public struct SectoriumWorkbenchView: View {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(text("Sectorium", "分区工")).font(.largeTitle.weight(.semibold))
+                        Text(text("Sectorium", "Sectorium（分区工）")).font(.largeTitle.weight(.semibold))
                         Text(text("Manage a development disk on a selected physical drive.", "在选定硬盘上管理虚拟开发盘。"))
                             .font(.callout).foregroundStyle(.secondary)
                     }
@@ -372,8 +372,8 @@ public struct SectoriumWorkbenchView: View {
                 model.adoptConfiguredLegacyDevelopmentDisk(deviceID: device.id)
             }
         } message: {
-            Text(text("UMA will register the configured DEV_APFS image only after rechecking this selected drive and the complete image-to-volume identity. No files will be moved or deleted.",
-                      "UMA 仅会在重新核验所选硬盘及完整镜像与宗卷身份后登记已配置的 DEV_APFS 镜像；不会移动或删除文件。"))
+            Text(text("AUV will register the configured DEV_APFS image only after rechecking this selected drive and the complete image-to-volume identity. No files will be moved or deleted.",
+                      "AUV 仅会在重新核验所选硬盘及完整镜像与宗卷身份后登记已配置的 DEV_APFS 镜像；不会移动或删除文件。"))
         }
     }
 

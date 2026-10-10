@@ -56,7 +56,7 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
     }
 
     public var appTitle: String {
-        "UMA"
+        "AUV"
     }
 
     public func remainingAccessibilityLabel(percent: Int) -> String {
@@ -75,8 +75,8 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
 
     public var quitApplication: String {
         switch self {
-        case .simplifiedChinese: "退出 UMA"
-        case .english: "Quit UMA"
+        case .simplifiedChinese: "退出 AUV"
+        case .english: "Quit AUV"
         }
     }
 

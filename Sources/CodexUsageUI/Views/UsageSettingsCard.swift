@@ -844,7 +844,7 @@ private struct ClaudeBrowserSettingsSection: View {
                 Text(language == .simplifiedChinese ? "Google / Claude 密码：未访问" : "Google / Claude password: Not accessed")
                 Text(language == .simplifiedChinese ? "API 密钥：不需要" : "API key: Not required")
                 Text(language == .simplifiedChinese ? "钥匙串：未访问" : "Keychain: Not accessed")
-                Text(language == .simplifiedChinese ? "Cookie：保留在浏览器中；UMA 不读取或导出" : "Cookies: Remain inside the browser; not read or exported by UMA")
+                Text(language == .simplifiedChinese ? "Cookie：保留在浏览器中；AUV 不读取或导出" : "Cookies: Remain inside the browser; not read or exported by AUV")
                 Text(language == .simplifiedChinese ? "状态栏/页面/缓存数据：仅净化后的配额字段；缓存组织信息与历史立即丢弃" : "Status-line/page/cache data: Sanitized quota fields only; cache organization and history are discarded")
                 Text(language == .simplifiedChinese ? "提示、回复、项目内容、身份与账单：不保留" : "Prompts, responses, project content, identity, and billing: Not retained")
             }

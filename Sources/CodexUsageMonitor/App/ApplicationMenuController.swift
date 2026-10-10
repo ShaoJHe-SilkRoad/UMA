@@ -59,7 +59,7 @@ final class ApplicationMenuController: NSObject, NSMenuItemValidation {
     }
 
     var diagnosticState: ApplicationMenuDiagnosticState {
-        let appMenu = installedMenu?.item(withTitle: "UMA")?.submenu
+        let appMenu = installedMenu?.item(withTitle: "AUV")?.submenu
         let refreshMenu = installedMenu?.item(withTitle: "Refresh")?.submenu
         let viewMenu = installedMenu?.item(withTitle: "View")?.submenu
         let threadOSRoot = installedMenu?.item(withTitle: "ThreadOS")
@@ -68,7 +68,7 @@ final class ApplicationMenuController: NSObject, NSMenuItemValidation {
             && threadOSItems.allSatisfy { !$0.isEnabled && $0.action == nil && $0.target == nil }
         let requiredRoutesPresent = [
             route(in: appMenu, title: "Settings…", action: #selector(openSettings), key: ","),
-            route(in: appMenu, title: "Quit UMA", action: #selector(quit), key: "q"),
+            route(in: appMenu, title: "Quit AUV", action: #selector(quit), key: "q"),
             route(in: refreshMenu, title: "Refresh All", action: #selector(refreshAll), key: "r"),
             route(in: viewMenu, title: "Open Main Window", action: #selector(openMainWindow), key: "1"),
             route(in: viewMenu, title: "Show Menu Bar Panel", action: #selector(showQuickPanel), key: "2"),
@@ -92,13 +92,13 @@ final class ApplicationMenuController: NSObject, NSMenuItemValidation {
     }
 
     private func appMenuItem() -> NSMenuItem {
-        let root = NSMenuItem(title: "UMA", action: nil, keyEquivalent: "")
-        let menu = NSMenu(title: "UMA")
-        menu.addItem(actionItem(title: "About UMA", action: #selector(showAbout)))
+        let root = NSMenuItem(title: "AUV", action: nil, keyEquivalent: "")
+        let menu = NSMenu(title: "AUV")
+        menu.addItem(actionItem(title: "About AUV", action: #selector(showAbout)))
         menu.addItem(.separator())
         menu.addItem(actionItem(title: "Settings…", action: #selector(openSettings), key: ","))
         menu.addItem(.separator())
-        menu.addItem(actionItem(title: "Quit UMA", action: #selector(quit), key: "q"))
+        menu.addItem(actionItem(title: "Quit AUV", action: #selector(quit), key: "q"))
         root.submenu = menu
         return root
     }
@@ -181,7 +181,9 @@ final class ApplicationMenuController: NSObject, NSMenuItemValidation {
         return item.target === self && item.action == action
     }
 
-    @objc private func showAbout() { NSApp.orderFrontStandardAboutPanel(nil) }
+    @objc private func showAbout() {
+        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "AUV — Agent Usage Viewer", .credits: NSAttributedString(string: "Formerly UMA. ThreadOS · Sectorium.")])
+    }
     @objc private func openSettings() { routes.openSettings() }
     @objc private func openMainWindow() { routes.openMainWindow() }
     @objc private func showQuickPanel() { routes.showQuickPanel() }

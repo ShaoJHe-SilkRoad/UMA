@@ -131,7 +131,7 @@ class RCGuards(unittest.TestCase):
 
     def test_canonical_metadata_and_invalid_build(self):
         authority, metadata, version = rc.version_metadata(rc.ROOT)
-        self.assertEqual(version, '0.15.0')
+        self.assertEqual(version, '0.15.1')
         self.assertEqual(metadata['BuildNumber'], authority['ReleaseCandidate']['BuildNumber'])
         self.assertRegex(metadata['BuildNumber'], r'^[1-9]\d*$')
         self.assertEqual(metadata['BundleIdentifier'], 'com.silkrd.uma')
@@ -327,6 +327,7 @@ class RCGuards(unittest.TestCase):
             'models.v2.json': {'schema': 'threados.model-catalog.v1',
                                'revision': revision_v2, 'models': {},
                                'marker': built_v2_marker},
+            'models.v4.json': {'schema': 'threados.model-catalog.v1', 'revision': 'sol-luna-ultra-20261010.1', 'models': {}},
             'models.v3.json': {'schema': 'threados.model-catalog.v1',
                                'revision': revision_v3, 'models': {},
                                'marker': built_v3_marker},
@@ -346,7 +347,7 @@ class RCGuards(unittest.TestCase):
         report = rc.copy_swiftpm_resource_bundle(bin_path, resources, source)
 
         packaged = resources / 'CodexUsageMonitor_CodexUsageUI.bundle' / 'Contents' / 'Resources'
-        for name in ('models.v1.json', 'models.v2.json', 'models.v3.json'):
+        for name in ('models.v1.json', 'models.v2.json', 'models.v3.json', 'models.v4.json'):
             source_file, built_file, copied = (source / 'Sources/CodexUsageUI/Resources/ThreadOS' / name,
                                                 built / name, packaged / name)
             self.assertEqual(source_file.read_bytes(), built_file.read_bytes())
@@ -357,7 +358,7 @@ class RCGuards(unittest.TestCase):
             self.assertEqual(report['catalogs'][name]['revision'],
                              {'models.v1.json': 'astra-20260904.1',
                               'models.v2.json': 'sol-luna-20260922.1',
-                              'models.v3.json': 'sol-luna-20261001.1'}[name])
+                              'models.v3.json': 'sol-luna-20261001.1', 'models.v4.json': 'sol-luna-ultra-20261010.1'}[name])
         self.assertEqual(report['bundle'], 'CodexUsageMonitor_CodexUsageUI.bundle')
         self.assertEqual(report['catalog'], 'Contents/Resources/models.v1.json')
         self.assertEqual(report['catalog_sha256'], rc.sha(packaged / 'models.v1.json'))

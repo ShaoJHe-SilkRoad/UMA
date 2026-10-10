@@ -144,6 +144,10 @@ enum CodexUsageMonitorApp {
     @MainActor
     static func main() {
         let application = NSApplication.shared
+        if CommandLine.arguments.contains("--release-preview") {
+            ReleasePreview.run(application: application)
+            return
+        }
         if CommandLine.arguments.contains(
             ClaudeAccuracySyncMachineVerifier.launchArgument
         ) {

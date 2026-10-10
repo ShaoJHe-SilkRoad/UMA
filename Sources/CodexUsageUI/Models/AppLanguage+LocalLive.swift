@@ -29,9 +29,9 @@ public extension AppLanguage {
     var loginForDataSyncHint: String {
         switch self {
         case .english:
-            "Opens the provider’s official desktop application. UMA never receives login credentials."
+            "Opens the provider’s official desktop application. AUV never receives login credentials."
         case .simplifiedChinese:
-            "打开提供商的官方桌面应用。UMA 不会接收登录凭据。"
+            "打开提供商的官方桌面应用。AUV 不会接收登录凭据。"
         }
     }
 

@@ -259,7 +259,7 @@ struct MainWindowRootView: View {
             MainToolbarNavigationControl(
                 selection: $navigation.destination,
                 labels: MainSurfaceDestination.allCases.map(destinationTitle),
-                accessibilityLabel: localized("UMA navigation", "UMA 导航")
+                accessibilityLabel: localized("AUV navigation", "AUV 导航")
             )
             .frame(width: 360)
             Spacer()
@@ -376,9 +376,9 @@ struct MainWindowRootView: View {
 
     private func destinationTitle(_ destination: MainSurfaceDestination) -> String {
         switch destination {
-        case .agents: localized("UMA", "UMA")
-        case .threadOS: "ThreadOS"
-        case .sectorium: localized("Sectorium", "分区工")
+        case .agents: localized("AUV", "AUV")
+        case .threadOS: localized("ThreadOS", "ThreadOS（线程工）")
+        case .sectorium: localized("Sectorium", "Sectorium（分区工）")
         }
     }
 

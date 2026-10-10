@@ -167,9 +167,9 @@ extension AppLanguage {
         case (.simplifiedChinese, .localCallbackWithoutQuotaWindows):
             "已收到本地活动；自动精确配额尚不可用。"
         case (.english, .desktopActivitySignalUnavailable):
-            "Claude Desktop does not expose a stable local activity signal. UMA can show only an available ≈ plan-cache estimate; use Accuracy Sync for current exact usage."
+            "Claude Desktop does not expose a stable local activity signal. AUV can show only an available ≈ plan-cache estimate; use Accuracy Sync for current exact usage."
         case (.simplifiedChinese, .desktopActivitySignalUnavailable):
-            "Claude Desktop 未提供稳定的本地活动信号。UMA 只能显示可用的 ≈ 计划缓存估算；请使用精确同步获取当前精确用量。"
+            "Claude Desktop 未提供稳定的本地活动信号。AUV 只能显示可用的 ≈ 计划缓存估算；请使用精确同步获取当前精确用量。"
         case (.english, .accuracyInventoryRestartRequired):
             "The Test App update is ready. Restart Safari once to finish loading it."
         case (.simplifiedChinese, .accuracyInventoryRestartRequired):

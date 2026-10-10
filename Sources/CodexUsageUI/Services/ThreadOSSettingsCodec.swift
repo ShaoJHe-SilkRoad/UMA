@@ -97,19 +97,21 @@ public enum ThreadOSSettingsCodec {
     /// V1 remains pinned to its original catalog; V2 drafts opt into this revision.
     public static let catalogRevision = legacyCatalogRevision
     public static let latestCatalogRevision = "sol-luna-20261001.1"
+    public static let ultraCatalogRevision = "sol-luna-ultra-20261010.1"
     public static let roleOrder: [ThreadOSRole] = [.codingWorker, .foreman, .leader, .qa, .reviewer]
     public static func loadCatalog() throws -> ThreadOSModelCatalog { try loadCatalog(revision: legacyCatalogRevision, bundle: .module) }
     public static func loadCatalog(bundle: Bundle) throws -> ThreadOSModelCatalog { try loadCatalog(revision: catalogRevision, bundle: bundle) }
     public static func loadCatalog(revision: String) throws -> ThreadOSModelCatalog { try loadCatalog(revision: revision, bundle: .module) }
     public static func loadCatalog(revision: String, bundle: Bundle) throws -> ThreadOSModelCatalog {
-        guard [legacyCatalogRevision, "sol-luna-20260922.1", latestCatalogRevision].contains(revision) else { throw ThreadOSSettingsCodecError.unsupportedPreset }
+        guard [legacyCatalogRevision, "sol-luna-20260922.1", latestCatalogRevision, ultraCatalogRevision].contains(revision) else { throw ThreadOSSettingsCodecError.unsupportedPreset }
         let resource = switch revision {
         case legacyCatalogRevision: "models.v1"
         case "sol-luna-20260922.1": "models.v2"
-        default: "models.v3"
+        case "sol-luna-20261001.1": "models.v3"
+        default: "models.v4"
         }
         let url = bundle.url(forResource: resource, withExtension: "json", subdirectory: "ThreadOS") ?? bundle.url(forResource: resource, withExtension: "json")
-        guard let url, let data = try? Data(contentsOf: url), let catalog = try? JSONDecoder().decode(ThreadOSModelCatalog.self, from: data), catalog.schema == "threados.model-catalog.v1", Set(catalog.presets.keys).isSuperset(of: ["astra-economy", "astra-balanced", "astra-speed", "astra-deep", "custom"]) else { throw ThreadOSSettingsCodecError.catalogUnavailable }
+        guard let url, let data = try? Data(contentsOf: url), let catalog = try? JSONDecoder().decode(ThreadOSModelCatalog.self, from: data), catalog.schema == "threados.model-catalog.v1", catalog.revision == revision, Set(catalog.presets.keys).isSuperset(of: ["astra-economy", "astra-balanced", "astra-speed", "astra-deep", "custom"]) else { throw ThreadOSSettingsCodecError.catalogUnavailable }
         return catalog
     }
     public static func canonicalRequest(_ draft: ThreadOSSettingsDraft) throws -> String { try canonicalRequest(draft, catalog: loadCatalog()) }

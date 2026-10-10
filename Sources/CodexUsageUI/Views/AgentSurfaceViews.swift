@@ -409,14 +409,14 @@ public struct QuickPanelSurface: View {
                     Text(localized("No active agents", "没有活跃的智能体"))
                         .font(.system(size: 13, weight: .medium))
                     Text(localized(
-                        "Connect an agent in UMA or scan this Mac again.",
-                        "请在 UMA 中连接智能体，或重新扫描这台 Mac。"
+                        "Connect an agent in AUV or scan this Mac again.",
+                        "请在 AUV 中连接智能体，或重新扫描这台 Mac。"
                     ))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                     HStack(spacing: 8) {
-                        Button(localized("Open UMA", "打开 UMA"), action: openMain)
+                        Button(localized("Open AUV", "打开 AUV"), action: openMain)
                         Button(localized("Scan for Agents", "扫描智能体"), action: scanAll)
                     }
                     .controlSize(.small)
@@ -459,12 +459,12 @@ public struct QuickPanelSurface: View {
     private var header: some View {
         HStack(spacing: 4) {
             Button(action: openMain) {
-                Label("UMA", systemImage: "gauge.with.dots.needle.67percent")
+                Label("AUV", systemImage: "gauge.with.dots.needle.67percent")
                     .font(.system(size: 13, weight: .semibold))
             }
             .buttonStyle(.plain)
-            .help(localized("Open UMA", "打开 UMA"))
-            .accessibilityLabel(localized("Open UMA", "打开 UMA"))
+            .help(localized("Open AUV", "打开 AUV"))
+            .accessibilityLabel(localized("Open AUV", "打开 AUV"))
             Spacer()
             headerButton(localized("Scan All", "全部扫描"), "sparkle.magnifyingglass", scanAll)
             headerButton(localized("Refresh All", "全部刷新"), "arrow.clockwise", refreshAll)
@@ -604,8 +604,8 @@ enum CodexDashboardPresentation {
         let chinese: String
         switch history {
         case .accountDailyBuckets:
-            english = "Provider-reported daily values are shown without UMA day reallocation."
-            chinese = "按提供方报告显示每日数值，UMA 不重新分配日期。"
+            english = "Provider-reported daily values are shown without AUV day reallocation."
+            chinese = "按提供方报告显示每日数值，AUV 不重新分配日期。"
         case .aggregateOnly:
             english = "Known local aggregates are kept separate, not divided into invented daily usage."
             chinese = "已知本地汇总值保持独立，不拆分为虚构的每日用量。"
@@ -624,8 +624,8 @@ enum CodexDashboardPresentation {
         let chinese: String
         switch history {
         case .accountDailyBuckets:
-            english = "Period: local calendar days; provider timezone unavailable · Unit: tokens · missing days unknown; zero means provider-reported zero · no UMA day reallocation"
-            chinese = "周期：本地日历日；提供方时区未知 · 单位：令牌 · 缺失日期未知；零表示提供方报告为零 · UMA 不重新分配日期"
+            english = "Period: local calendar days; provider timezone unavailable · Unit: tokens · missing days unknown; zero means provider-reported zero · no AUV day reallocation"
+            chinese = "周期：本地日历日；提供方时区未知 · 单位：令牌 · 缺失日期未知；零表示提供方报告为零 · AUV 不重新分配日期"
         case .aggregateOnly:
             english = "Period: local aggregate snapshot · No daily token buckets; aggregates retain their own units"
             chinese = "周期：本地汇总快照 · 无每日令牌分桶；汇总值保留原单位"
@@ -700,8 +700,8 @@ public struct AgentWorkspaceSurface: View {
             Button(localized("Enable", "启用"), action: connectClaude)
         } message: {
             Text(localized(
-                "UMA reads only approved local usage metadata. Prompt, response, session, credential, cookie, token, and Keychain content is never retained or transmitted.",
-                "UMA 仅读取已批准的本地用量元数据；不会保留或传输提示、回复、会话、凭据、Cookie、令牌或钥匙串内容。"
+                "AUV reads only approved local usage metadata. Prompt, response, session, credential, cookie, token, and Keychain content is never retained or transmitted.",
+                "AUV 仅读取已批准的本地用量元数据；不会保留或传输提示、回复、会话、凭据、Cookie、令牌或钥匙串内容。"
             ))
         }
     }
@@ -1169,7 +1169,7 @@ public struct AgentWorkspaceSurface: View {
                                 .disabled(true)
                             Text(issue == .developmentIsolation
                                 ? localized("Claude Code setup is unavailable in this development build.", "此开发版本不配置 Claude Code。")
-                                : localized("Install UMA in Applications or Desktop to connect Claude Code.", "请将 UMA 安装到 Applications 或桌面后连接 Claude Code。"))
+                                : localized("Install AUV in Applications or Desktop to connect Claude Code.", "请将 AUV 安装到 Applications 或桌面后连接 Claude Code。"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -1216,8 +1216,8 @@ public struct AgentWorkspaceSurface: View {
                 Label(claudeSmartLabel, systemImage: "lock.shield")
                     .font(.callout.weight(.medium))
                 Text(localized(
-                    "Local Smart and one-shot Accuracy Sync retain only approved usage metadata. Prompts, responses, credentials, and raw page content do not enter UMA.",
-                    "本地智能和一次性精确同步仅保留已批准的用量元数据；提示、回复、凭据和原始页面内容不会进入 UMA。"
+                    "Local Smart and one-shot Accuracy Sync retain only approved usage metadata. Prompts, responses, credentials, and raw page content do not enter AUV.",
+                    "本地智能和一次性精确同步仅保留已批准的用量元数据；提示、回复、凭据和原始页面内容不会进入 AUV。"
                 ))
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -1807,7 +1807,7 @@ public struct GlobalSettingsSurface: View {
                     subtitle: localized("Application behavior", "应用行为")
                 ) {
                     Toggle(
-                        localized("Launch UMA at login", "登录时启动 UMA"),
+                        localized("Launch AUV at login", "登录时启动 AUV"),
                         isOn: Binding(
                             get: { model.launchAtLoginState.isOn },
                             set: model.setLaunchAtLogin
@@ -1817,8 +1817,8 @@ public struct GlobalSettingsSurface: View {
                     if model.launchAtLoginState == .requiresApproval {
                         HStack {
                             Text(localized(
-                                "macOS approval is required before UMA can open at login.",
-                                "需要 macOS 批准后，UMA 才能在登录时启动。"
+                                "macOS approval is required before AUV can open at login.",
+                                "需要 macOS 批准后，AUV 才能在登录时启动。"
                             ))
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -2005,7 +2005,7 @@ public struct GlobalSettingsSurface: View {
                 ) {
                     settingFact(
                         localized("Usage data", "用量数据"),
-                        localized("UMA retains only allowlisted usage metadata.", "UMA 仅保留允许范围内的用量元数据。")
+                        localized("AUV retains only allowlisted usage metadata.", "AUV 仅保留允许范围内的用量元数据。")
                     )
                     settingFact(
                         localized("Retained state", "保留状态"),

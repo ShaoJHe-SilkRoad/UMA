@@ -6,6 +6,7 @@ private struct ThreadOSPromptPopup: NSViewRepresentable {
     struct Option {
         let title: String
         let value: String
+        var enabled: Bool = true
     }
 
     let label: String
@@ -36,8 +37,11 @@ private struct ThreadOSPromptPopup: NSViewRepresentable {
             for option in options {
                 popup.addItem(withTitle: option.title)
                 popup.lastItem?.representedObject = option.value
+                popup.lastItem?.isEnabled = option.enabled
             }
         }
+        popup.autoenablesItems = false
+        for (index, option) in options.enumerated() { popup.item(at: index)?.isEnabled = option.enabled }
         if let index = options.firstIndex(where: { $0.value == selection }) {
             popup.selectItem(at: index)
         }
@@ -456,8 +460,14 @@ final class ThreadOSPromptComposerForm: ObservableObject {
     @Published private(set) var generatedInstruction: String?
     @Published private(set) var copyResult: ThreadOSPromptComposerCopyResult?
     private let preferences: ApplicationPreferences
+    @Published private var capabilities: ThreadOSCapabilities
+    private let capabilityProvider: () -> ThreadOSCapabilities
+    @Published private(set) var selectionError: String?
 
-    init(preferences: ApplicationPreferences) {
+    init(preferences: ApplicationPreferences, capabilities: ThreadOSCapabilities? = nil, capabilityProvider: (() -> ThreadOSCapabilities)? = nil) {
+        let provider = capabilityProvider ?? { capabilities ?? .local() }
+        self.capabilityProvider = provider
+        self.capabilities = provider()
         self.preferences = preferences
         let loaded = Self.loadSelections(from: preferences)
         selections = loaded.selections ?? Self.defaultSelections
@@ -468,7 +478,8 @@ final class ThreadOSPromptComposerForm: ObservableObject {
         Set(ThreadOSPromptRole.allCases.filter { role in
             guard let selection = selections[role] else { return true }
             return !ThreadOSLeaderPrompt.supportedModels.contains(selection.model)
-                || !ThreadOSLeaderPrompt.supportedEfforts.contains(selection.effort)
+                || !ThreadOSCapabilities.catalogAllows(model: selection.model, effort: selection.effort)
+                || capabilities.availability(model: selection.model, effort: selection.effort) == .unsupported
         })
     }
 
@@ -477,17 +488,12 @@ final class ThreadOSPromptComposerForm: ObservableObject {
         let validation = invalid.isEmpty ? nil : (language == .simplifiedChinese
             ? "以下已保存角色的模型或思考档位不受支持：\(invalid.sorted { $0.rawValue < $1.rawValue }.map { $0.label(for: language) }.joined(separator: "、"))。请在对应菜单中选择受支持的值；保留的选择不会被默认值替换。"
             : "Saved model or reasoning-effort values are unsupported for: \(invalid.sorted { $0.rawValue < $1.rawValue }.map { $0.label(for: language) }.joined(separator: ", ")). Choose a supported value in each role menu; saved choices are not replaced with defaults.")
-        let messages = [validation].compactMap { $0 }
+        let messages = [validation, selectionError, ultraMessage(language: language)].compactMap { $0 }
         return messages.isEmpty ? nil : messages.joined(separator: " ")
     }
 
     var canGenerate: Bool {
-        selections.count == ThreadOSPromptRole.allCases.count &&
-            ThreadOSPromptRole.allCases.allSatisfy { role in
-                guard let selection = selections[role] else { return false }
-                return ThreadOSLeaderPrompt.supportedModels.contains(selection.model) &&
-                    ThreadOSLeaderPrompt.supportedEfforts.contains(selection.effort)
-            }
+selections.count == ThreadOSPromptRole.allCases.count && invalidRoles.isEmpty
     }
 
     func selection(for role: ThreadOSPromptRole) -> ThreadOSPromptSelection {
@@ -495,18 +501,32 @@ final class ThreadOSPromptComposerForm: ObservableObject {
     }
 
     func selectModel(_ model: String, for role: ThreadOSPromptRole) {
+        capabilities = capabilityProvider()
         guard ThreadOSLeaderPrompt.supportedModels.contains(model) else { return }
         let current = selection(for: role)
         guard current.model != model else { return }
+        guard !ThreadOSLeaderPrompt.supportedEfforts.contains(current.effort) || canSelect(model: model, effort: current.effort) else {
+            selectionError = "Ultra / Thinking: incompatible model; previous selection retained. 模型不兼容，已保留原选择。"
+            copyResult = nil
+            return
+        }
+        selectionError = nil
         selections[role] = .init(model: model, effort: current.effort)
         refreshInstruction()
         persistSelections()
     }
 
     func selectEffort(_ effort: String, for role: ThreadOSPromptRole) {
+        capabilities = capabilityProvider()
         guard ThreadOSLeaderPrompt.supportedEfforts.contains(effort) else { return }
         let current = selection(for: role)
         guard current.effort != effort else { return }
+        guard canSelect(model: current.model, effort: effort) else {
+            selectionError = "Ultra / Thinking: not supported for this model/client. 当前模型或客户端不支持，原选择保留。"
+            copyResult = nil
+            return
+        }
+        selectionError = nil
         selections[role] = .init(model: current.model, effort: effort)
         refreshInstruction()
         persistSelections()
@@ -516,6 +536,8 @@ final class ThreadOSPromptComposerForm: ObservableObject {
         language: AppLanguage,
         to clipboard: any ThreadOSSettingsClipboard
     ) -> ThreadOSPromptComposerCopyResult {
+        capabilities = capabilityProvider()
+        refreshInstruction()
         guard canGenerate, let prompt = generatedInstruction else {
             copyResult = .unavailable
             return .unavailable
@@ -527,8 +549,25 @@ final class ThreadOSPromptComposerForm: ObservableObject {
 
     private func refreshInstruction() {
         // Preview and Copy share this exact generated value. Wrapping is visual only.
-        generatedInstruction = try? ThreadOSLeaderPrompt.make(selections: selections, language: .english)
+        generatedInstruction = try? ThreadOSLeaderPrompt.make(selections: selections, language: .english, capabilities: capabilities)
         copyResult = nil
+    }
+
+    func canSelect(model: String, effort: String) -> Bool {
+        ThreadOSCapabilities.catalogAllows(model: model, effort: effort) && capabilities.availability(model: model, effort: effort) != .unsupported
+    }
+    func ultraAvailability(for role: ThreadOSPromptRole) -> ThreadOSCapabilities.Availability {
+        let model = selection(for: role).model
+        guard ThreadOSCapabilities.catalogAllows(model: model, effort: "ultra") else { return .unsupported }
+        return capabilities.availability(model: model, effort: "ultra")
+    }
+    private func ultraMessage(language: AppLanguage) -> String? {
+        guard selections.values.contains(where: { $0.effort == "ultra" }) else { return nil }
+        let pending = selections.contains { $0.value.effort == "ultra" && ultraAvailability(for: $0.key) == .unverified }
+        if language == .simplifiedChinese {
+            return pending ? "Ultra 能力待核实（离线或元数据过期）；可复制请求，接收客户端须验证。Ultra 可能增加用量并自动委派代理；复制不会执行。" : "Ultra 由本地 CLI 元数据支持；接收客户端仍须验证，不代表已生效。可能增加用量并自动委派代理。"
+        }
+        return pending ? "Ultra pending verification (offline/stale metadata). Copy requests only; the receiving client must verify. Ultra may increase usage and delegate agents." : "Ultra supported by local CLI metadata; the receiving client must still verify. Not effective yet. May increase usage and delegate agents."
     }
 
     private struct LoadResult {
@@ -816,13 +855,13 @@ public struct ThreadOSPromptComposerView: View {
 
     private func effortLabel(_ effort: String) -> String {
         if language == .simplifiedChinese {
-            return ["low": "低", "medium": "中", "high": "高", "xhigh": "极高"][effort] ?? effort
+            return ["low": "低", "medium": "中", "high": "高", "xhigh": "极高", "ultra": "Ultra"][effort] ?? effort
         }
-        return ["low": "Low", "medium": "Medium", "high": "High", "xhigh": "Ex High"][effort] ?? effort
+        return ["low": "Low", "medium": "Medium", "high": "High", "xhigh": "Ex High", "ultra": "Ultra"][effort] ?? effort
     }
 
     private func effortOptions(for role: ThreadOSPromptRole) -> [ThreadOSPromptPopup.Option] {
-        var values = ThreadOSLeaderPrompt.supportedEfforts.map { ThreadOSPromptPopup.Option(title: effortLabel($0), value: $0) }
+        var values = ThreadOSLeaderPrompt.supportedEfforts.map { ThreadOSPromptPopup.Option(title: $0 == "ultra" && form.ultraAvailability(for: role) == .unverified ? "Ultra · ?" : effortLabel($0), value: $0, enabled: form.canSelect(model: form.selection(for: role).model, effort: $0)) }
         let current = form.selection(for: role).effort
         if !ThreadOSLeaderPrompt.supportedEfforts.contains(current) {
             let title = language == .simplifiedChinese
@@ -895,8 +934,8 @@ enum ThreadOSPromptComposerSummary {
 
     private static func effortLabel(_ effort: String, language: AppLanguage) -> String {
         if language == .simplifiedChinese {
-            return ["low": "低", "medium": "中", "high": "高", "xhigh": "极高"][effort] ?? effort
+            return ["low": "低", "medium": "中", "high": "高", "xhigh": "极高", "ultra": "Ultra"][effort] ?? effort
         }
-        return ["low": "Low", "medium": "Medium", "high": "High", "xhigh": "Ex High"][effort] ?? effort
+        return ["low": "Low", "medium": "Medium", "high": "High", "xhigh": "Ex High", "ultra": "Ultra"][effort] ?? effort
     }
 }

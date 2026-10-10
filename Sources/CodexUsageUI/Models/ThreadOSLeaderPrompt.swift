@@ -39,16 +39,16 @@ public enum ThreadOSLeaderPrompt {
     public static let supportedModels = [
         "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra"
     ]
-    public static let supportedEfforts = ["low", "medium", "high", "xhigh"]
+    public static let supportedEfforts = ["low", "medium", "high", "xhigh", "ultra"]
 
     public static func make(
         selections: [ThreadOSPromptRole: ThreadOSPromptSelection],
-        language _: AppLanguage
+        language _: AppLanguage, capabilities: ThreadOSCapabilities = .unverified
     ) throws -> String {
         guard selections.count == ThreadOSPromptRole.allCases.count,
               ThreadOSPromptRole.allCases.allSatisfy({ role in
                   guard let selection = selections[role] else { return false }
-                  return supportedModels.contains(selection.model) && supportedEfforts.contains(selection.effort)
+                  return supportedModels.contains(selection.model) && supportedEfforts.contains(selection.effort) && ThreadOSCapabilities.catalogAllows(model: selection.model, effort: selection.effort) && capabilities.availability(model: selection.model, effort: selection.effort) != .unsupported
         }) else {
             throw ThreadOSLeaderPromptError.unsupportedSelection
         }

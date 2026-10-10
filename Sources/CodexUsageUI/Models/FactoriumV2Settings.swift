@@ -241,13 +241,13 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
     public static func availableModels(catalog: ThreadOSModelCatalog? = try? ThreadOSSettingsCodec.loadCatalog(revision: catalogRevision)) -> [String] {
         guard let catalog else { return [] }
         return catalog.models.keys.filter {
-            $0 != "gpt-5.6-sol" && !(catalog.revision == ThreadOSSettingsCodec.latestCatalogRevision && $0 == "gpt-6-sol")
+            (catalog.revision == ThreadOSSettingsCodec.ultraCatalogRevision || $0 != "gpt-5.6-sol") && !(catalog.revision == ThreadOSSettingsCodec.latestCatalogRevision && $0 == "gpt-6-sol")
         }.sorted()
     }
 
     public static func availableEfforts(model: String, leader: Bool, catalog: ThreadOSModelCatalog? = try? ThreadOSSettingsCodec.loadCatalog(revision: catalogRevision)) -> [String] {
         guard let values = catalog?.models[model]?.reasoningEfforts else { return [] }
-        return model == "gpt-6-astra" && !leader ? values.filter(["low", "medium", "high"].contains) : values
+        return catalog?.revision != ThreadOSSettingsCodec.ultraCatalogRevision && model == "gpt-6-astra" && !leader ? values.filter(["low", "medium", "high"].contains) : values
     }
 
     private struct Request: Encodable {

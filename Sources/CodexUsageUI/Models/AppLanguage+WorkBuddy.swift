@@ -221,8 +221,8 @@ extension AppLanguage {
 
     var workBuddyOfficialPageHint: String {
         self == .simplifiedChinese
-            ? "仅在默认浏览器打开官方页面；UMA 不会读取页面内容。"
-            : "Opens the official page in your default browser. UMA does not read its contents."
+            ? "仅在默认浏览器打开官方页面；AUV 不会读取页面内容。"
+            : "Opens the official page in your default browser. AUV does not read its contents."
     }
 
     var workBuddyPreview: String {
