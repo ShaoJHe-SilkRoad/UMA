@@ -37,7 +37,7 @@ AUV 是原 UMA 的公开名称：**Agent Usage Viewer**。同一个应用包含�
 
 Ultra 可能增加用量，并在适用宿主中委派额外代理。它不是 Fast，不是另一个模型；复制不会启动推理。本版没有进行真实 Ultra 推理或证明后端生效。
 
-[完整线程工指南](https://shaotinghe.com/threados/) · [接收端兼容说明](https://github.com/ShaoJHe-SilkRoad/ThreadOS/blob/main/docs/ULTRA_COMPATIBILITY.md)
+[完整线程工指南](https://shaotinghe.com/threados/) · [接收端兼容说明](docs/releases/0.15.1.md)
 
 ### Sectorium：早期开发阶段
 
