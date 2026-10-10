@@ -53,6 +53,8 @@ Ultra 可能增加用量，并在适用宿主中委派额外代理。它不是 F
 
 ### 下载与升级
 
+**完整步骤：**[安装、升级、首次使用及回退指南](docs/INSTALLATION.md#中文安装指南)（系统要求、正式下载、哈希、Finder 安装、组件设置与排错）。
+
 macOS 14 或更高；本次可下载构建为 **Apple silicon (arm64)**。从 [0.15.1 正式发布页](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.15.1) 下载应用 ZIP 和 SHA-256 文件，核对哈希及该页签名/公证结果。正常退出旧应用后，用解压的 `UMA.app` 替换原应用；建议保留旧应用副本。它显示为 AUV，保留原 bundle ID、偏好键、历史和用户设置。不要清空设置以升级，也不要关闭系统安全检查。
 
 **Sectorium 仍是早期软件：下载/设置前独立备份，优先测试数据；完整安全弹出未确认前不可拔盘。** 安装应用不会自动证明工具安装、自动化服务或磁盘已经就绪。浏览器桥接组件的既有启用和权限边界不变，本版不要求重新授权整个系统。
@@ -94,6 +96,8 @@ Select the intended physical drive and inspect its associated development image.
 AUV and ThreadOS English/dark isolated windows and relevant source regressions were checked. Sectorium, other language/theme states and minimum-window validation remain pending. This is **not** live create/adopt/mount/stop, service installation/automation, safe ejection, encryption, disconnect recovery, sleep or restart. Historical tests do not verify the current hardware path. [Sectorium guide and tested/not-tested matrix](https://shaotinghe.com/sectorium/).
 
 ### Download, upgrade and troubleshooting
+
+**Full instructions:** [Installation, upgrade, first use and rollback](docs/INSTALLATION.md#english-installation-guide), including requirements, download/checksum, Finder steps, component setup and troubleshooting.
 
 Requires macOS 14+; the downloadable build targets Apple silicon (arm64). Download the ZIP and SHA-256 from [0.15.1](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.15.1), and inspect its actual signing/notarization record. Quit normally, retain a backup, and replace the application with `UMA.app`. It displays AUV while preserving bundle ID, preference domains, history, helpers and stored choices. Do not clear user data or disable security checks.
 
