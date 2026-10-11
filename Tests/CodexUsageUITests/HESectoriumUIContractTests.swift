@@ -268,7 +268,10 @@ struct HESectoriumUIContractTests {
         #expect(toolbar.contains("SectoriumWorkbenchView("))
         #expect(toolbar.contains("case .sectorium:"))
         #expect(!toolbar.contains("HESectoriumStatusControl("))
-        #expect(panel.contains("HESectoriumStatusControl(isChinese:"))
+        #expect(!panel.contains("HESectoriumStatusControl(isChinese:"))
+        for label in ["Scan All", "Refresh All", "Desktop Wizard", "Settings"] {
+            #expect(panel.contains("headerButton(localized(\"" + label + "\""))
+        }
         let workbench = try source("Sources/CodexUsageUI/Views/SectoriumWorkbenchView.swift")
         let store = try source("Sources/CodexUsageUI/Stores/HESectoriumStore.swift")
         #expect(workbench.contains("pendingOperation: model.workbench.pendingOperation"))
