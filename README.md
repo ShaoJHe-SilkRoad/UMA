@@ -6,14 +6,14 @@
 
 | Platform | Download | Requirements |
 | --- | --- | --- |
-| Windows | [Download for Windows — 0.16.2](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.2/AUV-0.16.2-win-x64.zip) | Windows 11 · x64 · portable ZIP · **unsigned** |
+| Windows | [Download for Windows — 0.16.3](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Win_0.16.3.zip) | Windows 11 · x64 · portable ZIP · **unsigned** |
 | macOS | [Download for macOS — 0.15.1](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.15.1/AUV-0.15.1-build2026101002.zip) | macOS 14+ · Apple silicon · Developer ID signed and Apple notarized |
 
-[Installation guide](docs/INSTALLATION.md) · [Windows release notes](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.16.2) · [中文](#中文)
+[Installation guide](docs/INSTALLATION.md) · [Windows release notes](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.16.3) · [中文](#中文)
 
 ## Platform availability
 
-| Capability | Windows 0.16.2 | macOS 0.15.1 |
+| Capability | Windows 0.16.3 | macOS 0.15.1 |
 | --- | --- | --- |
 | AUV / Codex usage | Supported, read-only installed-client account data | Existing Mac monitoring |
 | WorkBuddy Credits | Experimental manual official-page sync; WebView2 Runtime required | Existing Mac provider behavior; not requalified here |
@@ -22,11 +22,11 @@
 | ThreadOS generate/copy | Supported; receiving-client application and live Ultra execution untested | Generation tested; live Ultra execution untested |
 | Sectorium | UI only; Windows storage backend unavailable; mutation disabled | Experimental Mac tools; real storage operations untested for 0.15.1 |
 
-Windows build **20261010.8** retains its tested binaries. [Windows source and build instructions](windows/README.md).
+Windows build **20261011.1** unifies the main header and refines Wizard/tray controls. [Windows source and build instructions](windows/README.md).
 
 ## Install on Windows
 
-Extract the entire ZIP and run **AUV.exe**; verify **0.16.2** in its title. The .NET desktop runtime is included. WorkBuddy's optional connection needs WebView2 Runtime. Enable the floating Wizard in Settings; click the AUV tray icon for usage. **Ctrl+Shift+Q** quits completely. Preserve **%LOCALAPPDATA%\AUV.Windows.UI.Preview** during upgrades. See the [Windows guide](docs/INSTALLATION.md#windows-installation-guide) for unsigned-build verification and provider limits.
+Extract the entire ZIP and run **AUV.exe**; verify **0.16.3** in AUV.exe → Properties → Details → Product version. The .NET desktop runtime is included. WorkBuddy's optional connection needs WebView2 Runtime. Enable the floating Wizard in Settings; click the AUV tray icon for usage. **Ctrl+Shift+Q** quits completely. Preserve **%LOCALAPPDATA%\AUV.Windows.UI.Preview** during upgrades. See the [Windows guide](docs/INSTALLATION.md#windows-installation-guide) for unsigned-build verification and provider limits.
 
 ## macOS 0.15.1
 
@@ -84,14 +84,14 @@ Ultra command generation was tested; live Ultra execution was not. Some window a
 
 | 平台 | 下载 | 要求 |
 | --- | --- | --- |
-| Windows | [下载 Windows 版 · v0.16.2](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.2/AUV-0.16.2-win-x64.zip) | Windows 11 · x64 · 便携 ZIP · **未签名** |
+| Windows | [下载 Windows 版 · v0.16.3](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Win_0.16.3.zip) | Windows 11 · x64 · 便携 ZIP · **未签名** |
 | macOS | [下载 macOS 版 · v0.15.1](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.15.1/AUV-0.15.1-build2026101002.zip) | macOS 14 或更新 · Apple silicon · 已签名并通过 Apple 公证 |
 
-[安装指南](docs/INSTALLATION.md#中文安装指南) · [Windows 更新说明](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.16.2)
+[安装指南](docs/INSTALLATION.md#中文安装指南) · [Windows 更新说明](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.16.3)
 
-### Windows 0.16.2
+### Windows 0.16.3
 
-构建号 **20261010.8**。全部解压 ZIP 后运行 **AUV.exe**，在标题确认 0.16.2。已包含 .NET 桌面运行时；可选 WorkBuddy 连接需 WebView2 Runtime。设置中启用独立桌面浮窗，托盘图标展开用量，**Ctrl+Shift+Q** 完全退出。升级请保留 **%LOCALAPPDATA%\AUV.Windows.UI.Preview**。
+构建号 **20261011.1**。全部解压 ZIP 后运行 **AUV.exe**，在 AUV.exe 文件属性 → 详细信息确认 0.16.3。已包含 .NET 桌面运行时；可选 WorkBuddy 连接需 WebView2 Runtime。设置中启用独立桌面浮窗，托盘图标展开用量，**Ctrl+Shift+Q** 完全退出。升级请保留 **%LOCALAPPDATA%\AUV.Windows.UI.Preview**。
 
 Codex 只读用量已接入；WorkBuddy 同步为试验功能；Claude/Antigravity 实时连接不可用。线程工可生成和复制，接收端与真实 Ultra 执行未验证。分区工**仅为界面，存储后台未实现，磁盘操作禁用**。详见[Windows 安装指南](docs/INSTALLATION.md#windows-中文安装指南)。
 
