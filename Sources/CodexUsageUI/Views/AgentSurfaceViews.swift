@@ -471,7 +471,6 @@ public struct QuickPanelSurface: View {
                 .disabled(!store.allowsManualRefresh)
             headerButton(localized("Desktop Wizard", "桌面向导"), "wand.and.stars", toggleWizard)
             headerButton(localized("Settings", "设置"), "gearshape", openSettings)
-            HESectoriumStatusControl(isChinese: store.language == .simplifiedChinese)
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 9)

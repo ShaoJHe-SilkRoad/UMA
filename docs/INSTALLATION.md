@@ -1,6 +1,6 @@
 # Install AUV / 安装 AUV
 
-[English](#english-installation-guide) · [中文](#中文安装指南) · [Windows 0.16.2](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.2/AUV-0.16.2-win-x64.zip) · [macOS 0.15.1](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.15.1/AUV-0.15.1-build2026101002.zip)
+[English](#english-installation-guide) · [中文](#中文安装指南) · [Windows 0.16.2](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.2/AUV-0.16.2-win-x64.zip) · [macOS 0.16.3](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Mac_0.16.3.zip)
 
 ## English installation guide
 
@@ -34,21 +34,21 @@ Expected SHA-256: **5b0b2fae43e7693472caae1e205dbe9b53f004a99b443c0adfcf58996bd9
 
 [Windows release notes](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.16.2) · [Checksums](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.2/HASHES.txt) · [Release manifest](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.2/RELEASE-MANIFEST.json) · [Report a problem](https://github.com/ShaoJHe-SilkRoad/UMA/issues)
 
-### macOS 0.15.1
+### macOS 0.16.3
 
 ### Before you start
 
 You need **macOS 14 or later and an Apple silicon Mac (M-series chip)**. Check Apple menu → About This Mac if you are unsure. This release does not include an Intel version.
 
-AUV 0.15.1 includes ThreadOS and Sectorium. You only need one app download.
+AUV 0.16.3 includes ThreadOS and Sectorium. You only need one app download.
 
 ### Install
 
-1. [Download AUV-0.15.1-build2026101002.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.15.1/AUV-0.15.1-build2026101002.zip). Choose this application ZIP, not GitHub’s “Source code” download.
+1. [Download AUV_Mac_0.16.3.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Mac_0.16.3.zip). Choose this application ZIP, not GitHub’s “Source code” download.
 2. Double-click the ZIP in Finder. It extracts **`UMA.app`** — the app opens as **AUV**, but keeps its old filename for compatibility.
 3. Drag it into **Applications** on your Mac’s internal disk. Your personal `~/Applications` folder also works. Keep the app on the internal disk if you plan to eject an external development drive.
 4. Open the installed copy and follow the normal macOS first-open prompt. This release is Developer ID signed and Apple notarized.
-5. Open **AUV → About AUV** and check **0.15.1**. The build number is **2026101002**; Finder → Get Info can also show the installed app’s version details.
+5. Open **AUV → About AUV** and check **0.16.3**. The build number is **2026101101**; Finder → Get Info can also show the installed app’s version details.
 
 ### Upgrade from UMA or an older AUV
 
@@ -73,16 +73,14 @@ Your saved settings are retained. You do not need to clear preferences, history 
 For the ZIP saved with its original name in Downloads, run:
 
 ```sh
-shasum -a 256 ~/Downloads/AUV-0.15.1-build2026101002.zip
+shasum -a 256 ~/Downloads/AUV_Mac_0.16.3.zip
 ```
 
 The first value should match:
 
-```text
-598bd61b8a439dde426b943bee3f84e57ad46bba96b94747405ae687825d505e
-```
+[HASHES.txt](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/HASHES.txt) (`AUV_Mac_0.16.3.zip`)
 
-If it differs, do not install that file. Download it again. The [release page](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.15.1) also provides `HASHES.txt` and the signing record. The signing identity is **SHAOTING HE (C6TUZVJ6SJ)**.
+If it differs, do not install that file. Download it again. The [release page](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.16.3) also provides `HASHES.txt` and the signing record. The signing identity is **SHAOTING HE (C6TUZVJ6SJ)**.
 
 ## 中文安装指南
 
@@ -110,21 +108,21 @@ PowerShell 校验方法同上，SHA-256 应为 **5b0b2fae43e7693472caae1e205dbe9
 
 [Windows 更新说明](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.16.2) · [校验值](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.2/HASHES.txt) · [发布清单](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.2/RELEASE-MANIFEST.json) · [反馈问题](https://github.com/ShaoJHe-SilkRoad/UMA/issues)
 
-### macOS 0.15.1
+### macOS 0.16.3
 
 ### 安装前
 
 需要 **macOS 14 或更新版本，以及 Apple silicon Mac（M 系列芯片）**。不确定时，可在苹果菜单 →“关于本机”查看。本版不提供 Intel 版本。
 
-AUV 0.15.1 已包含线程工和分区工，只需下载一个应用。
+AUV 0.16.3 已包含线程工和分区工，只需下载一个应用。
 
 ### 安装
 
-1. [下载 AUV-0.15.1-build2026101002.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.15.1/AUV-0.15.1-build2026101002.zip)。请选择这个应用 ZIP，不要选择 GitHub 的“Source code”源码包。
+1. [下载 AUV_Mac_0.16.3.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Mac_0.16.3.zip)。请选择这个应用 ZIP，不要选择 GitHub 的“Source code”源码包。
 2. 在 Finder 中双击解压，得到 **`UMA.app`**。打开后显示为 **AUV**，文件名沿用旧名以兼容已有安装。
 3. 将它拖入 Mac 内置盘的**“应用程序”**文件夹，也可以使用个人 `~/Applications` 文件夹。如果以后需要弹出外接开发硬盘，应用本身请放在内置盘。
 4. 打开安装后的应用，按 macOS 正常首次启动提示操作。本版已使用 Developer ID 签名，并通过 Apple 公证。
-5. 在 **AUV → 关于 AUV** 中确认版本为 **0.15.1**。构建号为 **2026101002**；Finder →“显示简介”也可查看已安装应用的版本信息。
+5. 在 **AUV → 关于 AUV** 中确认版本为 **0.16.3**。构建号为 **2026101101**；Finder →“显示简介”也可查看已安装应用的版本信息。
 
 ### 从 UMA 或旧版 AUV 升级
 
@@ -149,13 +147,11 @@ AUV 0.15.1 已包含线程工和分区工，只需下载一个应用。
 如果 ZIP 保留原名并位于“下载”文件夹，在终端执行：
 
 ```sh
-shasum -a 256 ~/Downloads/AUV-0.15.1-build2026101002.zip
+shasum -a 256 ~/Downloads/AUV_Mac_0.16.3.zip
 ```
 
 输出的第一个值应为：
 
-```text
-598bd61b8a439dde426b943bee3f84e57ad46bba96b94747405ae687825d505e
-```
+[HASHES.txt](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/HASHES.txt) (`AUV_Mac_0.16.3.zip`)
 
-不一致就不要安装，请重新下载。[正式发布页](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.15.1)也提供 `HASHES.txt` 和签名记录；签名者为 **SHAOTING HE (C6TUZVJ6SJ)**。
+不一致就不要安装，请重新下载。[正式发布页](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.16.3)也提供 `HASHES.txt` 和签名记录；签名者为 **SHAOTING HE (C6TUZVJ6SJ)**。
