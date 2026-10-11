@@ -67,7 +67,7 @@ internal static class RefinementVerification
             rows = Walk(main).OfType<AllowanceRow>().Where(r => r.Name == "ProviderRow").ToArray();
             Require(rows.All(r => Math.Abs(r.ActualHeight - (r.Card!.HasDisplayableQuota ? 64 : 36)) < 1), "Mixed native rail row heights follow quota availability");
             main.Model.Shell.ReplaceAdmittedPresentation(Available(9600)); app.Desktop.Density = WizardDensity.Regular; await Settle(main);
-            Require(Math.Abs(Wizard().ActualWidth - 126) < 1, "Regular native width is 126 DIP");
+            Require(Math.Abs(Wizard().ActualWidth - WizardPolicy.RegularWidth) < 1, "Regular native width follows the Wizard policy");
             Require(Walk(Wizard()).OfType<AllowanceRow>().All(r => Math.Abs(r.ActualHeight - 48) < 1), "Regular native row height is 48 DIP");
             ProductVerification.Capture((FrameworkElement)Wizard().Content, Path.Combine(directory, "regular-9600.png"));
             foreach (var value in new[] { 999m, 1500, 9900, 10000, 14000, 99000, 1300000 })

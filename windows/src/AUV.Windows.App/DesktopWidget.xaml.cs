@@ -40,8 +40,8 @@ public partial class DesktopWidget : Window
         var measure = WizardTypography.Measure(cards.Select(c => c.Value), textScale, Dpi());
         stableValueWidth = Math.Max(stableValueWidth, measure.ValueWidth);
         var nativeWidth = cards.Where(c => c.Kind == AllowanceKind.Credits).Select(c => WizardTypography.Text(c.Value, 18 * textScale, System.Windows.Media.Brushes.Black, Dpi(), FontWeights.SemiBold).WidthIncludingTrailingWhitespace + 55 * textScale).DefaultIfEmpty(0).Max();
-        var width = RenderedDensity == WizardDensity.Regular ? Math.Max(WizardPolicy.RegularWidth * textScale, nativeWidth * WizardPolicy.WidthRatio)
-            : (10 + 18 * textScale + 3) * WizardPolicy.WidthRatio + stableValueWidth;
+        var width = RenderedDensity == WizardDensity.Regular ? Math.Max(WizardPolicy.RegularWidth * textScale, nativeWidth * WizardPolicy.WidthRatio * WizardPolicy.RegularWidthAdjustment)
+            : ((10 + 18 * textScale + 3) * WizardPolicy.WidthRatio + stableValueWidth) * WizardPolicy.MinimalistWidthAdjustment;
         var height = RenderedDensity == WizardDensity.Regular ? WizardPolicy.RegularRowHeight * textScale : measure.Height;
         Cards.Children.Clear();
         foreach (var card in cards)

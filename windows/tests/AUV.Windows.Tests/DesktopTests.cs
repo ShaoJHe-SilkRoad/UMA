@@ -23,13 +23,13 @@ public sealed class DesktopTests
         var path = Path.Combine(Path.GetTempPath(), "auv-desktop-" + Guid.NewGuid() + ".json");
         try
         {
-            var store = new SettingsStore(path); Assert.True(store.Save(new() { Desktop = new() { WidgetVisible = true, AlwaysOnTop = false, CloseToTray = false, Left = -600, Top = 200 } }));
-            var restored = store.Load(new()); Assert.True(restored.Desktop.WidgetVisible); Assert.False(restored.Desktop.AlwaysOnTop); Assert.False(restored.Desktop.CloseToTray); Assert.Equal(-600, restored.Desktop.Left); Assert.Equal(1040, restored.Geometry.Width);
+            var store = new SettingsStore(path); Assert.True(store.Save(new() { Desktop = new() { WidgetVisible = true, AlwaysOnTop = false, CloseToTray = false, HideTrayIcon = true, Left = -600, Top = 200 } }));
+            var restored = store.Load(new()); Assert.True(restored.Desktop.WidgetVisible); Assert.False(restored.Desktop.AlwaysOnTop); Assert.False(restored.Desktop.CloseToTray); Assert.True(restored.Desktop.HideTrayIcon); Assert.Equal(-600, restored.Desktop.Left); Assert.Equal(1040, restored.Geometry.Width);
         }
         finally { if (File.Exists(path)) File.Delete(path); }
     }
     [Fact] public void OldSettingsWithoutDesktopPreferencesRemainValid()
-    { var settings = new PreviewSettings { Desktop = null! }; settings.Normalize(new()); Assert.NotNull(settings.Desktop); Assert.True(settings.Desktop.AlwaysOnTop); Assert.False(settings.Desktop.WidgetVisible); }
+    { var settings = new PreviewSettings { Desktop = null! }; settings.Normalize(new()); Assert.NotNull(settings.Desktop); Assert.True(settings.Desktop.AlwaysOnTop); Assert.False(settings.Desktop.WidgetVisible); Assert.False(settings.Desktop.HideTrayIcon); }
     [Fact] public void LiveSystemCountersAreSaneAndDoNotPopulateAccountUsage()
     {
         var monitor = new PerformanceMonitor(); var sample = monitor.Sample(); Assert.Null(sample.CpuPercent); Assert.True(sample.TotalMemory > 0); Assert.True(sample.AvailableMemory <= sample.TotalMemory); Assert.InRange(sample.MemoryPercent!.Value, 0, 100);

@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Windows;
 using System.Windows.Interop;
 
@@ -12,26 +14,48 @@ internal sealed class TrayIcon : IDisposable
     private readonly uint taskbarCreated = RegisterWindowMessage("TaskbarCreated");
     private NotifyIconData data;
     private nint ownedIcon;
-    private bool disposed;
+    private bool disposed, visible;
     public bool IsAdded { get; private set; }
     public event Action<bool>? Activated;
     public event Action? AvailabilityChanged;
-    internal TrayIcon(Window window)
+    internal TrayIcon(Window window, string settingsPath, bool visible = true)
     {
+        this.visible = visible;
         var handle = new WindowInteropHelper(window).Handle;
         source = HwndSource.FromHwnd(handle)!;
         var icon = SendMessage(handle, 0x007F, 0, 0); // WM_GETICON / ICON_SMALL, owned by WPF.
         if (icon == 0) icon = SendMessage(handle, 0x007F, 1, 0);
         if (icon == 0) icon = LoadIcon(0, (nint)32512); // Shared fallback, never destroyed here.
         data = new() { Size = (uint)Marshal.SizeOf<NotifyIconData>(), Window = handle, Id = 1,
-            Flags = 1 | 2 | 4 | 0x80, CallbackMessage = Callback, Icon = icon, Tip = "AUV · usage unknown", Info = "", InfoTitle = "" };
+            Flags = 1 | 2 | 4 | 0x20 | 0x80, CallbackMessage = Callback, Icon = icon, Tip = "AUV · usage unknown", Info = "", InfoTitle = "",
+            Guid = Identity(settingsPath) };
         UpdateAppearance(); source.AddHook(Hook); Add();
+    }
+    private static Guid Identity(string settingsPath)
+    {
+        // Unsigned Shell icon GUIDs are bound to the executable path. Keep restarts stable
+        // while isolating side-by-side portable builds and separate preference profiles.
+        var path = System.IO.Path.GetFullPath(Environment.ProcessPath!).ToUpperInvariant();
+        var profile = System.IO.Path.GetFullPath(settingsPath).ToUpperInvariant();
+        return new Guid(SHA256.HashData(Encoding.UTF8.GetBytes("AUV.Windows.Tray.v1\n" + path + "\n" + profile)).AsSpan(0, 16));
     }
     private void Add()
     {
+        if (disposed || !visible) return;
         IsAdded = Shell_NotifyIcon(0, ref data);
         if (IsAdded) { data.Version = 4; _ = Shell_NotifyIcon(4, ref data); }
         AvailabilityChanged?.Invoke();
+    }
+    public void SetVisible(bool value)
+    {
+        if (disposed || visible == value) return;
+        visible = value;
+        if (value) Add();
+        else
+        {
+            if (IsAdded) _ = Shell_NotifyIcon(2, ref data);
+            IsAdded = false; AvailabilityChanged?.Invoke();
+        }
     }
     public void SetTooltip(string value)
     { data.Tip = value.Length <= 127 ? value : value[..127]; if (IsAdded) _ = Shell_NotifyIcon(1, ref data); }
@@ -60,7 +84,8 @@ internal sealed class TrayIcon : IDisposable
     }
     public NativeDesktop.Rect? GetRectangle()
     {
-        var id = new IconIdentifier { Size = (uint)Marshal.SizeOf<IconIdentifier>(), Window = data.Window, Id = data.Id };
+        if (!IsAdded) return null;
+        var id = new IconIdentifier { Size = (uint)Marshal.SizeOf<IconIdentifier>(), Window = data.Window, Id = data.Id, Guid = data.Guid };
         return Shell_NotifyIconGetRect(ref id, out var rect) == 0 ? rect : null;
     }
     public void Dispose()

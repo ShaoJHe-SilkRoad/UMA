@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -29,20 +30,43 @@ public sealed class DesktopController : Observable, IDisposable
     public RelayCommand SettingsCommand { get; }
     public bool AlwaysOnTop { get => app.Settings.Desktop.AlwaysOnTop; set { app.Settings.Desktop.AlwaysOnTop = value; if (widget != null) widget.Topmost = value; Changed(); window.Persist(); } }
     public bool CloseToTray { get => app.Settings.Desktop.CloseToTray; set { app.Settings.Desktop.CloseToTray = value; Changed(); window.Persist(); } }
+    public bool HideTrayIcon
+    {
+        get => app.Settings.Desktop.HideTrayIcon;
+        set
+        {
+            if (HideTrayIcon == value) return;
+            app.Settings.Desktop.HideTrayIcon = value;
+            if (value) { flyout?.Hide(); UpdateSampling(); }
+            tray?.SetVisible(!value);
+            Changed(); Changed(nameof(TrayAvailable)); Changed(nameof(TrayStatus));
+            Main.Status = TrayStatus;
+            if (!TrayAvailable && !window.IsVisible) OpenMain();
+            window.Persist();
+        }
+    }
     public bool TrayAvailable => tray?.IsAdded == true;
-    public string TrayStatus => TrayAvailable ? "System tray ready · Windows controls icon visibility" : "System tray unavailable · main window stays accessible";
+    public string TrayStatus => HideTrayIcon ? "Tray icon hidden" : TrayAvailable ? "Tray icon enabled" : "System tray unavailable";
     public string WidgetButton => WidgetRequested ? "Hide Desktop Wizard" : "Show Desktop Wizard";
     public RelayCommand OpenCommand { get; }
     public RelayCommand ToggleWidgetCommand { get; }
     public RelayCommand HideWidgetCommand { get; }
     public RelayCommand DockWidgetCommand { get; }
     public RelayCommand QuitCommand { get; }
+    public RelayCommand HideTrayCommand { get; }
+    public RelayCommand TaskbarSettingsCommand { get; }
     public DesktopController(App app, MainWindow window)
     {
         this.app = app; this.window = window;
         OpenCommand = new(OpenMain); ToggleWidgetCommand = new(() => SetWidgetVisible(!WidgetRequested));
         HideWidgetCommand = new(() => SetWidgetVisible(false)); DockWidgetCommand = new(() => { if (widget != null) { NativeDesktop.Place(widget); RememberWidgetPosition(); } });
         QuitCommand = new(Quit);
+        HideTrayCommand = new(() => HideTrayIcon = true);
+        TaskbarSettingsCommand = new(() =>
+        {
+            try { Process.Start(new ProcessStartInfo("ms-settings:taskbar") { UseShellExecute = true }); }
+            catch (Exception e) when (e is Win32Exception or InvalidOperationException) { Main.Status = "Could not open Windows taskbar settings."; }
+        });
         SettingsCommand = new(() => { OpenMain(); new SettingsWindow(window, null).ShowDialog(); });
         timer.Tick += (_, _) => Performance.Update(monitor.Sample());
         window.Closing += MainClosing;
@@ -53,7 +77,7 @@ public sealed class DesktopController : Observable, IDisposable
     {
         if (started) return;
         started = true;
-        tray = new(window);
+        tray = new(window, app.Store.PathName, !HideTrayIcon);
         tray.Activated += context => { if (context) ShowMenu(); else ToggleFlyout(); };
         tray.AvailabilityChanged += () =>
         {
@@ -139,7 +163,7 @@ public sealed class DesktopController : Observable, IDisposable
     }
     public void HideMain()
     {
-        if (!TrayAvailable) { Main.Status = "Cannot hide: the system tray is unavailable."; return; }
+        if (!TrayAvailable) { Main.Status = HideTrayIcon ? "Show the tray icon in Settings before hiding the main window." : "Cannot hide: the system tray is unavailable."; return; }
         window.Persist(); window.Hide();
     }
     private void MainClosing(object? sender, CancelEventArgs e)
@@ -152,6 +176,7 @@ public sealed class DesktopController : Observable, IDisposable
         var usage = new MenuItem { Header = "Usage popup" }; usage.Click += (_, _) => ToggleFlyout(); menu.Items.Add(usage);
         menu.Items.Add(new MenuItem { Header = WidgetButton, Command = ToggleWidgetCommand });
         menu.Items.Add(new MenuItem { Header = "Wizard settings", Command = SettingsCommand });
+        menu.Items.Add(new MenuItem { Header = "Hide tray icon", Command = HideTrayCommand });
         menu.Items.Add(new Separator()); menu.Items.Add(new MenuItem { Header = "Exit AUV", Command = QuitCommand });
         menu.IsOpen = true;
     }
@@ -164,6 +189,7 @@ public sealed class DesktopController : Observable, IDisposable
         var density = new MenuItem { Header = "Density" };
         foreach (var choice in Densities) { var item = new MenuItem { Header = choice.ToString(), IsCheckable = true, IsChecked = Density == choice }; item.Click += (_, _) => Density = choice; density.Items.Add(item); }
         menu.Items.Add(density); menu.Items.Add(new MenuItem { Header = "Wizard settings", Command = SettingsCommand });
+        menu.Items.Add(new Separator()); menu.Items.Add(new MenuItem { Header = "Exit AUV", Command = QuitCommand });
         return menu;
     }
     public void Quit()
@@ -178,7 +204,7 @@ public sealed class DesktopController : Observable, IDisposable
         Main.Shell.PropertyChanged -= SelectionChanged; window.Closing -= MainClosing;
         flyout?.CloseForExit(); widget?.CloseForExit();
     }
-    internal object Evidence => new { TrayAvailable, WidgetVisible, AlwaysOnTop, SamplingActive = timer.IsEnabled,
+    internal object Evidence => new { TrayAvailable, HideTrayIcon, WidgetVisible, AlwaysOnTop, SamplingActive = timer.IsEnabled,
         FlyoutVisible = flyout?.IsVisible == true, WidgetNativeTopmost = widget != null && NativeDesktop.IsTopmost(widget),
         WidgetNonActivating = widget != null && NativeDesktop.IsNonActivating(widget), WidgetTaskbarButton = widget?.ShowInTaskbar,
         RenderedDensity = widget?.RenderedDensity.ToString(), CardCount = widget?.CardCount,

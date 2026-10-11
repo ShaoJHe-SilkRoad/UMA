@@ -39,6 +39,7 @@ public sealed class AllowanceRow : Control
     public double TextScale { get; set; } = 1;
     public bool Capsule { get; set; }
     public bool CompactDesktop { get; set; }
+    private bool StackedMinimalist => CompactDesktop && Density == WizardDensity.Minimalist && ActualWidth < 48 * TextScale;
     public AllowanceRow() { Focusable = false; SnapsToDevicePixels = true; }
     private Brush Resource(string name) => (Brush)(TryFindResource(name) ?? Brushes.Gray);
     private void UpdateDescription()
@@ -64,12 +65,14 @@ public sealed class AllowanceRow : Control
         dc.Pop(); dc.DrawGeometry(null, new Pen(Resource("BorderBrush"), 1), shape);
         var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
         var small = Density == WizardDensity.Minimalist;
-        var markSize = (CompactDesktop ? small ? 12 : 14 : small ? 18 : 24) * TextScale;
-        var markX = CompactDesktop ? 4 * TextScale : small ? 5 : 9;
-        if (!AgentBrandIcons.Draw(dc, card.Id, new Rect(markX, (ActualHeight - markSize) / 2, markSize, markSize), Resource("TextBrush")))
+        var markSize = (CompactDesktop ? small ? 12 : 17.5 : small ? 18 : 24) * TextScale;
+        var markX = CompactDesktop ? StackedMinimalist ? (ActualWidth - markSize) / 2 : (ActualHeight - markSize) / 2 : small ? 5 : 9;
+        var markY = StackedMinimalist ? Math.Max(0, (ActualHeight - markSize - TextScale - WizardTypography.Text("100%", 9.5 * TextScale, Resource("TextBrush"), dpi).Height) / 2)
+            : (ActualHeight - markSize) / 2;
+        if (!AgentBrandIcons.Draw(dc, card.Id, new Rect(markX, markY, markSize, markSize), Resource("TextBrush")))
         {
             var mark = WizardTypography.Text(card.Mark, markSize * .78, Resource("TextBrush"), dpi, FontWeights.SemiBold);
-            dc.DrawText(mark, new Point(markX + (markSize - mark.Width) / 2, (ActualHeight - mark.Height) / 2));
+            dc.DrawText(mark, new Point(markX + (markSize - mark.Width) / 2, markY + (markSize - mark.Height) / 2));
         }
         if (ShowStatus && card.HasDisplayableQuota)
         {
@@ -79,7 +82,7 @@ public sealed class AllowanceRow : Control
                 ConnectionState.Reconnecting or ConnectionState.Stale => Resource("WarningBrush"), _ => Resource("MutedBrush")
             };
             var indicatorScale = CompactDesktop ? .7 * TextScale : 1;
-            var center = new Point(markX + markSize - 2 * indicatorScale, ActualHeight / 2 + markSize / 2 - 2 * indicatorScale);
+            var center = new Point(markX + markSize - 2 * indicatorScale, markY + markSize - 2 * indicatorScale);
             dc.DrawEllipse(Resource("SurfaceBrush"), null, center, 4 * indicatorScale, 4 * indicatorScale);
             dc.DrawEllipse(card.Connection is ConnectionState.Disconnected or ConnectionState.Unavailable ? Resource("SurfaceBrush") : connectionBrush,
                 new Pen(connectionBrush, 1), center, 2.5 * indicatorScale, 2.5 * indicatorScale);
@@ -114,9 +117,10 @@ public sealed class AllowanceRow : Control
     }
     private void DrawCompact(DrawingContext dc, AllowanceCard card, double dpi, double markX, double markSize, bool minimalist)
     {
-        var inset = 5 * TextScale; var textX = markX + markSize + 5 * TextScale;
-        var available = ActualWidth - inset - textX;
-        var font = (minimalist ? 10.5 : 12) * TextScale;
+        var inset = (minimalist ? 6 : 8) * TextScale;
+        var textX = markX + markSize + (minimalist ? 4 : 5) * TextScale;
+        var available = StackedMinimalist ? ActualWidth - 2 * inset : ActualWidth - inset - textX;
+        var font = (minimalist ? StackedMinimalist ? 9.5 : 10.5 : 12) * TextScale;
         var displayValue = minimalist ? card.MinimalistValue : card.Value;
         var value = WizardTypography.Text(displayValue, font, Resource("TextBrush"), dpi, FontWeights.Medium);
         while (value.WidthIncludingTrailingWhitespace > available && font > 8.5 * TextScale)
@@ -124,25 +128,46 @@ public sealed class AllowanceRow : Control
             font = Math.Max(8.5 * TextScale, font - .25 * TextScale);
             value = WizardTypography.Text(displayValue, font, Resource("TextBrush"), dpi, FontWeights.Medium);
         }
-        value.MaxTextWidth = Math.Max(1, available); value.MaxTextHeight = value.Height;
+        value.MaxTextHeight = value.Height; value.MaxTextWidth = Math.Max(1, available);
         value.Trimming = TextTrimming.CharacterEllipsis;
         var valueWidth = Math.Min(available, value.WidthIncludingTrailingWhitespace);
         if (minimalist)
         {
-            dc.DrawText(value, new Point(ActualWidth - inset - valueWidth, (ActualHeight - value.Height) / 2)); return;
+            dc.DrawText(value, new Point(StackedMinimalist ? (ActualWidth - valueWidth) / 2 : ActualWidth - inset - valueWidth,
+                StackedMinimalist ? (ActualHeight + markSize + TextScale - value.Height) / 2 : (ActualHeight - value.Height) / 2)); return;
         }
         var native = card.Kind == AllowanceKind.Credits;
-        var nameWidth = ActualWidth - textX - inset - (native ? 0 : valueWidth + 4 * TextScale);
-        var name = WizardTypography.Text(card.Name, 9.5 * TextScale, Resource("TextBrush"), dpi, FontWeights.SemiBold);
-        name.MaxTextWidth = Math.Max(1, nameWidth); name.MaxTextHeight = name.Height; name.Trimming = TextTrimming.CharacterEllipsis;
-        dc.DrawText(name, new Point(textX, 8 * TextScale));
-        if (!native)
+        var identityWidth = ActualWidth - textX - inset - (native ? 0 : valueWidth + 4 * TextScale);
+        var name = WizardTypography.Text(card.Name, 12.35 * TextScale, Resource("TextBrush"), dpi, FontWeights.SemiBold);
+        var nameHeight = name.Height; var nameBaseline = name.Baseline;
+        var plan = string.IsNullOrWhiteSpace(card.Plan) ? null : WizardTypography.Text(card.Plan, 8.5 * TextScale, Resource("MutedBrush"), dpi);
+        var planWidth = plan == null ? 0 : Math.Min(plan.WidthIncludingTrailingWhitespace, Math.Max(1, identityWidth * .45));
+        var planGap = plan == null ? 0 : 4 * TextScale;
+        name.MaxTextHeight = nameHeight; name.MaxTextWidth = Math.Max(1, identityWidth - planWidth - planGap); name.Trimming = TextTrimming.CharacterEllipsis;
+        var nameWidth = Math.Min(name.MaxTextWidth, name.WidthIncludingTrailingWhitespace);
+        if (plan != null) { plan.MaxTextHeight = plan.Height; plan.MaxTextWidth = planWidth; plan.Trimming = TextTrimming.CharacterEllipsis; }
+        void DrawIdentity(double top, double lineHeight)
         {
-            var detail = WizardTypography.Text(card.Detail, 8.5 * TextScale, Resource("MutedBrush"), dpi);
-            detail.MaxTextWidth = Math.Max(1, ActualWidth - textX - inset); detail.MaxTextHeight = detail.Height; detail.Trimming = TextTrimming.CharacterEllipsis;
-            dc.DrawText(detail, new Point(textX, 27 * TextScale));
+            var y = top + (lineHeight - nameHeight) / 2;
+            dc.DrawText(name, new Point(textX, y));
+            if (plan != null) dc.DrawText(plan, new Point(textX + nameWidth + planGap, y + nameBaseline - plan.Baseline));
         }
-        dc.DrawText(value, new Point(ActualWidth - inset - valueWidth, (native ? 27 : 7) * TextScale));
+        if (native)
+        {
+            var top = (ActualHeight - nameHeight - 3 * TextScale - value.Height) / 2;
+            DrawIdentity(top, nameHeight);
+            dc.DrawText(value, new Point(ActualWidth - inset - valueWidth, top + nameHeight + 3 * TextScale));
+        }
+        else
+        {
+            var detail = WizardTypography.Text(card.WizardWindow, 8.5 * TextScale, Resource("MutedBrush"), dpi);
+            detail.MaxTextHeight = detail.Height; detail.MaxTextWidth = Math.Max(1, ActualWidth - textX - inset); detail.Trimming = TextTrimming.CharacterEllipsis;
+            var firstLine = Math.Max(nameHeight, value.Height);
+            var top = (ActualHeight - firstLine - 3 * TextScale - detail.Height) / 2;
+            DrawIdentity(top, firstLine);
+            dc.DrawText(value, new Point(ActualWidth - inset - valueWidth, top + (firstLine - value.Height) / 2));
+            dc.DrawText(detail, new Point(textX, top + firstLine + 3 * TextScale));
+        }
     }
 }
 public sealed class DetailQuotaBar : FrameworkElement
