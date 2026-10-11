@@ -38,6 +38,8 @@ enum AgentUsageRuntime {
 
 @MainActor
 public struct UsageMonitorRuntime {
+    /// Admitted usage connectors. Grok Bot is deliberately absent: presence is
+    /// a fail-closed diagnostic (`GrokBotPresenceProbe`), not a usage provider.
     static let productionConnectorIDs: Set<AgentConnectorID> = [
         CodexUsageConnector.connectorID,
         ClaudeCodeUsageConnector.connectorID,
