@@ -42,7 +42,7 @@ public sealed class CodexAppServer : IDisposable
                 start.ArgumentList.Add("app-server"); start.ArgumentList.Add("--listen"); start.ArgumentList.Add("stdio://");
                 process = Process.Start(start) ?? throw new IOException("Could not start Codex local interface."); activeExecutable = Executable;
                 _ = DiscardErrorOutput(process);
-                await Request("initialize", new { clientInfo = new { name = "auv_windows", title = "AUV Windows", version = "0.16.2" }, capabilities = new { experimentalApi = true } }, timeout.Token).ConfigureAwait(false);
+                await Request("initialize", new { clientInfo = new { name = "auv_windows", title = "AUV Windows", version = "0.16.3" }, capabilities = new { experimentalApi = true } }, timeout.Token).ConfigureAwait(false);
                 await process.StandardInput.WriteLineAsync("{\"method\":\"initialized\"}".AsMemory(), timeout.Token).ConfigureAwait(false);
                 await process.StandardInput.FlushAsync(timeout.Token).ConfigureAwait(false);
             }

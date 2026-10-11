@@ -3,14 +3,21 @@
   <StackPanel x:Name="GlobalPanel">
    <TextBlock Text="Appearance" FontWeight="SemiBold"/><WrapPanel Margin="0,8,0,8"><RadioButton x:Name="DarkChoice" Content="Dark" GroupName="Theme" Checked="ThemeChoice_Checked" Margin="0,4,20,4" AutomationProperties.AutomationId="auv.settings.dark"/><RadioButton x:Name="LightChoice" Content="Light" GroupName="Theme" Checked="ThemeChoice_Checked" Margin="0,4,20,4" AutomationProperties.AutomationId="auv.settings.light"/><RadioButton x:Name="SystemChoice" Content="System" GroupName="Theme" Checked="ThemeChoice_Checked" Margin="0,4,0,4" AutomationProperties.AutomationId="auv.settings.system"/></WrapPanel>
    <CheckBox x:Name="LargerChoice" Content="Larger text and Wizard cards" Click="Larger_Click" Margin="0,4,0,8"/>
-   <Border Style="{StaticResource Divider}"/><StackPanel x:Name="DesktopPanel"><TextBlock Text="Desktop Wizard · 桌面浮窗" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="{Binding TrayStatus}" Style="{StaticResource Muted}" FontSize="12" Margin="0,8"/>
+   <Border Style="{StaticResource Divider}"/><StackPanel x:Name="DesktopPanel">
+    <TextBlock Text="System tray · 系统托盘" FontSize="18" FontWeight="SemiBold"/>
+    <CheckBox Content="Hide tray icon · 隐藏托盘图标" IsChecked="{Binding HideTrayIcon, Mode=TwoWay}" Margin="0,10,0,5" AutomationProperties.AutomationId="auv.settings.hide-tray"/>
+    <TextBlock Text="{Binding TrayStatus}" Style="{StaticResource Muted}" FontSize="12" Margin="0,4" AutomationProperties.AutomationId="auv.settings.tray-status"/>
+    <TextBlock Text="Drag AUV out of the hidden icons menu to keep it beside the clock." Style="{StaticResource Muted}" FontSize="12" Margin="0,4,0,8"/>
+    <Button Content="Windows taskbar settings" Command="{Binding TaskbarSettingsCommand}" HorizontalAlignment="Left" Margin="0,0,0,8" AutomationProperties.AutomationId="auv.settings.taskbar"/>
+    <Border Style="{StaticResource Divider}"/>
+    <TextBlock Text="Desktop Wizard · 桌面浮窗" FontSize="18" FontWeight="SemiBold"/>
     <CheckBox Content="Enable Desktop Wizard" IsChecked="{Binding Enabled, Mode=TwoWay}" Margin="0,5"/>
     <CheckBox Content="Always on top" IsChecked="{Binding AlwaysOnTop, Mode=TwoWay}" Margin="0,5"/>
     <CheckBox Content="Show connection indicator" IsChecked="{Binding ShowStatus, Mode=TwoWay}" Margin="0,5"/>
     <CheckBox Content="Show usage fill" IsChecked="{Binding ShowFill, Mode=TwoWay}" Margin="0,5"/>
     <TextBlock Text="Density" Margin="0,10,0,4"/><ComboBox ItemsSource="{Binding Densities}" SelectedItem="{Binding Density, Mode=TwoWay}" MaxWidth="220" HorizontalAlignment="Left" MinWidth="180" AutomationProperties.Name="Wizard density"/>
     <WrapPanel Margin="0,10,0,4"><Button Content="{Binding WidgetButton}" Command="{Binding ToggleWidgetCommand}"/><Button Content="Move to lower right" Command="{Binding DockWidgetCommand}" Margin="8,0,0,0"/></WrapPanel>
-    <CheckBox Content="Close to tray" IsChecked="{Binding CloseToTray, Mode=TwoWay}" Margin="0,10,0,5"/>
+    <CheckBox Content="Close to tray" IsChecked="{Binding CloseToTray, Mode=TwoWay}" IsEnabled="{Binding TrayAvailable}" Margin="0,10,0,5"/>
     <TextBlock Text="Drag to move; right-click for options. Only available quotas appear." Style="{StaticResource Muted}" FontSize="12" Margin="0,8,0,0"/>
    </StackPanel>
   </StackPanel>

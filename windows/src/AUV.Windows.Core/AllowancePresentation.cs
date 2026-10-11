@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace AUV.Windows.Core;
 
@@ -33,6 +34,16 @@ public sealed record AllowanceCard
         _ => "—"
     };
     public string Detail => Plan is { Length: > 0 } ? $"{Plan} · {Window}" : Window;
+    public string WizardWindow
+    {
+        get
+        {
+            var window = Regex.Replace(Window, @"\s*·\s*resets\b.*$", "", RegexOptions.IgnoreCase).Trim();
+            window = Regex.Replace(window, @"\b(\d+)\s*[- ]?\s*(?:days?|d)\b(?:\s+(?:window|limit))?", "$1d", RegexOptions.IgnoreCase);
+            window = Regex.Replace(window, @"\b(\d+)\s*[- ]?\s*(?:hours?|hrs?|h)\b(?:\s+(?:window|limit))?", "$1h", RegexOptions.IgnoreCase);
+            return window;
+        }
+    }
     public string MinimalistValue => Id == "workbuddy" && Kind == AllowanceKind.Credits ? CompactCredits.Format(Credits!.Value) : Value;
     public QuotaSeverity Severity => LowRemainingPolicy.Resolve(Id, Plan, Percent, Credits, Kind);
     public string Description => $"{Name}; {Plan ?? "plan unknown"}; {Value} remaining; {Window}; {Source}; {Freshness}; {Connection}; {Severity}{(IsStale ? "; retained stale snapshot" : "")}";
@@ -93,7 +104,9 @@ public static class WizardPolicy
 {
     public const double WidthRatio = .6;
     public const double HeightRatio = .8;
-    public const double RegularWidth = 126;
+    public const double RegularWidth = 138.6;
+    public const double RegularWidthAdjustment = 1.1;
+    public const double MinimalistWidthAdjustment = 1.2;
     public const double RegularRowHeight = 48;
     public const double RowGap = 3.2;
     public static WizardDensity Resolve(WizardDensity preference, int visibleCount) =>

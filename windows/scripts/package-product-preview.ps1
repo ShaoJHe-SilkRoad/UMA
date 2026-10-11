@@ -27,10 +27,10 @@ $canonical = $sourceFiles | ConvertTo-Json -Depth 5 -Compress
 $sourceHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($canonical)))
 $manifest = [ordered]@{ Algorithm = 'SHA256 of UTF-8 compact ordered source-file manifest'; SourceIdentity = $sourceHash; Files = $sourceFiles }
 $manifest | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath (Join-Path $publishRoot 'SOURCE-MANIFEST.json') -Encoding utf8
-$buildInfo = [ordered]@{ Product = $(if ($Stable) { 'AUV Windows' } else { 'AUV Windows Preview' }); Version = $Version; Build = $Build; Task = $(if ($Stable) { 'Stable promotion of validated refinement' } elseif ($ValidatedRefinement) { 'Tested visibility refinement and native UI fixes' } elseif ($VisibilityRefinement) { 'Available-quota visibility and visual refinement' } elseif ($UiRefinement) { 'Prepared connections and compact UI refinement' } elseif ($ProviderIntegration) { 'Provider integration 1 — Codex and WorkBuddy' } else { 'AUV-WIN-016-PRODUCT-SURFACES-02' }); Target = 'win-x64'; SelfContained = $true; SDK = '10.0.401'; Runtime = '10.0.12'; MacReference = '766b808f2af537af4d6edfe8606221cb78c88b79'; WindowsSourceIdentity = $sourceHash; PackagedAtUtc = [DateTime]::UtcNow.ToString('o') }
+$buildInfo = [ordered]@{ Product = $(if ($Stable) { 'AUV Windows' } else { 'AUV Windows Preview' }); Version = $Version; Build = $Build; Task = $(if ($Stable) { 'Validated Windows stable build' } elseif ($ValidatedRefinement) { 'Tested visibility refinement and native UI fixes' } elseif ($VisibilityRefinement) { 'Available-quota visibility and visual refinement' } elseif ($UiRefinement) { 'Prepared connections and compact UI refinement' } elseif ($ProviderIntegration) { 'Provider integration 1 — Codex and WorkBuddy' } else { 'AUV-WIN-016-PRODUCT-SURFACES-02' }); Target = 'win-x64'; SelfContained = $true; SDK = '10.0.401'; Runtime = '10.0.12'; MacReference = '766b808f2af537af4d6edfe8606221cb78c88b79'; WindowsSourceIdentity = $sourceHash; PackagedAtUtc = [DateTime]::UtcNow.ToString('o') }
 if ($UiRefinement -or $VisibilityRefinement) { $buildInfo.Validation = [ordered]@{ Compilation = 'Passed'; AutomatedTests = 'Not run by user request'; NativeUI = 'Not run by user request'; LiveProviders = 'Not run by user request' } }
 if ($ValidatedRefinement -or $Stable) { $buildInfo.Validation = $validation.Summary; $buildInfo.TestedBinaries = $validation.Binaries }
-if ($Stable) { $buildInfo.Channel = 'stable'; $buildInfo.PromotedFrom = '0.16.0-validated-refinement.20261010.7'; $buildInfo.Designation = 'Latest local Windows stable version, approved by the user' }
+if ($Stable) { $buildInfo.Channel = 'stable'; $buildInfo.Designation = 'Windows stable version designated by the user' }
 $buildInfo | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $publishRoot 'BUILD-INFO.json') -Encoding utf8
 @'
 AUV 0.16.0 Windows UI Preview — build 20261010.3 — Windows 11 x64
@@ -196,7 +196,7 @@ its optional connection needs Microsoft Edge WebView2 Runtime and manual sign-in
 Claude/Antigravity have prepared interfaces only. Windows storage mutation is unavailable.
 
 Desktop Wizard is a separate floating window above apps. Drag to move, click a provider
-to open its details, right click for pin/density/hide. Tray popup includes read-only CPU/RAM.
+to open its details, right click for pin/density/hide/quit. Double click opens AUV. Tray popup includes read-only CPU/RAM.
 Ctrl+Shift+W: Wizard; Ctrl+Shift+U: tray popup; Ctrl+Comma: settings; Ctrl+Shift+Q: Quit.
 F5: refresh selected provider. Alt+A / Alt+T / Alt+S: module navigation.
 For offline launch: AUV.exe --offline --show-widget
@@ -211,14 +211,14 @@ if ($Stable) {
 @"
 AUV $Version — Windows 11 x64 — Stable — build $Build
 
-The user-designated latest local Windows stable version, promoted from validated build .7.
+The user-designated Windows stable version.
 Extract the complete folder and run AUV.exe. Keep all supporting files together.
-The executable, native window title, account client identity and package metadata use $Version.
+The executable, window identity, account client identity and package metadata use $Version.
 Existing Windows settings and owned connection sessions retain their current locations.
 
 Includes AUV, ThreadOS, Desktop Wizard and the tray usage/performance popup.
 Only fetched, connected, non-stale quota cards appear; verified zero remains visible.
-Regular Wizard base rows are 126 x 48 DIPs. Minimalist WorkBuddy Credits use compact
+Regular Wizard base rows are 138.6 x 48 DIPs. Minimalist WorkBuddy Credits use compact
 labels of at most four characters; hover shows the exact balance. Native icons adapt to appearance.
 
 Codex reads the installed client's existing login using its read-only usage interface.
@@ -232,7 +232,7 @@ F5: refresh selected provider. Alt+A / Alt+T / Alt+S: module navigation.
 Offline: AUV.exe --offline --show-widget
 Explicit sample data: AUV.exe --demo --offline --show-widget (separate preferences).
 
-Portable local package. No installer, startup service, signing or public upload is included.
+Portable package. No installer, startup service or code signing is included.
 Account snapshots and browser profiles are not packaged. BUILD-INFO.json records verification;
 SOURCE-MANIFEST.json identifies source. ZIP SHA-256 is supplied alongside the archive.
 "@ | Set-Content -LiteralPath (Join-Path $publishRoot 'README.txt') -Encoding utf8

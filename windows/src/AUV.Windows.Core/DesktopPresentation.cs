@@ -6,6 +6,7 @@ public sealed class DesktopPreferences
     public bool WidgetVisible { get; set; }
     public bool AlwaysOnTop { get; set; } = true;
     public bool CloseToTray { get; set; } = true;
+    public bool HideTrayIcon { get; set; }
     public double? Left { get; set; }
     public double? Top { get; set; }
     public WizardDensity Density { get; set; } = WizardDensity.Automatic;

@@ -1,9 +1,12 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Interop;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Shell;
 using AUV.Windows.Core;
 namespace AUV.Windows.App;
 public sealed class SectionConverter : IValueConverter
@@ -34,6 +37,7 @@ public partial class MainWindow : Window
 {
     public MainViewModel Model { get; }
     private App Host => (App)Application.Current;
+    private bool maximizeHovered, maximizePressed;
     public MainWindow(MainViewModel model)
     {
         Model = model; InitializeComponent(); DataContext = model;
@@ -51,6 +55,7 @@ public partial class MainWindow : Window
         if (bounds.Left is double left && bounds.Top is double top)
         { WindowStartupLocation = WindowStartupLocation.Manual; Left = Math.Clamp(left, work.Left, Math.Max(work.Left, work.Right - Width)); Top = Math.Clamp(top, work.Top, Math.Max(work.Top, work.Bottom - Height)); }
         SourceInitialized += (_, _) => { NativeAppearance.Apply(this, Host.IsDark); AppBrandIcon.Apply(this, Host.IsDark); HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(DisplayMessage); };
+        StateChanged += (_, _) => Dispatcher.BeginInvoke(UpdateFrameInsets, System.Windows.Threading.DispatcherPriority.Loaded);
         var hasSavedGeometry = System.IO.File.Exists(Host.Store.PathName);
         Loaded += (_, _) =>
         {
@@ -82,6 +87,13 @@ public partial class MainWindow : Window
         return success;
     }
     private void GlobalSettings_Click(object sender, RoutedEventArgs e) => new SettingsWindow(this, null).ShowDialog();
+    private void Minimize_Click(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);
+    private void MaximizeRestore_Click(object sender, RoutedEventArgs e)
+    {
+        if (WindowState == WindowState.Maximized) SystemCommands.RestoreWindow(this);
+        else SystemCommands.MaximizeWindow(this);
+    }
+    private void Close_Click(object sender, RoutedEventArgs e) => SystemCommands.CloseWindow(this);
     private void AgentSettings_Click(object sender, RoutedEventArgs e) => new SettingsWindow(this, Model.Shell.SelectedAgent.Name).ShowDialog();
     private void UsagePopup_Click(object sender, RoutedEventArgs e) => Host.Desktop.ToggleFlyout();
     private async void RefreshUsage_Click(object sender, RoutedEventArgs e) => await Host.Providers.RefreshSelectedAsync();
@@ -98,13 +110,66 @@ public partial class MainWindow : Window
     { if (e.NewValue is System.Windows.Controls.TreeViewItem item) Model.Storage.VolumeSelected = Equals(item.Tag, "Volume"); }
     private nint DisplayMessage(nint hwnd, int message, nint wParam, nint lParam, ref bool handled)
     {
+        if (message is 0x0084 or 0x00a1 or 0x00a2 && IsEnabled && MaximizeButton.IsVisible)
+        {
+            var packed = lParam.ToInt64();
+            var point = MaximizeButton.PointFromScreen(new Point((short)(packed & 0xffff), (short)((packed >> 16) & 0xffff)));
+            var over = new Rect(0, 0, MaximizeButton.ActualWidth, MaximizeButton.ActualHeight).Contains(point);
+            if (message == 0x0084) // WM_NCHITTEST
+            {
+                SetMaximizeHover(over);
+                // HTMAXBUTTON enables the Windows 11 Snap Layouts menu. Mouse clicks
+                // arrive as non-client messages instead of WPF Button events.
+                if (over) { handled = true; return 9; }
+            }
+            else if (message == 0x00a1 && over) // WM_NCLBUTTONDOWN
+            {
+                maximizePressed = true; MaximizeButton.Opacity = .6;
+                handled = true; return 0;
+            }
+            else if (message == 0x00a2 && maximizePressed) // WM_NCLBUTTONUP
+            {
+                ResetMaximizePress();
+                if (over) Dispatcher.BeginInvoke(() => MaximizeRestore_Click(MaximizeButton, new RoutedEventArgs()));
+                handled = true; return 0;
+            }
+        }
+        if (message == 0x02a2) SetMaximizeHover(false); // WM_NCMOUSELEAVE
+        if (message == 0x0202 || message == 0x0006 && wParam == 0) ResetMaximizePress(); // Client release / deactivation
         if (message is 0x007e or 0x02e0) Dispatcher.BeginInvoke(() =>
         {
             AppBrandIcon.Apply(this, Host.IsDark);
+            UpdateFrameInsets();
             if (WindowState != WindowState.Normal) return;
             var area = NativeDesktop.WorkDips(this); Width = Math.Min(Width, area.Width); Height = Math.Min(Height, area.Height);
             NativeDesktop.ClampToMonitor(this);
         });
         return 0;
+    }
+    private void SetMaximizeHover(bool value)
+    {
+        if (maximizeHovered == value) return;
+        maximizeHovered = value;
+        if (value) MaximizeButton.SetResourceReference(Control.BackgroundProperty, "RaisedBrush");
+        else MaximizeButton.ClearValue(Control.BackgroundProperty);
+    }
+    private void ResetMaximizePress()
+    { maximizePressed = false; MaximizeButton.ClearValue(OpacityProperty); }
+    private void UpdateFrameInsets()
+    {
+        var inset = new Thickness();
+        if (WindowState == WindowState.Maximized)
+        {
+            // Windows places the invisible resize frame outside the monitor work area.
+            // Keep the extended client content inside the visible area at this monitor's DPI.
+            var bounds = NativeDesktop.Rectangle(this); var area = NativeDesktop.WorkDips(this);
+            var dpi = VisualTreeHelper.GetDpi(this);
+            inset = new(Math.Max(0, area.Left - bounds.Left / dpi.DpiScaleX),
+                Math.Max(0, area.Top - bounds.Top / dpi.DpiScaleY),
+                Math.Max(0, bounds.Right / dpi.DpiScaleX - area.Left - area.Width),
+                Math.Max(0, bounds.Bottom / dpi.DpiScaleY - area.Top - area.Height));
+        }
+        RootLayout.Margin = inset;
+        WindowChrome.GetWindowChrome(this).CaptionHeight = 46 + inset.Top;
     }
 }

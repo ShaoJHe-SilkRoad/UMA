@@ -65,7 +65,7 @@ internal static class ProductVerification
                     {
                         var wizard = Wizard(); Require(wizard.RenderedDensity == WizardPolicy.Resolve(preference, visibleCount), $"Density resolved: {preference}/{visibleCount}");
                         Require(NativeDesktop.IsNonActivating(wizard) && !wizard.ShowInTaskbar, "Nonactivating native tool window without taskbar button");
-                        if (wizard.RenderedDensity == WizardDensity.Regular) { Require(Math.Abs(wizard.ActualWidth - WizardPolicy.RegularWidth) < 1, "Regular width 126 DIP"); Require(Math.Abs(wizard.ActualHeight - WizardPolicy.StackHeight(visibleCount, WizardPolicy.RegularRowHeight)) < 1, "Regular stack geometry"); }
+                        if (wizard.RenderedDensity == WizardDensity.Regular) { Require(Math.Abs(wizard.ActualWidth - WizardPolicy.RegularWidth) < 1, "Regular width follows the Wizard policy"); Require(Math.Abs(wizard.ActualHeight - WizardPolicy.StackHeight(visibleCount, WizardPolicy.RegularRowHeight)) < 1, "Regular stack geometry"); }
                         Capture((FrameworkElement)wizard.Content, Path.Combine(directory, $"wizard-{preference}-{count}.png"));
                     }
                     results.Add(new { Stage = $"{preference}-{count}", State = desktop.Evidence });
