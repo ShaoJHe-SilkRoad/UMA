@@ -1,8 +1,40 @@
 # Install AUV / 安装 AUV
 
-[English](#english-installation-guide) · [中文](#中文安装指南) · [Download / 下载](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.15.1/AUV-0.15.1-build2026101002.zip)
+[English](#english-installation-guide) · [中文](#中文安装指南) · [Windows 0.16.2](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.2/AUV-0.16.2-win-x64.zip) · [macOS 0.15.1](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.15.1/AUV-0.15.1-build2026101002.zip)
 
 ## English installation guide
+
+<a id="windows-installation-guide"></a>
+
+### Windows 0.16.2
+
+**Windows 11 · x64 · portable ZIP · unsigned** — build **20261010.8**.
+
+1. [Download for Windows · v0.16.2](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.2/AUV-0.16.2-win-x64.zip). Choose the application ZIP, not GitHub's source archive.
+2. Right-click the ZIP in File Explorer → **Extract All**. Keep the complete extracted folder, including every DLL and runtime file.
+3. Run **AUV.exe** from that folder as your normal Windows user. Confirm **AUV 0.16.2** in the window title or Properties → Details → Product version. This build has no separate About dialog.
+4. Choose AUV, ThreadOS or Sectorium. In Settings, enable the **Desktop Wizard**; it floats separately above applications. The AUV tray icon opens the usage/CPU/RAM popup (Windows may put it in the tray overflow).
+5. Use **Quit** in the tray or **Ctrl+Shift+Q** to exit completely. Closing the main window can keep the tray running.
+
+The **.NET 10.0.12 desktop runtime is included**; the portable app does not require a separate .NET SDK/runtime installation. Optional WorkBuddy connection additionally needs **Microsoft Edge WebView2 Runtime**, which is not bundled. Codex data requires the installed Codex client and its existing login. No new provider login is required simply to open AUV.
+
+This Windows build is **not digitally signed** and may trigger Windows or organization security controls. Check the official package checksum; keep protections enabled and [report the exact message](https://github.com/ShaoJHe-SilkRoad/UMA/issues) if blocked. No warning-free or clean-machine certification is claimed.
+
+**Upgrade:** quit the old copy, extract the new package into a separate folder and run its AUV.exe. Preserve **%LOCALAPPDATA%\AUV.Windows.UI.Preview**: it contains settings.v1.json and the separate workbuddy-web-* browser profile. The preview-era directory name is intentionally retained. Do not delete settings or assume rollback compatibility. Mac preferences are separate.
+
+**Scope:** Codex read-only usage is connected; WorkBuddy Credit sync is experimental. Claude and Antigravity live connections are unavailable. Missing/stale/disconnected quotas are hidden; verified zero stays visible. ThreadOS generates and copies instructions without dispatching work or applying settings. Sectorium is UI only with storage actions disabled. ARM64, installer, signing reputation, receiving-client execution and Windows storage qualification are not included.
+
+Verify in PowerShell:
+
+```powershell
+Get-FileHash -Algorithm SHA256 "$env:USERPROFILE\Downloads\AUV-0.16.2-win-x64.zip"
+```
+
+Expected SHA-256: **5b0b2fae43e7693472caae1e205dbe9b53f004a99b443c0adfcf58996bd99318**.
+
+[Windows release notes](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.16.2) · [Checksums](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.2/HASHES.txt) · [Release manifest](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.2/RELEASE-MANIFEST.json) · [Report a problem](https://github.com/ShaoJHe-SilkRoad/UMA/issues)
+
+### macOS 0.15.1
 
 ### Before you start
 
@@ -53,6 +85,32 @@ The first value should match:
 If it differs, do not install that file. Download it again. The [release page](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.15.1) also provides `HASHES.txt` and the signing record. The signing identity is **SHAOTING HE (C6TUZVJ6SJ)**.
 
 ## 中文安装指南
+
+<a id="windows-中文安装指南"></a>
+
+### Windows 0.16.2
+
+**Windows 11 · x64 · 便携 ZIP · 未签名**，构建号 **20261010.8**。
+
+1. [下载 Windows 版 · v0.16.2](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.2/AUV-0.16.2-win-x64.zip)。请选择应用 ZIP，不要选 GitHub 的源码压缩包。
+2. 在文件资源管理器右键 ZIP → **全部解压**。保留完整文件夹，包含所有 DLL 和运行时文件。
+3. 以普通用户运行其中的 **AUV.exe**，在窗口标题确认 **AUV 0.16.2**，也可在文件属性 → 详细信息查看产品版本。本版没有单独的“关于”窗口。
+4. 切换 AUV、线程工、分区工。在设置中启用 **Desktop Wizard 桌面浮窗**，它独立悬浮于应用上方。AUV 托盘图标可展开用量与 CPU/内存；图标可能位于托盘折叠菜单。
+5. 用托盘 **Quit** 或 **Ctrl+Shift+Q** 完全退出；只关闭主窗口可能仍保留托盘。
+
+**已包含 .NET 10.0.12 桌面运行时**，便携包无需另外安装 .NET SDK/运行时。可选 WorkBuddy 连接另需 **Microsoft Edge WebView2 Runtime**，本包不附带。Codex 需已安装的客户端及其现有登录；仅打开 AUV 无需新增代理登录。
+
+Windows 包**未进行数字签名**，可能受到 Windows 或组织安全策略拦截。请核对官方文件校验值，保持安全防护开启；若受阻，请[反馈具体提示](https://github.com/ShaoJHe-SilkRoad/UMA/issues)。不承诺无安全提示，也不宣称通过干净机器认证。
+
+**升级：**先正常退出旧版，将新包全部解压到独立文件夹，再运行新版 AUV.exe。保留 **%LOCALAPPDATA%\AUV.Windows.UI.Preview**，其中含 settings.v1.json 及独立的 workbuddy-web-* 浏览器配置。为延续设置，本版保留预览时期的目录名；不要删除设置，也不保证回退兼容。Mac 偏好单独保存。
+
+**范围：**Codex 只读用量已接入；WorkBuddy Credit 同步为试验功能。Claude、Antigravity 暂无实时连接。不可用、过期或断开的额度隐藏，已确认的零仍显示。线程工生成、复制指令，不代发任务或应用设置。分区工仅为界面，磁盘操作禁用。ARM64、安装器、签名信誉、接收端执行与 Windows 存储认证不在本版范围内。
+
+PowerShell 校验方法同上，SHA-256 应为 **5b0b2fae43e7693472caae1e205dbe9b53f004a99b443c0adfcf58996bd99318**。
+
+[Windows 更新说明](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.16.2) · [校验值](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.2/HASHES.txt) · [发布清单](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.2/RELEASE-MANIFEST.json) · [反馈问题](https://github.com/ShaoJHe-SilkRoad/UMA/issues)
+
+### macOS 0.15.1
 
 ### 安装前
 

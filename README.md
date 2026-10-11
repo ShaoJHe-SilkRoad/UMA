@@ -2,13 +2,35 @@
 
 # AUV — Agent Usage Viewer
 
-**See your AI usage, set up your coding team, and manage a virtual development disk — in one Mac app.**
+**See AI usage and configure coding-team instructions on Windows and macOS. Features vary by platform.**
 
-[Download AUV 0.15.1](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.15.1/AUV-0.15.1-build2026101002.zip) · [Installation guide](docs/INSTALLATION.md) · [中文](#中文)
+| Platform | Download | Requirements |
+| --- | --- | --- |
+| Windows | [Download for Windows — 0.16.2](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.2/AUV-0.16.2-win-x64.zip) | Windows 11 · x64 · portable ZIP · **unsigned** |
+| macOS | [Download for macOS — 0.15.1](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.15.1/AUV-0.15.1-build2026101002.zip) | macOS 14+ · Apple silicon · Developer ID signed and Apple notarized |
 
-Requires **macOS 14 or later and an Apple silicon Mac**. Developer signed and Apple notarized.
+[Installation guide](docs/INSTALLATION.md) · [Windows release notes](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.16.2) · [中文](#中文)
 
-## What you can do
+## Platform availability
+
+| Capability | Windows 0.16.2 | macOS 0.15.1 |
+| --- | --- | --- |
+| AUV / Codex usage | Supported, read-only installed-client account data | Existing Mac monitoring |
+| WorkBuddy Credits | Experimental manual official-page sync; WebView2 Runtime required | Existing Mac provider behavior; not requalified here |
+| Claude / Antigravity live data | Unavailable; prepared interfaces only | Existing Mac provider behavior; not requalified here |
+| Desktop Wizard / tray or menu bar | Supported separate floating Wizard and Windows tray popup | Existing Mac Wizard/menu bar |
+| ThreadOS generate/copy | Supported; receiving-client application and live Ultra execution untested | Generation tested; live Ultra execution untested |
+| Sectorium | UI only; Windows storage backend unavailable; mutation disabled | Experimental Mac tools; real storage operations untested for 0.15.1 |
+
+Windows build **20261010.8** retains its tested binaries. [Windows source and build instructions](windows/README.md).
+
+## Install on Windows
+
+Extract the entire ZIP and run **AUV.exe**; verify **0.16.2** in its title. The .NET desktop runtime is included. WorkBuddy's optional connection needs WebView2 Runtime. Enable the floating Wizard in Settings; click the AUV tray icon for usage. **Ctrl+Shift+Q** quits completely. Preserve **%LOCALAPPDATA%\AUV.Windows.UI.Preview** during upgrades. See the [Windows guide](docs/INSTALLATION.md#windows-installation-guide) for unsigned-build verification and provider limits.
+
+## macOS 0.15.1
+
+### What you can do
 
 | Area | What it does |
 | --- | --- |
@@ -16,11 +38,11 @@ Requires **macOS 14 or later and an Apple silicon Mac**. Developer signed and Ap
 | **ThreadOS** | Choose a model and thinking level for Leader, Coder Cluster, Reviewer Cluster and QA. Copy one instruction and paste it into your Leader conversation. |
 | **Sectorium** | Create or use an APFS virtual development disk on a drive, start or stop it, and request safe ejection of an external drive. **Early-stage feature; see the safety note below.** |
 
-![AUV usage overview with sample data](docs/images/0.15.1/auv-en.png)
+![macOS 0.15.1 AUV usage overview with sample data](docs/images/0.15.1/auv-en.png)
 
 The app supports English and Chinese, light and dark appearance, and keyboard navigation. Unavailable usage figures stay unknown; local cost estimates are not subscription bills.
 
-## Install in three steps
+### Install in three steps
 
 1. [Download the ZIP](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.15.1/AUV-0.15.1-build2026101002.zip) and double-click it in Finder.
 2. Move **`UMA.app`** to **Applications** on your Mac. It opens as **AUV**; the filename is kept for compatibility with earlier versions.
@@ -28,9 +50,9 @@ The app supports English and Chinese, light and dark appearance, and keyboard na
 
 Upgrading? Quit the old app first, keep a backup of it, and replace it in the same location. Your saved settings are retained. [Full installation and troubleshooting guide](docs/INSTALLATION.md).
 
-## ThreadOS: choose, copy, paste
+### ThreadOS: choose, copy, paste
 
-![ThreadOS team settings with sample data](docs/images/0.15.1/threados-en.png)
+![macOS 0.15.1 ThreadOS team settings with sample data](docs/images/0.15.1/threados-en.png)
 
 Set each role separately, check the instruction preview, then click **Generate and Copy**. Paste it into the Leader responsible for your development folder. That Leader applies the choices to its own team; AUV does not select a project or send messages for you.
 
@@ -38,7 +60,7 @@ Thinking levels include Low, Medium, High and Ex High. **Ultra** is available fo
 
 [ThreadOS guide](https://shaotinghe.com/threados/)
 
-## Sectorium: a development disk on your drive
+### Sectorium: a development disk on your drive
 
 Sectorium uses a file-based APFS disk image. It does **not** repartition or format the physical drive. You can use an existing image, including DEV_APFS, rather than create another one. **Stop** closes the virtual disk; **Safe Eject** prepares the entire external drive for unplugging.
 
@@ -48,9 +70,9 @@ This release has not been tested through live disk creation, mounting, ejection 
 
 [Sectorium setup and safety guide](https://shaotinghe.com/sectorium/)
 
-## Release and support
+### Release and support
 
-Current release: **0.15.1**, build **2026101002**, for Apple silicon. Intel Macs are not supported by this download. AUV was previously called UMA.
+Current macOS release: **0.15.1**, build **2026101002**, for Apple silicon. Intel Macs are not supported by this download. AUV was previously called UMA.
 
 Ultra command generation was tested; live Ultra execution was not. Some window and keyboard checks remain incomplete. [Detailed release checks and known limits](https://github.com/ShaoJHe-SilkRoad/UMA/blob/v0.15.1/docs/releases/0.15.1.md) · [Report a problem](https://github.com/ShaoJHe-SilkRoad/UMA/issues).
 
@@ -58,11 +80,22 @@ Ultra command generation was tested; live Ultra execution was not. Some window a
 
 ## 中文
 
-**一个 Mac 应用，查看 AI 用量、设置开发团队、管理虚拟开发盘。**
+**在 Windows 与 macOS 查看 AI 用量、设置开发团队指令；各平台功能范围不同。**
 
-[下载 AUV 0.15.1](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.15.1/AUV-0.15.1-build2026101002.zip) · [安装指南](docs/INSTALLATION.md#中文安装指南)
+| 平台 | 下载 | 要求 |
+| --- | --- | --- |
+| Windows | [下载 Windows 版 · v0.16.2](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.2/AUV-0.16.2-win-x64.zip) | Windows 11 · x64 · 便携 ZIP · **未签名** |
+| macOS | [下载 macOS 版 · v0.15.1](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.15.1/AUV-0.15.1-build2026101002.zip) | macOS 14 或更新 · Apple silicon · 已签名并通过 Apple 公证 |
 
-需要 **macOS 14 或更新版本，以及 Apple silicon Mac（M 系列芯片）**。应用已签名并通过 Apple 公证。
+[安装指南](docs/INSTALLATION.md#中文安装指南) · [Windows 更新说明](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.16.2)
+
+### Windows 0.16.2
+
+构建号 **20261010.8**。全部解压 ZIP 后运行 **AUV.exe**，在标题确认 0.16.2。已包含 .NET 桌面运行时；可选 WorkBuddy 连接需 WebView2 Runtime。设置中启用独立桌面浮窗，托盘图标展开用量，**Ctrl+Shift+Q** 完全退出。升级请保留 **%LOCALAPPDATA%\AUV.Windows.UI.Preview**。
+
+Codex 只读用量已接入；WorkBuddy 同步为试验功能；Claude/Antigravity 实时连接不可用。线程工可生成和复制，接收端与真实 Ultra 执行未验证。分区工**仅为界面，存储后台未实现，磁盘操作禁用**。详见[Windows 安装指南](docs/INSTALLATION.md#windows-中文安装指南)。
+
+### macOS 0.15.1
 
 ### 三个功能区
 
@@ -102,6 +135,6 @@ Ultra command generation was tested; live Ultra execution was not. Some window a
 
 ### 版本与帮助
 
-当前版本 **0.15.1**，构建号 **2026101002**，适用于 Apple silicon；此下载包不支持 Intel Mac。AUV 原名 UMA。
+当前 macOS 版本 **0.15.1**，构建号 **2026101002**，适用于 Apple silicon；此下载包不支持 Intel Mac。AUV 原名 UMA。
 
 Ultra 指令生成已测试，真实 Ultra 执行未测试；部分窗口与键盘检查尚未完成。[详细版本记录与已知限制](https://github.com/ShaoJHe-SilkRoad/UMA/blob/v0.15.1/docs/releases/0.15.1.md) · [反馈问题](https://github.com/ShaoJHe-SilkRoad/UMA/issues)。
