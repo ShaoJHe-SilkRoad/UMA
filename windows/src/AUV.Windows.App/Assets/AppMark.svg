@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <!-- AUV gauge identity simplified for native Windows icon sizes. Transparent canvas. -->
+  <circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.35" />
+  <path d="M4.1 8 L4.8 8 M5.3 4.7 L5.8 5.2 M8 3.8 L8 4.5 M10.7 4.7 L10.2 5.2 M11.9 8 L11.2 8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+  <path d="M7.1 9.9 L11.6 5.4 L8.8 11 Z" fill="currentColor" />
+  <circle cx="8" cy="10" r="1.1" fill="currentColor" />
+</svg>

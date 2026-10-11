@@ -1,0 +1,258 @@
+{
+  "Algorithm": "SHA256 of UTF-8 compact ordered source-file manifest",
+  "SourceIdentity": "70C65EC0C5496682F13954AB810A374B9267CEA771A28E5E74CB95067D6C50EE",
+  "Files": [
+    {
+      "Path": "AUV.Windows.sln",
+      "SHA256": "217540A44F415D70A1122A10C3696B531C405C0372C5B2E9363E3BAC6518E5AE"
+    },
+    {
+      "Path": "global.json",
+      "SHA256": "F6E73834E1B1D3A1418DBBA7F34DD7F51B8C4734B60F27E445E1440673DEF84A"
+    },
+    {
+      "Path": "NuGet.Config",
+      "SHA256": "1692A8D86568B011308F24740EE75B9978ABE3706E652BA554EA94D044A34B8A"
+    },
+    {
+      "Path": "scripts/bootstrap-sdk.ps1",
+      "SHA256": "D4E9F9E14C93C671BCDB6613603A39CE32E5440C662B4E2D883EEC6D1CAB63CE"
+    },
+    {
+      "Path": "scripts/build.ps1",
+      "SHA256": "94575C9C0C18F50D01E49C011ABC6A25448C69A4453BC54199B12EF70B2FF5B5"
+    },
+    {
+      "Path": "scripts/generate-native-icon.ps1",
+      "SHA256": "90C674609AC1EFA99FC5BD0389DD19DAEDFE858026C1D4C2CD223765F8C9865F"
+    },
+    {
+      "Path": "scripts/package-product-preview.ps1",
+      "SHA256": "92E6B21A89842177DF85BE992ABE2F1C6D432ABC3FF102FD10B8678E193DF940"
+    },
+    {
+      "Path": "src/AUV.Windows.App/AdaptiveWorkbench.cs",
+      "SHA256": "6AF68F24F6C51AB256218428745C219BDC1546C1C93F51BCC828C03A47C8531C"
+    },
+    {
+      "Path": "src/AUV.Windows.App/AgentBrandIcons.cs",
+      "SHA256": "0274CC20C70E05BF6A5E393BE2EDE3AF72E0E4760B516EB7CB9B5F6BCE09DC2E"
+    },
+    {
+      "Path": "src/AUV.Windows.App/AllowanceRow.cs",
+      "SHA256": "12A29BE9830B4C2EBE83A8F5B363D317B57B0371DEAD8B28B03F9E5B73F6E6DC"
+    },
+    {
+      "Path": "src/AUV.Windows.App/app.manifest",
+      "SHA256": "F6B519D3A03E91CB5EC0935A9E65AC45A3463B4B6D816548C8E10D2EC91F0AAA"
+    },
+    {
+      "Path": "src/AUV.Windows.App/App.xaml",
+      "SHA256": "E30DC4FB0B53C6E6C7FB4D8C7F78B8E8BB0EE0D1F9CCE310117CBF0C03386D7B"
+    },
+    {
+      "Path": "src/AUV.Windows.App/App.xaml.cs",
+      "SHA256": "C57E0D9DE7577D9BA373104C0CD4F9461A0131506B27F6CE4A55C098FF809FFE"
+    },
+    {
+      "Path": "src/AUV.Windows.App/AppBrandIcon.cs",
+      "SHA256": "B40F53BE42EAE97CA57A48A68A3AD7253E2828342923DAE7F4E887DE2FBA3163"
+    },
+    {
+      "Path": "src/AUV.Windows.App/Assets/AgentLogos/codex.svg",
+      "SHA256": "5BC55E25C07C98C35DC1FA1347FEA5FD429F22798D8E28068701F29AD77A3B60"
+    },
+    {
+      "Path": "src/AUV.Windows.App/Assets/AgentLogos/PROVENANCE.md",
+      "SHA256": "E816931D942DF6622F2914B82D24D73FC99C87B893458D141FD606C5A0DAB680"
+    },
+    {
+      "Path": "src/AUV.Windows.App/Assets/AgentLogos/workbuddy.svg",
+      "SHA256": "A67C9DDD563E7F5EB935B8CE51F80505E05B8450CB115D3CCEF8D88F01990380"
+    },
+    {
+      "Path": "src/AUV.Windows.App/Assets/AppIcon.ico",
+      "SHA256": "783E485E983D8B0D3FEA3060EAEC46BCAB909933EE2E3F6B4883907D1924DCE3"
+    },
+    {
+      "Path": "src/AUV.Windows.App/Assets/AppIcon.png",
+      "SHA256": "1AE0017ACCD7551C04AF29B017AB48AB233812001D71236B8103A83231E6BB64"
+    },
+    {
+      "Path": "src/AUV.Windows.App/Assets/AppMark.svg",
+      "SHA256": "BB9B52DFCB4C31D3EC5451D84FF8D51F5D8006021A0F03131592115344AE3064"
+    },
+    {
+      "Path": "src/AUV.Windows.App/Assets/Notices/WebView2-LICENSE.txt",
+      "SHA256": "0AF8F1B807512AAE39C2AC1AA4D0CAE65CABECB6FD554B8439A5162A0D6ECA55"
+    },
+    {
+      "Path": "src/AUV.Windows.App/Assets/Notices/WebView2-NOTICE.txt",
+      "SHA256": "106423785C5B7EBA0A8E61D1837F2132E9C828E20AD530F565D981C1DF60DD90"
+    },
+    {
+      "Path": "src/AUV.Windows.App/Assets/WorkBuddyCredits.js",
+      "SHA256": "974164F6E34EAF4716E23D517AE2C27A596E61197B851E8D9CB27DCDD52988D5"
+    },
+    {
+      "Path": "src/AUV.Windows.App/AUV.Windows.App.csproj",
+      "SHA256": "94CCC982AE99F79B727213DDA9E1132E31F39D066EB9429E4C6D894E32DF2AF3"
+    },
+    {
+      "Path": "src/AUV.Windows.App/DesktopController.cs",
+      "SHA256": "7E7CBA11F27FFFBDE6D3F25EAF240A9D48DA328641B3924FA86D35A5AB7075AA"
+    },
+    {
+      "Path": "src/AUV.Windows.App/DesktopVerification.cs",
+      "SHA256": "167F367332FFBA6D76051DBBC252C833ABB6F213F4E30C94B45C7F5AD912768C"
+    },
+    {
+      "Path": "src/AUV.Windows.App/DesktopWidget.xaml",
+      "SHA256": "FA93368CF49AE9B2400D6BBA1ED5D1EB9FEDDDF0D1A8696FD7AA0AF4A1871B32"
+    },
+    {
+      "Path": "src/AUV.Windows.App/DesktopWidget.xaml.cs",
+      "SHA256": "9C5B1EA0142B7D2CF8814CDB400F236AD9406EE283D881B425C04D12C080166D"
+    },
+    {
+      "Path": "src/AUV.Windows.App/LayoutVerification.cs",
+      "SHA256": "FA7E7AB970B762AA4A387A6D68CE9FE4E88A7E57F6CDD6B377E865BCF511F1D3"
+    },
+    {
+      "Path": "src/AUV.Windows.App/MainViewModel.cs",
+      "SHA256": "117FCE89CF70E49824870243A06A35C28B3372E627B3D28C82B835F5A3B39A8C"
+    },
+    {
+      "Path": "src/AUV.Windows.App/MainWindow.xaml",
+      "SHA256": "7C681EF9394BA91767B5E2D71540FA252FD20F7833C73A780450AD0D6C703864"
+    },
+    {
+      "Path": "src/AUV.Windows.App/MainWindow.xaml.cs",
+      "SHA256": "E233A7E59735CE2EF20CE79F0261D004749415C9D3C9F59E2F5A86F781EC71FD"
+    },
+    {
+      "Path": "src/AUV.Windows.App/NativeDesktop.cs",
+      "SHA256": "D3E5F9893C7EE3802DCE2B0E67B94917C75E23B0108DBBFF3850359E8E4B9823"
+    },
+    {
+      "Path": "src/AUV.Windows.App/PerformanceMonitor.cs",
+      "SHA256": "F8E14E77422DE7F392339DD38EEDC590FF0F6898964DAA62A4F02BF0C1DE9CEA"
+    },
+    {
+      "Path": "src/AUV.Windows.App/PreviewInstance.cs",
+      "SHA256": "8B5EC57067EB201317C429E5148ECF8A032EA0CF30C413F9D7D4A1C0C50328B5"
+    },
+    {
+      "Path": "src/AUV.Windows.App/ProductVerification.cs",
+      "SHA256": "1843C7D38AA456730EA0A7C99554BED94B7CB4B4E26084EC1A6E83135DE725BA"
+    },
+    {
+      "Path": "src/AUV.Windows.App/ProviderController.cs",
+      "SHA256": "6FDCE8C733B3EFC89315A648A87F8650C0F87435F6C8B8AAA069D68E673BF114"
+    },
+    {
+      "Path": "src/AUV.Windows.App/ProviderVerification.cs",
+      "SHA256": "7655CC5570B99E6CA2512872FE307931518207C05D85DFFA0FD9DC7963110253"
+    },
+    {
+      "Path": "src/AUV.Windows.App/RefinementVerification.cs",
+      "SHA256": "FB5F623D19DB5DFE6FD6326B350A050A1510080D4C8B63DC6282BF2214A66372"
+    },
+    {
+      "Path": "src/AUV.Windows.App/SettingsWindow.xaml",
+      "SHA256": "4B0BC45DEB08211CA5F75A664125238B263DACE171ED695958D7ED16F294D6EC"
+    },
+    {
+      "Path": "src/AUV.Windows.App/SettingsWindow.xaml.cs",
+      "SHA256": "C33B6078C6C9DE135C7261652E4FB0909FFA0E5A2B56704FD54AA4D6DA9820D3"
+    },
+    {
+      "Path": "src/AUV.Windows.App/TrayIcon.cs",
+      "SHA256": "E5E6B9E0BEE79BBB27346EF2FECC6BE40953BFFD18B7E45CFFAD3482AEF5054F"
+    },
+    {
+      "Path": "src/AUV.Windows.App/UsageFlyout.xaml",
+      "SHA256": "A4FF10C4470844A4F440CCFC14470C64A99D44D63681CA883D234EFDF95183E3"
+    },
+    {
+      "Path": "src/AUV.Windows.App/UsageFlyout.xaml.cs",
+      "SHA256": "CD3B3F7D2503E2E60B50F5B0051AF2ABE3A05599F67D0D7689654FF51C4837EB"
+    },
+    {
+      "Path": "src/AUV.Windows.App/WorkBuddyConnectionWindow.cs",
+      "SHA256": "3BB5D158C0213655C464EBD453C250E02BCCACB308B4EFBA0BD8FF58C109664A"
+    },
+    {
+      "Path": "src/AUV.Windows.Core/AllowancePresentation.cs",
+      "SHA256": "9E711D90DB3CDAA3987982B085F772D647CA82011C2CEC25570F0313DCFB1293"
+    },
+    {
+      "Path": "src/AUV.Windows.Core/AUV.Windows.Core.csproj",
+      "SHA256": "E59F2A7A7720AA611ED8C594EA1EC9B1D5588155CBC83F4D3EF5465E12CA64BE"
+    },
+    {
+      "Path": "src/AUV.Windows.Core/CodexAppServer.cs",
+      "SHA256": "C74445BBA793843F8E2476F3E27B990E9EA5393760AD212F046C588EA5F37DB5"
+    },
+    {
+      "Path": "src/AUV.Windows.Core/DesktopPresentation.cs",
+      "SHA256": "6EC53B30D757BE351033C1B670D2E82EBE182F2B21EDFAA2F93ECBC5A957C8A6"
+    },
+    {
+      "Path": "src/AUV.Windows.Core/Presentation.cs",
+      "SHA256": "B182515FFADEEA0732330EC89D8797D6713B681486B15AEEC889CE80ACDD50FD"
+    },
+    {
+      "Path": "src/AUV.Windows.Core/ProviderData.cs",
+      "SHA256": "35A964F700463AB421CC2CBD4CA730F1FA5D1649631216E11342185281CC857A"
+    },
+    {
+      "Path": "src/AUV.Windows.Core/ProviderIntegrationContracts.cs",
+      "SHA256": "4485D58813FC3ECC14B9B632672734DF76B9C4B4CA48CB0D44833809FEE0EE8F"
+    },
+    {
+      "Path": "src/AUV.Windows.Core/Resources/models.v4.json",
+      "SHA256": "EA3C29A7C77D8E7FD14EA976642ED027A1F84BF59D85EAF1FE238318628848C3"
+    },
+    {
+      "Path": "src/AUV.Windows.Core/SettingsStore.cs",
+      "SHA256": "ABE038A6DA6D9479A657FD23F7067AB8ECC247A9D21CEB904FD6818997F36A18"
+    },
+    {
+      "Path": "tests/AUV.Windows.Tests/AllowanceTests.cs",
+      "SHA256": "F5962BE6504C3525488730AB83F30E13326C0A91D1DAA81F5B22C4EDEDACA1F7"
+    },
+    {
+      "Path": "tests/AUV.Windows.Tests/AUV.Windows.Tests.csproj",
+      "SHA256": "8EB6721A2282645573EE150CD04AD38AE1F21B260D3981007193AFE979D6FA19"
+    },
+    {
+      "Path": "tests/AUV.Windows.Tests/DesktopTests.cs",
+      "SHA256": "125CF175ED87F9C0507D0E4F7F8F05EC3A9EE8D2928024E4E3399D3FB122AC8F"
+    },
+    {
+      "Path": "tests/AUV.Windows.Tests/Fixtures/uma015-current-command-baseline.json",
+      "SHA256": "ED96FE62FFD10961D349BF875DE283E3AA8CB01FE9720168201FD59DC6674097"
+    },
+    {
+      "Path": "tests/AUV.Windows.Tests/PreparedConnectionTests.cs",
+      "SHA256": "E1FB5551C40C4162B7933DA0A78BD233BBAC472B73950EE9B4EA619DE3C1D5A0"
+    },
+    {
+      "Path": "tests/AUV.Windows.Tests/ProviderDataTests.cs",
+      "SHA256": "3342C7101A7A90D7B94B2223B0C5A805E5919828A9963AE4ECECB84F32711EAF"
+    },
+    {
+      "Path": "tests/AUV.Windows.Tests/UnitTest1.cs",
+      "SHA256": "B1B0CE647834DE88C711947EF3F6CC52E5060A445A5CA0440E7580AEED55948B"
+    },
+    {
+      "Path": "tests/AUV.Windows.Tests/ViewModelTests.cs",
+      "SHA256": "74BE411E788EF80198BFA5EF0A6BA6222DE30AF0365BD62879A785DB04701F75"
+    },
+    {
+      "Path": "tests/AUV.Windows.Tests/VisibilityRefinementTests.cs",
+      "SHA256": "330A5E9A18BDC82983370FBEEC596093AED41E68AFBAA90142C8623AE418F8AF"
+    }
+  ]
+}

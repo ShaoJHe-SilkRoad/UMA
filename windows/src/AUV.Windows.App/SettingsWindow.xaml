@@ -1,0 +1,35 @@
+<Window Style="{StaticResource {x:Type Window}}" x:Class="AUV.Windows.App.SettingsWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="AUV — Global Settings" Width="550" Height="650" MinWidth="430" MinHeight="380" WindowStartupLocation="CenterOwner" ShowInTaskbar="False" UseLayoutRounding="True" AutomationProperties.AutomationId="auv.settings.window">
+ <Grid Margin="20"><Grid.RowDefinitions><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel><TextBlock x:Name="Heading" Text="Settings" FontSize="22" FontWeight="SemiBold"/><TextBlock x:Name="Subtitle" Text="AUV preferences" Style="{StaticResource Muted}" Margin="0,4,0,16"/>
+  <StackPanel x:Name="GlobalPanel">
+   <TextBlock Text="Appearance" FontWeight="SemiBold"/><WrapPanel Margin="0,8,0,8"><RadioButton x:Name="DarkChoice" Content="Dark" GroupName="Theme" Checked="ThemeChoice_Checked" Margin="0,4,20,4" AutomationProperties.AutomationId="auv.settings.dark"/><RadioButton x:Name="LightChoice" Content="Light" GroupName="Theme" Checked="ThemeChoice_Checked" Margin="0,4,20,4" AutomationProperties.AutomationId="auv.settings.light"/><RadioButton x:Name="SystemChoice" Content="System" GroupName="Theme" Checked="ThemeChoice_Checked" Margin="0,4,0,4" AutomationProperties.AutomationId="auv.settings.system"/></WrapPanel>
+   <CheckBox x:Name="LargerChoice" Content="Larger text and Wizard cards" Click="Larger_Click" Margin="0,4,0,8"/>
+   <Border Style="{StaticResource Divider}"/><StackPanel x:Name="DesktopPanel"><TextBlock Text="Desktop Wizard · 桌面浮窗" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="{Binding TrayStatus}" Style="{StaticResource Muted}" FontSize="12" Margin="0,8"/>
+    <CheckBox Content="Enable Desktop Wizard" IsChecked="{Binding Enabled, Mode=TwoWay}" Margin="0,5"/>
+    <CheckBox Content="Always on top" IsChecked="{Binding AlwaysOnTop, Mode=TwoWay}" Margin="0,5"/>
+    <CheckBox Content="Show connection indicator" IsChecked="{Binding ShowStatus, Mode=TwoWay}" Margin="0,5"/>
+    <CheckBox Content="Show usage fill" IsChecked="{Binding ShowFill, Mode=TwoWay}" Margin="0,5"/>
+    <TextBlock Text="Density" Margin="0,10,0,4"/><ComboBox ItemsSource="{Binding Densities}" SelectedItem="{Binding Density, Mode=TwoWay}" MaxWidth="220" HorizontalAlignment="Left" MinWidth="180" AutomationProperties.Name="Wizard density"/>
+    <WrapPanel Margin="0,10,0,4"><Button Content="{Binding WidgetButton}" Command="{Binding ToggleWidgetCommand}"/><Button Content="Move to lower right" Command="{Binding DockWidgetCommand}" Margin="8,0,0,0"/></WrapPanel>
+    <CheckBox Content="Close to tray" IsChecked="{Binding CloseToTray, Mode=TwoWay}" Margin="0,10,0,5"/>
+    <TextBlock Text="Drag to move; right-click for options. Only available quotas appear." Style="{StaticResource Muted}" FontSize="12" Margin="0,8,0,0"/>
+   </StackPanel>
+  </StackPanel>
+  <StackPanel x:Name="ProviderPanel" Visibility="Collapsed"><TextBlock x:Name="ConnectionHeading" FontWeight="SemiBold" FontSize="18"/><TextBlock x:Name="ConnectionBody" Style="{StaticResource Muted}" Margin="0,8,0,12"/>
+   <StackPanel x:Name="CodexPanel" Visibility="Collapsed">
+    <TextBlock Text="Uses your installed Codex client and its ChatGPT sign-in." Style="{StaticResource Muted}"/>
+    <CheckBox Content="Read Codex on launch and refresh every minute" IsChecked="{Binding CodexEnabled, Mode=TwoWay}" Margin="0,12"/>
+    <TextBlock Text="Codex executable · leave blank to detect"/><TextBox Text="{Binding CodexExecutable, UpdateSourceTrigger=LostFocus}" Margin="0,6" AutomationProperties.Name="Codex executable path"/>
+    <TextBlock Text="{Binding ResolvedCodex}" Style="{StaticResource Muted}" FontSize="12"/>
+    <WrapPanel Margin="0,12"><Button Content="Choose codex.exe" Click="ChooseCodex_Click"/><Button Content="Read / refresh Codex" Click="ReadCodex_Click" Margin="8,0,0,0"/></WrapPanel>
+    <TextBlock Text="Disabling reading keeps you signed in to Codex." Style="{StaticResource Muted}" FontSize="12"/>
+   </StackPanel>
+   <StackPanel x:Name="WorkBuddyPanel" Visibility="Collapsed">
+    <TextBlock Text="Sign in to the official Plan and Usage page, then Sync Credits." Style="{StaticResource Muted}"/>
+    <WrapPanel Margin="0,16"><Button Content="Connect" Click="ConnectWorkBuddy_Click" ToolTip="Opens the official website in AUV's separate browser session."/><Button Content="Disconnect" Click="DisconnectWorkBuddy_Click" Margin="8,0,0,0" ToolTip="Clears only AUV's WorkBuddy browser session."/></WrapPanel>
+    <TextBlock Text="Experimental page sync · incomplete data stays hidden." Style="{StaticResource Muted}" FontSize="12"/>
+   </StackPanel>
+   <TextBlock x:Name="OtherProviderNote" Text="This provider's Windows connection is not implemented yet." Style="{StaticResource Muted}" Visibility="Collapsed"/>
+  </StackPanel>
+  <TextBlock x:Name="SaveStatus" Style="{StaticResource Muted}" FontSize="12" Margin="0,12,0,0" AutomationProperties.LiveSetting="Polite"/>
+ </StackPanel></ScrollViewer><Button Grid.Row="1" Content="_Done" HorizontalAlignment="Right" MinWidth="90" Margin="0,16,0,0" Click="Done_Click" IsDefault="True" IsCancel="True"/></Grid>
+</Window>

@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework><UseWPF>true</UseWPF><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><AssemblyName>AUV</AssemblyName><Version>0.16.2</Version><AssemblyVersion>0.16.2.0</AssemblyVersion><FileVersion>0.16.2.0</FileVersion><InformationalVersion>0.16.2</InformationalVersion><PlatformTarget>x64</PlatformTarget><ApplicationManifest>app.manifest</ApplicationManifest><ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon></PropertyGroup>
+  <ItemGroup><ProjectReference Include="..\AUV.Windows.Core\AUV.Windows.Core.csproj" /></ItemGroup>
+  <ItemGroup><Resource Include="Assets\AppIcon.png" /><Resource Include="Assets\AppMark.svg" /><Resource Include="Assets\AgentLogos\*.svg" /><EmbeddedResource Include="Assets\WorkBuddyCredits.js" LogicalName="AUV.Assets.WorkBuddyCredits.js" /></ItemGroup>
+  <ItemGroup><PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" /></ItemGroup>
+  <ItemGroup><None Update="Assets\Notices\*" CopyToPublishDirectory="PreserveNewest" TargetPath="Notices\%(Filename)%(Extension)" /><None Update="Assets\AgentLogos\PROVENANCE.md" CopyToPublishDirectory="PreserveNewest" TargetPath="Notices\AgentLogos.md" /></ItemGroup>
+</Project>
