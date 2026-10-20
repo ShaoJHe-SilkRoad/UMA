@@ -1,8 +1,60 @@
 # Install AUV / 安装 AUV
 
-[English](#english-installation-guide) · [中文](#中文安装指南) · [Windows 0.16.3](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Win_0.16.3.zip) · [macOS 0.16.3](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Mac_0.16.3.zip)
+[English](#english-installation-guide) · [中文](#中文安装指南) · [Mac 0.17.2](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.2/AUV_Mac_0.17.2_Universal.zip) · [Windows 0.16.3](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Win_0.16.3.zip)
 
 ## English installation guide
+
+<a id="mac-installation-guide"></a>
+
+### Mac 0.17.2
+
+**macOS 14+ · Apple silicon or Intel · Universal app · build 2026102001.** This package is Developer ID signed and Apple notarized. See [tested configurations](MAC_COMPATIBILITY.md) for the distinction between the build's requirements and real-device coverage.
+
+#### Install
+
+1. [Download AUV_Mac_0.17.2_Universal.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.2/AUV_Mac_0.17.2_Universal.zip). Choose the application ZIP, not GitHub's source archive.
+2. Double-click the ZIP in Finder. It extracts **`UMA.app`**, which opens as **AUV**.
+3. Drag the app to **Applications** on your Mac's internal disk. Keeping it there lets Sectorium disconnect an external drive without ejecting the app itself.
+4. Open AUV and follow the normal macOS first-open prompt. The main window's lower-left corner shows **AUV 0.17.2**. Finder → Get Info shows the app version too.
+
+#### Upgrade
+
+Quit the old app through its menu before replacing it; closing its window may leave it running. Replace `UMA.app` in the same Applications folder and open the new copy. Keep your saved preferences and registered volumes. You do not need to clear settings or caches.
+
+#### Connect Codex
+
+1. Install the official Codex desktop app and sign in with your ChatGPT account.
+2. In AUV, allow the local Codex connection and choose **Scan for Agents**.
+3. Select Codex and **Refresh** to read the allowance available for that account.
+
+Codex is a separate download. AUV reads the allowance supplied by Codex; it does not count ChatGPT website messages. An API-key-only login may not provide a ChatGPT plan allowance. If you are signed in but no usage appears, use the [connection troubleshooting guide](FIRST_INSTALL_TROUBLESHOOTING.md).
+
+#### Use the other workspaces
+
+- **ThreadOS:** choose models and thinking levels, then copy the generated instruction to your project's Leader. Copying does not apply settings by itself. [ThreadOS guide](https://shaotinghe.com/threados/).
+- **Sectorium:** select a drive and register an existing development image or create one. **Load** mounts the development volume. **Unload** closes it while keeping its parent drive connected. **Disconnect** safely ejects the entire external drive. Allow removable-drive access when macOS requests it for an operation you selected. Wait for successful disconnection before unplugging. [Sectorium guide](https://shaotinghe.com/sectorium/).
+
+#### Troubleshooting
+
+- **The old version opens:** quit it, then open the copy in Applications instead of an older copy in Downloads.
+- **macOS blocks the app or reports damage:** download the official ZIP again and compare the checksum below. Keep macOS security enabled; [report the complete message](https://github.com/ShaoJHe-SilkRoad/UMA/issues) if it persists.
+- **Codex is connected but a statistic is missing:** some statistics are optional and depend on the Codex version and account. Missing token statistics do not invalidate an available account allowance.
+
+#### Optional download check
+
+For the ZIP in Downloads, run:
+
+```sh
+shasum -a 256 ~/Downloads/AUV_Mac_0.17.2_Universal.zip
+```
+
+Expected SHA-256:
+
+```text
+99f435b8d4b35a51863e4b1242054bb0c1cd7f9e95912505e687c8170b281bc4
+```
+
+[Mac release notes](releases/AUV_Mac_0.17.2.md) · [Release downloads](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.17.2)
 
 <a id="windows-installation-guide"></a>
 
@@ -34,55 +86,59 @@ Expected SHA-256: **bc1577aae1d3ffdc3e3b104de15c6649ab4fb83f452a04865d548002f432
 
 [Windows release notes](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.16.3) · [Checksums](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/HASHES.txt) · [Release manifest](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/RELEASE-MANIFEST.json) · [Report a problem](https://github.com/ShaoJHe-SilkRoad/UMA/issues)
 
-### macOS 0.16.3
+## 中文安装指南
 
-### Before you start
+<a id="mac-中文安装指南"></a>
 
-You need **macOS 14 or later and an Apple silicon Mac (M-series chip)**. Check Apple menu → About This Mac if you are unsure. This release does not include an Intel version.
+### Mac 0.17.2
 
-AUV 0.16.3 includes ThreadOS and Sectorium. You only need one app download.
+**macOS 14 及以上 · Apple silicon 或 Intel · 通用包 · 构建号 2026102001。** 本包已完成 Developer ID 签名和 Apple 公证。安装要求与实机测试范围有所区别，详见[已测试环境](MAC_COMPATIBILITY.md#中文)。
 
-### Install
+#### 安装
 
-1. [Download AUV_Mac_0.16.3.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Mac_0.16.3.zip). Choose this application ZIP, not GitHub’s “Source code” download.
-2. Double-click the ZIP in Finder. It extracts **`UMA.app`** — the app opens as **AUV**, but keeps its old filename for compatibility.
-3. Drag it into **Applications** on your Mac’s internal disk. Your personal `~/Applications` folder also works. Keep the app on the internal disk if you plan to eject an external development drive.
-4. Open the installed copy and follow the normal macOS first-open prompt. This release is Developer ID signed and Apple notarized.
-5. Open **AUV → About AUV** and check **0.16.3**. The build number is **2026101101**; Finder → Get Info can also show the installed app’s version details.
+1. [下载 AUV_Mac_0.17.2_Universal.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.2/AUV_Mac_0.17.2_Universal.zip)。请选择应用 ZIP，不要选 GitHub 的源码压缩包。
+2. 在 Finder 中双击解压，得到 **`UMA.app`**，打开后显示为 **AUV**。
+3. 将应用拖入 Mac 内置盘的**“应用程序”**文件夹。这样分区工弹出外接硬盘时，应用本身仍能正常运行。
+4. 打开 AUV，按 macOS 正常首次启动提示操作。主窗口左下角应显示 **AUV 0.17.2**，Finder →“显示简介”也可以查看版本。
 
-### Upgrade from UMA or an older AUV
+#### 升级
 
-Quit the old app through its menu — closing the window may leave it running in the menu bar. Keep a copy of the old app as a backup, then replace it with the new `UMA.app` in the same installation folder. Open the new copy.
+替换前先通过菜单正常退出旧版；只关窗口可能仍会在后台运行。在原“应用程序”文件夹中替换 `UMA.app`，再打开新版。保留已有偏好和已登记开发卷，无需清空设置或缓存。
 
-Your saved settings are retained. You do not need to clear preferences, history or caches. Installing AUV does not automatically install or activate Sectorium’s storage tools.
+#### 连接 Codex
 
-### What to do after opening
+1. 安装官方 Codex 桌面应用，并使用 ChatGPT 账户登录。
+2. 在 AUV 中允许连接本机 Codex，然后点击**“扫描智能体”**。
+3. 选择 Codex 并点击**“刷新”**，读取该账户能够提供的额度。
 
-- **AUV:** choose an agent to see the usage information available for its account.
-- **ThreadOS:** choose each role’s model and thinking level, copy the instruction, and paste it into your Leader conversation. [ThreadOS guide](https://shaotinghe.com/threados/).
-- **Sectorium:** follow the [setup guide](https://shaotinghe.com/sectorium/) before using storage actions. It is still experimental: back up important data and start with noncritical data. Do not unplug a drive until its complete safe-eject operation succeeds.
+Codex 需单独安装。AUV 显示 Codex 返回的额度，不统计 ChatGPT 网页消息数。仅使用 API Key 登录时，可能没有 ChatGPT 套餐额度。已登录但没有用量时，请查看[连接排错指南](FIRST_INSTALL_TROUBLESHOOTING.md#中文)。
 
-### If something goes wrong
+#### 使用其他功能区
 
-- **An older version opens:** quit it, then open the copy in your chosen Applications folder rather than Downloads.
-- **macOS blocks the app or says it is damaged:** download it again from the official release and check the file below. Do not disable system security or force it open. If the problem remains, [report the message](https://github.com/ShaoJHe-SilkRoad/UMA/issues).
-- **You need to go back:** quit AUV and restore your backed-up app to the same folder. This restores the app only; it does not undo changes to Sectorium tools, services or disk data.
+- **线程工：**选择模型与思考档位，将生成的指令复制给项目的 Leader。复制本身不会应用设置。[线程工指南](https://shaotinghe.com/threados/)。
+- **分区工：**选择硬盘，登记已有开发镜像或新建开发卷。**Load · 装载**挂载开发卷；**Unload · 卸载**关闭开发卷，母盘保持连接；**Disconnect · 断开**安全弹出整个外接硬盘。执行所选操作时，按 macOS 提示允许访问移动硬盘。断开成功后再拔线。[分区工指南](https://shaotinghe.com/sectorium/)。
 
-### Optional: verify your download
+#### 遇到问题
 
-For the ZIP saved with its original name in Downloads, run:
+- **打开的仍是旧版：**正常退出后，从“应用程序”打开新版，不要打开“下载”中的旧副本。
+- **macOS 阻止启动或提示损坏：**重新下载正式 ZIP，核对下方校验值。保持系统安全保护开启；仍有问题时请[反馈完整提示](https://github.com/ShaoJHe-SilkRoad/UMA/issues)。
+- **已连接 Codex，但缺少某项统计：**部分统计取决于 Codex 版本和账户。缺少 token 统计，不影响已经取得的账户额度。
+
+#### 可选：校验下载文件
+
+ZIP 位于“下载”文件夹时，在终端运行：
 
 ```sh
-shasum -a 256 ~/Downloads/AUV_Mac_0.16.3.zip
+shasum -a 256 ~/Downloads/AUV_Mac_0.17.2_Universal.zip
 ```
 
-The first value should match:
+SHA-256 应为：
 
-[HASHES.txt](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Mac_0.16.3.HASHES.txt) (`AUV_Mac_0.16.3.zip`)
+```text
+99f435b8d4b35a51863e4b1242054bb0c1cd7f9e95912505e687c8170b281bc4
+```
 
-If it differs, do not install that file. Download it again. The [release page](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.16.3) also provides `AUV_Mac_0.16.3.HASHES.txt` and the signing record. The signing identity is **SHAOTING HE (C6TUZVJ6SJ)**.
-
-## 中文安装指南
+[Mac 更新说明](releases/AUV_Mac_0.17.2.md#中文) · [发布下载页](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.17.2)
 
 <a id="windows-中文安装指南"></a>
 
@@ -107,51 +163,3 @@ Windows 包**未进行数字签名**，可能受到 Windows 或组织安全策�
 PowerShell 校验方法同上，SHA-256 应为 **bc1577aae1d3ffdc3e3b104de15c6649ab4fb83f452a04865d548002f432085a**。
 
 [Windows 更新说明](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.16.3) · [校验值](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/HASHES.txt) · [发布清单](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/RELEASE-MANIFEST.json) · [反馈问题](https://github.com/ShaoJHe-SilkRoad/UMA/issues)
-
-### macOS 0.16.3
-
-### 安装前
-
-需要 **macOS 14 或更新版本，以及 Apple silicon Mac（M 系列芯片）**。不确定时，可在苹果菜单 →“关于本机”查看。本版不提供 Intel 版本。
-
-AUV 0.16.3 已包含线程工和分区工，只需下载一个应用。
-
-### 安装
-
-1. [下载 AUV_Mac_0.16.3.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Mac_0.16.3.zip)。请选择这个应用 ZIP，不要选择 GitHub 的“Source code”源码包。
-2. 在 Finder 中双击解压，得到 **`UMA.app`**。打开后显示为 **AUV**，文件名沿用旧名以兼容已有安装。
-3. 将它拖入 Mac 内置盘的**“应用程序”**文件夹，也可以使用个人 `~/Applications` 文件夹。如果以后需要弹出外接开发硬盘，应用本身请放在内置盘。
-4. 打开安装后的应用，按 macOS 正常首次启动提示操作。本版已使用 Developer ID 签名，并通过 Apple 公证。
-5. 在 **AUV → 关于 AUV** 中确认版本为 **0.16.3**。构建号为 **2026101101**；Finder →“显示简介”也可查看已安装应用的版本信息。
-
-### 从 UMA 或旧版 AUV 升级
-
-先通过菜单正常退出旧应用；只关窗口可能仍会在菜单栏运行。保留一份旧应用备份，再用新的 `UMA.app` 替换原安装文件夹中的应用，然后打开新版。
-
-已保存的设置会保留，无需清空偏好、历史或缓存。安装 AUV 不会自动安装或启用分区工的存储工具。
-
-### 打开后做什么
-
-- **AUV：**选择代理，查看其账户能够提供的用量信息。
-- **线程工：**分别选择角色的模型与思考档位，复制指令，粘贴给 Leader。[线程工指南](https://shaotinghe.com/threados/)。
-- **分区工：**先阅读[设置指南](https://shaotinghe.com/sectorium/)，再使用磁盘操作。它仍是试验功能，请先备份重要数据，用非关键数据试用；完整安全弹出成功前不要拔盘。
-
-### 遇到问题
-
-- **打开的还是旧版：**正常退出后，从选定的“应用程序”文件夹打开，不要打开“下载”里的旧副本。
-- **macOS 阻止启动或提示应用损坏：**从正式发布页重新下载，并按下方方法校验。不要关闭系统安全检查或强行启动。仍有问题时，请[反馈具体提示](https://github.com/ShaoJHe-SilkRoad/UMA/issues)。
-- **需要退回旧版：**退出 AUV，将备份的旧应用放回原位置。这只回退应用，不会撤销分区工工具、服务或磁盘数据的变化。
-
-### 可选：校验下载文件
-
-如果 ZIP 保留原名并位于“下载”文件夹，在终端执行：
-
-```sh
-shasum -a 256 ~/Downloads/AUV_Mac_0.16.3.zip
-```
-
-输出的第一个值应为：
-
-[HASHES.txt](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Mac_0.16.3.HASHES.txt) (`AUV_Mac_0.16.3.zip`)
-
-不一致就不要安装，请重新下载。[正式发布页](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.16.3)也提供 `AUV_Mac_0.16.3.HASHES.txt` 和签名记录；签名者为 **SHAOTING HE (C6TUZVJ6SJ)**。
