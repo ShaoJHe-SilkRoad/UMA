@@ -67,6 +67,37 @@ struct PreviewRendererTool {
             .flatMap { Double($0.dropFirst("--percent=".count)) }
             ?? 44
 
+        if arguments.contains("--sectorium") {
+            #if DEBUG
+            // Real production view, synthetic data only. This route never creates
+            // the live usage store or starts storage observation/automation.
+            let size = arguments.contains("--compact")
+                ? CGSize(width: 760, height: 620)
+                : CGSize(width: 1120, height: 820)
+            let content = AnyView(
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("AUV · Sectorium").font(.headline)
+                        Spacer()
+                        Text(language == .english ? "Synthetic data · implemented UI" : "模拟数据 · 实际界面实现")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding(16)
+                    Divider()
+                    SectoriumWorkbenchView(store: .isolatedPreviewFixture(), isChinese: language != .english)
+                }
+                .frame(width: size.width, height: size.height)
+                .background(Color(nsColor: .windowBackgroundColor))
+                .environment(\.colorScheme, isDark ? ColorScheme.dark : ColorScheme.light)
+            )
+            try renderM3RReview(.init(content: content, size: size), to: outputPath,
+                               scale: renderScale, alphaMask: false, liveReview: false)
+            return
+            #else
+            throw PreviewError.invalidScenario
+            #endif
+        }
+
         let compactFill = try CompactFillReviewFixture.parse(arguments)
         for provider in ["codex", "claude"] {
             let prefix = "--\(provider)-plan="

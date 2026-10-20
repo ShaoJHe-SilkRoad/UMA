@@ -38,13 +38,14 @@ import HESectoriumRuntime
         #expect(!external.secondary.contains(.eject))
 
         let internalDrive = plan(external: false)
-        #expect(internalDrive.primary == .stop)
+        #expect(internalDrive.primary == .recheck)
+        #expect(internalDrive.secondary.contains(.stop))
         #expect(!internalDrive.secondary.contains(.eject))
 
-        #expect(plan(external: true, identityVerified: false).primary == nil)
-        #expect(plan(external: true, readiness: .partialFailure("fixture" )).primary == nil)
+        #expect(plan(external: true, identityVerified: false).primary == .recheck)
+        #expect(plan(external: true, readiness: .partialFailure("fixture" )).primary == .recheck)
         #expect(plan(external: true, pending: "start:interrupted").primary == .resume)
-        #expect(plan(external: true, canEject: false).primary == .stop)
+        #expect(plan(external: true, canEject: false).primary == .recheck)
     }
 
     @Test func sectoriumOrderingPrefersExternalThenStableNames() {
@@ -726,8 +727,10 @@ import HESectoriumRuntime
         workbenchScroll.reflectScrolledClipView(workbenchScroll.contentView)
         settle(host)
 
+        let primaryID = fixture.store.snapshot.installed == .installed
+            ? "uma.sectorium.create" : "uma.sectorium.setup-components"
         let identifiers: Set<String> = [
-            "uma.sectorium.refresh", "uma.sectorium.settings", "uma.sectorium.create",
+            "uma.sectorium.refresh", "uma.sectorium.settings", primaryID,
             "uma.sectorium.drive-details"
         ]
         let controls = descendants(of: host).filter { identifiers.contains($0.accessibilityIdentifier()) }
@@ -737,7 +740,7 @@ import HESectoriumRuntime
         let controlFramesFitNarrowWidth = controlFrames.allSatisfy { $0.minX >= host.bounds.minX && $0.maxX <= host.bounds.maxX }
         #expect(controlFramesFitNarrowWidth,
                 "Workbench controls must remain within the narrow attached content width: \(controlFrames)")
-        let primaryControl = try #require(controls.first { $0.accessibilityIdentifier() == "uma.sectorium.create" })
+        let primaryControl = try #require(controls.first { $0.accessibilityIdentifier() == primaryID })
         let primaryFrame = primaryControl.convert(primaryControl.bounds, to: host)
         let detailsControl = try #require(controls.first { $0.accessibilityIdentifier() == "uma.sectorium.drive-details" })
         #expect(primaryFrame.midY < detailsControl.convert(detailsControl.bounds, to: host).midY,
@@ -754,8 +757,8 @@ import HESectoriumRuntime
         }
         #expect(traversed.contains("uma.sectorium.refresh"))
         #expect(traversed.contains("uma.sectorium.settings"))
-        #expect(traversed.contains("uma.sectorium.create"))
-        #expect(traversed.contains("uma.sectorium.create"))
+        #expect(traversed.contains(primaryID))
+        #expect(traversed.contains("uma.sectorium.drive-details"))
     }
 
     @Test func sectoriumMutationButtonsRequireVerifiedIdentityAndNoPendingOperation() async throws {
@@ -788,10 +791,13 @@ import HESectoriumRuntime
             settle(host)
 
             let buttons = descendants(of: host).compactMap { $0 as? NSButton }
-            let actionButtons = buttons.filter { ["uma.sectorium.create", "uma.sectorium.adopt", "uma.sectorium.resume"].contains($0.accessibilityIdentifier()) }
+            let actionButtons = buttons.filter { ["uma.sectorium.setup-components", "uma.sectorium.create",
+                                                  "uma.sectorium.adopt", "uma.sectorium.resume"].contains($0.accessibilityIdentifier()) }
+            let setupOrCreate = fixture.store.snapshot.installed == .installed
+                ? "uma.sectorium.create" : "uma.sectorium.setup-components"
             #expect(fixture.store.workbench.pendingOperation == scenario.pending)
             #expect(actionButtons.map { $0.accessibilityIdentifier() }.sorted()
-                    == (scenario.identityVerified ? (scenario.pending == nil ? ["uma.sectorium.create"] : ["uma.sectorium.resume"])
+                    == (scenario.identityVerified ? (scenario.pending == nil ? [setupOrCreate] : ["uma.sectorium.resume"])
                        : []).sorted())
             let allActionsEnabled = actionButtons.reduce(true) { $0 && $1.isEnabled }
             #expect(allActionsEnabled)
@@ -1004,7 +1010,7 @@ import HESectoriumRuntime
             (.awaitingUnlock, "Unlock required", "unlock the image explicitly"),
             (.noDevice, "Choose a drive", "select a physical drive"),
             (.readOnly, "Read-only", "read-only"),
-            (.ejected, "Ejected", "no longer mounted")
+            (.ejected, "Drive disconnected", "safe eject has not been confirmed")
         ]
         for (readiness, expectedTitle, expectedSummary) in blocked {
             fixture.store.apply(devices: [fixture.device], profiles: [], readiness: readiness,
@@ -1051,6 +1057,12 @@ import HESectoriumRuntime
             fixture.store.apply(devices: [fixture.device], profiles: [profile], readiness: scenario.readiness,
                                 pending: scenario.pending)
             settle(host)
+            if scenario.action == "uma.sectorium.stop" {
+                let moreActions = try #require(descendants(of: host).compactMap { $0 as? NSButton }
+                    .first { $0.accessibilityIdentifier() == "uma.sectorium.more-actions" })
+                moreActions.performClick(nil)
+                settle(host)
+            }
             let scroll = try #require(descendants(of: host).compactMap { $0 as? NSScrollView }.first)
             let button = try #require(descendants(of: host).compactMap { $0 as? NSButton }
                 .first { $0.accessibilityIdentifier() == scenario.action },
@@ -1128,11 +1140,14 @@ import HESectoriumRuntime
             let scroll = try #require(descendants(of: host).compactMap { $0 as? NSScrollView }.first)
             if mode == .ready {
                 let moreActions = try #require(descendants(of: host)
+                    .compactMap { $0 as? NSButton }
                     .first { $0.accessibilityIdentifier() == "uma.sectorium.more-actions" })
                 #expect(moreActions.window === window)
+                moreActions.performClick(nil)
+                settle(host)
                 #expect(descendants(of: host).compactMap { $0 as? NSButton }
                     .contains { $0.accessibilityIdentifier() == action },
-                    "The direct safe-eject route is available before opening the collapsed secondary actions.")
+                    "The verified safe-eject route is available in the secondary actions.")
             }
             let button = try #require(descendants(of: host).compactMap { $0 as? NSButton }
                 .first { $0.accessibilityIdentifier() == action })
@@ -1561,7 +1576,7 @@ import HESectoriumRuntime
         #expect((window.firstResponder as? NSView).flatMap(accessibilityIdentifier(in:)) == "uma.sectorium.settings")
     }
 
-    @Test func hesSettingsActionsReceiveVisibleForwardAndReverseWindowFocus() throws {
+    @Test func hesSettingsActionsReceiveVisibleForwardAndReverseWindowFocus() async throws {
         _ = NSApplication.shared
         let fixture = HESectoriumKeyboardFixture()
         defer { fixture.remove() }
@@ -1572,15 +1587,19 @@ import HESectoriumRuntime
         window.makeKeyAndOrderFront(nil)
         defer { window.orderOut(nil) }
         settle(host)
+        try await waitForAvailableInventory(fixture.store)
+        settle(host)
         let expected: Set<String> = [
             "uma.settings.hesectorium.install", "uma.settings.hesectorium.repair",
-            "uma.settings.hesectorium.automation", "uma.settings.hesectorium.mount",
-            "uma.settings.hesectorium.eject", "uma.settings.hesectorium.refresh"
+            "uma.settings.hesectorium.automation", "uma.settings.hesectorium.refresh"
         ]
+        let eject = try #require(descendants(of: host).compactMap { $0 as? NSButton }
+            .first { $0.accessibilityIdentifier() == "uma.settings.hesectorium.eject" })
+        #expect(!eject.isEnabled, "A drive without a verified eject checkpoint must not expose an active eject control.")
         var forward: Set<String> = []
         for _ in 0..<48 {
             window.selectNextKeyView(nil)
-            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            try await Task.sleep(for: .milliseconds(10))
             if let view = window.firstResponder as? NSView,
                let identifier = accessibilityIdentifier(in: view), expected.contains(identifier) {
                 forward.insert(identifier)
@@ -1596,7 +1615,7 @@ import HESectoriumRuntime
         var reverse: Set<String> = []
         for _ in 0..<24 {
             window.selectPreviousKeyView(nil)
-            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            try await Task.sleep(for: .milliseconds(10))
             if let view = window.firstResponder as? NSView,
                let identifier = accessibilityIdentifier(in: view), expected.contains(identifier) {
                 reverse.insert(identifier)
@@ -1979,6 +1998,9 @@ private final class HESectoriumKeyboardEjectDriver: WholeDeviceEjectDriving {
     func unmountAllPhysicalVolumesNonForce(_ target: WholeDeviceTopology) -> WholeDeviceActionReceipt { .busy("fixture forbids mutation") }
     func ejectWholeDeviceNonForce(_ target: WholeDeviceTopology) -> WholeDeviceActionReceipt { .busy("fixture forbids mutation") }
     func presence(physicalIdentity: String) -> WholeDevicePresence { .present }
+    func presence(of target: WholeDeviceTopology) -> WholeDevicePresence {
+        target.physicalIdentity == topology.physicalIdentity ? .present : .unknown("fixture target mismatch")
+    }
     func freshReturnIdentityMatches(_ journal: WholeDeviceEjectJournalRecord) -> Bool {
         guard journal.target.matchesPhysicalIdentityAndVolumes(topology),
               topology.volumes.allSatisfy(\.mounted),

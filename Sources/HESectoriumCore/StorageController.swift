@@ -137,6 +137,14 @@ public struct StoragePersistentState: Equatable, Sendable {
     public var operationID: String?
     public var outerDisappearedAfterIntent: Bool
     public var outerReconnectAttempted: Bool
+    /// Stable IDs from the registered profile store. Suppression survives process restart.
+    public var suppressedProfileIDs: Set<String>
+    /// A physical disappearance was authoritatively observed for these profiles.
+    public var disconnectedProfileIDs: Set<String>
+    /// One automatic attach attempt has been claimed for the current insertion.
+    public var reconnectAttemptedProfileIDs: Set<String>
+    /// Completed whole-device eject journals, keyed by exact physical identity for later Return.
+    public var terminalEjectJournals: [String: String]
     /// Non-automation operation marker shared with the Sectorium workbench.
     public var workbenchOperation: String?
     /// Durable validation/mutation boundary for safe workbench recovery.
@@ -146,17 +154,68 @@ public struct StoragePersistentState: Equatable, Sendable {
     public var workbenchTerminalResult: String?
     public init(revision: UInt64 = 0, ejectIntent: Bool, operationID: String? = nil,
                 outerDisappearedAfterIntent: Bool = false, outerReconnectAttempted: Bool = false,
+                suppressedProfileIDs: Set<String> = [], disconnectedProfileIDs: Set<String> = [],
+                reconnectAttemptedProfileIDs: Set<String> = [],
+                terminalEjectJournals: [String: String] = [:],
                 workbenchOperation: String? = nil, workbenchPhase: String? = nil,
                 workbenchTarget: String? = nil, workbenchCompletedStep: String? = nil,
                 workbenchTerminalResult: String? = nil) {
         self.revision = revision; self.ejectIntent = ejectIntent; self.operationID = operationID
         self.outerDisappearedAfterIntent = outerDisappearedAfterIntent
         self.outerReconnectAttempted = outerReconnectAttempted
+        self.suppressedProfileIDs = suppressedProfileIDs
+        self.disconnectedProfileIDs = disconnectedProfileIDs
+        self.reconnectAttemptedProfileIDs = reconnectAttemptedProfileIDs
+        self.terminalEjectJournals = terminalEjectJournals
         self.workbenchOperation = workbenchOperation
         self.workbenchPhase = workbenchPhase
         self.workbenchTarget = workbenchTarget
         self.workbenchCompletedStep = workbenchCompletedStep
         self.workbenchTerminalResult = workbenchTerminalResult
+    }
+
+    /// Called under the shared operation lock before a confirmed manual unload/eject mutation.
+    /// The caller persists this state with a revisioned compare-and-swap.
+    @discardableResult
+    public mutating func suppressProfile(_ profileID: String) -> Bool {
+        guard Self.validProfileID(profileID) else { return false }
+        suppressedProfileIDs.insert(profileID)
+        // A new manual choice supersedes absence observed before that choice.
+        disconnectedProfileIDs.remove(profileID)
+        return true
+    }
+
+    /// A manual load may clear only its own suppression after a fresh, complete image chain check.
+    /// The caller persists this state with a revisioned compare-and-swap under the shared lock.
+    @discardableResult
+    public mutating func clearProfileSuppressionAfterValidatedLoad(
+        _ profileID: String, policy: StorageIdentityPolicy, observation: StorageObservation
+    ) -> Bool {
+        guard Self.validProfileID(profileID), !ejectIntent,
+              case .success = policy.validate(observation) else { return false }
+        suppressedProfileIDs.remove(profileID)
+        disconnectedProfileIDs.remove(profileID)
+        reconnectAttemptedProfileIDs.insert(profileID)
+        return true
+    }
+
+    /// Copy every durable field while advancing the CAS revision by one.
+    public func advancingRevision() -> Self {
+        .init(revision: revision + 1, ejectIntent: ejectIntent, operationID: operationID,
+              outerDisappearedAfterIntent: outerDisappearedAfterIntent,
+              outerReconnectAttempted: outerReconnectAttempted,
+              suppressedProfileIDs: suppressedProfileIDs,
+              disconnectedProfileIDs: disconnectedProfileIDs,
+              reconnectAttemptedProfileIDs: reconnectAttemptedProfileIDs,
+              terminalEjectJournals: terminalEjectJournals,
+              workbenchOperation: workbenchOperation, workbenchPhase: workbenchPhase,
+              workbenchTarget: workbenchTarget, workbenchCompletedStep: workbenchCompletedStep,
+              workbenchTerminalResult: workbenchTerminalResult)
+    }
+
+    static func validProfileID(_ value: String) -> Bool {
+        !value.isEmpty && value.count <= 128 && !value.contains("\n")
+            && !value.contains("\r") && !value.contains("\0")
     }
 }
 
@@ -208,6 +267,9 @@ public final class StorageController {
     let store: DurableStateStore
     let lock: OperationLock
     public let identityPolicy: StorageIdentityPolicy
+    // Guarded by the shared operation lock. Startup reconciles persisted claims
+    // once per controller lifetime; repeated callbacks cannot create a retry loop.
+    private var startupReconciledProfileIDs: Set<String> = []
 
     public init(backend: StorageBackend, store: DurableStateStore, lock: OperationLock,
                 identityPolicy: StorageIdentityPolicy = .expected) {
@@ -231,10 +293,11 @@ public final class StorageController {
             do { prior = try store.load() } catch { return result(id, mode, steps, .stateUnavailable(String(describing: error))) }
             guard prior.workbenchOperation == nil else { return result(id, mode, steps, .operationInProgress) }
             guard !prior.ejectIntent else { return result(id, mode, steps, .ejectAlreadyPending) }
-            let pending = StoragePersistentState(revision: prior.revision + 1, ejectIntent: true, operationID: id,
-                workbenchOperation: prior.workbenchOperation, workbenchPhase: prior.workbenchPhase,
-                workbenchTarget: prior.workbenchTarget, workbenchCompletedStep: prior.workbenchCompletedStep,
-                workbenchTerminalResult: prior.workbenchTerminalResult)
+            var pending = prior.advancingRevision()
+            pending.ejectIntent = true
+            pending.operationID = id
+            pending.outerDisappearedAfterIntent = false
+            pending.outerReconnectAttempted = false
             do {
                 guard try store.compareAndSwap(expectedRevision: prior.revision, newState: pending) else {
                     return result(id, mode, steps, .stateConflict)
@@ -275,12 +338,9 @@ public final class StorageController {
                 steps.append(.init(step: "verifyOuterAbsent", status: .succeeded))
                 do {
                     let current = try store.load()
-                    let marked = StoragePersistentState(revision: current.revision + 1, ejectIntent: current.ejectIntent,
-                        operationID: current.operationID, outerDisappearedAfterIntent: current.ejectIntent,
-                        outerReconnectAttempted: false, workbenchOperation: current.workbenchOperation,
-                        workbenchPhase: current.workbenchPhase, workbenchTarget: current.workbenchTarget,
-                        workbenchCompletedStep: current.workbenchCompletedStep,
-                        workbenchTerminalResult: current.workbenchTerminalResult)
+                    var marked = current.advancingRevision()
+                    marked.outerDisappearedAfterIntent = current.ejectIntent
+                    marked.outerReconnectAttempted = false
                     guard try store.compareAndSwap(expectedRevision: current.revision, newState: marked) else {
                         steps.append(.init(step: "recordOuterDisappearance", status: .failed, detail: "State revision conflict"))
                         return result(id, mode, steps, .stateConflict)
@@ -311,12 +371,14 @@ public final class StorageController {
             if state.workbenchOperation != nil { return result(id, .automatic, [], .operationInProgress) }
             switch event {
             case .outerDisappeared(let uuid) where uuid == identityPolicy.outerUUID && state.ejectIntent:
-                let marked = StoragePersistentState(revision: state.revision + 1, ejectIntent: true,
-                    operationID: state.operationID, outerDisappearedAfterIntent: true,
-                    outerReconnectAttempted: false, workbenchOperation: state.workbenchOperation,
-                    workbenchPhase: state.workbenchPhase, workbenchTarget: state.workbenchTarget,
-                    workbenchCompletedStep: state.workbenchCompletedStep,
-                    workbenchTerminalResult: state.workbenchTerminalResult)
+                switch backend.finalOuterState() {
+                case .absent: break
+                case .stillPresent: return result(id, .automatic, [], .outerStillPresent)
+                case .unknown(let reason): return result(id, .automatic, [], .finalStateUnknown(reason))
+                }
+                var marked = state.advancingRevision()
+                marked.outerDisappearedAfterIntent = true
+                marked.outerReconnectAttempted = false
                 guard try store.compareAndSwap(expectedRevision: state.revision, newState: marked) else {
                     return result(id, .automatic, [], .stateConflict)
                 }
@@ -330,44 +392,16 @@ public final class StorageController {
                     return result(id, .automatic, steps, .readiness(failure))
                 }
                 steps.append(.init(step: "verifyOuterIdentity", status: .succeeded))
-
-                // Claim this physical reinsert sequence before the mutating attach. Duplicate events
-                // cannot issue another attach; a later confirmed disconnect resets the claim.
-                let claimed = StoragePersistentState(revision: state.revision + 1, ejectIntent: true,
-                    operationID: state.operationID, outerDisappearedAfterIntent: true,
-                    outerReconnectAttempted: true, workbenchOperation: state.workbenchOperation,
-                    workbenchPhase: state.workbenchPhase, workbenchTarget: state.workbenchTarget,
-                    workbenchCompletedStep: state.workbenchCompletedStep,
-                    workbenchTerminalResult: state.workbenchTerminalResult)
+                // A confirmed return is recorded, but eject intent is never cleared by automation.
+                // Only an explicit manual load may recover this pending operation.
+                var claimed = state.advancingRevision()
+                claimed.outerReconnectAttempted = true
                 guard try store.compareAndSwap(expectedRevision: state.revision, newState: claimed) else {
                     return result(id, .automatic, steps, .stateConflict)
                 }
-
-                let attach = backend.attachImage()
-                steps.append(.init(step: "attachImage", status: attach.succeeded ? .succeeded : .failed, detail: attach.detail))
-                guard attach.succeeded else {
-                    return result(id, .automatic, steps, .attachFailed(attach.exitCode, attach.detail))
-                }
-                guard let observation = backend.observe() else {
-                    steps.append(.init(step: "verifyReadiness", status: .failed, detail: "No observation"))
-                    return result(id, .automatic, steps, .observationUnavailable)
-                }
-                if case .failure(let failure) = identityPolicy.validate(observation) {
-                    steps.append(.init(step: "verifyReadiness", status: .failed, detail: failure.rawValue))
-                    return result(id, .automatic, steps, .readiness(failure))
-                }
-                steps.append(.init(step: "verifyReadiness", status: .succeeded))
-                let recovered = StoragePersistentState(revision: claimed.revision + 1, ejectIntent: false,
-                    outerReconnectAttempted: claimed.outerReconnectAttempted,
-                    workbenchOperation: claimed.workbenchOperation, workbenchPhase: claimed.workbenchPhase,
-                    workbenchTarget: claimed.workbenchTarget, workbenchCompletedStep: claimed.workbenchCompletedStep,
-                    workbenchTerminalResult: claimed.workbenchTerminalResult)
-                guard try store.compareAndSwap(expectedRevision: claimed.revision, newState: recovered) else {
-                    return result(id, .automatic, steps, .stateConflict)
-                }
-                steps.append(.init(step: "clearEjectIntent", status: .succeeded,
-                                   detail: "Outer reinsert and complete storage chain validated"))
-                return OperationResult(operationID: id, mode: .automatic, steps: steps)
+                steps.append(.init(step: "retainEjectIntent", status: .skipped,
+                                   detail: "Explicit manual load required after physical return"))
+                return result(id, .automatic, steps, .recoveryRequiresManualMount)
             case .outerReappeared(let uuid) where uuid == identityPolicy.outerUUID && state.ejectIntent
                 && state.outerDisappearedAfterIntent && state.outerReconnectAttempted:
                 return OperationResult(operationID: id, mode: .automatic,
@@ -377,6 +411,145 @@ public final class StorageController {
                                        steps: [.init(step: "ignoreEvent", status: .skipped, detail: "Not a verified outer reconnect")])
             }
         } catch { return result(id, .automatic, [], .stateUnavailable(String(describing: error))) }
+    }
+
+    /// One inspected startup attempt for an explicitly registered profile. Runtime supplies
+    /// the registered identity policy and its matching backend; preference gating stays outside.
+    public func mountRegisteredProfileAtStartup(profileID: String, policy: StorageIdentityPolicy,
+                                                backend profileBackend: StorageBackend) -> OperationResult {
+        let id = UUID().uuidString
+        guard StoragePersistentState.validProfileID(profileID) else {
+            return result(id, .automatic, [], .workbenchFailed("Invalid registered profile ID"))
+        }
+        guard lock.acquire() else { return result(id, .automatic, [], .operationInProgress) }
+        defer { lock.release() }
+        do {
+            let state = try store.load()
+            let reconcilePriorProcessClaim = startupReconciledProfileIDs.insert(profileID).inserted
+            return automaticProfileMountLocked(operationID: id, profileID: profileID, policy: policy,
+                                               backend: profileBackend, state: state,
+                                               reconcilePriorProcessClaim: reconcilePriorProcessClaim)
+        } catch { return result(id, .automatic, [], .stateUnavailable(String(describing: error))) }
+    }
+
+    /// Disk Arbitration events must be routed only for registered profiles whose backing UUID
+    /// matches the callback. A fresh whole-disk absence check is required before a disconnect
+    /// resets the one-attempt claim. Duplicate appear callbacks cannot create a reconnect.
+    public func handleRegisteredProfileEvent(_ event: StorageEvent, profileID: String,
+                                             policy: StorageIdentityPolicy,
+                                             backend profileBackend: StorageBackend) -> OperationResult {
+        let id = UUID().uuidString
+        guard StoragePersistentState.validProfileID(profileID) else {
+            return result(id, .automatic, [], .workbenchFailed("Invalid registered profile ID"))
+        }
+        guard lock.acquire() else { return result(id, .automatic, [], .operationInProgress) }
+        defer { lock.release() }
+        do {
+            let state = try store.load()
+            guard state.workbenchOperation == nil else { return result(id, .automatic, [], .operationInProgress) }
+            switch event {
+            case .outerDisappeared(let uuid) where uuid == policy.outerUUID:
+                switch profileBackend.finalOuterState() {
+                case .absent: break
+                case .stillPresent: return result(id, .automatic, [], .outerStillPresent)
+                case .unknown(let reason): return result(id, .automatic, [], .finalStateUnknown(reason))
+                }
+                if state.disconnectedProfileIDs.contains(profileID)
+                    && !state.reconnectAttemptedProfileIDs.contains(profileID) {
+                    return .init(operationID: id, mode: .automatic,
+                                 steps: [.init(step: "ignoreEvent", status: .skipped,
+                                               detail: "Profile disappearance already recorded")])
+                }
+                var marked = state.advancingRevision()
+                marked.disconnectedProfileIDs.insert(profileID)
+                marked.reconnectAttemptedProfileIDs.remove(profileID)
+                guard try store.compareAndSwap(expectedRevision: state.revision, newState: marked) else {
+                    return result(id, .automatic, [], .stateConflict)
+                }
+                return .init(operationID: id, mode: .automatic,
+                             steps: [.init(step: "recordProfileDisappearance", status: .succeeded)])
+            case .outerReappeared(let uuid) where uuid == policy.outerUUID:
+                return automaticProfileMountLocked(operationID: id, profileID: profileID, policy: policy,
+                                                   backend: profileBackend, state: state)
+            default:
+                return .init(operationID: id, mode: .automatic,
+                             steps: [.init(step: "ignoreEvent", status: .skipped,
+                                           detail: "Event does not match registered backing volume")])
+            }
+        } catch { return result(id, .automatic, [], .stateUnavailable(String(describing: error))) }
+    }
+
+    private func automaticProfileMountLocked(operationID id: String, profileID: String,
+                                             policy: StorageIdentityPolicy, backend profileBackend: StorageBackend,
+                                             state: StoragePersistentState,
+                                             reconcilePriorProcessClaim: Bool = false) -> OperationResult {
+        var steps: [OperationStepResult] = []
+        guard state.workbenchOperation == nil else { return result(id, .automatic, steps, .operationInProgress) }
+        guard !state.ejectIntent else { return result(id, .automatic, steps, .recoveryRequiresManualMount) }
+        // A manually unloaded volume stays unloaded during the same physical
+        // connection, including across application restarts. Only previously
+        // verified physical absence permits a new automatic attempt.
+        guard !state.suppressedProfileIDs.contains(profileID)
+                || state.disconnectedProfileIDs.contains(profileID) else {
+            return .init(operationID: id, mode: .automatic,
+                         steps: [.init(step: "profileSuppressed", status: .skipped,
+                                       detail: "Automatic loading is paused for this physical connection")])
+        }
+        guard reconcilePriorProcessClaim || !state.reconnectAttemptedProfileIDs.contains(profileID) else {
+            return .init(operationID: id, mode: .automatic,
+                         steps: [.init(step: "ignoreEvent", status: .skipped,
+                                       detail: "Automatic load already attempted for this insertion")])
+        }
+        if case .failure(let failure) = policy.validateOuter(profileBackend.observeOuter()) {
+            steps.append(.init(step: "verifyOuterIdentity", status: .failed, detail: failure.rawValue))
+            return result(id, .automatic, steps, .readiness(failure))
+        }
+        steps.append(.init(step: "verifyOuterIdentity", status: .succeeded))
+        var claimed = state.advancingRevision()
+        if state.disconnectedProfileIDs.contains(profileID) {
+            claimed.suppressedProfileIDs.remove(profileID)
+        }
+        claimed.reconnectAttemptedProfileIDs.insert(profileID)
+        do {
+            guard try store.compareAndSwap(expectedRevision: state.revision, newState: claimed) else {
+                return result(id, .automatic, steps, .stateConflict)
+            }
+        } catch { return result(id, .automatic, steps, .stateUnavailable(String(describing: error))) }
+        steps.append(.init(step: "claimProfileLoadAttempt", status: .succeeded))
+
+        let observation: StorageObservation?
+        if let existing = profileBackend.observe() {
+            if case .failure(let failure) = policy.validate(existing) {
+                steps.append(.init(step: "verifyExistingImage", status: .failed, detail: failure.rawValue))
+                return result(id, .automatic, steps, .readiness(failure))
+            }
+            observation = existing
+            steps.append(.init(step: "reuseVerifiedImage", status: .succeeded))
+        } else {
+            let attach = profileBackend.attachImage()
+            steps.append(.init(step: "attachImage", status: attach.succeeded ? .succeeded : .failed,
+                               detail: attach.detail))
+            guard attach.succeeded else { return result(id, .automatic, steps, .attachFailed(attach.exitCode, attach.detail)) }
+            observation = profileBackend.observe()
+        }
+        guard let observation else {
+            steps.append(.init(step: "verifyReadiness", status: .failed, detail: "No observation"))
+            return result(id, .automatic, steps, .observationUnavailable)
+        }
+        if case .failure(let failure) = policy.validate(observation) {
+            steps.append(.init(step: "verifyReadiness", status: .failed, detail: failure.rawValue))
+            return result(id, .automatic, steps, .readiness(failure))
+        }
+        steps.append(.init(step: "verifyReadiness", status: .succeeded))
+        var completed = claimed.advancingRevision()
+        completed.disconnectedProfileIDs.remove(profileID)
+        do {
+            guard try store.compareAndSwap(expectedRevision: claimed.revision, newState: completed) else {
+                return result(id, .automatic, steps, .stateConflict)
+            }
+        } catch { return result(id, .automatic, steps, .stateUnavailable(String(describing: error))) }
+        steps.append(.init(step: "recordProfileReady", status: .succeeded))
+        return .init(operationID: id, mode: .automatic, steps: steps)
     }
 
     /// Reads durable state only. Lock lifetime belongs to the injected kernel-backed lock.
@@ -409,10 +582,17 @@ public final class StorageController {
         }
         steps.append(.init(step: "verifyOuterIdentity", status: .succeeded))
 
-        let attached = backend.attachImage()
-        steps.append(.init(step: "attachImage", status: attached.succeeded ? .succeeded : .failed, detail: attached.detail))
-        guard attached.succeeded else { return result(id, mode, steps, .attachFailed(attached.exitCode, attached.detail)) }
-        guard let observation = backend.observe() else {
+        let observation: StorageObservation?
+        if let existing = backend.observe(), case .success = identityPolicy.validate(existing) {
+            steps.append(.init(step: "reuseVerifiedImage", status: .succeeded))
+            observation = existing
+        } else {
+            let attached = backend.attachImage()
+            steps.append(.init(step: "attachImage", status: attached.succeeded ? .succeeded : .failed, detail: attached.detail))
+            guard attached.succeeded else { return result(id, mode, steps, .attachFailed(attached.exitCode, attached.detail)) }
+            observation = backend.observe()
+        }
+        guard let observation else {
             steps.append(.init(step: "verifyReadiness", status: .failed, detail: "No observation"))
             return result(id, mode, steps, .observationUnavailable)
         }
@@ -423,11 +603,10 @@ public final class StorageController {
         steps.append(.init(step: "verifyReadiness", status: .succeeded))
 
         if state.ejectIntent && mode == .manual {
-            let recovered = StoragePersistentState(revision: state.revision + 1, ejectIntent: false,
-                outerReconnectAttempted: state.outerReconnectAttempted,
-                workbenchOperation: state.workbenchOperation, workbenchPhase: state.workbenchPhase,
-                workbenchTarget: state.workbenchTarget, workbenchCompletedStep: state.workbenchCompletedStep,
-                workbenchTerminalResult: state.workbenchTerminalResult)
+            var recovered = state.advancingRevision()
+            recovered.ejectIntent = false
+            recovered.operationID = nil
+            recovered.outerDisappearedAfterIntent = false
             do {
                 guard try store.compareAndSwap(expectedRevision: state.revision, newState: recovered) else {
                     return result(id, mode, steps, .stateConflict)

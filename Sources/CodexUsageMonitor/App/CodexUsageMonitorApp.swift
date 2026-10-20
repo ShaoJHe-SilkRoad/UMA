@@ -2,6 +2,7 @@ import AppKit
 import CodexUsageUI
 import Darwin
 import Foundation
+import HESectoriumRuntime
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -12,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let runtimeFactory: RuntimeFactory
     private let wakeNotificationCenter: NotificationCenter
     private let terminationReply: @MainActor (NSApplication) -> Void
+    private let storageAutomation: (any SectoriumAutomationLifecycle)?
     private var hasStarted = false
     private var isDisconnectingForTermination = false
     private(set) var wakeObserver: CodexWakeRefreshObserver?
@@ -29,7 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             wakeNotificationCenter: NSWorkspace.shared.notificationCenter,
             shellCoordinator: AppShellCoordinator(),
-            shellDiagnosticRequested: CommandLine.arguments.contains("--diagnose-app-shell")
+            shellDiagnosticRequested: CommandLine.arguments.contains("--diagnose-app-shell"),
+            storageAutomation: SectoriumAutomationSession.live()
         )
     }
 
@@ -40,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wakeNotificationCenter: NotificationCenter,
         shellCoordinator: AppShellCoordinator? = nil,
         shellDiagnosticRequested: Bool = false,
+        storageAutomation: (any SectoriumAutomationLifecycle)? = nil,
         terminationReply: @escaping @MainActor (NSApplication) -> Void = {
             $0.reply(toApplicationShouldTerminate: true)
         }
@@ -49,12 +53,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.shellCoordinator = shellCoordinator
         self.shellDiagnosticRequested = shellDiagnosticRequested
         self.terminationReply = terminationReply
+        self.storageAutomation = storageAutomation
         super.init()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard !hasStarted, !isDisconnectingForTermination else { return }
         hasStarted = true
+        if !shellDiagnosticRequested { storageAutomation?.start() }
         if let shellCoordinator {
             NSApp.setActivationPolicy(.regular)
             NSApp.unhide(nil)
@@ -117,15 +123,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         isDisconnectingForTermination = true
         launchTask?.cancel()
         wakeObserver?.invalidate()
+        storageAutomation?.stop()
         // The shell-only diagnostic starts no providers and owns no connector
         // shutdown work. Let it exit immediately after emitting its result.
         guard !shellDiagnosticRequested else { return .terminateNow }
-        guard let runtime else { return .terminateNow }
+        guard runtime != nil || storageAutomation != nil else { return .terminateNow }
         terminationTask = Task { @MainActor [runtime,
+                                            storageAutomation,
                                             observer = wakeObserver,
                                             reply = terminationReply] in
             await observer?.waitForPendingWake()
-            await runtime.shutdown()
+            await storageAutomation?.waitForPendingOperations()
+            await runtime?.shutdown()
             reply(sender)
         }
         return .terminateLater
@@ -135,6 +144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         isDisconnectingForTermination = true
         launchTask?.cancel()
         wakeObserver?.invalidate()
+        storageAutomation?.stop()
         shellCoordinator?.tearDown()
     }
 }

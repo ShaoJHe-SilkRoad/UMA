@@ -1230,6 +1230,11 @@ public struct AgentWorkspaceSurface: View {
             VStack(alignment: .leading, spacing: 6) {
                 factRow(localized("Connection", "连接"), connectionLabel)
                 factRow(localized("Source health", "来源健康状态"), diagnosticLabel)
+                if providerID == .codex, let error = store.lastError {
+                    Text(error)
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Text(localized("Diagnostics use bounded status classifications only.", "诊断仅使用有界状态分类。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)

@@ -19,7 +19,8 @@ private final class R3FixtureRunner: HESectoriumTimedCommandRunning {
     var crashAfterBSD: String?
     var busyAfterEffectBSD: String?
     var noEffectBSD: String?
-    var ejectHasNoEffect = false
+    var ejectRetainsUnmountedNode = false
+    var ejectLeavesMountedMember = false
     var inventoryUnknown = false
     private(set) var calls: [[String]] = []
     private(set) var mutationRecords: [[String: Any]] = []
@@ -49,6 +50,23 @@ private final class R3FixtureRunner: HESectoriumTimedCommandRunning {
 
     func run(_ executable: String, _ arguments: [String], cwd: URL) -> CommandOutcome {
         calls.append([executable] + arguments)
+        // The Service performs a real activity check before beginning eject.
+        // These exact synthetic volume targets are clear in this recovery
+        // fixture; other commands still fail closed below, without host fallback.
+        if executable == "/usr/sbin/lsof", arguments.count == 5,
+           Array(arguments.prefix(4)) == ["-nP", "-Fpcf", "+f", "--"],
+           ["/dev/disk81s1", "/dev/disk81s2", "/dev/disk31s1"].contains(arguments[4]) {
+            return .init(exitCode: 1, detail: "")
+        }
+        if executable == "/usr/sbin/diskutil", arguments == ["list", "-plist"] {
+            guard !inventoryUnknown else { return .init(exitCode: 1, detail: "fixture whole-disk inventory unavailable") }
+            let rows: [[String: Any]] = observer.devices.map { device in
+                ["DeviceIdentifier": device.bsdName,
+                 "Partitions": device.volumeMembers.map { ["DeviceIdentifier": $0.bsdName] }]
+            }
+            return plist(["AllDisksAndPartitions": rows,
+                          "AllDisks": rows.compactMap { $0["DeviceIdentifier"] as? String }])
+        }
         if executable == "/bin/df", arguments.count == 2, arguments[0] == "-P" {
             guard !inventoryUnknown else { return .init(exitCode: 1, detail: "fixture observation unavailable") }
             let path = arguments[1]
@@ -60,6 +78,18 @@ private final class R3FixtureRunner: HESectoriumTimedCommandRunning {
            arguments[0] == "info", arguments[1] == "-plist", arguments[2].hasPrefix("/dev/") {
             let bsd = String(arguments[2].dropFirst(5))
             return diskInfo[bsd].map(plist) ?? .init(exitCode: 127, detail: "unknown fixture disk")
+        }
+        let externalMount = root.appendingPathComponent("external", isDirectory: true).path
+        if managed, executable == "/usr/sbin/diskutil",
+           arguments == ["info", "-plist", externalMount] {
+            let matches = observer.devices.filter { $0.id == r3MediaID.uuidString && $0.bsdName == "disk81" }
+            guard matches.count == 1,
+                  matches[0].volumeMembers.contains(where: {
+                      $0.bsdName == "disk81s1" && $0.volumeUUID == r3FirstID
+                          && $0.mounted && $0.mountPoint == externalMount
+                  }) else { return .init(exitCode: 127, detail: "unmounted fixture backing volume") }
+            return plist(["VolumeUUID": r3FirstID.uuidString, "MountPoint": externalMount,
+                          "DeviceIdentifier": "disk81s1", "PartOfWhole": "disk81"])
         }
         if executable == "/usr/sbin/diskutil", arguments == ["apfs", "list", "-plist"] {
             return plist(["Containers": apfsContainers])
@@ -100,7 +130,13 @@ private final class R3FixtureRunner: HESectoriumTimedCommandRunning {
         }
         if executable == "/usr/sbin/diskutil", arguments == ["eject", "/dev/disk81"] {
             recordMutation([executable] + arguments)
-            if !ejectHasNoEffect { observer.devices.removeAll { $0.bsdName == "disk81" } }
+            if ejectLeavesMountedMember {
+                // An enumerated USB node alone is valid after logical eject.
+                // Keep this negative unsafe by observing an actually mounted member.
+                setMounted("disk81s1", true)
+            } else if !ejectRetainsUnmountedNode {
+                observer.devices.removeAll { $0.bsdName == "disk81" }
+            }
             return .success
         }
         return .init(exitCode: 127, detail: "unconfigured R3 fixture command")
@@ -121,7 +157,8 @@ private final class R3FixtureRunner: HESectoriumTimedCommandRunning {
             guard device.bsdName == "disk81" else { return device }
             let members = device.volumeMembers.map { member in
                 member.bsdName == bsd ? SectoriumPhysicalVolumeMember(bsdName: member.bsdName,
-                    volumeUUID: member.volumeUUID, mounted: mounted, mountPoint: mounted ? member.mountPoint : nil) : member
+                    volumeUUID: member.volumeUUID, mounted: mounted,
+                    mountPoint: mounted ? root.appendingPathComponent(bsd == "disk81s1" ? "external" : "second").path : nil) : member
             }
             return SectoriumPhysicalDevice(id: device.id, bsdName: device.bsdName, name: device.name,
                 isExternal: device.isExternal, identityVerified: device.identityVerified,
@@ -150,6 +187,7 @@ private let r3MediaID = UUID(uuidString: "148CC6E1-CB27-4C60-BB27-B61C0A5A4001")
 private let r3FirstID = UUID(uuidString: "148CC6E1-CB27-4C60-BB27-B61C0A5A4002")!
 private let r3SecondID = UUID(uuidString: "148CC6E1-CB27-4C60-BB27-B61C0A5A4003")!
 private let r3ImageID = UUID(uuidString: "148CC6E1-CB27-4C60-BB27-B61C0A5A4004")!
+private let r3SystemID = UUID(uuidString: "148CC6E1-CB27-4C60-BB27-B61C0A5A4006")!
 
 private func r3Device(_ root: URL, members: [(UUID, String, Bool)], identity: String? = nil) -> SectoriumPhysicalDevice {
     let rows = members.map { uuid, bsd, mounted in
@@ -169,8 +207,8 @@ private func r3Images(_ root: URL) -> [[String: Any]] {
                            "mount-point": root.appendingPathComponent("DEV").path]]]]
 }
 
-private func r3Profile(_ root: URL) -> SectoriumDevelopmentProfile {
-    SectoriumDevelopmentProfile(name: "Development", deviceID: r3MediaID.uuidString,
+private func r3Profile(_ root: URL, id: String = UUID().uuidString) -> SectoriumDevelopmentProfile {
+    SectoriumDevelopmentProfile(id: id, name: "Development", deviceID: r3MediaID.uuidString,
         backingVolumeUUID: r3FirstID, backingMountPoint: root.appendingPathComponent("external").path,
         imagePath: root.appendingPathComponent("external/Development.sparsebundle").path,
         devVolumeName: "DEV_APFS", devMountPoint: root.appendingPathComponent("DEV").path,
@@ -200,16 +238,37 @@ private func r3MakeRuntime(_ root: URL, _ mode: String) throws -> (HESectoriumSe
     if mode.contains("new-member") {
         device = r3Device(root, members: initial + [(UUID(uuidString: "148CC6E1-CB27-4C60-BB27-B61C0A5A4005")!, "disk81s3", true)])
     }
-    let observer = R3FixtureObserver(managed ? [device, SectoriumPhysicalDevice(id: "virtual-image",
+    let systemDisk = SectoriumPhysicalDevice(id: "fixture-system-disk1", bsdName: "disk1",
+        name: "Unrelated internal fixture", isExternal: false, identityVerified: true,
+        wholeDeviceBytes: nil, mountedVolumePaths: ["/"], volumeUUIDs: [r3SystemID],
+        readBytes: nil, writtenBytes: nil,
+        volumeMembers: [.init(bsdName: "disk1s1", volumeUUID: r3SystemID,
+                              mounted: true, mountPoint: "/")],
+        topologyComplete: true, isVirtual: false)
+    let observer = R3FixtureObserver(managed ? [systemDisk, device, SectoriumPhysicalDevice(id: "virtual-image",
         bsdName: "disk30", name: "R3 virtual fixture", isExternal: false, identityVerified: true,
         wholeDeviceBytes: nil, mountedVolumePaths: [dev.path], volumeUUIDs: [r3ImageID], readBytes: nil,
         writtenBytes: nil, volumeMembers: [.init(bsdName: "disk31s1", volumeUUID: r3ImageID,
-        mounted: true, mountPoint: dev.path)], topologyComplete: true, isVirtual: true)] : [device])
+        mounted: true, mountPoint: dev.path)], topologyComplete: true, isVirtual: true)] : [systemDisk, device])
     let runner = R3FixtureRunner(observer: observer, root: root, support: support, managed: managed)
     if managed {
         runner.diskInfo["disk31s1"] = ["DeviceIdentifier": "disk31s1", "VirtualOrPhysical": "Virtual", "APFSContainerReference": "disk31"]
         runner.images = r3Images(root)
-        try JSONEncoder().encode([r3Profile(root)]).write(to: HESectoriumPaths(root: support).sectoriumProfiles, options: .atomic)
+        let registry = HESectoriumPaths(root: support).sectoriumProfiles
+        if crashSeed {
+            try JSONEncoder().encode([r3Profile(root)]).write(to: registry, options: .atomic)
+        } else {
+            // A fresh recovery process must retain the profile whose original
+            // operation was durably recorded. Recreating it gives it a new UUID
+            // and is a different registration, not a recovery of the old one.
+            let profiles = try JSONDecoder().decode([SectoriumDevelopmentProfile].self,
+                from: Data(contentsOf: registry))
+            guard profiles.count == 1,
+                  profiles[0] == r3Profile(root, id: profiles[0].id) else {
+                throw NSError(domain: "R3 fixture", code: 4,
+                    userInfo: [NSLocalizedDescriptionKey: "persisted recovery profile does not match the seeded fixture"])
+            }
+        }
     }
     if mode.hasPrefix("recover") {
         // The durable physical image-detach boundary exists, so the current process observes no attached image.
@@ -222,7 +281,8 @@ private func r3MakeRuntime(_ root: URL, _ mode: String) throws -> (HESectoriumSe
     runner.inventoryUnknown = mode.contains("unknown")
     runner.failBSD = mode.contains("busy-again") ? "disk81s2" : runner.failBSD
     runner.noEffectBSD = mode.contains("postcheck") ? "disk81s2" : nil
-    runner.ejectHasNoEffect = mode.contains("eject-present")
+    runner.ejectRetainsUnmountedNode = mode.contains("eject-node-retained")
+    runner.ejectLeavesMountedMember = mode.contains("eject-present")
 
     let service = HESectoriumService(paths: HESectoriumPaths(root: support),
         backend: R3UnusedBackend(), store: JSONStateStore(url: support.appendingPathComponent("state.json")),
@@ -241,7 +301,7 @@ private func requireR3<T>(_ value: T?) throws -> T {
 func runR3EjectRecoveryFixture(_ scenario: String, rootPath: String) -> Never {
     do {
         let root = URL(fileURLWithPath: rootPath, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
-        let (service, _, runner, support) = try r3MakeRuntime(root, scenario)
+        let (service, observer, runner, support) = try r3MakeRuntime(root, scenario)
         if scenario.hasPrefix("seed") {
             let prompt = try requireR3(service.prepareWholeDeviceEjectConfirmation())
             let result = service.ejectSelectedExternalDevice(checkpoint: prompt.checkpoint(knownWritersClosed: true))
@@ -289,7 +349,11 @@ func runR3EjectRecoveryFixture(_ scenario: String, rootPath: String) -> Never {
             "pending": state.workbenchOperation ?? "none", "intent": state.ejectIntent,
             "phase": journal?.phase.rawValue ?? "unknown", "completedSteps": journal?.completedSteps ?? [],
             "repeatSucceeded": repeated?.succeeded ?? false, "durableBeforeEveryMutation": durability,
-            "mutations": Array(mutations.dropFirst(before)), "commands": runner.calls]
+            "mutations": Array(mutations.dropFirst(before)), "commands": runner.calls,
+            "targetStillEnumerated": observer.devices.contains { $0.bsdName == "disk81" },
+            "mountedTargetMembers": observer.devices.filter { $0.bsdName == "disk81" }
+                .flatMap(\.volumeMembers).filter(\.mounted).map(\.bsdName),
+            "attachedImageCount": runner.images.count]
         writeR3(output)
         exit(0)
     } catch {

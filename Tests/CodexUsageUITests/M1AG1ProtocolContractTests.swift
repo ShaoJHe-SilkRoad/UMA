@@ -5,6 +5,109 @@ import SwiftUI
 
 @Suite(.timeLimit(.minutes(1)))
 struct M1AG1ProtocolContractTests {
+
+    @Test(arguments: [
+        #"{"userAgent":"protocol-test"}"#,
+        #"{"userAgent":"protocol-test","platformFamily":"unix","platformOs":"macos"}"#,
+        #"{"userAgent":"protocol-test","codexHome":null,"platformFamily":null,"platformOs":null}"#,
+        #"{"userAgent":"protocol-test","codexHome":"/synthetic/.codex","platformFamily":"unix","platformOs":"macos","futureDiagnostic":"ignored"}"#
+    ])
+    func optionalInitializationMetadataDoesNotBlockVerifiedQuota(resultJSON: String) async throws {
+        let result = try #require(JSONSerialization.jsonObject(with: Data(resultJSON.utf8)) as? [String: Any])
+        let sequence = providerReadSequence()
+        let transport = ProtocolTransport(messages: [response(1, result: result)] + sequence.dropFirst())
+        let session = CodexAppServerSession(transportFactory: { transport })
+        let client = CodexAppServerClient(resolver: FixedResolver(), session: session)
+
+        let usage = try await client.fetchUsage()
+        #expect(usage.rateLimits.primary?.usedPercent == 20)
+        #expect(await client.connectionState() == .ready)
+        #expect(try transport.sentObjects().map { $0["method"] as? String } == [
+            "initialize", "initialized", "account/read", "account/rateLimits/read", "account/usage/read"
+        ])
+        await client.disconnect()
+    }
+
+    @Test(arguments: [
+        #"{}"#,
+        #"{"userAgent":null}"#,
+        #"{"userAgent":42}"#,
+        #"{"userAgent":"protocol-test","platformOs":42}"#
+    ])
+    func malformedInitializationNeverReachesAccountReads(resultJSON: String) async throws {
+        let result = try #require(JSONSerialization.jsonObject(with: Data(resultJSON.utf8)) as? [String: Any])
+        let transport = ProtocolTransport(messages: [response(1, result: result)])
+        let session = CodexAppServerSession(transportFactory: { transport })
+        try await session.start(executableURL: URL(fileURLWithPath: "/synthetic/codex"))
+        do {
+            try await session.initializeIfNeeded()
+            Issue.record("Malformed initialization must fail before account reads.")
+        } catch let error as CodexUsageClientError {
+            #expect(error.failure == .malformedResponse(method: "initialize"))
+        }
+        #expect(await session.hasUsableInitializedTransport() == false)
+        #expect(try transport.sentObjects().map { $0["method"] as? String } == ["initialize"])
+        await session.shutdown()
+    }
+
+    @Test(arguments: [
+        #"{"userAgent":"  "}"#,
+        #"{"userAgent":"protocol-test","codexHome":"relative/home"}"#,
+        #"{"userAgent":"protocol-test","platformFamily":""}"#,
+        #"{"userAgent":"protocol-test","platformOs":"  "}"#
+    ])
+    func invalidProvidedInitializationMetadataIsStillRejected(resultJSON: String) async throws {
+        let result = try #require(JSONSerialization.jsonObject(with: Data(resultJSON.utf8)) as? [String: Any])
+        let transport = ProtocolTransport(messages: [response(1, result: result)])
+        let session = CodexAppServerSession(transportFactory: { transport })
+        try await session.start(executableURL: URL(fileURLWithPath: "/synthetic/codex"))
+        do {
+            try await session.initializeIfNeeded()
+            Issue.record("Invalid metadata must not establish a usable session.")
+        } catch let error as CodexUsageClientError {
+            #expect(error.failure == .protocolIncompatible)
+        }
+        #expect(await session.hasUsableInitializedTransport() == false)
+        #expect(try transport.sentObjects().map { $0["method"] as? String } == ["initialize"])
+        await session.shutdown()
+    }
+
+    @Test
+    func productionTransportUsesDefaultStdioWithAnIsolatedSyntheticServer() async throws {
+        let root = URL(fileURLWithPath: "/private/tmp", isDirectory: true)
+            .appendingPathComponent("auv-0172-connection-fixture-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executable = root.appendingPathComponent("synthetic-app-server")
+        // Only shell builtins and synthetic JSON are used: no installed Codex,
+        // account files, provider requests, or user storage are accessed.
+        let script = #"""
+        #!/bin/sh
+        [ "$#" -eq 1 ] && [ "$1" = "app-server" ] || exit 61
+        [ "$PWD" = "/" ] && [ -d "$HOME" ] || exit 62
+        [ -z "${CODEX_HOME+x}" ] || exit 63
+        while IFS= read -r request; do
+            case "$request" in
+                *'"method":"initialize"'*)
+                    printf '%s\n' '{"id":1,"result":{"userAgent":"isolated-process-fixture"}}'
+                    ;;
+            esac
+        done
+        """#
+        try script.write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let transport = ProcessCodexAppServerTransport(launchConfiguration: .init(homeDirectory: root.path))
+        defer { transport.stop() }
+        let session = CodexAppServerSession(
+            transportFactory: { transport },
+            requestTimeout: 2,
+            initializationTimeout: 2
+        )
+        try await session.start(executableURL: executable)
+        try await session.initializeIfNeeded()
+        #expect(await session.hasUsableInitializedTransport())
+        await session.shutdown()
+    }
     @Test
     func accountWireContractUsesSchemaRequiredShapes() async throws {
         let transport = ProtocolTransport(messages: [
@@ -173,7 +276,7 @@ struct M1AG1ProtocolContractTests {
     }
 
     @Test
-    func missingSchemaRequiredUsageSummaryIsRejected() async throws {
+    func missingOptionalUsageSummaryPreservesVerifiedQuota() async throws {
         let transport = ProtocolTransport(messages: [
             response(1, result: [
                 "codexHome": "/synthetic/.codex",
@@ -194,12 +297,77 @@ struct M1AG1ProtocolContractTests {
             session: session
         )
 
+        let usage = try await client.fetchUsage()
+        #expect(usage.lifetimeTokens == nil)
+        #expect(usage.dailyUsage == nil)
+        #expect(await client.connectionState() == .ready)
+        #expect(await session.hasUsableInitializedTransport())
+        await client.disconnect()
+    }
+
+    @Test(arguments: [-32601, -32000])
+    func optionalRPCErrorPreservesQuotaAndNextRefreshDoesNotRetryIt(code: Int) async throws {
+        let sequence = providerReadSequence()
+        let transport = ProtocolTransport(messages: Array(sequence.prefix(3)) + [
+            try JSONSerialization.data(withJSONObject: ["id": 4, "error": [
+                "code": code, "message": "synthetic-secret-must-not-be-retained"
+            ]]),
+            response(5, result: ["account": ["type": "chatgpt"], "requiresOpenaiAuth": true]),
+            response(6, result: ["rateLimits": ["primary": ["usedPercent": 35, "windowDurationMins": 300]]])
+        ])
+        let session = CodexAppServerSession(transportFactory: { transport })
+        let client = CodexAppServerClient(resolver: FixedResolver(), session: session)
+        let first = try await client.fetchUsage()
+        #expect(first.rateLimits.primary?.usedPercent == 20)
+        #expect(first.lifetimeTokens == nil)
+        let second = try await client.fetchUsage()
+        #expect(second.rateLimits.primary?.usedPercent == 35)
+        #expect(try transport.sentObjects().filter { $0["method"] as? String == "account/usage/read" }.count == 1)
+        #expect(await session.hasUsableInitializedTransport())
+        await client.disconnect()
+    }
+
+    @Test
+    func optionalTimeoutBoundsFirstReadingAndRelaunchRechecksAccount() async throws {
+        let firstTransport = ProtocolTransport(messages: Array(providerReadSequence().prefix(3)))
+        let secondTransport = ProtocolTransport(messages: [
+            initializeResponse(),
+            response(2, result: ["account": NSNull(), "requiresOpenaiAuth": true])
+        ])
+        let queue = TransportQueue([firstTransport, secondTransport])
+        let session = CodexAppServerSession(transportFactory: { queue.next() })
+        let client = CodexAppServerClient(resolver: FixedResolver(), session: session, optionalUsageTimeout: 0.03)
+        let start = ContinuousClock.now
+        let usage = try await client.fetchUsage()
+        let elapsed = start.duration(to: .now)
+        print("FIRST_INSTALL_FIXTURE optional_timeout_first_quota=\(elapsed)")
+        #expect(elapsed < .seconds(1))
+        #expect(usage.rateLimits.primary?.usedPercent == 20)
+        #expect(!firstTransport.isRunning)
+        do {
+            _ = try await client.fetchUsageAfterVerifiedAccount()
+            Issue.record("A replacement session must verify account before returning quota")
+        } catch let error as CodexUsageClientError {
+            #expect(error.failure == .accountAuthorizationRequired)
+        }
+        #expect(try secondTransport.sentObjects().map { $0["method"] as? String } == ["initialize", "initialized", "account/read"])
+        await client.disconnect()
+    }
+
+    @Test
+    func requiredQuotaFailureStillRejectsUsageAndDoesNotRequestOptionalStatistics() async throws {
+        let transport = ProtocolTransport(messages: Array(providerReadSequence().prefix(2)) + [
+            try JSONSerialization.data(withJSONObject: ["id": 3, "error": ["code": -32601, "message": "synthetic"]])
+        ])
+        let client = CodexAppServerClient(resolver: FixedResolver(), session: CodexAppServerSession(transportFactory: { transport }))
         do {
             _ = try await client.fetchUsage()
-            Issue.record("A response missing schema-required summary must not be accepted.")
+            Issue.record("Required quota failure must not become READY")
         } catch let error as CodexUsageClientError {
-            #expect(error.failure == .malformedResponse(method: "account/usage/read"))
+            #expect(error.failure == .protocolIncompatible)
         }
+        #expect(try !transport.sentObjects().contains { $0["method"] as? String == "account/usage/read" })
+        await client.disconnect()
     }
 
     @Test

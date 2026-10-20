@@ -27,7 +27,8 @@ import HESectoriumRuntime
             hesectoriumStore: storage, promptPreferences: preferences)
         let size = CommandLine.arguments.contains("--preview-minimum") ? NSSize(width:760,height:488) : NSSize(width:1040,height:760)
         let window = NSWindow(contentRect:NSRect(origin:.zero,size:size), styleMask:[.titled,.closable,.miniaturizable,.resizable], backing:.buffered,defer:false)
-        window.title = "AUV 0.15.1 — isolated preview (sample data)"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Dev"
+        window.title = "AUV \(version) — isolated preview (sample data)"
         window.isReleasedWhenClosed = false
         window.contentMinSize = NSSize(width:760,height:488)
         window.contentViewController = NSHostingController(rootView:view)

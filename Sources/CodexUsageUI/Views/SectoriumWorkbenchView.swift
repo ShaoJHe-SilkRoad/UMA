@@ -2,6 +2,15 @@ import AppKit
 import HESectoriumRuntime
 import SwiftUI
 
+enum SectoriumVolumeNameInput {
+    static func isValid(_ name: String) -> Bool {
+        !name.isEmpty && name.count <= 80 && !name.hasPrefix(".")
+            && name == name.trimmingCharacters(in: .whitespacesAndNewlines)
+            && !name.contains("/") && !name.contains(":")
+            && !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+    }
+}
+
 enum SectoriumCapacityInput {
     static let maximumGiB = 16_384
     private static let bytesPerGiB: UInt64 = 1_073_741_824
@@ -23,7 +32,7 @@ enum SectoriumCapacityInput {
 }
 
 enum SectoriumWorkbenchAction: String, CaseIterable, Equatable {
-    case create, adopt, start, stop, resume, continueEject, returnToDevelopment, eject
+    case setupComponents, create, adopt, start, stop, resume, continueEject, returnToDevelopment, eject, recheck
 }
 
 enum SectoriumWorkbenchDeviceOrdering {
@@ -38,6 +47,40 @@ enum SectoriumWorkbenchDeviceOrdering {
 
     static func defaultSelection(from devices: [SectoriumPhysicalDevice]) -> SectoriumPhysicalDevice? {
         externalFirst(devices.filter { $0.isVirtual == false && $0.identityVerified }).first
+    }
+}
+
+private struct SectoriumParentGroup: Identifiable {
+    let id: String
+    let name: String
+    let isExternal: Bool
+    let device: SectoriumPhysicalDevice?
+    let rows: [SectoriumVolumeRow]
+}
+
+enum SectoriumVolumePrimaryAction: Equatable {
+    case load, safelyUnloadAndEject, unloadOnly, recheck
+}
+
+struct SectoriumVolumeActionPlan: Equatable {
+    let action: SectoriumVolumePrimaryAction
+    let enabled: Bool
+    let disconnectEnabled: Bool?
+
+    static func make(verifiedLoaded: Bool?, isExternal: Bool, canLoad: Bool,
+                     canUnloadOnly: Bool, canSafeUnloadAndEject: Bool, busy: Bool) -> Self {
+        let action: SectoriumVolumePrimaryAction
+        let available: Bool
+        switch verifiedLoaded {
+        case true:
+            action = .unloadOnly; available = canUnloadOnly
+        case false:
+            action = .load; available = canLoad
+        case nil:
+            action = .recheck; available = true
+        }
+        return .init(action: action, enabled: available && !busy,
+            disconnectEnabled: verifiedLoaded == true && isExternal ? canSafeUnloadAndEject && !busy : nil)
     }
 }
 
@@ -76,6 +119,7 @@ struct SectoriumWorkbenchActionPlan: Equatable {
         var canBeginEject: Bool
         var canContinueEject: Bool
         var canReturnFromEject: Bool
+        var componentSetupNeeded: Bool = false
     }
 
     let primary: SectoriumWorkbenchAction?
@@ -85,16 +129,18 @@ struct SectoriumWorkbenchActionPlan: Equatable {
 
     static func make(_ input: Input) -> Self {
         if let pending = input.pendingOperation {
-            guard input.inventoryAvailable, !input.busy else {
-                return .init(primary: nil, secondary: [], recovery: [],
-                             unavailableReason: input.busy ? .busy : .inventoryUnavailable)
+            guard !input.busy else {
+                return .init(primary: nil, secondary: [], recovery: [], unavailableReason: .busy)
+            }
+            guard input.inventoryAvailable else {
+                return .init(primary: .recheck, secondary: [], recovery: [], unavailableReason: .inventoryUnavailable)
             }
             if pending.hasPrefix("eject:") {
                 let recovery: [SectoriumWorkbenchAction] = [
                     input.canContinueEject ? .continueEject : nil,
                     input.canReturnFromEject ? .returnToDevelopment : nil
                 ].compactMap { $0 }
-                return .init(primary: recovery.first, secondary: [], recovery: recovery,
+                return .init(primary: recovery.first ?? .recheck, secondary: [], recovery: recovery,
                              unavailableReason: recovery.isEmpty ? .stateUnknown : nil)
             }
             return .init(primary: .resume, secondary: [], recovery: [.resume], unavailableReason: nil)
@@ -103,22 +149,28 @@ struct SectoriumWorkbenchActionPlan: Equatable {
             return .init(primary: nil, secondary: [], recovery: [], unavailableReason: .chooseDrive)
         }
         guard input.inventoryAvailable else {
-            return .init(primary: nil, secondary: [], recovery: [], unavailableReason: .inventoryUnavailable)
+            return .init(primary: .recheck, secondary: [], recovery: [], unavailableReason: .inventoryUnavailable)
         }
         guard !input.busy else {
             return .init(primary: nil, secondary: [], recovery: [], unavailableReason: .busy)
         }
         guard input.identityVerified else {
-            return .init(primary: nil, secondary: [], recovery: [], unavailableReason: .identityUnavailable)
+            return .init(primary: .recheck, secondary: [], recovery: [], unavailableReason: .identityUnavailable)
         }
         guard !input.stale else {
-            return .init(primary: nil, secondary: [], recovery: [], unavailableReason: .stale)
+            return .init(primary: .recheck, secondary: [], recovery: [], unavailableReason: .stale)
+        }
+        if input.canReturnFromEject {
+            return .init(primary: .returnToDevelopment, secondary: [], recovery: [.returnToDevelopment],
+                         unavailableReason: nil)
         }
         switch input.readiness {
         case .busy:
             return .init(primary: nil, secondary: [], recovery: [], unavailableReason: .busy)
-        case .unknown, .partialFailure, .operationInProgress, .ejected:
-            return .init(primary: nil, secondary: [], recovery: [], unavailableReason: .stateUnknown)
+        case .unknown, .partialFailure, .operationInProgress:
+            return .init(primary: .recheck, secondary: [], recovery: [], unavailableReason: .stateUnknown)
+        case .ejected:
+            return .init(primary: nil, secondary: [], recovery: [], unavailableReason: nil)
         default:
             break
         }
@@ -131,22 +183,27 @@ struct SectoriumWorkbenchActionPlan: Equatable {
         } else if input.legacyState == .mounted || input.legacyState == .detached {
             primary = .adopt
         } else if input.legacyState == .unknown {
-            return .init(primary: nil, secondary: [], recovery: [], unavailableReason: .stateUnknown)
+            return .init(primary: .recheck, secondary: [], recovery: [], unavailableReason: .stateUnknown)
         } else if input.hasProfile {
             switch input.readiness {
-            case .ready: primary = input.external && input.canBeginEject ? .eject : .stop
+            case .ready: primary = input.external && input.canBeginEject ? .eject : .recheck
             case .notStarted, .awaitingUnlock:
-                primary = input.profileFormatVerified ? .start : nil
-                if primary == nil { reason = .imageFormatUnknown }
+                primary = input.profileFormatVerified ? .start : .recheck
+                if !input.profileFormatVerified { reason = .imageFormatUnknown }
+            case .readOnly:
+                primary = input.external && input.canBeginEject ? .eject : .recheck
             default:
-                primary = nil
+                primary = .recheck
                 reason = .stateUnknown
             }
         } else {
             switch input.readiness {
-            case .connected, .noDevelopmentDisk, .notStarted: primary = .create
+            case .connected, .noDevelopmentDisk, .notStarted:
+                primary = input.componentSetupNeeded ? .setupComponents : .create
+            case .readOnly:
+                primary = input.external && input.canBeginEject ? .eject : .recheck
             default:
-                primary = nil
+                primary = .recheck
                 reason = .stateUnknown
             }
         }
@@ -154,7 +211,9 @@ struct SectoriumWorkbenchActionPlan: Equatable {
         var secondary: [SectoriumWorkbenchAction] = []
         if input.readiness == .connected || input.readiness == .noDevelopmentDisk
             || input.readiness == .notStarted || input.readiness == .awaitingUnlock || input.readiness == .ready {
-            if primary != .create && input.legacyState == .none { secondary.append(.create) }
+            if primary != .create && input.legacyState == .none && !input.componentSetupNeeded {
+                secondary.append(.create)
+            }
             if !input.hasProfile && (input.legacyState == .none
                 || (input.legacyState == .mounted && primary == .eject)) {
                 secondary.append(.adopt)
@@ -166,7 +225,9 @@ struct SectoriumWorkbenchActionPlan: Equatable {
                 || input.readiness == .ready || input.readiness == .readOnly) {
             if primary != .eject { secondary.append(.eject) }
         }
-        if primary == .eject && input.hasProfile { secondary.append(.stop) }
+        if input.hasProfile && (input.readiness == .ready || input.readiness == .readOnly) {
+            secondary.append(.stop)
+        }
         return .init(primary: primary, secondary: secondary, recovery: [], unavailableReason: reason)
     }
 }
@@ -175,21 +236,29 @@ public struct SectoriumWorkbenchView: View {
     @StateObject private var model: HESectoriumStore
     private let isChinese: Bool
     @State private var showingSettings = false
-    @State private var showingMoreActions = false
-    @State private var showingDriveDetails = false
     @StateObject private var settingsButtonRef = SectoriumWeakButtonReference()
     @State private var showingCreate = false
+    @State private var creationDeviceID = ""
+    @State private var creationFilesystemID = SectoriumFilesystem.apfs.rawValue
+    @State private var creationAutoLoad = true
+    @State private var creationMountPoint = ""
+    @State private var showingCreationOptions = false
+    @State private var showingVolumeSettings = false
+    @State private var settingsProfileID = ""
+    @State private var editDisplayName = ""
+    @State private var editMountPoint = ""
+    @State private var editAutoLoad = true
+    @State private var editCapacityGiB = 100
+    @State private var unlockProfileID = ""
+    @State private var expandedVolumeDetails: Set<String> = []
     @State private var showingLegacyAdoptionConfirmation = false
+    @State private var adoptionDeviceID = ""
     @State private var showingUnlock = false
     @State private var profileName = "Development"
     @State private var capacityGiB = 100
-    @State private var caseSensitive = false
     @State private var encrypted = false
-    @State private var startAfterCreation = false
     @State private var password = ""
     @State private var unlockPassword = ""
-    @State private var knownWritersClosed = false
-    @State private var stopKnownWritersClosed = false
 
     public init(store: HESectoriumStore? = nil, isChinese: Bool = false) {
         _model = StateObject(wrappedValue: store ?? HESectoriumStore())
@@ -198,409 +267,523 @@ public struct SectoriumWorkbenchView: View {
 
     public var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(text("Sectorium", "Sectorium（分区工）")).font(.largeTitle.weight(.semibold))
-                        Text(text("Manage a development disk on a selected physical drive.", "在选定硬盘上管理虚拟开发盘。"))
-                            .font(.callout).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 28) {
+                workbenchHeader
+                operationStatus
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        Text(text("YOUR DRIVES", "你的硬盘"))
+                            .font(.caption.weight(.semibold)).tracking(1.2).foregroundStyle(.secondary)
+                        Spacer()
+                        Button { prepareCreation() } label: {
+                            Label(text("Create volume", "创建开发卷"), systemImage: "plus")
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(model.isBusy || model.registryUnavailable || creatableDevices.isEmpty)
+                        .accessibilityIdentifier("uma.sectorium.create")
                     }
-                    Spacer()
-                    SectoriumWorkbenchButton(title: text("Refresh", "刷新"), identifier: "uma.sectorium.refresh",
-                                             isEnabled: !model.isBusy, controlSize: .small) { model.refresh() }
-                    SectoriumWorkbenchButton(title: text("Settings", "设置"), identifier: "uma.sectorium.settings",
-                                             isEnabled: true, controlSize: .regular, action: {
-                                                 settingsButtonRef.ownerWindow = settingsButtonRef.button?.window
-                                                 showingSettings = true
-                                             }, onReady: {
-                                                 settingsButtonRef.button = $0
-                                             })
+                    inventoryNotices
+                    ForEach(parentGroups) { group in parentSection(group) }
                 }
-
-                GroupBox(text("Physical drive", "物理硬盘")) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if model.inventoryState == .loading && !model.workbench.devices.isEmpty {
-                            Text(inventoryMessage).foregroundStyle(.secondary)
-                        }
-                        if physicalDevices.isEmpty {
-                            Text(inventoryMessage)
-                                .foregroundStyle(.secondary)
-                        }
+                if !unassignedDevices.isEmpty {
+                    DisclosureGroup(text("Other observed devices", "其他已观察设备")) {
+                        Text(text("These devices could not be linked to one physical parent and are not offered as action targets.",
+                                  "这些设备尚无法关联到唯一物理母盘，因此不提供操作。"))
                         ForEach(unassignedDevices) { device in
-                            Text(text("Unassigned device", "未归属设备") + " " + device.bsdName
-                                 + (device.hasAmbiguousPhysicalStores
-                                    ? text(" · multiple APFS physical stores; no mother drive was chosen.",
-                                           " · 存在多个 APFS 物理存储，未指定母盘。")
-                                    : text(" · physical ownership is unverified; actions are unavailable.",
-                                           " · 物理归属未核实，操作不可用。")))
-                                .font(.caption).foregroundStyle(.orange)
-                                .accessibilityIdentifier("uma.sectorium.unassigned-device")
+                            Text(device.name).accessibilityIdentifier("uma.sectorium.unassigned-device")
                         }
-                        if !physicalDevices.isEmpty {
-                            ForEach(physicalDevices) { device in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack(spacing: 8) {
-                                        Label(physicalTitle(device), systemImage: device.isExternal ? "externaldrive" : "internaldrive")
-                                            .font(.subheadline.weight(.semibold))
-                                            .accessibilityIdentifier("uma.sectorium.physical-title.\(device.bsdName)")
-                                        Spacer()
-                                        if model.workbench.selectedDeviceID == device.id {
-                                            Label(text("Selected", "已选择"), systemImage: "checkmark.circle.fill")
-                                                .font(.caption).foregroundStyle(.tint)
-                                                .accessibilityIdentifier("uma.sectorium.selected-drive.\(device.bsdName)")
-                                        } else {
-                                            SectoriumWorkbenchButton(title: text("Select", "选择"),
-                                                identifier: "uma.sectorium.select-drive.\(device.bsdName)",
-                                                isEnabled: !model.isBusy && model.inventoryState == .available) {
-                                                    model.selectDevice(device.id)
-                                                }
-                                                .frame(maxWidth: 72)
-                                        }
-                                    }
-                                    if device.isExternal {
-                                        physicalDeviceDetails(device)
-                                    } else {
-                                        DisclosureGroup(text("Internal drive details", "内置硬盘详情")) {
-                                            physicalDeviceDetails(device)
-                                        }
-                                    }
-                                }
-                                .padding(.horizontal, 8).padding(.vertical, 6)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(UMAVisualStyle.surface, in: RoundedRectangle(cornerRadius: 8))
-                                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(UMAVisualStyle.separator.opacity(0.65), lineWidth: 0.5)
-                    .allowsHitTesting(false))
-                                .accessibilityElement(children: .contain)
-                                .accessibilityIdentifier("uma.sectorium.physical-drive")
-                            }
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 4)
+                    }.font(.callout).foregroundStyle(.secondary)
                 }
-
-                GroupBox(text("Development disk", "虚拟开发盘")) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if selectedDeviceProfiles.count > 1 {
-                            Picker(text("Development disk", "开发盘"), selection: Binding(
-                                get: { model.workbench.selectedProfileID ?? "" },
-                                set: { model.selectProfile($0.isEmpty ? nil : $0) }
-                            )) {
-                                Text(text("Choose a development disk", "选择开发盘")).tag("")
-                                ForEach(selectedDeviceProfiles) { profile in Text(profile.name).tag(profile.id) }
-                            }
-                            .accessibilityIdentifier("uma.sectorium.profile-picker")
-                            .disabled(model.isBusy)
-                        }
-                        HStack {
-                            Label(readinessTitle, systemImage: readinessSymbol)
-                                .font(.headline)
-                                .accessibilityIdentifier("uma.sectorium.readiness-title")
-                            Spacer()
-                            if let profile = selectedProfile {
-                                Text(profile.name).foregroundStyle(.secondary)
-                            }
-                        }
-                        Text(readinessSummary).font(.callout).foregroundStyle(.secondary)
-                            .accessibilityIdentifier("uma.sectorium.readiness-summary")
-                        actionControls
-                        if let technicalDetail = readinessTechnicalDetail {
-                            DisclosureGroup(text("Technical details", "技术详情")) {
-                                Text(technicalDetail).font(.caption).textSelection(.enabled)
-                                    .accessibilityIdentifier("uma.sectorium.readiness-technical-detail")
-                            }
-                            .accessibilityIdentifier("uma.sectorium.readiness-details")
+                if model.userNotice != nil {
+                    DisclosureGroup(text("Latest operation details", "最近操作详情")) {
+                        Text(model.lastResult).font(.caption).textSelection(.enabled)
+                        ForEach(Array(model.workbench.operationSteps.enumerated()), id: \.offset) { _, step in
+                            Text("\(step.step): \(step.detail)").font(.caption).textSelection(.enabled)
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 4)
-                }
-
-                driveDetails
-
-                if !model.lastResult.isEmpty {
-                    GroupBox(text("Latest operation", "最近操作")) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(operationSummary).accessibilityIdentifier("uma.sectorium.operation-summary")
-                            DisclosureGroup(text("Operation details", "操作详情")) {
-                                Text(model.lastResult).font(.caption).textSelection(.enabled)
-                                ForEach(Array(model.workbench.operationSteps.enumerated()), id: \.offset) { _, step in
-                                    HStack {
-                                        Image(systemName: step.status == .succeeded ? "checkmark.circle" : step.status == .failed ? "xmark.circle" : "minus.circle")
-                                        Text(step.step)
-                                        Spacer()
-                                        Text(step.detail).foregroundStyle(.secondary).lineLimit(2)
-                                    }
-                                    .font(.caption)
-                                }
-                            }
-                            .accessibilityIdentifier("uma.sectorium.operation-details")
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    .font(.callout).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("uma.sectorium.operation-details")
                 }
             }
-            .padding(22)
+            .padding(28)
+            .frame(maxWidth: 1040, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
-        .frame(minWidth: 360, minHeight: 438)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityIdentifier("uma.sectorium.workbench")
         .onAppear { model.activateWorkbench() }
         .onDisappear { model.deactivateWorkbench() }
-        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification)) { _ in
-            model.pauseSamplingForSleep()
-        }
-        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
-            model.resumeSamplingAfterWake()
-        }
         .sheet(isPresented: $showingCreate) { createSheet }
         .sheet(isPresented: $showingUnlock) { unlockSheet }
+        .sheet(isPresented: $showingVolumeSettings) { volumeSettingsSheet }
         .sheet(isPresented: $showingSettings, onDismiss: restoreSettingsFocus) {
             HESectoriumSettingsView(isChinese: isChinese, store: model) {
                 showingSettings = false
             }
         }
-        .sheet(isPresented: Binding(get: { model.wholeDeviceEjectConfirmation != nil }, set: { if !$0 { model.cancelWholeDeviceEjectConfirmation() } })) {
+        .sheet(isPresented: Binding(get: { !showingSettings && model.wholeDeviceEjectConfirmation != nil }, set: { if !$0 { model.cancelWholeDeviceEjectConfirmation() } })) {
             ejectConfirmationSheet
         }
-        .sheet(isPresented: Binding(get: { model.stopConfirmation != nil }, set: { if !$0 { model.cancelStopConfirmation() } })) {
-            stopConfirmationSheet
+        .sheet(isPresented: Binding(get: { model.safetyCheck != nil }, set: { if !$0 { model.cancelSafetyCheck() } })) {
+            SectoriumActivityCheckView(model: model, isChinese: isChinese)
         }
         .alert(text("Adopt existing development disk?", "接纳已有开发盘？"), isPresented: $showingLegacyAdoptionConfirmation) {
             Button(text("Cancel", "取消"), role: .cancel) {}
             Button(text("Adopt verified DEV_APFS", "接纳已核实的 DEV_APFS")) {
-                guard let device = selectedDevice else { return }
-                model.adoptConfiguredLegacyDevelopmentDisk(deviceID: device.id)
+                guard !adoptionDeviceID.isEmpty else { return }
+                model.adoptConfiguredLegacyDevelopmentDisk(deviceID: adoptionDeviceID)
             }
         } message: {
-            Text(text("AUV will register the configured DEV_APFS image only after rechecking this selected drive and the complete image-to-volume identity. No files will be moved or deleted.",
-                      "AUV 仅会在重新核验所选硬盘及完整镜像与宗卷身份后登记已配置的 DEV_APFS 镜像；不会移动或删除文件。"))
+            Text(text("AUV will register the configured image only after rechecking the drive and complete image-to-volume identity. No files will be moved or deleted.",
+                      "AUV 仅会在重新核验硬盘及完整镜像与卷身份后登记已配置的镜像；不会移动或删除文件。"))
         }
     }
 
-    @ViewBuilder private var actionControls: some View {
-        let plan = actionPlan
-        let directEject = plan.secondary.contains(.eject) ? SectoriumWorkbenchAction.eject : nil
-        if plan.recovery.isEmpty, let primary = plan.primary {
-            HStack(spacing: 8) {
-                SectoriumWorkbenchButton(title: actionTitle(primary), identifier: actionIdentifier(primary),
-                                         isEnabled: true, action: { perform(primary) })
-                    .accessibilityIdentifier("uma.sectorium.primary-action")
-                if let directEject {
-                    SectoriumWorkbenchButton(title: actionTitle(directEject), identifier: actionIdentifier(directEject),
-                                             isEnabled: true, controlSize: .small) { perform(directEject) }
-                }
+    private var workbenchHeader: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
+                Text(text("Sectorium", "分区工"))
+                    .font(.system(size: 28, weight: .semibold, design: .rounded))
+                Spacer(minLength: 8)
+                SectoriumWorkbenchButton(title: text("Refresh", "刷新"), identifier: "uma.sectorium.refresh",
+                    isEnabled: !model.isBusy, controlSize: .small) { model.refresh() }
+                    .frame(width: 78, height: 28)
+                SectoriumWorkbenchButton(title: text("Settings", "设置"), identifier: "uma.sectorium.settings",
+                    isEnabled: true, controlSize: .small, action: {
+                        settingsButtonRef.ownerWindow = settingsButtonRef.button?.window
+                        showingSettings = true
+                    }, onReady: { settingsButtonRef.button = $0 })
+                    .frame(width: 78, height: 28)
             }
-        } else if let directEject, plan.recovery.isEmpty {
-            SectoriumWorkbenchButton(title: actionTitle(directEject), identifier: actionIdentifier(directEject),
-                                     isEnabled: true, controlSize: .small) { perform(directEject) }
-        }
-        if let reason = plan.unavailableReason {
-            Text(unavailableReasonText(reason)).font(.caption).foregroundStyle(.secondary)
-                .accessibilityIdentifier("uma.sectorium.action-unavailable-reason")
-        }
-        if !plan.recovery.isEmpty {
-            HStack(spacing: 8) {
-                ForEach(plan.recovery, id: \.rawValue) { action in
-                    SectoriumWorkbenchButton(title: actionTitle(action), identifier: actionIdentifier(action),
-                                             isEnabled: true, controlSize: .small) { perform(action) }
-                }
-            }
-        }
-        let collapsedActions = plan.secondary.filter { $0 != .eject }
-        if !collapsedActions.isEmpty {
-            SectoriumWorkbenchButton(
-                title: text(showingMoreActions ? "Fewer actions" : "More actions",
-                            showingMoreActions ? "收起其他操作" : "更多操作"),
-                identifier: "uma.sectorium.more-actions", isEnabled: true, controlSize: .small) {
-                    showingMoreActions.toggle()
-                }
-            if showingMoreActions {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), alignment: .leading)],
-                          alignment: .leading, spacing: 8) {
-                    ForEach(collapsedActions, id: \.rawValue) { action in
-                        SectoriumWorkbenchButton(title: actionTitle(action), identifier: actionIdentifier(action),
-                                                 isEnabled: true, controlSize: .small) { perform(action) }
-                    }
-                }
-                .padding(.top, 6)
-            }
-        }
-        if model.workbench.safeToUnplug {
-            Label(text("Safe to unplug", "可以拔出硬盘"), systemImage: "checkmark.circle.fill")
-                .font(.caption).foregroundStyle(.green)
-                .accessibilityIdentifier("uma.sectorium.safe-to-unplug")
-        } else if selectedDevice?.isExternal == true {
-            Text(text("Keep the drive connected until safe eject is confirmed.",
-                      "确认安全弹出前，请保持硬盘连接。"))
-                .font(.caption).foregroundStyle(.secondary)
-        } else if selectedDevice != nil {
-            Text(text("Local drives cannot be physically ejected here.", "此处不能物理弹出本地硬盘。"))
-                .font(.caption).foregroundStyle(.secondary)
+            Text(text("Your development volumes. Load to work, disconnect to unplug.",
+                      "管理开发空间。加载后开始工作，安全断开后拔出硬盘。"))
+                .font(.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    @ViewBuilder private func physicalDeviceDetails(_ device: SectoriumPhysicalDevice) -> some View {
-        Text(deviceLabel(device)).font(.callout).foregroundStyle(.secondary)
-        if !device.identityVerified {
-            Text(text("Visible; management unavailable until identity is verified.",
-                      "硬盘可见；身份核实前无法管理。"))
-                .font(.callout).foregroundStyle(.orange)
-        }
-        ForEach(device.volumeMembers, id: \.bsdName) { member in
-            Label(volumeDescription(member), systemImage: "externaldrive.fill.badge.person.crop")
-                .font(.callout).accessibilityIdentifier("uma.sectorium.backing-volume")
-        }
-        ForEach(model.workbench.profiles.filter { $0.deviceID == device.id }) { profile in
-            Label(profile.devVolumeName + " · " + logicalCapacityDescription(profile.logicalCapacityBytes)
-                  + text(" · registered virtual disk", " · 已登记虚拟盘"), systemImage: "internaldrive")
-                .font(.callout).accessibilityIdentifier("uma.sectorium.related-development-disk")
-        }
-        if let legacy = model.legacyDevelopmentByDevice[device.id] {
-            Label(legacy.name + " · " + logicalCapacityDescription(legacy.logicalCapacityBytes)
-                  + " · " + legacyStateDescription(legacy), systemImage: "internaldrive")
-                .font(.callout).accessibilityIdentifier("uma.sectorium.related-development-disk")
-        }
-        if !device.isExternal && !device.apfsContainers.isEmpty {
-            DisclosureGroup(text("System and recovery APFS details", "系统与恢复 APFS 详情")) {
-                ForEach(device.apfsContainers, id: \.bsdName) { container in
-                    Text(apfsContainerDescription(container)).font(.caption)
-                }
-            }
-        }
-    }
-
-    private var driveDetails: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(ioAvailabilitySummary).font(.caption).foregroundStyle(.secondary)
-                .accessibilityIdentifier("uma.sectorium.io-availability")
-            SectoriumWorkbenchButton(
-                title: text(showingDriveDetails ? "Hide drive details and I/O" : "Drive details and I/O",
-                            showingDriveDetails ? "收起硬盘详情与 I/O" : "硬盘详情与 I/O"),
-                identifier: "uma.sectorium.drive-details", isEnabled: true, controlSize: .small) {
-                    showingDriveDetails.toggle()
-                }
-            if showingDriveDetails {
-            VStack(alignment: .leading, spacing: 8) {
-                if let device = selectedDevice {
-                    Text(identityDescription(device)).font(.caption).foregroundStyle(.secondary)
-                    if device.mountedVolumePaths.isEmpty {
-                        Text(text("Connected, but no mounted storage location is available.",
-                                  "硬盘已连接，但没有可用的已挂载存储位置。"))
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    if !device.isExternal {
-                        SectoriumWorkbenchConsentControl(
-                            title: text("Allow I/O sampling for this local disk", "允许采样此本地硬盘 I/O"),
-                            identifier: "uma.sectorium.local-sampling-consent",
-                            isConsented: model.isLocalDeviceSamplingConsented(device.id),
-                            isEnabled: device.identityBasis == .wholeMediaUUID
-                                && model.inventoryState == .available && !model.isBusy
-                        ) { consented in
-                            model.setLocalDeviceSamplingConsent(consented, for: device.id)
-                        }
+    @ViewBuilder private var operationStatus: some View {
+        if model.isBusy || model.workbench.pendingOperation != nil || model.workbench.safeToUnplug || model.userNotice != nil {
+            VStack(alignment: .leading, spacing: 10) {
+                if model.isBusy {
+                    HStack(spacing: 10) {
+                        ProgressView().controlSize(.small)
+                        Text(model.progressNotice.text(isChinese: isChinese)).font(.callout)
                     }
                 }
-                DisclosureGroup(text("I/O identity details", "I/O 身份详情")) {
-                    Text(selectedDevice.map(identityDescription) ?? text("No selected drive.", "未选择硬盘。"))
-                        .font(.caption).textSelection(.enabled)
+                if let pending = model.workbench.pendingOperation, !model.isBusy {
+                    Label(model.pendingEjectDriveDisconnected
+                        ? text("Drive disconnected. Updating its operation status.", "硬盘已断开，正在更新操作状态。")
+                        : text("An earlier storage operation needs attention.", "此前一项存储操作需要处理。"),
+                        systemImage: "exclamationmark.triangle")
+                        .font(.callout).foregroundStyle(.orange)
+                        .accessibilityIdentifier("uma.sectorium.pending-operation")
+                    if pending.hasPrefix("eject:") {
+                        pendingEjectActions
+                    } else {
+                        Button(text("Continue operation", "继续操作")) { model.resumePendingOperation() }
+                            .disabled(model.isBusy)
+                    }
                 }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), alignment: .leading)],
-                          alignment: .leading, spacing: 8) {
-                    metric(text("Whole-drive read", "整盘读取"), model.workbench.io.readBytesPerSecond)
-                    metric(text("Whole-drive write", "整盘写入"), model.workbench.io.writtenBytesPerSecond)
-                    Text(model.workbench.io.isFresh ? text("Live", "实时") : text("Unknown", "未知"))
-                        .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier("uma.sectorium.io-freshness")
+                if model.workbench.safeToUnplug {
+                    Label(text("Disconnect successful. You can unplug \(model.safeToUnplugDriveName ?? "the drive").",
+                               "安全断开成功，现在可以拔出 \(model.safeToUnplugDriveName ?? "硬盘")。"),
+                          systemImage: "checkmark.circle.fill")
+                        .font(.callout.weight(.medium)).foregroundStyle(.green)
+                        .accessibilityIdentifier("uma.sectorium.safe-to-unplug")
+                }
+                if !model.isBusy, !model.workbench.safeToUnplug, let notice = model.userNotice {
+                    Text(notice.text(isChinese: isChinese)).font(.callout)
+                        .accessibilityIdentifier("uma.sectorium.operation-summary")
                 }
             }
+            .padding(.vertical, 13).padding(.horizontal, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 6)
+            .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 9))
+            .accessibilityElement(children: .contain)
+        }
+    }
+
+    @ViewBuilder private var inventoryNotices: some View {
+        if model.inventoryState != .available && model.inventoryState != .empty {
+            Text(inventoryMessage).font(.callout).foregroundStyle(.secondary)
+        }
+        if model.registryUnavailable {
+            Label(text("Saved volume registrations could not be read. Existing records are preserved; refresh to retry.",
+                       "无法读取已保存的开发卷登记。已有记录保持原样，请刷新重试。"), systemImage: "exclamationmark.triangle")
+                .font(.callout).foregroundStyle(.orange)
+                .accessibilityIdentifier("uma.sectorium.registry-unavailable")
+        }
+        if let reason = model.inventoryFailureDescription {
+            DisclosureGroup(text("Drive detection details", "硬盘检测详情")) {
+                Text(reason).font(.caption).textSelection(.enabled)
+            }
+        }
+        if parentGroups.isEmpty && model.inventoryState == .empty {
+            VStack(alignment: .leading, spacing: 8) {
+                Image(systemName: "externaldrive.badge.plus").font(.system(size: 26)).foregroundStyle(.secondary)
+                Text(text("Connect a drive to get started", "连接硬盘，开始使用")).font(.headline)
+                Text(text("Connected drives appear here automatically. You can also refresh to check again.",
+                          "连接的硬盘会自动显示，也可以点击刷新重新检查。"))
+                    .font(.callout).foregroundStyle(.secondary)
+            }.padding(.vertical, 24)
+        }
+    }
+
+    private var creatableDevices: [SectoriumPhysicalDevice] {
+        physicalDevices.filter { $0.identityVerified && $0.topologyComplete }
+    }
+
+    private var parentGroups: [SectoriumParentGroup] {
+        let observed = physicalDevices.map { device in
+            SectoriumParentGroup(id: device.id, name: device.name, isExternal: device.isExternal,
+                device: device, rows: model.volumeRows.filter { $0.parentDeviceID == device.id })
+        }
+        let observedIDs = Set(observed.map(\.id))
+        let missing = Dictionary(grouping: model.volumeRows.filter { !observedIDs.contains($0.parentDeviceID) },
+                                 by: \.parentDeviceID)
+            .map { id, rows in
+                SectoriumParentGroup(id: id, name: rows.first?.parentName ?? text("Disconnected drive", "未连接的硬盘"),
+                    isExternal: rows.first?.isExternal ?? true, device: nil, rows: rows)
+            }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        return (observed + missing).sorted {
+            if $0.isExternal != $1.isExternal { return $0.isExternal }
+            return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    @ViewBuilder private var pendingEjectActions: some View {
+        if let target = model.pendingWholeDeviceEjectTargetID {
+            let name = model.workbench.devices.first { $0.id == target }?.name
+                ?? model.volumeRows.first { $0.parentDeviceID == target }?.parentName
+                ?? text("the previously selected drive", "此前选定的硬盘")
+            Text(text("Continue the interrupted operation for \(name).",
+                      "继续 \(name) 上未完成的操作。"))
+                .font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier("uma.sectorium.pending-eject-target")
+        }
+        HStack {
+            if model.canContinueWholeDeviceEject {
+                Button(text("Continue Disconnect", "继续安全断开")) {
+                    model.prepareContinueWholeDeviceEjectConfirmation()
+                }
+                .disabled(model.isBusy)
+                .accessibilityIdentifier("uma.sectorium.continue-eject")
+            }
+            if model.canReturnFromWholeDeviceEject {
+                Button(text("Cancel Disconnect · Return to development", "取消断开，返回开发环境")) { model.returnToDevelopment() }
+                    .disabled(model.isBusy)
+                    .accessibilityIdentifier("uma.sectorium.return-to-development")
+            }
+            if !model.canContinueWholeDeviceEject && !model.canReturnFromWholeDeviceEject {
+                Button(text("Recheck", "重新检查")) { model.refresh() }
+                    .disabled(model.isBusy)
             }
         }
     }
 
-    private var actionPlan: SectoriumWorkbenchActionPlan {
-        return .make(.init(hasDrive: selectedDevice != nil,
-            identityVerified: selectedDevice?.identityVerified == true,
-            external: selectedDevice?.isExternal == true,
-            stale: staleAttachment,
-            inventoryAvailable: model.inventoryState == .available,
-            busy: model.isBusy,
-            readiness: model.workbench.readiness,
-            hasProfile: selectedProfile != nil,
-            profileFormatVerified: selectedProfile?.hasVerifiedImageFormat == true,
-            legacyState: presentationLegacyState,
-            pendingOperation: model.workbench.pendingOperation
-                ?? (model.snapshot.pendingEject == true ? "eject:pending" : nil),
-            canBeginEject: model.canBeginWholeDeviceEject,
-            canContinueEject: model.canContinueWholeDeviceEject,
-            canReturnFromEject: model.canReturnFromWholeDeviceEject))
-    }
-
-    private var ioAvailabilitySummary: String {
-        if model.workbench.io.isFresh { return text("Whole-drive I/O is available with verified media identity.", "已核实介质身份，整盘 I/O 可用。") }
-        switch selectedDevice?.identityBasis {
-        case .wholeMediaUUID:
-            return text("Whole-drive I/O is currently unavailable.", "当前无法读取整盘 I/O。")
-        case .uniqueBackingVolumeUUID:
-            return text("Whole-drive I/O needs a verified media identity.", "整盘 I/O 需要已核实的介质身份。")
-        case .unavailable, nil:
-            return text("Whole-drive I/O is unavailable because hardware identity is unverified.",
-                        "硬件身份未核实，无法读取整盘 I/O。")
-        }
-    }
-
-    private func actionTitle(_ action: SectoriumWorkbenchAction) -> String {
-        switch action {
-        case .create: text("Create development disk", "创建开发盘")
-        case .adopt: text("Adopt existing disk", "接纳已有开发盘")
-        case .start: text("Start", "启动")
-        case .stop: text("Stop", "停止")
-        case .resume: text("Resume operation", "继续未完成操作")
-        case .continueEject: text("Continue eject", "继续弹出")
-        case .returnToDevelopment: text("Return to development", "返回开发环境")
-        case .eject: text("Eject external drive", "弹出整块外接硬盘")
-        }
-    }
-    private func actionIdentifier(_ action: SectoriumWorkbenchAction) -> String {
-        switch action {
-        case .create: "uma.sectorium.create"
-        case .adopt: "uma.sectorium.adopt"
-        case .start: "uma.sectorium.start"
-        case .stop: "uma.sectorium.stop"
-        case .resume: "uma.sectorium.resume"
-        case .continueEject: "uma.sectorium.continue-eject"
-        case .returnToDevelopment: "uma.sectorium.return-to-development"
-        case .eject: "uma.sectorium.eject-drive"
-        }
-    }
-    private func perform(_ action: SectoriumWorkbenchAction) {
-        switch action {
-        case .create: showingCreate = true
-        case .adopt:
-            if presentationLegacyState == .mounted || presentationLegacyState == .detached {
-                showingLegacyAdoptionConfirmation = true
-            } else {
-                adoptExisting()
+    private func parentSection(_ group: SectoriumParentGroup) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: group.isExternal ? "externaldrive" : "internaldrive")
+                    .font(.system(size: 24, weight: .regular)).foregroundStyle(.secondary)
+                    .frame(width: 32, height: 38)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(group.device.map(physicalTitle) ?? group.name).font(.headline)
+                    HStack(spacing: 6) {
+                        Text(group.isExternal ? text("External drive", "外接硬盘") : text("Internal storage", "内置存储"))
+                        if let bytes = group.device?.wholeDeviceBytes {
+                            Text("·")
+                            Text(formatBytes(bytes))
+                        }
+                        if group.device == nil {
+                            Text("·")
+                            Text(text("Disconnected", "已断开"))
+                        }
+                    }.font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                if let device = group.device, device.identityVerified {
+                    Menu {
+                        Button(text("Create on this drive", "在此硬盘创建")) { prepareCreation(on: device.id) }
+                            .disabled(model.isBusy || model.registryUnavailable)
+                        if model.legacyDevelopmentByDevice[device.id] == nil {
+                            Button(group.rows.isEmpty
+                                ? text("Register existing image…", "登记已有镜像…")
+                                : text("Register another image…", "登记其他镜像…")) { adoptExisting(on: device) }
+                                .disabled(model.isBusy || model.registryUnavailable || (!model.hasObservedRegistrations && group.rows.isEmpty))
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis").frame(width: 24, height: 24)
+                    }
+                    .menuStyle(.borderlessButton).fixedSize()
+                    .accessibilityLabel(text("Drive options for \(group.name)", "\(group.name) 的硬盘选项"))
+                    .accessibilityIdentifier("uma.sectorium.parent-options.\(group.id)")
+                }
             }
-        case .start: startSelectedProfile()
-        case .stop: model.prepareStopDevelopmentDiskConfirmation()
-        case .resume: model.resumePendingOperation()
-        case .continueEject: model.prepareContinueWholeDeviceEjectConfirmation()
-        case .returnToDevelopment: model.returnToDevelopment()
-        case .eject: model.prepareWholeDeviceEjectConfirmation()
+            .accessibilityIdentifier("uma.sectorium.parent.\(group.id)")
+
+            if let legacy = model.legacyDevelopmentByDevice[group.id] {
+                Divider()
+                legacyVolumeRow(legacy, parentID: group.id)
+            } else if group.rows.isEmpty && !model.registryUnavailable {
+                Text(model.hasObservedRegistrations
+                    ? text("No development volume registered on this drive.", "此硬盘尚无已登记的开发卷。")
+                    : text("Checking development volumes…", "正在识别开发卷…"))
+                    .font(.callout).foregroundStyle(.secondary)
+                if let device = group.device, device.identityVerified {
+                    HStack(spacing: 14) {
+                        Button(text("Create volume", "创建开发卷")) { prepareCreation(on: device.id) }
+                            .disabled(model.isBusy || model.registryUnavailable)
+                        Button(text("Register existing…", "登记已有开发卷…")) { adoptExisting(on: device) }
+                            .buttonStyle(.borderless)
+                            .disabled(model.isBusy || model.registryUnavailable || !model.hasObservedRegistrations)
+                    }
+                }
+            }
+            ForEach(group.rows) { row in
+                Divider()
+                volumeRow(row)
+            }
+            DisclosureGroup(text("Drive details", "硬盘详情")) {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let device = group.device {
+                        Text(deviceLabel(device)).textSelection(.enabled)
+                        Text(identityDescription(device)).textSelection(.enabled)
+                        if model.workbench.selectedDeviceID != device.id {
+                            Button(text("Show drive activity", "查看硬盘活动")) { model.selectDevice(device.id) }
+                                .disabled(model.isBusy)
+                        } else {
+                            if !device.isExternal {
+                                Toggle(text("Read whole-drive I/O for this internal drive", "读取此内置硬盘的整盘 I/O"), isOn: Binding(
+                                    get: { model.isLocalDeviceSamplingConsented(device.id) },
+                                    set: { model.setLocalDeviceSamplingConsent($0, for: device.id) }))
+                                    .accessibilityIdentifier("uma.sectorium.local-sampling-consent")
+                            }
+                            HStack(spacing: 32) {
+                                metric(text("Whole-drive read", "整盘读取"), model.workbench.io.readBytesPerSecond)
+                                metric(text("Whole-drive write", "整盘写入"), model.workbench.io.writtenBytesPerSecond)
+                            }
+                            Text(text("Activity reflects this physical drive, not an individual volume. Unavailable readings remain unknown.",
+                                      "活动数值属于整块物理硬盘，不代表某个开发卷；无法读取时保留未知。"))
+                        }
+                    } else {
+                        Text(text("This drive is not currently observed.", "当前未观察到此硬盘。"))
+                    }
+                }.padding(.top, 8).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .font(.callout).foregroundStyle(.secondary)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(group.isExternal ? 0.025 : 0.012), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.09), lineWidth: 0.5))
+        .accessibilityElement(children: .contain)
+    }
+
+    /// Existing volumes are real observed storage even before AUV has a local
+    /// management registration. Never represent an empty registry as an empty disk.
+    private func legacyVolumeRow(_ legacy: HESectoriumService.LegacyDevelopmentDisplay,
+                                 parentID: String) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 8) {
+                Text(legacy.name).font(.body.weight(.semibold))
+                Spacer()
+                if legacy.state != .unknown {
+                    Text(legacy.state == .mounted ? text("Loaded", "已加载") : text("Not Loaded", "未加载"))
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(legacy.state == .mounted ? Color.green : Color.secondary)
+                        .accessibilityIdentifier("uma.sectorium.legacy-state.\(parentID)")
+                }
+            }
+            if legacy.logicalCapacityBytes != nil {
+                Text(logicalCapacityDescription(legacy.logicalCapacityBytes))
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            Text(legacy.state == .unknown
+                ? text("This existing volume is known, but its current loading state could not be verified. Refresh before managing it.",
+                       "已发现此已有开发卷，但当前加载状态尚无法核实。请刷新后再管理。")
+                : text("Existing development volume. Register it with AUV to manage loading and safe removal; its files stay in place.",
+                       "这是已有开发卷。登记到 AUV 后即可管理加载与安全退出；现有文件保持原位。"))
+                .font(.callout).foregroundStyle(.secondary)
+            Button(legacy.state == .unknown ? text("Recheck", "重新检查") : text("Register existing volume", "登记已有开发卷")) {
+                if legacy.state == .unknown { model.refresh() }
+                else {
+                    adoptionDeviceID = parentID
+                    showingLegacyAdoptionConfirmation = true
+                }
+            }
+            .disabled(model.isBusy || model.workbench.pendingOperation != nil)
+            .accessibilityIdentifier("uma.sectorium.legacy-register.\(parentID)")
+            if let mountPoint = legacy.mountPoint {
+                DisclosureGroup(text("Volume details", "开发卷详情")) {
+                    Text(mountPoint).font(.caption).textSelection(.enabled)
+                }.font(.caption)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("uma.sectorium.legacy-volume.\(parentID)")
+    }
+
+    private func volumeRow(_ row: SectoriumVolumeRow) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "externaldrive.fill").foregroundStyle(.secondary)
+                Text(row.profile.name).font(.system(size: 16, weight: .semibold))
+                Spacer()
+                if let loaded = row.verifiedLoaded {
+                    SectoriumStatusPill(title: !row.parentConnected && !loaded ? text("Disconnected", "已断开")
+                        : loaded ? text("Loaded", "已加载") : text("Unloaded", "已卸载"), active: loaded)
+                        .accessibilityIdentifier("uma.sectorium.volume-state.\(row.id)")
+                }
+            }
+            Text("\(logicalCapacityDescription(row.profile.logicalCapacityBytes)) · \(filesystemDescription(row.profile))")
+                .font(.callout).foregroundStyle(.secondary)
+            if !model.registryUnavailable && !row.message(isChinese: isChinese).isEmpty {
+                Text(row.message(isChinese: isChinese)).font(.callout).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("uma.sectorium.volume-message.\(row.id)")
+            }
+            HStack(spacing: 10) {
+                if row.parentConnected || row.verifiedLoaded == nil {
+                    SectoriumWorkbenchButton(title: primaryTitle(for: row),
+                    identifier: "uma.sectorium.volume-primary.\(row.id)",
+                    isEnabled: primaryEnabled(for: row), prominent: row.verifiedLoaded == false,
+                    action: { performPrimary(for: row) })
+                    .frame(width: isChinese ? 116 : 100, height: 32)
+                        .help(text("Load and Unload affect this development volume only.", "加载和卸载仅作用于此开发卷。"))
+                }
+                if let enabled = actionPlan(for: row).disconnectEnabled {
+                    SectoriumWorkbenchButton(title: text("Disconnect", "安全断开硬盘"),
+                        identifier: "uma.sectorium.volume-disconnect.\(row.id)", isEnabled: enabled, prominent: true,
+                        action: { model.prepareSafeUnloadAndEject(profileID: row.id) })
+                        .frame(width: isChinese ? 136 : 118, height: 32)
+                        .help(text("Unload all volumes and safely eject the entire external drive.", "卸载所有相关卷并安全弹出整个外接硬盘。"))
+                }
+                Menu {
+                    Button(text("Volume settings", "开发卷设置")) { prepareVolumeSettings(for: row) }
+                        .disabled(model.registryUnavailable)
+                    Button(text("Open IMPORTANT.md history", "打开 IMPORTANT.md 历史")) {
+                        openHistory(for: row.id)
+                    }
+                    .disabled(model.registryUnavailable || !row.parentConnected || model.documentReadsInProgress.contains(row.id))
+                    if row.documentationPending {
+                        Button(text("Retry document sync", "重试文档同步")) { model.retryDocumentation(profileID: row.id) }
+                            .disabled(model.isBusy || model.registryUnavailable || !row.parentConnected)
+                    }
+                    Button(text("Refresh status", "刷新状态")) { model.refresh() }
+                } label: {
+                    Image(systemName: "ellipsis").frame(width: 24, height: 28)
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                .accessibilityLabel(text("More options for \(row.profile.name)", "\(row.profile.name) 的更多选项"))
+                .accessibilityIdentifier("uma.sectorium.volume-more.\(row.id)")
+                Spacer(minLength: 0)
+            }
+            if row.verifiedLoaded == true && row.parentConnected {
+                Text(row.isExternal
+                    ? text("Unload keeps the drive connected. Disconnect ejects the entire drive.",
+                           "卸载仅关闭开发卷；安全断开会弹出整个硬盘。")
+                    : text("Unload closes this development volume. Your internal drive stays connected.",
+                           "卸载仅关闭此开发卷，内置硬盘保持连接。"))
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            DisclosureGroup(isExpanded: Binding(
+                get: { expandedVolumeDetails.contains(row.id) },
+                set: { isExpanded in
+                    if isExpanded { expandedVolumeDetails.insert(row.id) }
+                    else { expandedVolumeDetails.remove(row.id) }
+                })) {
+                Text(text("Image: \(row.profile.imagePath)", "镜像：\(row.profile.imagePath)"))
+                Text(text("Mount location: \(row.profile.devMountPoint)", "挂载位置：\(row.profile.devMountPoint)"))
+                if row.documentationPending {
+                    Text(text("History document sync is pending. This does not change the volume’s loading state.",
+                              "历史文档尚待同步，不影响开发卷的加载状态。"))
+                        .accessibilityIdentifier("uma.sectorium.document-pending.\(row.id)")
+                }
+                if !row.parentConnected {
+                    Text(text("Connect the parent drive to open its history document.", "连接母盘后可打开历史文档。"))
+                }
+            } label: {
+                Text(text("History and diagnostics", "历史与诊断"))
+            }
+            .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("uma.sectorium.volume.\(row.id)")
+    }
+
+    private func filesystemDescription(_ profile: SectoriumDevelopmentProfile) -> String {
+        switch profile.filesystem {
+        case .apfs: text("APFS", "APFS")
+        case .apfsCaseSensitive: text("APFS (case-sensitive)", "APFS（区分大小写）")
+        case nil: text("Filesystem not verified", "文件系统未核实")
         }
     }
-    private func unavailableReasonText(_ reason: SectoriumWorkbenchActionPlan.UnavailableReason) -> String {
-        switch reason {
-        case .chooseDrive: text("Select a physical drive to continue.", "请选择物理硬盘以继续。")
-        case .inventoryUnavailable: text("Refresh the drive list before taking action.", "刷新硬盘清单后再操作。")
-        case .busy: text("A storage operation is still running. Wait for its result.", "存储操作仍在进行，请等待结果。")
-        case .pending: text("Finish the pending recovery before starting another action.", "先完成待恢复操作，再开始其他操作。")
-        case .identityUnavailable: text("This drive is visible, but its identity is not verified for management.", "硬盘可见，但身份尚未核实，暂不能管理。")
-        case .stale: text("Refresh and select the drive again to verify its current identity.", "请刷新并重新选择硬盘以核实当前身份。")
-        case .stateUnknown: text("The current disk state could not be verified; keep the drive connected.", "当前无法核实开发盘状态，请保持硬盘连接。")
-        case .imageFormatUnknown: text("The image format is not verified, so Start is unavailable.", "镜像格式尚未核实，无法启动。")
+
+    private func primaryTitle(for row: SectoriumVolumeRow) -> String {
+        switch actionPlan(for: row).action {
+        case .safelyUnloadAndEject: text("Disconnect", "安全断开硬盘")
+        case .unloadOnly: text("Unload", "卸载开发卷")
+        case .load: text("Load", "加载")
+        case .recheck: text("Recheck", "重新检查")
+        }
+    }
+
+    private func primaryEnabled(for row: SectoriumVolumeRow) -> Bool {
+        actionPlan(for: row).enabled
+    }
+
+    private func actionPlan(for row: SectoriumVolumeRow) -> SectoriumVolumeActionPlan {
+        .make(verifiedLoaded: row.verifiedLoaded, isExternal: row.isExternal,
+              canLoad: row.canLoad, canUnloadOnly: row.canUnloadOnly,
+              canSafeUnloadAndEject: row.canSafeUnloadAndEject,
+              busy: model.isBusy || row.isBusy)
+    }
+
+    private func performPrimary(for row: SectoriumVolumeRow) {
+        let plan = actionPlan(for: row)
+        guard plan.enabled else { return }
+        switch plan.action {
+        case .safelyUnloadAndEject: model.prepareSafeUnloadAndEject(profileID: row.id)
+        case .unloadOnly: model.prepareUnloadOnlyConfirmation(profileID: row.id)
+        case .load:
+            if row.profile.encrypted == true {
+                unlockProfileID = row.id
+                showingUnlock = true
+            } else { model.loadDevelopmentDisk(profileID: row.id) }
+        case .recheck: model.refresh()
+        }
+    }
+
+    private func prepareCreation(on deviceID: String? = nil) {
+        creationDeviceID = deviceID ?? creatableDevices.first?.id ?? ""
+        creationFilesystemID = (model.creationFilesystems.first ?? .apfs).rawValue
+        creationAutoLoad = true
+        creationMountPoint = ""
+        showingCreationOptions = false
+        encrypted = false
+        password = ""
+        showingCreate = true
+    }
+
+    private func prepareVolumeSettings(for row: SectoriumVolumeRow) {
+        settingsProfileID = row.id
+        editDisplayName = row.profile.name
+        editMountPoint = row.profile.devMountPoint
+        editAutoLoad = row.profile.autoLoad
+        editCapacityGiB = Int((row.profile.logicalCapacityBytes ?? 107_374_182_400) / 1_073_741_824)
+        showingVolumeSettings = true
+        model.refreshVolumeSettings(profileID: row.id)
+    }
+
+    private func openHistory(for profileID: String) {
+        Task { @MainActor in
+            if let document = await model.verifiedHistoryDocument(profileID: profileID) {
+                NSWorkspace.shared.open(document)
+            }
         }
     }
 
@@ -713,6 +896,7 @@ public struct SectoriumWorkbenchView: View {
         if model.workbench.pendingOperation != nil || model.snapshot.pendingEject == true {
             return text("In progress", "操作中")
         }
+        if model.workbench.safeToUnplug { return text("Safe to unplug", "可以拔出硬盘") }
         if model.inventoryState != .available {
             switch model.inventoryState {
             case .loading: return text("Loading drives", "正在读取硬盘")
@@ -725,27 +909,27 @@ public struct SectoriumWorkbenchView: View {
         case .operationInProgress: return text("In progress", "操作中")
         case .partialFailure: return text("Partially completed", "部分完成")
         case .unknown: return text("Unknown", "未知")
-        case .ejected: return text("Ejected", "已弹出")
+        case .ejected: return text("Drive disconnected", "硬盘已断开连接")
         case .awaitingUnlock: return text("Unlock required", "需要解锁")
         case .noDevice: return text("Choose a drive", "请选择硬盘")
         case .readOnly: return text("Read-only", "只读")
         default: break
         }
         if presentationLegacy?.state == .mounted {
-            return text("Started, not yet managed", "已启动，尚未接纳管理")
+            return text("Loaded, not yet managed", "已装载，尚未接纳管理")
         }
         return switch model.workbench.readiness {
         case .noDevice: text("Choose a drive", "请选择硬盘")
         case .connected: text("Drive connected", "硬盘已连接")
         case .noDevelopmentDisk: text("No development disk", "没有开发盘")
-        case .notStarted: text("Not started", "未启动")
+        case .notStarted: text("Unloaded", "未装载")
         case .awaitingUnlock: text("Unlock required", "需要解锁")
         case .ready: text("Ready", "已就绪")
         case .readOnly: text("Read-only", "只读")
         case .busy: text("Busy", "忙碌")
         case .operationInProgress: text("In progress", "操作中")
         case .partialFailure: text("Partially completed", "部分完成")
-        case .ejected: text("Ejected", "已弹出")
+        case .ejected: text("Drive disconnected", "硬盘已断开连接")
         case .unknown: text("Unknown", "未知")
         }
     }
@@ -753,6 +937,10 @@ public struct SectoriumWorkbenchView: View {
         if model.isBusy || model.workbench.pendingOperation != nil || model.snapshot.pendingEject == true {
             return text("A storage operation needs attention. Keep the selected drive connected and review its result.",
                         "存储操作仍待处理。请保持所选硬盘连接并查看结果。")
+        }
+        if model.workbench.safeToUnplug {
+            return text("The selected physical drive was verified absent after safe eject.",
+                        "安全弹出后已核实所选物理硬盘不再出现。")
         }
         if model.inventoryState != .available { return inventoryMessage }
         switch model.workbench.readiness {
@@ -776,24 +964,6 @@ public struct SectoriumWorkbenchView: View {
         }
         return readinessDetail
     }
-    private var operationSummary: String {
-        let completed = model.workbench.operationSteps.filter { $0.status == .succeeded }.count
-        switch model.workbench.readiness {
-        case .partialFailure:
-            return text("Stopped after \(completed) confirmed step(s). Remaining work is unverified; keep the drive connected.",
-                        "已确认完成 \(completed) 个步骤后停止。其余操作尚未验证；请保持硬盘连接。")
-        case .operationInProgress:
-            return text("\(completed) step(s) are confirmed. The operation still needs attention; keep the drive connected.",
-                        "已确认完成 \(completed) 个步骤。操作仍待处理；请保持硬盘连接。")
-        case .unknown:
-            return text("The result could not be verified. Keep the drive connected and review the details.",
-                        "操作结果尚无法验证。请保持硬盘连接并查看详情。")
-        default:
-            return model.lastResult == "Completed"
-                ? text("Operation completed.", "操作已完成。")
-                : text("The operation did not complete. Review the details before continuing.", "操作未完成。继续前请查看详情。")
-        }
-    }
     private var readinessTechnicalDetail: String? {
         switch model.workbench.readiness {
         case .operationInProgress(let detail), .partialFailure(let detail), .unknown(let detail): detail
@@ -807,11 +977,12 @@ public struct SectoriumWorkbenchView: View {
         case .connected: text("A physical drive is selected.", "已选择物理硬盘。")
         case .noDevelopmentDisk: text("This drive has no registered development disk.", "此硬盘尚无已登记的开发盘。")
         case .notStarted: text("The development image is not mounted.", "开发镜像当前未挂载。")
-        case .awaitingUnlock: text("Unlock the image explicitly to start it.", "请明确解锁镜像后启动。")
+        case .awaitingUnlock: text("Unlock the image to load the development volume.", "解锁镜像后即可装载开发卷。")
         case .ready: text("The validated APFS development volume is available.", "已验证的 APFS 开发卷可用。")
         case .readOnly: text("The mounted volume is read-only.", "已挂载卷为只读。")
         case .busy: text("The storage system reported an active use.", "存储系统报告该卷正在使用。")
-        case .ejected: text("The selected external device is no longer mounted.", "所选外接硬盘已卸载。")
+        case .ejected: text("The selected drive is no longer observed. Safe eject has not been confirmed.",
+                            "已无法观察到所选硬盘；尚未确认安全弹出。")
         }
     }
     private var readinessSymbol: String {
@@ -826,201 +997,266 @@ public struct SectoriumWorkbenchView: View {
 
     private var createSheet: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(text("Create development disk", "创建开发盘")).font(.title2.weight(.semibold))
-            TextField(text("Name", "名称"), text: $profileName)
-            HStack {
-                Text(text("Logical capacity", "逻辑容量"))
-                TextField("100", value: $capacityGiB, format: .number).frame(width: 90)
-                Text("GiB")
+            SectoriumSheetHeader(title: text("Create development volume", "创建开发卷"),
+                subtitle: text("A separate space for your development work.", "为开发工作准备独立空间。"), symbol: "plus.circle")
+            Divider()
+            Picker(text("Parent drive", "母盘"), selection: $creationDeviceID) {
+                ForEach(creatableDevices) { device in
+                    Text(device.name).tag(device.id)
+                }
             }
-            Toggle(text("Case-sensitive APFS", "区分大小写的 APFS"), isOn: $caseSensitive)
-            Toggle(text("Encrypt this disk", "加密此开发盘"), isOn: $encrypted)
-            Toggle(text("Start after creation", "创建后启动"), isOn: $startAfterCreation)
-            if encrypted {
-                SecureField(text("Password (not saved)", "密码（不会保存）"), text: $password)
-                    .accessibilityIdentifier("uma.sectorium.create.password")
-            } else {
-                Text(text("New disks are unencrypted by default. Existing disks are never migrated.", "新建开发盘默认不加密；不会迁移现有开发盘。"))
-                    .font(.caption).foregroundStyle(.secondary)
+            .accessibilityIdentifier("uma.sectorium.create.parent")
+            LabeledContent(text("Volume name", "开发卷名称")) {
+                TextField(text("Volume name", "开发卷名称"), text: $profileName)
+                    .accessibilityIdentifier("uma.sectorium.create.name")
             }
-            Text(text("Logical capacity is not reserved physical space.", "逻辑容量不代表预留了同等物理空间。"))
+            LabeledContent(text("Capacity", "容量")) {
+                HStack(spacing: 6) {
+                    TextField("100", value: $capacityGiB, format: .number).frame(width: 90)
+                        .accessibilityIdentifier("uma.sectorium.create.capacity")
+                    Text("GiB").foregroundStyle(.secondary)
+                }
+            }
+            Picker(text("Filesystem", "文件系统"), selection: $creationFilesystemID) {
+                ForEach(model.creationFilesystems, id: \.rawValue) { filesystem in
+                    Text(filesystem == .apfs ? "APFS" : text("APFS (case-sensitive)", "APFS（区分大小写）"))
+                        .tag(filesystem.rawValue)
+                }
+            }
+            .accessibilityIdentifier("uma.sectorium.create.filesystem")
+            Text(text("Creates a file-backed volume on the selected writable drive. Existing drive contents are preserved; logical capacity is not reserved space.",
+                      "将在所选可写硬盘内创建文件型开发卷，保留现有内容；逻辑容量不代表预留同等空间。"))
                 .font(.caption).foregroundStyle(.secondary)
+            DisclosureGroup(isExpanded: $showingCreationOptions) {
+                Toggle(text("Load automatically when this drive connects", "连接硬盘后自动加载"),
+                       isOn: $creationAutoLoad)
+                TextField(text("Mount location (automatic by default)", "挂载位置（默认自动选择）"),
+                          text: $creationMountPoint)
+                    .accessibilityIdentifier("uma.sectorium.create.mount-location")
+                Toggle(text("Encrypt this volume", "加密此开发卷"), isOn: $encrypted)
+                if encrypted {
+                    SecureField(text("Password (not saved)", "密码（不会保存）"), text: $password)
+                        .accessibilityIdentifier("uma.sectorium.create.password")
+                }
+            } label: {
+                Text(text("Options", "其他选项"))
+            }
+            .padding(.vertical, 6)
+            Divider()
             HStack {
                 Spacer()
                 Button(text("Cancel", "取消")) { showingCreate = false; password = "" }
-                Button(text(startAfterCreation ? "Choose location, create and start" : "Choose location and create",
-                            startAfterCreation ? "选择位置、创建并启动" : "选择位置并创建"), action: createDevelopmentDisk)
-                    .disabled(model.isBusy || profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        || !SectoriumCapacityInput.isValid(capacityGiB) || (encrypted && password.isEmpty))
+                    .keyboardShortcut(.cancelAction)
+                Button(text("Create volume", "创建开发卷"), action: createDevelopmentDisk)
+                    .disabled(model.isBusy || model.registryUnavailable || creationDeviceID.isEmpty || model.creationFilesystems.isEmpty || !isValidProfileName(profileName)
+                        || !SectoriumCapacityInput.isValid(capacityGiB) || (encrypted && password.isEmpty)
+                        || (!creationMountPoint.isEmpty && !creationMountPoint.hasPrefix("/")))
                     .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("uma.sectorium.create.confirm")
             }
         }
-        .padding(24)
-        .frame(width: 470)
+        .textFieldStyle(.roundedBorder)
+        .padding(28)
+        .frame(width: 500)
+    }
+
+    @ViewBuilder private var volumeSettingsSheet: some View {
+        if let row = model.volumeRows.first(where: { $0.id == settingsProfileID }) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    SectoriumSheetHeader(title: text("Volume settings", "开发卷设置"),
+                        subtitle: row.profile.name + " · " + row.parentName, symbol: "slider.horizontal.3")
+                    Spacer()
+                    Button(text("Done", "完成")) { showingVolumeSettings = false }
+                        .keyboardShortcut(.cancelAction)
+                }
+                Divider()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                    SectoriumPreferenceSection(title: text("Name", "名称")) {
+                        HStack {
+                            TextField(text("Display name", "显示名称"), text: $editDisplayName)
+                                .accessibilityIdentifier("uma.sectorium.settings.name")
+                            Button(text("Save name", "保存名称")) {
+                                model.updateDevelopmentDisk(profileID: row.id,
+                                    change: .displayName(editDisplayName))
+                            }
+                            .disabled(model.isBusy || model.registryUnavailable || !isValidProfileName(editDisplayName)
+                                || editDisplayName == row.profile.name)
+                        }
+                    }
+                    SectoriumPreferenceSection(title: text("Automatic loading", "自动加载")) {
+                        Toggle(text("Load when this drive connects", "连接硬盘后加载"), isOn: $editAutoLoad)
+                            .accessibilityIdentifier("uma.sectorium.settings.autoload")
+                        Button(text("Save automatic loading", "保存自动加载设置")) {
+                            model.updateDevelopmentDisk(profileID: row.id,
+                                change: .autoLoad(editAutoLoad))
+                        }
+                        .disabled(model.isBusy || model.registryUnavailable || editAutoLoad == row.profile.autoLoad)
+                    }
+                    SectoriumPreferenceSection(title: text("Mount location", "挂载位置")) {
+                        TextField(text("Mount location", "挂载位置"), text: $editMountPoint)
+                            .accessibilityIdentifier("uma.sectorium.settings.mount-location")
+                        Button(text("Change mount location", "更改挂载位置")) {
+                            model.updateDevelopmentDisk(profileID: row.id,
+                                change: .mountPoint(editMountPoint))
+                        }
+                        .disabled(model.isBusy || model.registryUnavailable || row.verifiedLoaded != false
+                            || !editMountPoint.hasPrefix("/")
+                            || editMountPoint == row.profile.devMountPoint)
+                        if row.verifiedLoaded != false {
+                            Text(text("Unload and verify this volume before changing its mount location.",
+                                      "更改挂载位置前，先卸载并核实此开发卷。"))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    SectoriumPreferenceSection(title: text("Capacity and filesystem", "容量与文件系统")) {
+                        HStack {
+                            TextField(text("Logical capacity", "逻辑容量"), value: $editCapacityGiB, format: .number)
+                                .accessibilityIdentifier("uma.sectorium.settings.capacity")
+                            Text("GiB")
+                            Button(text("Increase capacity", "扩大容量")) {
+                                model.updateDevelopmentDisk(profileID: row.id, change: .capacityGiB(editCapacityGiB))
+                            }
+                            .disabled(model.isBusy || model.registryUnavailable || row.verifiedLoaded != false || row.profile.encrypted != false
+                                || model.capacityChangeUnavailableReason(for: row) != nil
+                                || !SectoriumCapacityInput.isValid(editCapacityGiB)
+                                || (SectoriumCapacityInput.requestedBytes(gib: editCapacityGiB) ?? 0) <= (row.profile.logicalCapacityBytes ?? UInt64.max))
+                        }
+                        Text(text("Unload the volume before increasing its capacity. Shrinking and resizing encrypted volumes are not supported here.",
+                                  "先卸载开发卷再扩大容量。此处不支持缩小容量或调整加密卷。"))
+                            .font(.caption).foregroundStyle(.secondary)
+                        LabeledContent(text("Filesystem", "文件系统"), value: filesystemDescription(row.profile))
+                        Text(text("Changing this filesystem requires recreating the volume and is not offered here. Create a separate volume with the desired format to preserve existing data.",
+                                  "更改此文件系统需要重建开发卷，因此此处不提供转换。可另建所需格式的开发卷，保留现有数据。"))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    DisclosureGroup(text("History", "历史")) {
+                        if row.documentHistory.isEmpty {
+                            Text(text("No recorded changes yet.", "暂无已记录的变更。"))
+                                .foregroundStyle(.secondary)
+                        }
+                        ForEach(row.documentHistory.suffix(10).reversed(), id: \.id) { event in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(historyTitle(event))
+                                Text(event.occurredAt, style: .date).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        if row.documentationPending {
+                            Text(text("Document sync pending; the volume’s actual loading state is unchanged.",
+                                      "文档待同步；开发卷的实际加载状态未改变。"))
+                                .foregroundStyle(.secondary)
+                            Button(text("Retry document sync", "重试文档同步")) { model.retryDocumentation(profileID: row.id) }
+                                .disabled(model.isBusy || model.registryUnavailable || !row.parentConnected)
+                        }
+                        Button(text("Open IMPORTANT.md", "打开 IMPORTANT.md")) { openHistory(for: row.id) }
+                            .disabled(model.registryUnavailable || !row.parentConnected || model.documentReadsInProgress.contains(row.id))
+                    }
+                    DisclosureGroup(text("Technical details", "技术详情")) {
+                        Text(row.profile.imagePath).font(.caption).textSelection(.enabled)
+                        Text(row.profile.devMountPoint).font(.caption).textSelection(.enabled)
+                        if let reason = model.capacityChangeUnavailableReason(for: row) { Text(reason).font(.caption).textSelection(.enabled) }
+                    }
+                    }.padding(.vertical, 10).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .textFieldStyle(.roundedBorder)
+                if let notice = model.userNotice {
+                    Text(notice.text(isChinese: isChinese)).font(.callout).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("uma.sectorium.settings.result")
+                }
+            }
+            .padding(28)
+            .frame(width: 540, height: 610)
+            .accessibilityIdentifier("uma.sectorium.volume-settings")
+        } else {
+            VStack(spacing: 12) {
+                Text(text("This volume is no longer available. Refresh before editing.",
+                          "此开发卷已不可用。请刷新后再修改。"))
+                Button(text("Close", "关闭")) { showingVolumeSettings = false }
+            }
+            .padding(20)
+        }
     }
 
     private var unlockSheet: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(text("Unlock development disk", "解锁开发盘")).font(.title2.weight(.semibold))
-            Text(text("Leave the password empty for an unencrypted image. For an encrypted image, it is sent to the system disk utility over stdin and is not saved.",
-                      "未加密镜像可留空。加密镜像的密码仅通过标准输入交给系统磁盘工具，不会保存。"))
+            SectoriumSheetHeader(title: text("Unlock development volume", "解锁开发卷"),
+                subtitle: text("Your password stays on this Mac.", "密码仅用于本机解锁。"), symbol: "lock.open")
+            Divider()
+            Text(text("Enter this volume’s password. It is used only to unlock the volume and is not saved by AUV.",
+                      "输入此开发卷的密码，仅用于本次解锁，AUV 不会保存。"))
                 .font(.callout).foregroundStyle(.secondary)
             SecureField(text("Password", "密码"), text: $unlockPassword)
                 .accessibilityIdentifier("uma.sectorium.unlock.password")
             HStack {
                 Spacer()
                 Button(text("Cancel", "取消")) { showingUnlock = false; unlockPassword = "" }
-                Button(text("Unlock and start", "解锁并启动"), action: unlockAndStart)
+                    .keyboardShortcut(.cancelAction)
+                Button(text("Unlock and Load", "解锁并装载"), action: unlockAndStart)
                     .disabled(model.isBusy)
                     .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(24)
-        .frame(width: 440)
+        .textFieldStyle(.roundedBorder)
+        .padding(28)
+        .frame(width: 460)
     }
 
     private var ejectConfirmationSheet: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(model.wholeDeviceEjectConfirmation?.isContinuation == true
-                ? text("Continue whole-drive eject", "继续弹出整块硬盘")
-                : text("Confirm whole-drive eject", "确认弹出整块硬盘")).font(.title2.weight(.semibold))
-            if let confirmation = model.wholeDeviceEjectConfirmation {
-                Text(text("Physical drive: \(selectedDevice?.name ?? "External drive")",
-                          "物理硬盘：\(selectedDevice?.name ?? "外接硬盘")")).font(.headline)
-                Text(confirmation.isContinuation
-                    ? text("Continue the recorded non-forcing physical eject for this exact device after rechecking the remaining mounted volumes.",
-                           "重新核验仍挂载的宗卷后，继续此硬盘已记录的非强制整盘弹出。")
-                    : text("This will unmount \(confirmation.affectedMembers.count) physical volume(s) and detach \(confirmation.attachedImageIdentities.count) virtual disk image(s).",
-                           "此操作将卸载 \(confirmation.affectedMembers.count) 个物理宗卷，并分离 \(confirmation.attachedImageIdentities.count) 个虚拟磁盘镜像。"))
-                    .font(.callout)
-                DisclosureGroup(text("Technical identifiers", "技术标识")) {
-                    Text(text("Physical identity: \(confirmation.physicalIdentity)", "物理身份：\(confirmation.physicalIdentity)"))
-                    Text(text("Whole-device node: /dev/\(confirmation.bsdName)", "整盘设备节点：/dev/\(confirmation.bsdName)"))
-                    ForEach(confirmation.affectedMembers, id: \.self) { member in
-                        Text(text("Volume: \(member)", "宗卷：\(member)")).font(.system(.caption, design: .monospaced))
-                    }
-                    ForEach(confirmation.attachedImageIdentities, id: \.self) { image in
-                        Text(text("Virtual image: \(image)", "虚拟镜像：\(image)")).font(.system(.caption, design: .monospaced))
-                    }
-                }
-                Text(confirmation.dependenciesCanFinishOffTarget
-                    ? text("Required control and state dependencies are outside this drive.", "所需控制程序和状态依赖位于此硬盘之外。")
-                    : text("Required dependencies may be on this drive; eject is unavailable.", "所需依赖可能位于此硬盘上，无法弹出。"))
-                    .font(.callout).foregroundStyle(confirmation.dependenciesCanFinishOffTarget ? Color.secondary : Color.red)
-                Toggle(text("I closed known applications and writers using this drive", "我已关闭使用此硬盘的已知应用和写入程序"),
-                       isOn: $knownWritersClosed)
-                    .accessibilityIdentifier("uma.sectorium.eject-known-writers-closed")
-                HStack {
-                    Spacer()
-                    Button(text("Cancel", "取消")) {
-                        knownWritersClosed = false
-                        model.cancelWholeDeviceEjectConfirmation()
-                    }
-                    Button(confirmation.isContinuation
-                        ? text("Continue eject", "继续弹出")
-                        : text("Unmount and eject", "卸载并弹出")) {
-                        model.confirmWholeDeviceEject(knownWritersClosed: knownWritersClosed)
-                        knownWritersClosed = false
-                    }
-                    .disabled(!knownWritersClosed || !confirmation.dependenciesCanFinishOffTarget || model.isBusy)
-                    .keyboardShortcut(.defaultAction)
-                    .accessibilityIdentifier("uma.sectorium.eject-confirm")
-                }
-            } else {
-                Text(text("The device scope could not be verified.", "无法验证硬盘及受影响范围。"))
-                Button(text("Close", "关闭")) { model.cancelWholeDeviceEjectConfirmation() }
-            }
+        let confirmedDeviceName = model.wholeDeviceEjectConfirmation.flatMap { confirmation in
+            model.workbench.devices.first(where: { $0.id == confirmation.physicalIdentity })?.name
         }
-        .padding(24)
-        .frame(minWidth: 460)
-        .onAppear { knownWritersClosed = false }
-    }
-
-    private var stopConfirmationSheet: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(text("Confirm stopping development disk", "确认停止开发盘")).font(.title2.weight(.semibold))
-            if let confirmation = model.stopConfirmation {
-                Text(text("Stop the verified virtual disk on \(selectedDevice?.name ?? "the selected drive")? The physical drive will not be ejected.",
-                          "停止 \(selectedDevice?.name ?? "所选硬盘") 上已验证的虚拟开发盘？此操作不会弹出物理硬盘。"))
-                DisclosureGroup(text("Technical identifiers", "技术标识")) {
-                    Text("Profile: \(confirmation.profileID)")
-                    Text("Image: \(confirmation.imagePath)")
-                    Text("Backing volume: \(confirmation.backingVolumeUUID.uuidString)")
-                    Text("Development volume: \(confirmation.devVolumeUUID.uuidString)")
-                }
-                Toggle(text("I closed known applications and writers using the development disk", "我已关闭使用开发盘的已知应用和写入程序"),
-                       isOn: $stopKnownWritersClosed)
-                    .accessibilityIdentifier("uma.sectorium.stop-known-writers-closed")
-                HStack {
-                    Spacer()
-                    Button(text("Cancel", "取消")) {
-                        stopKnownWritersClosed = false
-                        model.cancelStopConfirmation()
-                    }
-                    Button(text("Stop development disk", "停止开发盘")) {
-                        model.stopDevelopmentDisk(knownWritersClosed: stopKnownWritersClosed)
-                        stopKnownWritersClosed = false
-                    }
-                    .disabled(!stopKnownWritersClosed || model.isBusy)
-                    .keyboardShortcut(.defaultAction)
-                    .accessibilityIdentifier("uma.sectorium.stop-confirm")
-                }
-            } else {
-                Text(text("The mounted image identity could not be verified.", "无法验证已挂载镜像身份。"))
-                Button(text("Close", "关闭")) { model.cancelStopConfirmation() }
-            }
-        }
-        .padding(24)
-        .frame(minWidth: 440)
-        .onAppear { stopKnownWritersClosed = false }
-    }
-
-    private func startSelectedProfile() {
-        guard let profile = selectedProfile else { return }
-        guard profile.hasVerifiedImageFormat else { return }
-        if profile.encrypted == false { model.startDevelopmentDisk() }
-        else { showingUnlock = true }
+        return SectoriumWholeDeviceEjectConfirmationView(model: model, isChinese: isChinese,
+            selectedDeviceName: confirmedDeviceName)
     }
 
     private func unlockAndStart() {
-        model.startDevelopmentDisk(password: unlockPassword)
+        guard !unlockProfileID.isEmpty else { return }
+        model.loadDevelopmentDisk(profileID: unlockProfileID, password: unlockPassword)
         unlockPassword = ""
+        unlockProfileID = ""
         showingUnlock = false
     }
 
     private func createDevelopmentDisk() {
-        guard let deviceID = selectedDevice?.id else { return }
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
-        panel.prompt = text("Create here", "在此创建")
-        guard panel.runModal() == .OK, let directory = panel.url else { return }
-        guard let requestedBytes = SectoriumCapacityInput.requestedBytes(gib: capacityGiB) else {
-            showCapacityAlert(text("Choose a capacity from 1 to 16,384 GiB.", "请选择 1 至 16,384 GiB 的容量。"))
-            return
-        }
-        if let available = try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-            .volumeAvailableCapacityForImportantUsage,
-           available >= 0, requestedBytes > UInt64(available) {
-            guard let recommendedGiB = SectoriumCapacityInput.recommendedGiB(availableBytes: UInt64(available)) else {
-                showCapacityAlert(text("Not enough available space for a useful development disk.",
-                                       "可用空间不足，无法创建有实用容量的开发盘。"))
-                return
-            }
-            let alert = NSAlert()
-            alert.alertStyle = .warning
-            alert.messageText = text("The requested logical capacity exceeds available space.", "请求的逻辑容量超过当前可用空间。")
-            alert.informativeText = text("A sparsebundle does not reserve its full logical capacity. Use \(recommendedGiB) GiB, 80% of the currently available space?",
-                                         "稀疏包不会预留全部逻辑容量。是否使用 \(recommendedGiB) GiB（当前可用空间的 80%）？")
-            alert.addButton(withTitle: text("Use recommended capacity", "使用建议容量"))
-            alert.addButton(withTitle: text("Cancel", "取消"))
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-            capacityGiB = recommendedGiB
-        }
-        model.createDevelopmentDisk(deviceID: deviceID, parentDirectory: directory, name: profileName,
-                                    capacityGiB: capacityGiB, caseSensitive: caseSensitive,
-                                    password: encrypted ? password : nil,
-                                    startAfterCreation: startAfterCreation)
+        guard creatableDevices.contains(where: { $0.id == creationDeviceID }),
+              isValidProfileName(profileName), SectoriumCapacityInput.isValid(capacityGiB) else { return }
+        guard let filesystem = SectoriumFilesystem(rawValue: creationFilesystemID),
+              model.creationFilesystems.contains(filesystem) else { return }
+        let mount = creationMountPoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        let request = SectoriumCreateRequest(deviceID: creationDeviceID, parentDirectory: nil,
+            name: profileName.trimmingCharacters(in: .whitespacesAndNewlines), capacityGiB: capacityGiB,
+            filesystem: filesystem, autoLoad: creationAutoLoad,
+            mountPoint: mount.isEmpty ? nil : mount, password: encrypted ? password : nil)
+        model.createDevelopmentDisk(request: request)
         showingCreate = false; password = ""
+    }
+
+    private func historyTitle(_ event: SectoriumPortableDocumentEvent) -> String {
+        let title: String
+        switch event.kind {
+        case "registered": title = text("Volume registered", "已登记开发卷")
+        case "validated": title = text("Volume verified", "已核实开发卷")
+        case "loaded": title = text("Volume loaded", "已加载开发卷")
+        case "unloaded": title = text("Volume unloaded", "已卸载开发卷")
+        case "ejected": title = text("Parent drive disconnected", "母盘已断开")
+        case "reconnected": title = text("Parent drive reconnected", "母盘重新连接")
+        case "displayNameChanged": title = text("Name changed", "已更改名称")
+        case "autoLoadChanged": title = text("Automatic loading changed", "已更改自动加载")
+        case "mountPointChanged": title = text("Mount location changed", "已更改挂载位置")
+        case "capacityChanged": title = text("Capacity changed", "已更改容量")
+        case "filesystemChanged": title = text("Filesystem changed", "已更改文件系统")
+        case "creationIntended": title = text("Creation started", "开始创建")
+        case "modificationIntended": title = text("Change started", "开始更改")
+        case "removed": title = text("Registration removed", "已移除登记")
+        case "replaced": title = text("Registration replaced", "已替换登记")
+        default: title = text("Volume record updated", "开发卷记录更新")
+        }
+        return event.phase == .intended ? title + text(" — completion not recorded", " — 尚未记录完成") : title
+    }
+
+    private func isValidProfileName(_ name: String) -> Bool {
+        SectoriumVolumeNameInput.isValid(name)
     }
 
     private func showCapacityAlert(_ message: String) {
@@ -1033,10 +1269,16 @@ public struct SectoriumWorkbenchView: View {
 
     private func adoptExisting() {
         guard let device = selectedDevice else { return }
+        adoptExisting(on: device)
+    }
+
+    private func adoptExisting(on device: SectoriumPhysicalDevice) {
+        guard device.identityVerified, model.inventoryState == .available,
+              !model.isBusy else { return }
         let panel = SectoriumExistingImagePicker.makePanel(
-            mountedVolumePaths: device.mountedVolumePaths, prompt: text("Adopt", "接纳"))
+            mountedVolumePaths: device.mountedVolumePaths, prompt: text("Register", "登记"))
         guard let url = SectoriumExistingImagePicker.selectedURL(from: panel, response: panel.runModal()) else { return }
-        guard model.workbench.selectedDeviceID == device.id, !staleAttachment,
+        guard model.workbench.devices.contains(where: { $0.id == device.id && $0.identityVerified }),
               model.inventoryState == .available, !model.isBusy else { return }
         model.adoptDevelopmentDisk(deviceID: device.id, imageURL: url)
     }
@@ -1092,6 +1334,225 @@ public struct SectoriumWorkbenchView: View {
     private func text(_ english: String, _ chinese: String) -> String { isChinese ? chinese : english }
 }
 
+struct SectoriumStatusPill: View {
+    let title: String
+    let active: Bool
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle().fill(active ? Color.green : Color.secondary).frame(width: 5, height: 5)
+            Text(title).font(.caption.weight(.medium))
+        }
+        .foregroundStyle(active ? Color.green : Color.secondary)
+        .padding(.horizontal, 9).padding(.vertical, 5)
+        .background((active ? Color.green : Color.secondary).opacity(0.09), in: Capsule())
+    }
+}
+
+struct SectoriumSheetHeader: View {
+    let title: String
+    let subtitle: String
+    let symbol: String
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol).font(.system(size: 25, weight: .light)).foregroundStyle(.secondary)
+                .frame(width: 30, height: 32)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title).font(.system(size: 21, weight: .semibold))
+                Text(subtitle).font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+struct SectoriumPreferenceSection<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).font(.headline)
+            content
+            Divider().padding(.top, 6)
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Group only resolved application identities. Unknown tools remain separate by
+/// command; an identically named but differently identified app stays distinct.
+struct SectoriumBlockingApplicationGroup: Identifiable {
+    let id: String
+    let name: String
+    let processes: [SectoriumActivityProcess]
+
+    static func make(_ processes: [SectoriumActivityProcess]) -> [Self] {
+        let grouped = Dictionary(grouping: processes) { process in
+            if let bundle = process.bundleIdentifier, !bundle.isEmpty { return "bundle:" + bundle }
+            if let name = process.applicationName, !name.isEmpty { return "application:" + name }
+            return "command:" + process.command
+        }
+        return grouped.map { id, values in
+            let ordered = values.sorted { $0.processID < $1.processID }
+            return Self(id: id, name: ordered.first?.applicationName ?? ordered.first?.command ?? "", processes: ordered)
+        }.sorted {
+            let comparison = $0.name.localizedStandardCompare($1.name)
+            return comparison == .orderedSame ? $0.id < $1.id : comparison == .orderedAscending
+        }
+    }
+}
+
+struct SectoriumActivityCheckView: View {
+    @ObservedObject var model: HESectoriumStore
+    let isChinese: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if let check = model.safetyCheck {
+                SectoriumSheetHeader(title: check.name,
+                    subtitle: check.processes.isEmpty ? text("Review before continuing", "继续前确认")
+                        : text("Apps are using this drive", "有应用正在使用此硬盘"), symbol: "externaldrive.badge.exclamationmark")
+                Divider()
+                Text(message(check)).font(.callout).foregroundStyle(.secondary)
+                if !check.processes.isEmpty {
+                    ScrollView(.vertical) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(SectoriumBlockingApplicationGroup.make(check.processes)) { group in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Label(group.name, systemImage: "app")
+                                            .font(.body.weight(.medium))
+                                        Spacer()
+                                        Text(text("\(group.processes.count) processes", "\(group.processes.count) 个进程"))
+                                            .font(.callout).foregroundStyle(.secondary)
+                                    }
+                                    DisclosureGroup(text("Process details", "进程详情")) {
+                                        ForEach(group.processes, id: \.processID) { process in
+                                            HStack(alignment: .top, spacing: 10) {
+                                                Text("PID \(process.processID)").monospacedDigit()
+                                                Text(process.references.contains { $0.descriptor == "cwd" }
+                                                    ? text("Open working folder", "工作目录仍打开")
+                                                    : text("Open drive resource", "硬盘资源仍打开"))
+                                            }.font(.caption).foregroundStyle(.secondary)
+                                        }
+                                    }.font(.callout).foregroundStyle(.secondary)
+                                    Divider()
+                                }.padding(.vertical, 5)
+                            }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 220)
+                    .accessibilityIdentifier("uma.sectorium.blocking-apps")
+                }
+                if let notice = check.quitNotice {
+                    Text(notice.text(isChinese: isChinese)).font(.callout).foregroundStyle(.secondary)
+                }
+                if check.waiting { ProgressView(text("Waiting for the apps to release the drive…", "正在等待应用释放硬盘…")) }
+                if !check.waiting, !check.applications.isEmpty {
+                    Button(quitTitle(check)) { model.quitBlockingApplicationsAndRetry() }
+                        .disabled(model.isBusy)
+                        .accessibilityIdentifier("uma.sectorium.quit-blockers-and-retry")
+                }
+                Divider()
+                HStack {
+                    Button(text("Cancel", "取消")) { model.cancelSafetyCheck() }
+                        .keyboardShortcut(.cancelAction)
+                    Spacer()
+                    if check.canProceed {
+                        Button(text("Continue", "继续")) { model.confirmSafeUnload() }
+                            .keyboardShortcut(.defaultAction)
+                    } else if !check.waiting {
+                        Button(text("Recheck", "重新检查")) { model.recheckSafeUnload() }
+                            .disabled(model.isBusy)
+                        Button(text("Wait", "等待")) { model.waitForSafeUnload() }
+                            .disabled(model.isBusy)
+                    }
+                }
+            }
+        }
+        .padding(28).frame(width: 520)
+        .accessibilityIdentifier("uma.sectorium.activity-check")
+    }
+    private func message(_ check: SectoriumSafetyCheck) -> String {
+        switch check.activity {
+        case .busy:
+            text("These apps or processes still use this drive. An open working folder can prevent unloading even when no data is being written. Quit the listed apps, then retry.",
+                 "以下应用或进程仍在使用硬盘。即使没有写入，打开的工作目录也可能阻止卸载。请退出列出的应用后重试。")
+        case .incomplete:
+            text("Activity could not be fully checked. Keep the drive connected. Cancel or wait for a fresh check; nothing will be forced closed.",
+                 "暂时无法完整检查使用情况，请保持硬盘连接。可取消或等待重新检查；不会强制关闭任何程序。")
+        case .noVisibleOccupancy:
+            text("No visible activity was found. Continue to recheck and unload normally. This check alone does not guarantee that the drive is safe to disconnect.",
+                 "未发现可见活动。继续后将再次检查并正常卸载；仅此检查不能证明可以安全拔线。")
+        }
+    }
+    private func quitTitle(_ check: SectoriumSafetyCheck) -> String {
+        if check.applications.count == 1, let app = check.applications.first {
+            return text("Quit \(app.name) and retry", "退出 \(app.name) 并重试")
+        }
+        let names = check.applications.map(\.name).joined(separator: isChinese ? "、" : ", ")
+        return text("Quit \(names) and retry", "退出 \(names) 并重试")
+    }
+    private func text(_ en: String, _ zh: String) -> String { isChinese ? zh : en }
+}
+
+struct SectoriumWholeDeviceEjectConfirmationView: View {
+    @ObservedObject var model: HESectoriumStore
+    let isChinese: Bool
+    let selectedDeviceName: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if let confirmation = model.wholeDeviceEjectConfirmation {
+                SectoriumSheetHeader(title: confirmation.isObservationOnly ? text("Verify removal", "确认已移除")
+                    : text("Disconnect drive", "安全断开硬盘"),
+                    subtitle: selectedDeviceName ?? text("External drive", "外接硬盘"), symbol: "eject.circle")
+                Divider()
+                Text(confirmation.isObservationOnly
+                    ? text("Check whether the previously ejected drive is now absent. This does not run another eject.",
+                           "确认此前弹出的硬盘现在是否已移除；不会重复执行弹出。")
+                    : text("Disconnect unloads all volumes and safely ejects the entire drive. Unload alone keeps the parent drive connected.",
+                           "断开操作会卸载所有相关卷并安全弹出整个硬盘；仅卸载开发卷则保留母盘连接。"))
+                    .font(.body)
+                if !affectedVolumeNames.isEmpty {
+                    Text(affectedVolumeNames.joined(separator: " · ")).font(.callout).foregroundStyle(.secondary)
+                }
+                if !confirmation.dependenciesCanFinishOffTarget && !confirmation.isObservationOnly {
+                    Text(text("AUV is currently using files on this drive to finish the operation. Move its required runtime to the Mac before ejecting.",
+                              "AUV 完成操作所需的运行文件仍在此硬盘上。请先将必要运行组件放到 Mac 内置盘，再弹出。"))
+                        .foregroundStyle(.orange)
+                }
+                DisclosureGroup(text("Technical details", "技术详情")) {
+                    Text("/dev/\(confirmation.bsdName)")
+                    Text(text("\(confirmation.affectedMembers.count) physical volumes, \(confirmation.attachedImageIdentities.count) disk images",
+                              "\(confirmation.affectedMembers.count) 个物理卷，\(confirmation.attachedImageIdentities.count) 个磁盘镜像"))
+                    ForEach(confirmation.affectedMembers, id: \.self) { Text($0).textSelection(.enabled) }
+                }.font(.caption).foregroundStyle(.secondary)
+                Divider()
+                HStack {
+                    Button(text("Cancel", "取消")) { model.cancelWholeDeviceEjectConfirmation() }
+                        .keyboardShortcut(.cancelAction)
+                    Spacer()
+                    Button(confirmation.isObservationOnly ? text("Check", "核验") : text("Disconnect", "安全断开硬盘")) {
+                        model.confirmWholeDeviceEject()
+                    }
+                    .disabled(model.isBusy || (!confirmation.isObservationOnly && !confirmation.dependenciesCanFinishOffTarget))
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("uma.sectorium.eject-confirm")
+                }
+            } else {
+                Text(text("The drive changed. Refresh before trying again.", "硬盘已变化，请刷新后重试。"))
+                Button(text("Close", "关闭")) { model.cancelWholeDeviceEjectConfirmation() }
+            }
+        }
+        .padding(28).frame(width: 480)
+    }
+    private var affectedVolumeNames: [String] {
+        guard let id = model.wholeDeviceEjectConfirmation?.physicalIdentity else { return [] }
+        let names = model.workbench.devices.first { $0.id == id }?.volumeMembers.compactMap(\.name) ?? []
+        return Array(Set(names + model.volumeRows.filter { $0.parentDeviceID == id }.map { $0.profile.name })).sorted()
+    }
+    private func text(_ en: String, _ zh: String) -> String { isChinese ? zh : en }
+}
+
 enum SectoriumExistingImagePicker {
     @MainActor
     static func makePanel(mountedVolumePaths: [String], prompt: String) -> NSOpenPanel {
@@ -1130,6 +1591,7 @@ struct SectoriumWorkbenchButton: NSViewRepresentable {
     let identifier: String
     let isEnabled: Bool
     var controlSize: NSControl.ControlSize = .regular
+    var prominent: Bool = false
     let action: () -> Void
     var onReady: ((NSButton) -> Void)? = nil
 
@@ -1140,6 +1602,7 @@ struct SectoriumWorkbenchButton: NSViewRepresentable {
                                                        action: #selector(Coordinator.activate(_:)))
         button.bezelStyle = .rounded
         button.controlSize = controlSize
+        button.bezelColor = prominent ? .controlAccentColor : nil
         button.setWorkbenchEnabled(isEnabled)
         button.refusesFirstResponder = false
         button.focusRingType = .exterior
@@ -1153,6 +1616,7 @@ struct SectoriumWorkbenchButton: NSViewRepresentable {
         context.coordinator.action = action
         button.title = title
         button.controlSize = controlSize
+        button.bezelColor = prominent ? .controlAccentColor : nil
         (button as? SectoriumWorkbenchFocusableButton)?.setWorkbenchEnabled(isEnabled)
         button.setAccessibilityLabel(title)
         button.setAccessibilityIdentifier(identifier)

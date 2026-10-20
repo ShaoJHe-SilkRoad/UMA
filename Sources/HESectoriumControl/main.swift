@@ -11,8 +11,14 @@ extension HESectoriumService: HESectoriumCommandServing {
     }
 
     public func runAgent() -> Int32 {
-        let startupExit = HESectoriumCommandDispatcher.report(runAutomationAgentAtStartup(), writeStdout: { print($0) }, writeStderr: { fputs($0, stderr) })
-        guard startupExit == 0 else { return startupExit }
+        let startup = runAutomationAgentAtStartup()
+        let startupExit = HESectoriumCommandDispatcher.report(startup, writeStdout: { print($0) }, writeStderr: { fputs($0, stderr) })
+        if startupExit != 0 {
+            // A failed one-shot startup load is not a successful action. Keep the
+            // single installed observer alive so a later verified reconnect can
+            // be handled; the startup failure was already reported to stderr.
+            fputs("HESectoriumControl: startup load failed; observing for verified device changes\n", stderr)
+        }
         #if canImport(DiskArbitration)
         guard let observer = HESectoriumDiskObserver(service: self) else {
             fputs("HESectoriumControl: Disk Arbitration is unavailable\n", stderr)

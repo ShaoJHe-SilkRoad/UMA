@@ -36,6 +36,7 @@ public struct WholeDeviceTopology: Codable, Equatable, Sendable {
     }
     public var hasUniqueMembers: Bool {
         !volumes.isEmpty && Set(volumes.map(\.identity)).count == volumes.count
+            && stablePhysicalVolumeIdentities?.count == volumes.count
             && Set(images.map(\.identity)).count == images.count
             && images.allSatisfy { Set($0.volumeIdentities).count == $0.volumeIdentities.count }
             && images.allSatisfy { image in
@@ -61,6 +62,49 @@ public struct WholeDeviceTopology: Codable, Equatable, Sendable {
             && volumes.count == other.volumes.count
             && Set(volumes.map(\.identity)).count == volumes.count
     }
+
+    /// A terminal Return can see the same media at a new BSD number. Match stable physical
+    /// and APFS member identities here; mutating steps deliberately retain the stricter
+    /// `matchesPhysicalIdentityAndVolumes` check and dispatch from a fresh observation.
+    public func matchesStablePhysicalIdentityAndVolumes(_ other: Self) -> Bool {
+        physicalIdentity == other.physicalIdentity
+            && isWholeDevice && other.isWholeDevice && isExternal && other.isExternal
+            && !isSystemDevice && !other.isSystemDevice
+            && inventoryComplete && other.inventoryComplete && hasUniqueMembers && other.hasUniqueMembers
+            && stablePhysicalVolumeIdentities == other.stablePhysicalVolumeIdentities
+    }
+
+    /// No action was issued after the confirmed snapshot. An explicit cancellation may
+    /// accept newly discovered members, but only on a freshly verified, complete target
+    /// containing every original stable member and the original attached image inventory.
+    public func canCancelUnissuedEject(on current: Self) -> Bool {
+        guard physicalIdentity == current.physicalIdentity,
+              isWholeDevice && current.isWholeDevice && isExternal && current.isExternal,
+              !isSystemDevice && !current.isSystemDevice,
+              inventoryComplete && current.inventoryComplete,
+              hasUniqueMembers && current.hasUniqueMembers,
+              let originalMembers = stablePhysicalVolumeIdentities,
+              let currentMembers = current.stablePhysicalVolumeIdentities,
+              originalMembers.isSubset(of: currentMembers),
+              Set(images) == Set(current.images) else { return false }
+        return true
+    }
+
+    private var stablePhysicalVolumeIdentities: Set<String>? {
+        let identities = volumes.compactMap { Self.stablePhysicalVolumeIdentity($0.identity) }
+        guard identities.count == volumes.count else { return nil }
+        return Set(identities)
+    }
+
+    private static func stablePhysicalVolumeIdentity(_ identity: String) -> String? {
+        let components = identity.split(separator: "|", omittingEmptySubsequences: false)
+        if components.count == 1 { return identity.isEmpty ? nil : identity }
+        guard components.count == 2,
+              let uuid = UUID(uuidString: String(components[0])),
+              String(components[1]).range(of: #"^disk[0-9]+(?:s[0-9]+)+$"#, options: .regularExpression) != nil
+        else { return nil }
+        return uuid.uuidString.lowercased()
+    }
 }
 
 public struct WholeDeviceEjectCheckpoint: Equatable, Sendable {
@@ -85,6 +129,18 @@ public struct WholeDeviceEjectCheckpoint: Equatable, Sendable {
         guard confirmedExactTargetAndScope, knownWritersClosed, dependenciesCanFinishOffTarget,
               confirmedPhysicalIdentity == target.physicalIdentity,
               confirmedMemberKey == target.memberKey, target.inventoryComplete, target.hasUniqueMembers,
+              let confirmedAt, now.timeIntervalSince(confirmedAt) >= -5,
+              now.timeIntervalSince(confirmedAt) <= 120 else { return false }
+        return true
+    }
+
+    /// A successful eject callback needs only a fresh identity/absence observation. No disk
+    /// action follows, so writer closure and off-target execution are not preconditions here.
+    public func permitsReadOnlyRecheck(for target: WholeDeviceTopology, now: Date = Date()) -> Bool {
+        guard confirmedExactTargetAndScope,
+              confirmedPhysicalIdentity == target.physicalIdentity,
+              confirmedMemberKey == target.memberKey,
+              target.inventoryComplete, target.hasUniqueMembers,
               let confirmedAt, now.timeIntervalSince(confirmedAt) >= -5,
               now.timeIntervalSince(confirmedAt) <= 120 else { return false }
         return true
@@ -139,12 +195,22 @@ public protocol WholeDeviceEjectDriving: AnyObject {
     func unmountAllPhysicalVolumesNonForce(_ target: WholeDeviceTopology) -> WholeDeviceActionReceipt
     func ejectWholeDeviceNonForce(_ target: WholeDeviceTopology) -> WholeDeviceActionReceipt
     func presence(physicalIdentity: String) -> WholeDevicePresence
+    /// Safety-bearing absence checks carry the original observed target. A missing ID alone
+    /// cannot prove that physical media with degraded identity has disappeared.
+    func presence(of target: WholeDeviceTopology) -> WholeDevicePresence
+    /// Read-only postcondition used only after the exact whole-device eject succeeded.
+    /// macOS may keep the USB device node enumerated until the cable is unplugged.
+    func successfulEjectHasUnmountedPostcondition(of target: WholeDeviceTopology) -> Bool
     func freshReturnIdentityMatches(_ journal: WholeDeviceEjectJournalRecord) -> Bool
     func freshPhysicalContinuationMatches(_ journal: WholeDeviceEjectJournalRecord) -> Bool
     func freshEjectIssuedRecovery(_ journal: WholeDeviceEjectJournalRecord) -> WholeDeviceEjectIssuedRecovery
 }
 
 public extension WholeDeviceEjectDriving {
+    func successfulEjectHasUnmountedPostcondition(of target: WholeDeviceTopology) -> Bool { false }
+    func presence(of target: WholeDeviceTopology) -> WholeDevicePresence {
+        .unknown("target-aware physical presence is unavailable")
+    }
     func freshPhysicalContinuationMatches(_ journal: WholeDeviceEjectJournalRecord) -> Bool { false }
     func freshEjectIssuedRecovery(_ journal: WholeDeviceEjectJournalRecord) -> WholeDeviceEjectIssuedRecovery { .refused }
 }
@@ -153,7 +219,7 @@ public struct WholeDeviceEjectJournalRecord: Codable, Equatable, Sendable {
     public enum Phase: String, Codable, Sendable {
         case prepared, imageVolumesUnmountIssued, imageVolumesUnmounted, imageDetachIssued, imagesDetached
         case physicalVolumesUnmountIssued, physicalVolumesUnmounted
-        case ejectIssued, ejectCallbackSucceeded, verifiedAbsent, interrupted
+        case ejectIssued, ejectCallbackSucceeded, ejected, verifiedAbsent, disconnected, interrupted
     }
     /// The last mutating request durably issued, including requests whose receipt failed or
     /// whose process stopped before a completion step could be recorded. Optional so older
@@ -180,17 +246,54 @@ public struct WholeDeviceEjectJournalRecord: Codable, Equatable, Sendable {
         self.completedSteps = completedSteps; self.lastReceipt = lastReceipt
         self.lastIssuedAction = lastIssuedAction; self.recoveryObservation = recoveryObservation
     }
+
+    /// Both terminal states carry an OS eject receipt; only verifiedAbsent also proves
+    /// the device is no longer enumerated. Ejected media can safely remain plugged in.
+    public var safelyEjected: Bool { phase == .ejected || phase == .verifiedAbsent }
+
+    /// The durable journal proves this operation never dispatched a storage action.
+    public var canCancelUnissuedEject: Bool {
+        (phase == .prepared || phase == .interrupted)
+            && lastIssuedAction == nil && lastReceipt == nil
+            && completedSteps.isEmpty && recoveryObservation == nil
+    }
+
+    /// A durable successful callback with an unresolved final presence probe can only be
+    /// rechecked; it must never issue another eject or infer safe removal from the callback alone.
+    public var successfulEjectCallbackRequiresRecheck: Bool {
+        guard phase == .ejectCallbackSucceeded || phase == .interrupted,
+              lastIssuedAction == .ejectWholeDevice,
+              case .completed? = lastReceipt,
+              completedSteps.contains("ejectWholeDevice") else { return false }
+        return completedSteps.contains("unmountAllPhysicalVolumes")
+            || target.volumes.allSatisfy { completedSteps.contains("unmountPhysicalVolume:\($0.identity)") }
+    }
+
+    /// After every volume was unmounted and the whole-device eject was issued, a
+    /// freshly verified mounted instance is a return to use even if the process
+    /// lost the eject receipt or missed the disappearance event. This permits
+    /// read-only reconciliation, never another mutation or a safe-unplug claim.
+    public var issuedEjectCanReconcileRemount: Bool {
+        guard lastIssuedAction == .ejectWholeDevice,
+              phase == .ejectIssued || phase == .ejectCallbackSucceeded || phase == .interrupted,
+              target.images.allSatisfy({ completedSteps.contains("detachImage:\($0.identity)") }) else { return false }
+        return completedSteps.contains("unmountAllPhysicalVolumes")
+            || target.volumes.allSatisfy { completedSteps.contains("unmountPhysicalVolume:\($0.identity)") }
+    }
 }
 
 /// Used by StorageController under its existing shared lock and durable state store. The encoded
 /// journal is stored in the existing workbench target slot while the eject intent suppresses
-/// automation. No generic resume path may consume this journal.
+/// automation. Verified eject completion moves the journal to a target-scoped terminal slot and frees the
+/// active slot. No generic resume path may consume an in-progress journal.
 public extension StorageController {
     func ejectWholeExternalDevice(physicalIdentity: String, checkpoint: WholeDeviceEjectCheckpoint,
-                                  driver: WholeDeviceEjectDriving) -> WholeDeviceEjectResult {
+                                  driver: WholeDeviceEjectDriving,
+                                  affectedProfileIDs: Set<String> = []) -> WholeDeviceEjectResult {
         let operationID = UUID().uuidString
         guard checkpoint.confirmedExactTargetAndScope && checkpoint.knownWritersClosed
-                && checkpoint.dependenciesCanFinishOffTarget else {
+                && checkpoint.dependenciesCanFinishOffTarget,
+              affectedProfileIDs.allSatisfy(StoragePersistentState.validProfileID) else {
             return .init(operationID: operationID, completedSteps: [], canUnplug: false, failure: .checkpointRequired)
         }
         guard lock.acquire() else {
@@ -201,6 +304,9 @@ public extension StorageController {
         do { state = try store.load() }
         catch { return .init(operationID: operationID, completedSteps: [], canUnplug: false, failure: .stateUnavailable(String(describing: error))) }
         guard state.workbenchOperation == nil && !state.ejectIntent else {
+            return .init(operationID: operationID, completedSteps: [], canUnplug: false, failure: .operationPending)
+        }
+        guard state.terminalEjectJournals[physicalIdentity] == nil else {
             return .init(operationID: operationID, completedSteps: [], canUnplug: false, failure: .operationPending)
         }
         guard let target = driver.observe(physicalIdentity: physicalIdentity) else {
@@ -219,7 +325,8 @@ public extension StorageController {
             return .init(operationID: operationID, completedSteps: [], canUnplug: false, failure: .checkpointRequired)
         }
         var journal = WholeDeviceEjectJournalRecord(operationID: operationID, target: target)
-        guard persistEjectJournal(journal, state: state, intent: true, phase: "eject:prepared") else {
+        guard persistEjectJournal(journal, state: state, intent: true, phase: "eject:prepared",
+                                  additionalSuppressedProfileIDs: affectedProfileIDs) else {
             return .init(operationID: operationID, completedSteps: [], canUnplug: false, failure: .stateConflict)
         }
         var completed: [String] = []
@@ -332,25 +439,137 @@ public extension StorageController {
         completed.append("ejectWholeDevice")
         journal.phase = .ejectCallbackSucceeded; journal.completedSteps = completed
         guard persistEjectJournal(journal, intent: true, phase: "eject:callback-succeeded") else { return fail(.stateConflict, ejectReceipt) }
-        switch driver.presence(physicalIdentity: physicalIdentity) {
-        case .absent:
-            journal.phase = .verifiedAbsent; journal.completedSteps = completed
-            guard persistEjectJournal(journal, intent: true, phase: "eject:verified-absent", terminal: "safe-to-unplug") else {
-                return fail(.stateConflict, ejectReceipt)
-            }
-            return .init(operationID: operationID, completedSteps: completed, canUnplug: true)
-        case .present: return fail(.absenceUnverified("target remains present"), ejectReceipt)
-        case .unknown(let reason): return fail(.absenceUnverified(reason), ejectReceipt)
-        }
+        return finalizeSuccessfulEject(journal, driver: driver)
     }
 
-    /// Explicit Return is separate from eject and clears automation suppression only after a
-    /// fresh exact physical/image/APFS validation supplied by the same runtime adapter.
+    /// Explicit Return closes an active legacy journal only after fresh exact validation.
+    /// A completed target-scoped journal requires the physical-identity overload below.
     func returnFromWholeDeviceEject(driver: WholeDeviceEjectDriving) -> Bool {
         guard lock.acquire() else { return false }
         defer { lock.release() }
-        guard let state = try? store.load(), state.ejectIntent,
-              let journal = decodeEjectJournal(state.workbenchTarget) else { return false }
+        guard let state = try? store.load(), let journal = activeEjectJournal(in: state),
+              returnBoundaryIsRecoverable(journal), driver.freshReturnIdentityMatches(journal) else { return false }
+        return persistValidatedReturn(journal, state: state)
+    }
+
+    /// Completed ejects remain available by exact target after the global active slot is freed.
+    /// Return itself never clears per-profile suppression; only a validated manual load may do so.
+    func returnFromWholeDeviceEject(physicalIdentity: String, driver: WholeDeviceEjectDriving) -> Bool {
+        guard lock.acquire() else { return false }
+        defer { lock.release() }
+        guard let state = try? store.load() else { return false }
+        if let active = activeEjectJournal(in: state) {
+            guard active.target.physicalIdentity == physicalIdentity,
+                  returnBoundaryIsRecoverable(active), driver.freshReturnIdentityMatches(active) else { return false }
+            return persistValidatedReturn(active, state: state)
+        }
+        guard let terminal = terminalEjectJournal(for: physicalIdentity, in: state),
+              driver.freshReturnIdentityMatches(terminal) else { return false }
+        return persistValidatedReturn(terminal, state: state, terminalPhysicalIdentity: physicalIdentity)
+    }
+
+    /// Read-only availability; the mutating Return path repeats every check under the lock.
+    func canReturnFromWholeDeviceEject(driver: WholeDeviceEjectDriving) -> Bool {
+        guard lock.acquire() else { return false }
+        defer { lock.release() }
+        guard let state = try? store.load(), let journal = activeEjectJournal(in: state) else { return false }
+        return returnBoundaryIsRecoverable(journal) && driver.freshReturnIdentityMatches(journal)
+    }
+
+    func canReturnFromWholeDeviceEject(physicalIdentity: String, driver: WholeDeviceEjectDriving) -> Bool {
+        guard lock.acquire() else { return false }
+        defer { lock.release() }
+        guard let state = try? store.load() else { return false }
+        if let active = activeEjectJournal(in: state) {
+            return active.target.physicalIdentity == physicalIdentity
+                && returnBoundaryIsRecoverable(active) && driver.freshReturnIdentityMatches(active)
+        }
+        guard let terminal = terminalEjectJournal(for: physicalIdentity, in: state) else { return false }
+        return driver.freshReturnIdentityMatches(terminal)
+    }
+
+    /// Reconcile native appearance/disappearance without issuing a storage action. An absent
+    /// target releases the operation slot even after an interrupted request, but only a
+    /// durable successful eject callback earns the safe-to-unplug result. A fresh complete
+    /// mounted identity after an issued eject can resume use without proving the earlier
+    /// eject succeeded. It never repeats that old eject. Compare-and-swap and the shared lock prevent stale observations
+    /// from overwriting a concurrent action.
+    func reconcileWholeDeviceEjectRecovery(physicalIdentity: String,
+                                           driver: WholeDeviceEjectDriving,
+                                           affectedProfileIDs: Set<String> = []) -> Bool {
+        guard lock.acquire() else { return false }
+        defer { lock.release() }
+        guard let state = try? store.load() else { return false }
+        if var journal = activeEjectJournal(in: state) {
+            guard journal.target.physicalIdentity == physicalIdentity,
+                  journal.target.isWholeDevice, journal.target.isExternal, !journal.target.isSystemDevice,
+                  journal.target.inventoryComplete, journal.target.hasUniqueMembers else { return false }
+            switch driver.presence(of: journal.target) {
+            case .unknown: return false
+            case .absent:
+                let safelyEjected = journal.successfulEjectCallbackRequiresRecheck
+                journal.phase = safelyEjected ? .verifiedAbsent : .disconnected
+                return archiveTerminalEjectJournal(journal,
+                    phase: safelyEjected ? "eject:verified-absent" : "eject:disconnected",
+                    disconnectedProfileIDs: affectedProfileIDs)
+            case .present:
+                if journal.successfulEjectCallbackRequiresRecheck,
+                   driver.successfulEjectHasUnmountedPostcondition(of: journal.target) {
+                    journal.phase = .ejected
+                    return archiveTerminalEjectJournal(journal, phase: "eject:completed",
+                        disconnectedProfileIDs: affectedProfileIDs)
+                }
+                guard journal.issuedEjectCanReconcileRemount,
+                      driver.freshReturnIdentityMatches(journal) else { return false }
+                return persistValidatedReturn(journal, state: state,
+                    reconnectedProfileIDs: affectedProfileIDs)
+            }
+        }
+        if let terminal = terminalEjectJournal(for: physicalIdentity, in: state) {
+            guard driver.presence(of: terminal.target) == .present,
+                  driver.freshReturnIdentityMatches(terminal) else { return false }
+            return persistValidatedReturn(terminal, state: state,
+                terminalPhysicalIdentity: physicalIdentity, reconnectedProfileIDs: affectedProfileIDs)
+        }
+        // Older returns released the operation and removed the terminal journal,
+        // but left these profiles disconnected/suppressed. Reconcile that exact
+        // retained receipt only after the current disk and profile chain validate.
+        guard !state.ejectIntent, state.workbenchOperation == nil,
+              state.terminalEjectJournals[physicalIdentity] == nil,
+              state.workbenchPhase == "eject:return-validated",
+              state.workbenchTerminalResult == "returned-to-development",
+              !affectedProfileIDs.isDisjoint(with: state.suppressedProfileIDs.union(state.disconnectedProfileIDs)),
+              let returned = decodeEjectJournal(state.workbenchTarget),
+              returned.operationID == state.operationID,
+              returned.target.physicalIdentity == physicalIdentity,
+              returned.target.isWholeDevice, returned.target.isExternal, !returned.target.isSystemDevice,
+              returned.target.inventoryComplete, returned.target.hasUniqueMembers,
+              returnBoundaryIsRecoverable(returned),
+              driver.presence(of: returned.target) == .present,
+              driver.freshReturnIdentityMatches(returned) else { return false }
+        return persistValidatedReturn(returned, state: state, reconnectedProfileIDs: affectedProfileIDs)
+    }
+
+    private func activeEjectJournal(in state: StoragePersistentState) -> WholeDeviceEjectJournalRecord? {
+        guard state.ejectIntent, let journal = decodeEjectJournal(state.workbenchTarget),
+              state.operationID == journal.operationID,
+              state.workbenchOperation == "eject:\(journal.operationID)" else { return nil }
+        return journal
+    }
+
+    private func terminalEjectJournal(for physicalIdentity: String,
+                                      in state: StoragePersistentState) -> WholeDeviceEjectJournalRecord? {
+        guard !state.ejectIntent, state.workbenchOperation == nil,
+              let encoded = state.terminalEjectJournals[physicalIdentity],
+              let journal = decodeEjectJournal(encoded),
+              journal.safelyEjected || journal.phase == .disconnected,
+              !journal.operationID.isEmpty, journal.target.physicalIdentity == physicalIdentity,
+              journal.target.isWholeDevice, journal.target.isExternal, !journal.target.isSystemDevice,
+              journal.target.inventoryComplete, journal.target.hasUniqueMembers else { return nil }
+        return journal
+    }
+
+    private func returnBoundaryIsRecoverable(_ journal: WholeDeviceEjectJournalRecord) -> Bool {
         let allImagesDurablyDetached = journal.target.images.allSatisfy { image in
             journal.completedSteps.contains("detachImage:\(image.identity)")
         }
@@ -367,51 +586,51 @@ public extension StorageController {
             && journal.lastIssuedAction == .imageVolumesUnmount && busyImageReceipt
             && !journal.target.images.isEmpty && noPhysicalMutationStarted
             && !journal.completedSteps.contains { $0.hasPrefix("detachImage:") }
-        let returnBoundaryIsRecoverable = journal.phase == .verifiedAbsent
+        let returnBoundaryIsRecoverable = journal.safelyEjected || journal.phase == .disconnected
+            || journal.successfulEjectCallbackRequiresRecheck
+            || journal.issuedEjectCanReconcileRemount
+            || journal.canCancelUnissuedEject
             || (journal.phase == .imagesDetached && allImagesDurablyDetached
                 && journal.lastIssuedAction == .imageDetach)
             || recoverableBusyImageState
-        guard returnBoundaryIsRecoverable, driver.freshReturnIdentityMatches(journal) else { return false }
-        let returned = StoragePersistentState(revision: state.revision + 1, ejectIntent: false,
-            operationID: journal.operationID, outerDisappearedAfterIntent: false,
-            outerReconnectAttempted: false, workbenchOperation: nil, workbenchPhase: "eject:return-validated",
-            workbenchTarget: nil, workbenchCompletedStep: nil, workbenchTerminalResult: "returned-to-development")
-        return (try? store.compareAndSwap(expectedRevision: state.revision, newState: returned)) == true
+        return returnBoundaryIsRecoverable
     }
 
-    /// Read-only counterpart used by UI availability. The mutating Return path repeats every
-    /// check under the same lock, so this observation cannot itself authorize a later mutation.
-    func canReturnFromWholeDeviceEject(driver: WholeDeviceEjectDriving) -> Bool {
-        guard lock.acquire() else { return false }
-        defer { lock.release() }
-        guard let state = try? store.load(), state.ejectIntent,
-              let journal = decodeEjectJournal(state.workbenchTarget) else { return false }
-        let allImagesDurablyDetached = journal.target.images.allSatisfy { image in
-            journal.completedSteps.contains("detachImage:\(image.identity)")
+    private func persistValidatedReturn(_ journal: WholeDeviceEjectJournalRecord,
+                                        state: StoragePersistentState,
+                                        terminalPhysicalIdentity: String? = nil,
+                                        reconnectedProfileIDs: Set<String> = []) -> Bool {
+        var returned = state.advancingRevision()
+        if let terminalPhysicalIdentity {
+            returned.terminalEjectJournals.removeValue(forKey: terminalPhysicalIdentity)
         }
-        let noPhysicalMutationStarted = journal.lastIssuedAction != .physicalVolumesUnmount
-            && journal.lastIssuedAction != .ejectWholeDevice
-            && !journal.completedSteps.contains { $0.hasPrefix("unmountPhysicalVolume") || $0.hasPrefix("ejectWholeDevice") }
-        let busyImageBoundary: Bool = {
-            guard journal.phase == .interrupted, journal.lastIssuedAction == .imageVolumesUnmount,
-                  case .busy? = journal.lastReceipt else { return false }
-            return !journal.target.images.isEmpty && noPhysicalMutationStarted
-                && !journal.completedSteps.contains { $0.hasPrefix("detachImage:") }
-        }()
-        let recoverable = journal.phase == .verifiedAbsent
-            || (journal.phase == .imagesDetached && allImagesDurablyDetached && journal.lastIssuedAction == .imageDetach)
-            || busyImageBoundary
-        return recoverable && driver.freshReturnIdentityMatches(journal)
+        returned.ejectIntent = false
+        returned.operationID = journal.operationID
+        returned.outerDisappearedAfterIntent = false
+        returned.outerReconnectAttempted = false
+        returned.workbenchOperation = nil
+        returned.workbenchPhase = "eject:return-validated"
+        // Retain the native receipt as history, without retaining an active operation.
+        returned.workbenchTarget = (try? JSONEncoder().encode(journal))?.base64EncodedString()
+        returned.workbenchCompletedStep = nil
+        returned.workbenchTerminalResult = "returned-to-development"
+        // A verified new connection is no longer disconnected, and the old
+        // connection's eject intent must not disable Load or its auto-load policy.
+        // Explicit cancellation on the same connection passes no profile IDs and
+        // keeps suppression until an intentional Load succeeds.
+        returned.suppressedProfileIDs.subtract(reconnectedProfileIDs)
+        returned.disconnectedProfileIDs.subtract(reconnectedProfileIDs)
+        returned.reconnectAttemptedProfileIDs.subtract(reconnectedProfileIDs)
+        return (try? store.compareAndSwap(expectedRevision: state.revision, newState: returned)) == true
     }
 
     /// Continues only a journaled physical-volume unmount after a new exact user checkpoint.
     /// It reobserves the original member identities, skips only durably recorded completions,
-    /// and retains eject intent until verified physical absence.
+    /// and retains eject intent until native eject completion is freshly verified.
     func continueWholeExternalDeviceEject(checkpoint: WholeDeviceEjectCheckpoint,
                                           driver: WholeDeviceEjectDriving) -> WholeDeviceEjectResult {
         let operationID = UUID().uuidString
-        guard checkpoint.confirmedExactTargetAndScope && checkpoint.knownWritersClosed
-                && checkpoint.dependenciesCanFinishOffTarget else {
+        guard checkpoint.confirmedExactTargetAndScope else {
             return .init(operationID: operationID, completedSteps: [], canUnplug: false, failure: .checkpointRequired)
         }
         guard lock.acquire() else {
@@ -424,23 +643,37 @@ public extension StorageController {
               journal.operationID == state.operationID,
               journal.target.isExternal, journal.target.isWholeDevice, !journal.target.isSystemDevice,
               journal.target.inventoryComplete, journal.target.hasUniqueMembers,
-              journal.target.images.allSatisfy({ journal.completedSteps.contains("detachImage:\($0.identity)") }),
-              checkpoint.permitsRequest(for: journal.target) else {
+              journal.target.images.allSatisfy({ journal.completedSteps.contains("detachImage:\($0.identity)") }) else {
             return .init(operationID: operationID, completedSteps: [], canUnplug: false, failure: .returnTargetMismatch)
+        }
+        let callbackOnlyRecheck = journal.successfulEjectCallbackRequiresRecheck
+        guard callbackOnlyRecheck ? checkpoint.permitsReadOnlyRecheck(for: journal.target)
+                                  : checkpoint.permitsRequest(for: journal.target) else {
+            return .init(operationID: operationID, completedSteps: [], canUnplug: false, failure: .checkpointRequired)
+        }
+        if journal.safelyEjected {
+            guard archiveTerminalEjectJournal(journal, phase: journal.phase == .ejected ? "eject:completed" : "eject:verified-absent") else {
+                return .init(operationID: journal.operationID, completedSteps: journal.completedSteps,
+                             canUnplug: false, failure: .stateConflict)
+            }
+            return .init(operationID: journal.operationID, completedSteps: journal.completedSteps, canUnplug: true)
+        }
+        if callbackOnlyRecheck {
+            return finalizeSuccessfulEject(journal, driver: driver)
         }
         let recoveringIssuedEject = journal.phase == .ejectIssued && journal.lastIssuedAction == .ejectWholeDevice
         if recoveringIssuedEject {
             switch driver.freshEjectIssuedRecovery(journal) {
             case .exactTargetAbsent:
-                journal.phase = .verifiedAbsent
+                journal.phase = .disconnected
                 journal.recoveryObservation = .exactTargetAbsentAfterEjectIssue
-                guard persistEjectJournal(journal, intent: true, phase: "eject:verified-absent-after-issued-recovery", terminal: "safe-to-unplug") else {
+                guard archiveTerminalEjectJournal(journal, phase: "eject:disconnected-after-issued-recovery") else {
                     return .init(operationID: journal.operationID, completedSteps: journal.completedSteps,
                                  canUnplug: false, failure: .stateConflict)
                 }
                 return .init(operationID: journal.operationID,
                              completedSteps: journal.completedSteps + ["observeWholeDeviceAbsentAfterEjectIssue"],
-                             canUnplug: true)
+                             canUnplug: false, failure: .absenceUnverified("Drive is disconnected; the interrupted eject has no completion receipt"))
             case .exactTargetPresentUnmounted:
                 journal.recoveryObservation = .exactTargetPresentUnmountedAfterEjectIssue
             case .refused:
@@ -519,29 +752,87 @@ public extension StorageController {
         guard persistEjectJournal(journal, intent: true, phase: "eject:callback-succeeded") else {
             return fail(.stateConflict, receipt)
         }
-        switch driver.presence(physicalIdentity: journal.target.physicalIdentity) {
+        return finalizeSuccessfulEject(journal, driver: driver)
+    }
+
+    /// A successful macOS eject does not require the user to physically unplug the cable.
+    /// Preserve actual absence separately from a still-enumerated, fully unmounted target.
+    private func finalizeSuccessfulEject(_ saved: WholeDeviceEjectJournalRecord,
+                                         driver: WholeDeviceEjectDriving) -> WholeDeviceEjectResult {
+        var journal = saved
+        guard journal.successfulEjectCallbackRequiresRecheck else {
+            return .init(operationID: journal.operationID, completedSteps: journal.completedSteps,
+                         canUnplug: false, failure: .returnTargetMismatch)
+        }
+        switch driver.presence(of: journal.target) {
         case .absent:
             journal.phase = .verifiedAbsent
-            guard persistEjectJournal(journal, intent: true, phase: "eject:verified-absent", terminal: "safe-to-unplug") else {
-                return fail(.stateConflict, receipt)
+        case .present:
+            guard driver.successfulEjectHasUnmountedPostcondition(of: journal.target) else {
+                return .init(operationID: journal.operationID, completedSteps: journal.completedSteps,
+                             canUnplug: false, failure: .absenceUnverified("ejected target has mounted, attached, changed or unverified members"))
             }
-            return .init(operationID: journal.operationID, completedSteps: completed, canUnplug: true)
-        case .present: return fail(.absenceUnverified("target remains present"), receipt)
-        case .unknown(let detail): return fail(.absenceUnverified(detail), receipt)
+            journal.phase = .ejected
+        case .unknown(let detail):
+            return .init(operationID: journal.operationID, completedSteps: journal.completedSteps,
+                         canUnplug: false, failure: .absenceUnverified(detail))
         }
+        guard archiveTerminalEjectJournal(journal,
+                phase: journal.phase == .ejected ? "eject:completed" : "eject:verified-absent") else {
+            return .init(operationID: journal.operationID, completedSteps: journal.completedSteps,
+                         canUnplug: false, failure: .stateConflict)
+        }
+        return .init(operationID: journal.operationID, completedSteps: journal.completedSteps, canUnplug: true)
+    }
+
+    /// A single CAS moves authoritative completion out of the active slot. A failed CAS leaves
+    /// the prior in-progress journal intact for explicit recovery; it cannot report success.
+    private func archiveTerminalEjectJournal(_ journal: WholeDeviceEjectJournalRecord,
+                                                   phase: String,
+                                                   disconnectedProfileIDs: Set<String> = []) -> Bool {
+        guard journal.safelyEjected || journal.phase == .disconnected,
+              journal.target.isWholeDevice, journal.target.isExternal, !journal.target.isSystemDevice,
+              journal.target.inventoryComplete, journal.target.hasUniqueMembers,
+              let state = try? store.load(), state.ejectIntent,
+              state.operationID == journal.operationID,
+              state.workbenchOperation == "eject:\(journal.operationID)",
+              state.terminalEjectJournals[journal.target.physicalIdentity] == nil,
+              let data = try? JSONEncoder().encode(journal), data.count <= 48_000 else { return false }
+        var next = state.advancingRevision()
+        next.terminalEjectJournals[journal.target.physicalIdentity] = data.base64EncodedString()
+        next.ejectIntent = false
+        next.operationID = nil
+        next.outerDisappearedAfterIntent = false
+        next.outerReconnectAttempted = false
+        next.workbenchOperation = nil
+        next.workbenchPhase = phase
+        next.workbenchTarget = nil
+        next.workbenchCompletedStep = journal.completedSteps.last
+        next.workbenchTerminalResult = journal.safelyEjected
+            ? "safe-to-unplug" : "disconnected-without-eject-confirmation"
+        next.disconnectedProfileIDs.formUnion(disconnectedProfileIDs)
+        next.reconnectAttemptedProfileIDs.subtract(disconnectedProfileIDs)
+        return (try? store.compareAndSwap(expectedRevision: state.revision, newState: next)) == true
     }
 
     private func persistEjectJournal(_ journal: WholeDeviceEjectJournalRecord,
                                      state supplied: StoragePersistentState? = nil, intent: Bool,
-                                     phase: String, terminal: String? = nil) -> Bool {
+                                     phase: String,
+                                     additionalSuppressedProfileIDs: Set<String> = []) -> Bool {
         guard let state = supplied ?? (try? store.load()),
               let data = try? JSONEncoder().encode(journal), data.count <= 48_000 else { return false }
         let encoded = data.base64EncodedString()
-        let next = StoragePersistentState(revision: state.revision + 1, ejectIntent: intent,
-            operationID: journal.operationID, outerDisappearedAfterIntent: journal.phase == .verifiedAbsent,
-            outerReconnectAttempted: false, workbenchOperation: "eject:\(journal.operationID)",
-            workbenchPhase: phase, workbenchTarget: encoded,
-            workbenchCompletedStep: journal.completedSteps.last, workbenchTerminalResult: terminal)
+        var next = state.advancingRevision()
+        next.ejectIntent = intent
+        next.operationID = journal.operationID
+        next.outerDisappearedAfterIntent = journal.phase == .verifiedAbsent
+        next.outerReconnectAttempted = false
+        next.suppressedProfileIDs.formUnion(additionalSuppressedProfileIDs)
+        next.workbenchOperation = "eject:\(journal.operationID)"
+        next.workbenchPhase = phase
+        next.workbenchTarget = encoded
+        next.workbenchCompletedStep = journal.completedSteps.last
+        next.workbenchTerminalResult = nil
         return (try? store.compareAndSwap(expectedRevision: state.revision, newState: next)) == true
     }
 

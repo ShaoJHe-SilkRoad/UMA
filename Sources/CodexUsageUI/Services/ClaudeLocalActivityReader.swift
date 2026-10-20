@@ -1,6 +1,7 @@
 import CryptoKit
 import Darwin
 import Foundation
+import CoreServices
 
 /// Published Claude list prices in US dollars per one million tokens.
 ///
@@ -220,21 +221,38 @@ struct ClaudeLocalSurfaceDetector: @unchecked Sendable {
     private let fileManager: FileManager
     private let homeDirectory: URL
     private let applicationsDirectory: URL
+    private let registeredApplicationPaths: @Sendable () -> [String]
+    private let bundleIdentifier: @Sendable (String) -> String?
 
     init(
         fileManager: FileManager = .default,
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
-        applicationsDirectory: URL = URL(fileURLWithPath: "/Applications", isDirectory: true)
+        applicationsDirectory: URL = URL(fileURLWithPath: "/Applications", isDirectory: true),
+        registeredApplicationPaths: (@Sendable () -> [String])? = nil,
+        bundleIdentifier: @escaping @Sendable (String) -> String? = { Bundle(path: $0)?.bundleIdentifier }
     ) {
         self.fileManager = fileManager
         self.homeDirectory = homeDirectory
         self.applicationsDirectory = applicationsDirectory
+        self.bundleIdentifier = bundleIdentifier
+        self.registeredApplicationPaths = registeredApplicationPaths ?? {
+            // Fixture roots must not fall through to the host's registry.
+            guard applicationsDirectory.path == "/Applications",
+                  homeDirectory == FileManager.default.homeDirectoryForCurrentUser else { return [] }
+            let urls = LSCopyApplicationURLsForBundleIdentifier("com.anthropic.claudefordesktop" as CFString, nil)?
+                .takeRetainedValue() as? [URL] ?? []
+            return urls.map(\.path)
+        }
     }
 
     var claudeDesktopInstalled: Bool {
-        fileManager.fileExists(
-            atPath: applicationsDirectory.appendingPathComponent("Claude.app").path
-        )
+        [applicationsDirectory.appendingPathComponent("Claude.app"),
+         homeDirectory.appendingPathComponent("Applications/Claude.app")]
+            .contains { fileManager.fileExists(atPath: $0.path) }
+            || registeredApplicationPaths().contains {
+                bundleIdentifier($0) == "com.anthropic.claudefordesktop"
+                    && fileManager.fileExists(atPath: $0)
+            }
     }
 
     var statusLineCapableSurfaceInstalled: Bool {

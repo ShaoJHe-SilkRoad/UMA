@@ -49,6 +49,11 @@ private final class ScriptedRunner: HESectoriumCommandRunning {
         return outputs[key] ?? .init(exitCode: 127, detail: "fixture command not configured")
     }
 }
+private final class RefusingPortableWriter: SectoriumPortableDocumentWriting {
+    func update(profile: SectoriumDevelopmentProfile, event: String) -> SectoriumPortableDocumentResult {
+        .pending("fixture withholds portable writes")
+    }
+}
 
 private func plistText(_ value: Any) throws -> String {
     let data = try PropertyListSerialization.data(fromPropertyList: value, format: .xml, options: 0)
@@ -130,7 +135,13 @@ private struct Fixture {
         let eject = source.appendingPathComponent("he-eject")
         try Data(contentsOf: repository.appendingPathComponent("Configuration/HESectorium/he-eject")).write(to: eject)
         let agent = source.appendingPathComponent("agent.plist")
-        try Data("<plist><string>com.juliushe.dev-apfs-mounter</string><string>__UMA_CONTROL_PATH__</string><string>__UMA_LOG_OUT__</string><string>__UMA_LOG_ERR__</string></plist>".utf8).write(to: agent)
+        let agentTemplate: [String: Any] = [
+            "Label": SectoriumLaunchAgentConfiguration.label,
+            "ProgramArguments": ["__UMA_CONTROL_PATH__", "agent"],
+            "RunAtLoad": true, "ProcessType": "Background",
+            "StandardOutPath": "__UMA_LOG_OUT__", "StandardErrorPath": "__UMA_LOG_ERR__"
+        ]
+        try PropertyListSerialization.data(fromPropertyList: agentTemplate, format: .xml, options: 0).write(to: agent)
         let config = source.appendingPathComponent("identity.json")
         let identity = """
         {"outerUUID":"\(StorageIdentityPolicy.expected.outerUUID.uuidString)","devUUID":"\(StorageIdentityPolicy.expected.devUUID!.uuidString)","outerMountPoint":"/Volumes/HE","devMountPoint":"/Volumes/HE/DEV","devVolumeName":"DEV_APFS","imagePath":"/Volumes/HE/.DEV-APFS.sparsebundle"}
@@ -214,6 +225,71 @@ private struct Fixture {
     #expect(second.succeeded)
     #expect(second.changedPaths.isEmpty)
     #expect(second.summary.contains("adopted"))
+}
+
+@Test func loadedAgentRequiresExactLabelProgramAndArguments() {
+    let label = SectoriumLaunchAgentConfiguration.label
+    let control = "/private/tmp/agent-fixture/HESectoriumControl"
+    let expected: [String: Any] = ["Label": label, "ProgramArguments": [control, "agent"]]
+    #expect(SystemAgentStatusProvider.classify(job: expected, label: label,
+        expectedControlPath: control) == .loaded)
+    var wrongLabel = expected; wrongLabel["Label"] = "com.example.other-agent"
+    var wrongProgram = expected; wrongProgram["ProgramArguments"] = ["/bin/sh", "agent"]
+    var wrongArguments = expected; wrongArguments["ProgramArguments"] = [control, "eject"]
+    var extraArgument = expected; extraArgument["ProgramArguments"] = [control, "agent", "unexpected"]
+    var conflictingProgram = expected; conflictingProgram["Program"] = "/bin/sh"
+    var noArguments = expected; noArguments.removeValue(forKey: "ProgramArguments")
+    for job in [wrongLabel, wrongProgram, wrongArguments, extraArgument, conflictingProgram, noArguments] {
+        #expect(SystemAgentStatusProvider.classify(job: job, label: label,
+            expectedControlPath: control) == .unknown)
+    }
+    #expect(SystemAgentStatusProvider.classify(job: expected, label: "com.example.other-agent",
+        expectedControlPath: control) == .unknown)
+}
+
+@Test func installedAgentRequiresExactStructuredPlist() throws {
+    let f = try Fixture(); defer { f.remove() }
+    let installer = HESectoriumInstaller(paths: f.paths, home: f.home)
+    #expect(installer.apply(f.assets, action: .install).succeeded)
+    #expect(installer.status() == .installed)
+    let target = f.home.appendingPathComponent("Library/LaunchAgents/com.juliushe.dev-apfs-mounter.plist")
+    let original = try Data(contentsOf: target)
+    let valid = try #require(PropertyListSerialization.propertyList(from: original, options: [], format: nil) as? [String: Any])
+    var wrongLabel = valid; wrongLabel["Label"] = "com.example.other-agent"
+    var wrongProgram = valid; wrongProgram["ProgramArguments"] = ["/bin/sh", "agent"]
+    var wrongArguments = valid; wrongArguments["ProgramArguments"] = [f.paths.root.appendingPathComponent("HESectoriumControl").path, "eject"]
+    var conflictingProgram = valid; conflictingProgram["Program"] = "/bin/sh"
+    var wrongRunAtLoad = valid; wrongRunAtLoad["RunAtLoad"] = false
+    var decoy = wrongProgram; decoy["Comment"] = f.paths.root.appendingPathComponent("HESectoriumControl").path
+    for job in [wrongLabel, wrongProgram, wrongArguments, conflictingProgram, wrongRunAtLoad, decoy] {
+        try PropertyListSerialization.data(fromPropertyList: job, format: .xml, options: 0)
+            .write(to: target, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
+        #expect(installer.status() == .conflict("LaunchAgent is not bound to the shared controller"))
+    }
+    try original.write(to: target, options: .atomic)
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
+    #expect(installer.status() == .installed)
+}
+
+@Test func maliciousAgentAssetIsRejectedBeforeAnyInstallWrite() throws {
+    let f = try Fixture(); defer { f.remove() }
+    let source = f.root.appendingPathComponent("malicious-agent.plist")
+    let template = try #require(PropertyListSerialization.propertyList(
+        from: Data(contentsOf: f.assets.launchAgent), options: [], format: nil) as? [String: Any])
+    var malicious = template
+    malicious["ProgramArguments"] = ["/bin/sh", "-c", "exit 0"]
+    malicious["Comment"] = "__UMA_CONTROL_PATH__"
+    try PropertyListSerialization.data(fromPropertyList: malicious, format: .xml, options: 0).write(to: source)
+    let assets = HESectoriumAssets(control: f.assets.control, devMountWrapper: f.assets.devMountWrapper,
+        ejectWrapper: f.assets.ejectWrapper, launchAgent: source, identityConfig: f.assets.identityConfig)
+
+    let result = HESectoriumInstaller(paths: f.paths, home: f.home).apply(assets, action: .install)
+
+    #expect(!result.succeeded)
+    #expect(!FileManager.default.fileExists(atPath: f.paths.root.appendingPathComponent("HESectoriumControl").path))
+    #expect(!FileManager.default.fileExists(atPath:
+        f.home.appendingPathComponent("Library/LaunchAgents/com.juliushe.dev-apfs-mounter.plist").path))
 }
 
 @Test func unknownExistingTargetBlocksBeforeAnyWrite() throws {
@@ -318,6 +394,22 @@ private struct Fixture {
     #expect(!FileManager.default.fileExists(atPath: f.home.appendingPathComponent(".local/bin/dev-apfs-mount").path))
 }
 
+@Test func registeredProfileInstallerDoesNotRequireLegacyIdentityFile() throws {
+    let f = try Fixture(); defer { f.remove() }
+    let installer = HESectoriumInstaller(paths: f.paths, home: f.home)
+    let profileAssets = HESectoriumAssets(control: f.assets.control,
+        devMountWrapper: f.assets.devMountWrapper, ejectWrapper: f.assets.ejectWrapper,
+        launchAgent: f.assets.launchAgent, identityConfig: nil)
+
+    let installed = installer.apply(profileAssets, action: .install, profileConfigured: true)
+
+    #expect(installed.succeeded, "\(installed.summary)")
+    #expect(installer.status(profileConfigured: true) == .installed)
+    #expect(installer.status() == .missing)
+    #expect(!FileManager.default.fileExists(atPath: f.paths.config.path))
+    #expect(installed.fileOutcomes.allSatisfy { $0.file != "identityConfig" })
+}
+
 @Test func concurrentPreimageChangeIsNotOverwritten() throws {
     let f = try Fixture(); defer { f.remove() }
     let control = f.paths.root.appendingPathComponent("HESectoriumControl")
@@ -365,7 +457,8 @@ private struct Fixture {
     let f = try Fixture(); defer { f.remove() }
     let backend = FixtureBackend(); let store = MemoryStore(); let lock = MemoryLock()
     let service = HESectoriumService(paths: f.paths, backend: backend, store: store, operationLock: lock,
-                                     installer: HESectoriumInstaller(paths: f.paths, home: f.home))
+                                     installer: HESectoriumInstaller(paths: f.paths, home: f.home),
+                                     runner: ScriptedRunner(), portableDocumentWriter: RefusingPortableWriter())
     let snapshot = service.refreshStatus()
     #expect(snapshot.readiness == .notReady("identity configuration missing or invalid"))
     #expect(!service.mountDEV().succeeded)
@@ -380,7 +473,8 @@ private struct Fixture {
     let f = try Fixture(); defer { f.remove() }
     let backend = FixtureBackend(), store = MemoryStore(), lock = MemoryLock(), runner = ScriptedRunner()
     let service = HESectoriumService(paths: f.paths, backend: backend, store: store,
-        operationLock: lock, runner: runner, identityPolicy: .expected)
+        operationLock: lock, installer: HESectoriumInstaller(paths: f.paths, home: f.home),
+        runner: runner, identityPolicy: .expected, portableDocumentWriter: RefusingPortableWriter())
 
     let result = service.safeEjectHE()
 
@@ -399,13 +493,15 @@ private struct Fixture {
     let installer = HESectoriumInstaller(paths: f.paths, home: f.home)
     try FileManager.default.createDirectory(at: f.paths.root, withIntermediateDirectories: true)
     try Data("invalid".utf8).write(to: f.paths.config)
-    let invalid = HESectoriumService(paths: f.paths, backend: backend, store: store, operationLock: lock, installer: installer)
+    let invalid = HESectoriumService(paths: f.paths, backend: backend, store: store, operationLock: lock,
+        installer: installer, runner: ScriptedRunner(), portableDocumentWriter: RefusingPortableWriter())
     #expect(invalid.refreshStatus().readiness == .notReady("identity configuration missing or invalid"))
     #expect(invalid.runAutomationAgentAtStartup().steps.first?.step == "automationGate")
     #expect(backend.attachCount == 0)
 
     try Data(contentsOf: f.assets.identityConfig!).write(to: f.paths.config)
-    let valid = HESectoriumService(paths: f.paths, backend: backend, store: store, operationLock: lock, installer: installer)
+    let valid = HESectoriumService(paths: f.paths, backend: backend, store: store, operationLock: lock,
+        installer: installer, runner: ScriptedRunner(), portableDocumentWriter: RefusingPortableWriter())
     #expect(valid.setAutomationEnabled(true).succeeded)
     store.value = .init(revision: 1, ejectIntent: true, operationID: "pending")
     let pending = valid.runAutomationAgentAtStartup()
@@ -428,20 +524,24 @@ private struct Fixture {
     #expect(runner.invocations.allSatisfy { $0.2 == f.paths.workingDirectory })
 }
 
-@Test func imageBackingAndDevAPFSChainMustMatchReadOnlyCommandOutput() throws {
+@Test(arguments: ["/Volumes/HE", "/Volumes/HE Work", "/Volumes/HE  Work"])
+func imageBackingAndDevAPFSChainMustMatchReadOnlyCommandOutput(outerMount: String) throws {
     let f = try Fixture(); defer { f.remove() }
-    let p = StorageIdentityPolicy.expected
+    let p = StorageIdentityPolicy(outerUUID: StorageIdentityPolicy.expected.outerUUID,
+        devUUID: StorageIdentityPolicy.expected.devUUID, outerMountPoint: outerMount,
+        devMountPoint: outerMount + "/DEV", devVolumeName: "DEV_APFS",
+        imagePath: outerMount + "/.DEV-APFS.sparsebundle")
     let runner = ScriptedRunner()
-    runner.outputs["/usr/sbin/diskutil info -plist /Volumes/HE"] = try diskInfo([
+    runner.outputs["/usr/sbin/diskutil info -plist \(p.outerMountPoint)"] = try diskInfo([
         "VolumeUUID": p.outerUUID.uuidString, "MountPoint": p.outerMountPoint, "FilesystemType": "ExFAT",
         "WritableVolume": true, "VolumeName": "HE", "DeviceIdentifier": "disk20s1", "PartOfWhole": "disk20"
     ])
-    runner.outputs["/usr/sbin/diskutil info -plist /Volumes/HE/DEV"] = try diskInfo([
+    runner.outputs["/usr/sbin/diskutil info -plist \(p.devMountPoint)"] = try diskInfo([
         "VolumeUUID": p.devUUID!.uuidString, "MountPoint": p.devMountPoint, "FilesystemType": "APFS",
         "WritableVolume": true, "VolumeName": p.devVolumeName, "DeviceIdentifier": "disk31s1", "APFSContainerReference": "disk31"
     ])
-    runner.outputs["/usr/sbin/diskutil info -plist /dev/disk31s1"] = runner.outputs["/usr/sbin/diskutil info -plist /Volumes/HE/DEV"]!
-    runner.outputs["/usr/sbin/diskutil info -plist /dev/disk20s1"] = runner.outputs["/usr/sbin/diskutil info -plist /Volumes/HE"]!
+    runner.outputs["/usr/sbin/diskutil info -plist /dev/disk31s1"] = runner.outputs["/usr/sbin/diskutil info -plist \(p.devMountPoint)"]!
+    runner.outputs["/usr/sbin/diskutil info -plist /dev/disk20s1"] = runner.outputs["/usr/sbin/diskutil info -plist \(p.outerMountPoint)"]!
     runner.outputs["/usr/sbin/diskutil info -plist /dev/disk20"] = try diskInfo(["DeviceIdentifier": "disk20", "VirtualOrPhysical": "Physical"])
     runner.outputs["/usr/sbin/diskutil apfs list -plist"] = try diskInfo(["Containers": [[
         "ContainerReference": "disk31", "PhysicalStores": [["DeviceIdentifier": "disk30"]],
@@ -453,14 +553,14 @@ private struct Fixture {
             ["mount-point": p.devMountPoint, "volume-uuid": p.devUUID!.uuidString, "dev-entry": "/dev/disk31s1"]
         ]
     ]]])
-    runner.outputs["/bin/df -P \(p.imagePath)"] = .init(exitCode: 0, detail: "Filesystem 512-blocks Used Available Capacity iused ifree %iused Mounted on\n/dev/disk20s1 1000 100 900 10% 1 2 1% /Volumes/HE\n")
-    let backend = MacStorageBackend(paths: f.paths, runner: runner)
+    runner.outputs["/bin/df -P \(p.imagePath)"] = .init(exitCode: 0, detail: "Filesystem 512-blocks Used Available Capacity iused ifree %iused Mounted on\n/dev/disk20s1 1000 100 900 10% 1 2 1% \(p.outerMountPoint)\n")
+    let backend = MacStorageBackend(paths: f.paths, runner: runner, policy: p)
     let observed = try #require(backend.observe())
     if case .failure = p.validate(observed) { Issue.record("fixture chain did not validate") }
 
     runner.outputs["/bin/df -P \(p.imagePath)"] = .init(exitCode: 0, detail: "Filesystem 512-blocks Used Available Capacity iused ifree %iused Mounted on\n/dev/disk20s1 1000 100 900 10% 1 2 1% /Volumes/Other\n")
     #expect(backend.observe() == nil)
-    runner.outputs["/bin/df -P \(p.imagePath)"] = .init(exitCode: 0, detail: "Filesystem 512-blocks Used Available Capacity iused ifree %iused Mounted on\n/dev/disk20s1 1000 100 900 10% 1 2 1% /Volumes/HE\n")
+    runner.outputs["/bin/df -P \(p.imagePath)"] = .init(exitCode: 0, detail: "Filesystem 512-blocks Used Available Capacity iused ifree %iused Mounted on\n/dev/disk20s1 1000 100 900 10% 1 2 1% \(p.outerMountPoint)\n")
     runner.outputs["/usr/sbin/diskutil apfs list -plist"] = try diskInfo(["Containers": [[
         "ContainerReference": "disk31", "PhysicalStores": [["DeviceIdentifier": "disk99"]],
         "Volumes": [["APFSVolumeUUID": p.devUUID!.uuidString, "DeviceIdentifier": "disk31s1"]]
@@ -584,14 +684,14 @@ private struct Fixture {
         "WritableVolume": true, "VolumeName": "HE", "DeviceIdentifier": "disk6s1", "ParentWholeDisk": "disk6"
     ])
     runner.outputs["/usr/bin/hdiutil info -plist"] = try diskInfo(["images": []])
-    let attach = "/usr/sbin/diskutil image attach --nobrowse --mountPoint \(dev.path) \(image.path)"
+    let attach = "/usr/bin/hdiutil attach -nobrowse -mountpoint \(dev.path) \(image.path)"
     runner.outputs[attach] = .init(exitCode: 0)
     let backend = MacStorageBackend(paths: f.paths, runner: runner, policy: policy)
 
     let result = backend.attachImage()
 
     #expect(result.succeeded)
-    #expect(runner.invocations.filter { $0.0 == "/usr/sbin/diskutil" && $0.1.first == "image" }.count == 1)
+    #expect(runner.invocations.filter { $0.0 == "/usr/bin/hdiutil" && $0.1.first == "attach" }.count == 1)
 }
 
 @Test func absentOrMalformedDEVObservationRefusesBeforeAttach() throws {
@@ -653,8 +753,10 @@ private struct Fixture {
     let result = backend.attachImage()
 
     #expect(!result.succeeded)
-    #expect(result.detail.contains("Could not verify"))
-    #expect(result.detail.contains("refresh its identity"))
+    #expect(result.detail.contains("open the mount directory"))
+    #expect(result.detail.contains("Not a directory"))
+    #expect(result.detail.contains("No Load command was run"))
+    #expect(try Data(contentsOf: dev) == Data("fixture file blocks directory metadata open".utf8))
     #expect(!runner.invocations.contains { ($0.0 == "/usr/sbin/diskutil" && $0.1.first == "image")
         || ($0.0 == "/usr/bin/hdiutil" && $0.1.first == "attach") })
 }
@@ -705,7 +807,7 @@ private struct Fixture {
     #expect(!runner.invocations.contains { $0.0 == "/usr/sbin/diskutil" && $0.1.first == "image" })
 }
 
-@Test func storageBackendUsesSharedDescriptorPreflightAndRefusesNonEmptyMountpoint() throws {
+@Test func storageBackendPreservesNonemptyMountpointAndReturnsNativeFailure() throws {
     let f = try Fixture(); defer { f.remove() }
     let mount = f.root.appendingPathComponent("outer", isDirectory: true)
     let dev = mount.appendingPathComponent("DEV", isDirectory: true)
@@ -725,13 +827,19 @@ private struct Fixture {
         "VolumeUUID": outerUUID.uuidString, "MountPoint": mount.path, "FilesystemType": "ExFAT",
         "WritableVolume": true, "VolumeName": "HE", "DeviceIdentifier": "disk20s1"
     ])
+    runner.outputs["/usr/bin/hdiutil info -plist"] = try diskInfo(["images": []])
+    runner.outputs["/usr/sbin/diskutil image attach --help"] = .init(exitCode: 0, detail: "diskutil image attach")
+    let nativeKey = "/usr/sbin/diskutil image attach --nobrowse --mountPoint \(dev.path) \(image.path)"
+    runner.outputs[nativeKey] = .init(exitCode: 1, detail: "Native mount cancelled by user")
     let backend = MacStorageBackend(paths: f.paths, runner: runner, policy: policy)
     let result = backend.attachImage()
 
     #expect(!result.succeeded)
-    #expect(result.detail.contains("not empty"))
+    #expect(result.exitCode == 1)
+    #expect(result.detail == "Native mount cancelled by user")
     #expect(try Data(contentsOf: dev.appendingPathComponent("existing.txt")) == Data("preserve".utf8))
-    #expect(!runner.invocations.contains { $0.0 == "/usr/sbin/diskutil" && $0.1.first == "image" })
+    #expect(runner.invocations.filter { $0.0 == "/usr/sbin/diskutil" && $0.1 == ["image", "attach", "--nobrowse", "--mountPoint", dev.path, image.path] }.count == 1)
+    #expect(!runner.invocations.contains { $0.0 == "/usr/bin/hdiutil" && $0.1.first == "attach" })
 }
 
 @Test func serviceSnapshotSeparatesDesiredAutomationFromLoadedAgentAndProgress() throws {
@@ -739,8 +847,9 @@ private struct Fixture {
     let provider = FixtureAgentStatusProvider(.loaded)
     let backend = FixtureBackend()
     let service = HESectoriumService(paths: f.paths, backend: backend, store: MemoryStore(), operationLock: MemoryLock(),
-        installer: HESectoriumInstaller(paths: f.paths, home: f.home), identityPolicy: .expected,
-        agentStatusProvider: provider)
+        installer: HESectoriumInstaller(paths: f.paths, home: f.home), runner: ScriptedRunner(),
+        identityPolicy: .expected, agentStatusProvider: provider,
+        portableDocumentWriter: RefusingPortableWriter())
     #expect(service.setAutomationEnabled(true).succeeded)
     let snapshot = service.refreshStatus()
     #expect(snapshot.automationEnabled)
@@ -754,7 +863,8 @@ private struct Fixture {
     backend.outerObservation = .init(uuid: UUID(), mountPoint: "/Volumes/HE", fileSystem: "ExFAT", writable: true,
                                      name: "HE", rootMatchesExpected: true)
     let service = HESectoriumService(paths: f.paths, backend: backend, store: MemoryStore(), operationLock: MemoryLock(),
-        installer: HESectoriumInstaller(paths: f.paths, home: f.home), identityPolicy: .expected)
+        installer: HESectoriumInstaller(paths: f.paths, home: f.home), runner: ScriptedRunner(),
+        identityPolicy: .expected, portableDocumentWriter: RefusingPortableWriter())
     #expect(!service.mountDEV().succeeded)
     #expect(backend.attachCount == 0)
 }
@@ -767,8 +877,8 @@ private struct Fixture {
     let policy = StorageIdentityPolicy(outerUUID: UUID(), devUUID: UUID(), outerMountPoint: outer.path,
                                       devMountPoint: dev.path, devVolumeName: "DEV_APFS", imagePath: outer.appendingPathComponent("image.sparsebundle").path)
     let runner = ScriptedRunner(); let backend = MacStorageBackend(paths: f.paths, runner: runner, policy: policy)
-    let key = "/usr/sbin/lsof -nP +f -- \(dev.path)"
-    runner.outputs[key] = .init(exitCode: 0, detail: "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nEditor 123 user cwd DIR 1 4096 1 \(dev.path)")
+    let key = "/usr/sbin/lsof -nP -Fpcf +f -- \(dev.path)"
+    runner.outputs[key] = .init(exitCode: 0, detail: "p123\ncEditor\nfcwd\n")
     #expect(backend.assessOccupancy(scope: .dev) == .busy(processIDs: [123]))
     runner.outputs[key] = .init(exitCode: 1)
     #expect(backend.assessOccupancy(scope: .dev) == .noVisibleOccupancy)
@@ -800,12 +910,20 @@ private struct Fixture {
     let initial = try store.load()
     let state = StoragePersistentState(revision: initial.revision + 1, ejectIntent: true,
         operationID: "reconnect-fixture", outerDisappearedAfterIntent: true,
-        outerReconnectAttempted: true, workbenchOperation: "start:interrupted",
+        outerReconnectAttempted: true,
+        suppressedProfileIDs: ["manual-profile"], disconnectedProfileIDs: ["disconnected-profile"],
+        reconnectAttemptedProfileIDs: ["attempted-profile"],
+        terminalEjectJournals: ["physical-A": "encoded-terminal-journal"],
+        workbenchOperation: "start:interrupted",
         workbenchPhase: "mutating", workbenchTarget: "fixture-image",
         workbenchCompletedStep: "attachImage", workbenchTerminalResult: nil)
     #expect(try store.compareAndSwap(expectedRevision: initial.revision, newState: state))
     let reloaded = try JSONStateStore(url: f.paths.state).load()
     #expect(reloaded.outerReconnectAttempted)
+    #expect(reloaded.suppressedProfileIDs == ["manual-profile"])
+    #expect(reloaded.disconnectedProfileIDs == ["disconnected-profile"])
+    #expect(reloaded.reconnectAttemptedProfileIDs == ["attempted-profile"])
+    #expect(reloaded.terminalEjectJournals == ["physical-A": "encoded-terminal-journal"])
     #expect(reloaded.workbenchOperation == state.workbenchOperation)
     #expect(reloaded.workbenchPhase == "mutating")
     #expect(reloaded.workbenchCompletedStep == "attachImage")
@@ -815,6 +933,10 @@ private struct Fixture {
     let oldState = try JSONStateStore(url: f.paths.state).load()
     #expect(oldState.outerDisappearedAfterIntent)
     #expect(!oldState.outerReconnectAttempted)
+    #expect(oldState.suppressedProfileIDs.isEmpty)
+    #expect(oldState.disconnectedProfileIDs.isEmpty)
+    #expect(oldState.reconnectAttemptedProfileIDs.isEmpty)
+    #expect(oldState.terminalEjectJournals.isEmpty)
     #expect(oldState.workbenchOperation == nil)
 }
 
@@ -825,8 +947,10 @@ private struct Fixture {
     try FileManager.default.createSymbolicLink(at: f.paths.root, withDestinationURL: escaped)
     try Data(contentsOf: f.assets.identityConfig!).write(to: escaped.appendingPathComponent("storage-identity.json"))
     let service = HESectoriumService(paths: f.paths, backend: FixtureBackend(), store: MemoryStore(), operationLock: MemoryLock(),
-                                     installer: HESectoriumInstaller(paths: f.paths, home: f.home))
-    #expect(service.refreshStatus().readiness == .notReady("identity configuration missing or invalid"))
+                                     installer: HESectoriumInstaller(paths: f.paths, home: f.home),
+                                     runner: ScriptedRunner(), portableDocumentWriter: RefusingPortableWriter())
+    #expect(!service.identityConfigurationReady)
+    #expect(service.refreshStatus().readiness == .notReady("registered profile configuration unavailable or invalid"))
     #expect(!service.mountDEV().succeeded)
 }
 
@@ -861,7 +985,8 @@ private struct Fixture {
     let backend = FixtureBackend(); let store = MemoryStore(); let lock = MemoryLock()
     let installer = HESectoriumInstaller(paths: f.paths, home: f.home)
     let service = HESectoriumService(paths: f.paths, backend: backend, store: store, operationLock: lock,
-                                     installer: installer, identityPolicy: .expected)
+                                     installer: installer, runner: ScriptedRunner(), identityPolicy: .expected,
+                                     portableDocumentWriter: RefusingPortableWriter())
     #expect(service.setAutomationEnabled(false).succeeded)
     #expect(backend.performed.isEmpty)
     let offEvent = service.runAutomationAgent(.outerReappeared(uuid: StorageIdentityPolicy.expected.outerUUID))
@@ -873,7 +998,8 @@ private struct Fixture {
     #expect(backend.attachCount == 0)
     let reconnect = service.runAutomationAgent(.outerReappeared(uuid: StorageIdentityPolicy.expected.outerUUID))
     #expect(reconnect.succeeded)
-    #expect(backend.attachCount == 1)
+    #expect(reconnect.steps.contains { $0.step == "reuseVerifiedImage" && $0.status == .succeeded })
+    #expect(backend.attachCount == 0)
     #expect(backend.performed.isEmpty)
 }
 
@@ -881,7 +1007,9 @@ private struct Fixture {
     let f = try Fixture(); defer { f.remove() }
     let backend = FixtureBackend(); let store = MemoryStore()
     let service = HESectoriumService(paths: f.paths, backend: backend, store: store, operationLock: MemoryLock(),
-                                     installer: HESectoriumInstaller(paths: f.paths, home: f.home), identityPolicy: .expected)
+                                     installer: HESectoriumInstaller(paths: f.paths, home: f.home),
+                                     runner: ScriptedRunner(), identityPolicy: .expected,
+                                     portableDocumentWriter: RefusingPortableWriter())
     #expect(service.setAutomationEnabled(true).succeeded)
     store.value = .init(revision: 1, ejectIntent: true, operationID: "prior")
     let result = service.runAutomationAgent(.outerReappeared(uuid: StorageIdentityPolicy.expected.outerUUID))

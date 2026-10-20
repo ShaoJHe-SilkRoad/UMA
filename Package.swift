@@ -95,7 +95,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "CodexUsageMonitor",
-            dependencies: ["CodexUsageUI"],
+            dependencies: ["CodexUsageUI", "HESectoriumRuntime"],
             path: "Sources/CodexUsageMonitor"
         ),
         .executableTarget(

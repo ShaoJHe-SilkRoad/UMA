@@ -123,7 +123,8 @@ final class ProcessCodexAppServerTransport: CodexAppServerTransport, @unchecked 
         let inputPipe = Pipe()
         let outputPipe = Pipe()
         process.executableURL = executableURL
-        process.arguments = ["app-server", "--stdio"]
+        // Stdio is the documented default; avoid version-specific CLI aliases.
+        process.arguments = ["app-server"]
         process.environment = launchConfiguration.environment
         process.currentDirectoryURL = launchConfiguration.currentDirectoryURL
         process.standardInput = inputPipe
@@ -401,12 +402,14 @@ actor CodexAppServerSession {
     func requestWithExplicitNullParameters<Result: Decodable>(
         method: String,
         timeout: TimeInterval? = nil,
-        timeoutFailure: CodexUsageClientFailure? = nil
+        timeoutFailure: CodexUsageClientFailure? = nil,
+        optionalResponse: Bool = false
     ) async throws -> Result {
         try await request(
             method: method,
             timeout: timeout,
             timeoutFailure: timeoutFailure,
+            optionalResponse: optionalResponse,
             encode: { id in
                 try JSONEncoder().encode(JSONRPCRequestWithNullParameters(id: id, method: method))
             }
@@ -433,6 +436,7 @@ actor CodexAppServerSession {
         method: String,
         timeout: TimeInterval?,
         timeoutFailure: CodexUsageClientFailure?,
+        optionalResponse: Bool = false,
         encode: (Int) throws -> Data
     ) async throws -> Result {
         let generation = receiveGeneration
@@ -443,6 +447,7 @@ actor CodexAppServerSession {
         nextRequestID += 1
         let expectedID = JSONRPCID.integer(id)
 
+        var receivedCorrelatedResponse = false
         do {
             guard transport?.isRunning == true, !receiverReachedEOF else {
                 throw CodexUsageClientError(.processExited)
@@ -456,6 +461,7 @@ actor CodexAppServerSession {
                 timeoutFailure: timeoutFailure ?? .requestTimedOut(method: method)
             )
             guard generation == receiveGeneration else { throw invalidatedRequestError(since: generation) }
+            receivedCorrelatedResponse = true
             let envelope: JSONRPCResponse<Result>
             do {
                 envelope = try JSONDecoder().decode(JSONRPCResponse<Result>.self, from: responseData)
@@ -474,7 +480,10 @@ actor CodexAppServerSession {
             return result
         } catch let error as CodexUsageClientError {
             guard generation == receiveGeneration else { throw invalidatedRequestError(since: generation) }
-            shutdown()
+            // An unsupported optional RPC (or optional payload decode error)
+            // does not invalidate the already authenticated quota transport.
+            // Timeouts/transport faults still close it to reject late replies.
+            if !optionalResponse || !receivedCorrelatedResponse { shutdown() }
             throw error
         } catch {
             guard generation == receiveGeneration else { throw invalidatedRequestError(since: generation) }
@@ -570,6 +579,10 @@ actor CodexAppServerSession {
         if let lastTransportFailure { return lastTransportFailure }
         if let transport, !transport.isRunning || receiverReachedEOF { return .processExited }
         return nil
+    }
+
+    func hasUsableInitializedTransport() -> Bool {
+        isInitialized && transport?.isRunning == true && !receiverReachedEOF
     }
 
     private func publishTransportFailure(_ error: Error) {
@@ -924,16 +937,18 @@ actor CodexAppServerSession {
 }
 
 private struct InitializeResponse: Decodable {
-    private let codexHome: String
-    private let platformFamily: String
-    private let platformOs: String
+    // Older app-server versions may omit diagnostic metadata. It does not
+    // gate account reads, but malformed metadata must not become trusted.
+    private let codexHome: String?
+    private let platformFamily: String?
+    private let platformOs: String?
     private let userAgent: String
 
     var isCompatible: Bool {
-        codexHome.hasPrefix("/")
-            && !platformFamily.isEmpty
-            && !platformOs.isEmpty
-            && !userAgent.isEmpty
+        (codexHome.map { $0.hasPrefix("/") } ?? true)
+            && (platformFamily.map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? true)
+            && (platformOs.map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? true)
+            && !userAgent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 

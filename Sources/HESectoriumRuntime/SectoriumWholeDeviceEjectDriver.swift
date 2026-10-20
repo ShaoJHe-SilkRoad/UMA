@@ -11,9 +11,10 @@ public struct SectoriumWholeDeviceEjectConfirmation: Identifiable, Equatable, Se
     public let observedAt: Date
     public let dependenciesCanFinishOffTarget: Bool
     public let isContinuation: Bool
+    public let isObservationOnly: Bool
 
     public init(topology: WholeDeviceTopology, observedAt: Date = Date(), dependenciesCanFinishOffTarget: Bool,
-                isContinuation: Bool = false) {
+                isContinuation: Bool = false, isObservationOnly: Bool = false) {
         id = UUID().uuidString
         physicalIdentity = topology.physicalIdentity
         bsdName = topology.bsdName
@@ -23,6 +24,7 @@ public struct SectoriumWholeDeviceEjectConfirmation: Identifiable, Equatable, Se
         self.observedAt = observedAt
         self.dependenciesCanFinishOffTarget = dependenciesCanFinishOffTarget
         self.isContinuation = isContinuation
+        self.isObservationOnly = isObservationOnly
     }
 
     /// The freshness window is bound to the observation shown to the user. Confirming later
@@ -45,6 +47,7 @@ public final class SectoriumWholeDeviceEjectDriver: WholeDeviceEjectDriving {
     private let runner: HESectoriumCommandRunning
     private let cwd: URL
     private let independentReturnValidator: (WholeDeviceEjectJournalRecord) -> Bool
+    private let independentLoadedReturnValidator: (WholeDeviceEjectJournalRecord) -> Bool
     private let independentContinuationValidator: (WholeDeviceEjectJournalRecord) -> Bool
     private var imageWholeDiskByIdentity: [String: String] = [:]
     private var imageVolumesByIdentity: [String: Set<String>] = [:]
@@ -52,13 +55,26 @@ public final class SectoriumWholeDeviceEjectDriver: WholeDeviceEjectDriving {
     public init(observer: SectoriumDeviceObserving, runner: HESectoriumCommandRunning,
                 workingDirectory: URL,
                 independentReturnValidator: @escaping (WholeDeviceEjectJournalRecord) -> Bool = { _ in false },
+                independentLoadedReturnValidator: @escaping (WholeDeviceEjectJournalRecord) -> Bool = { _ in false },
                 independentContinuationValidator: @escaping (WholeDeviceEjectJournalRecord) -> Bool = { _ in false }) {
         self.observer = observer; self.runner = runner; self.cwd = workingDirectory
         self.independentReturnValidator = independentReturnValidator
+        self.independentLoadedReturnValidator = independentLoadedReturnValidator
         self.independentContinuationValidator = independentContinuationValidator
     }
 
     public func observe(physicalIdentity: String) -> WholeDeviceTopology? {
+        withObservation { observeTopology(physicalIdentity: physicalIdentity) }
+    }
+
+    private func withObservation<T>(_ body: () -> T) -> T {
+        if let scoped = runner as? SectoriumObservationCommandRunner {
+            return scoped.withObservation(body)
+        }
+        return body()
+    }
+
+    private func observeTopology(physicalIdentity: String) -> WholeDeviceTopology? {
         guard let devices = try? observer.observeDevices(),
               let matches = Optional(devices.filter { $0.id == physicalIdentity }), matches.count == 1,
               let device = matches.first, device.isVirtual == false, device.identityVerified, device.topologyComplete,
@@ -163,15 +179,109 @@ public final class SectoriumWholeDeviceEjectDriver: WholeDeviceEjectDriving {
     public func presence(physicalIdentity: String) -> WholeDevicePresence {
         guard let devices = try? observer.observeDevices() else { return .unknown("device inventory unavailable") }
         let matches = devices.filter { $0.id == physicalIdentity }
-        if matches.isEmpty { return .absent }
+        if matches.isEmpty { return .unknown("original physical topology is required to verify absence") }
         guard matches.count == 1, matches[0].identityVerified else { return .unknown("physical identity is ambiguous") }
         return .present
     }
 
+    /// A catalog ID can disappear while the same physical media remains connected with
+    /// unverified identity (for example, a single-volume anchor gains another member).
+    /// Only a complete fresh inventory with no plausible old media may report absence.
+    public func presence(of target: WholeDeviceTopology) -> WholeDevicePresence {
+        withObservation { observePresence(of: target) }
+    }
+
+    public func successfulEjectHasUnmountedPostcondition(of target: WholeDeviceTopology) -> Bool {
+        withObservation {
+            guard let current = observeTopology(physicalIdentity: target.physicalIdentity),
+                  target.matchesPhysicalIdentityAndVolumes(current), current.hasUniqueMembers,
+                  current.volumes.allSatisfy({ !$0.mounted }), current.images.isEmpty else { return false }
+            return true
+        }
+    }
+
+    private func observePresence(of target: WholeDeviceTopology) -> WholeDevicePresence {
+        guard target.isWholeDevice, target.isExternal, !target.isSystemDevice,
+              target.inventoryComplete, target.hasUniqueMembers,
+              let originalUUIDs = Self.physicalMemberUUIDs(target) else {
+            return .unknown("target identity is unavailable")
+        }
+        // A complete native list containing no external physical media proves
+        // this external target is gone. Do not inspect every internal APFS volume
+        // (or wait for their unavailable identity) after a successful OS eject.
+        // A failed, malformed or nonempty result needs the full identity path.
+        let external = runner.run("/usr/sbin/diskutil", ["list", "-plist", "external", "physical"], cwd: cwd)
+        if external.succeeded, let root = Self.plist(external.detail),
+           let rows = root["AllDisksAndPartitions"] as? [[String: Any]], rows.isEmpty,
+           (root["AllDisks"] == nil || (root["AllDisks"] as? [String])?.isEmpty == true) {
+            return .absent
+        }
+        guard let devices = try? observer.observeDevices() else {
+            return .unknown("target or device inventory is unavailable")
+        }
+        let exact = devices.filter { $0.id == target.physicalIdentity }
+        if !exact.isEmpty {
+            guard exact.count == 1, exact[0].identityVerified, exact[0].isVirtual == false else {
+                return .unknown("physical identity is ambiguous")
+            }
+            return .present
+        }
+        for device in devices {
+            let observedUUIDs = Set(device.volumeMembers.map(\.volumeUUID)).union(device.volumeUUIDs)
+            if device.bsdName == target.bsdName || !observedUUIDs.isDisjoint(with: originalUUIDs) {
+                return .unknown("possible original physical media remains connected")
+            }
+            if device.isVirtual != true && !device.identityVerified
+                && (device.isExternal || !device.topologyComplete) {
+                // Apple internal storage may have no stable media identity. Its unrelated
+                // incomplete APFS catalog must not hold an external eject open forever.
+                // Require native Internal evidence; an unknown location still fails closed.
+                let info = runner.run("/usr/sbin/diskutil", ["info", "-plist", "/dev/" + device.bsdName], cwd: cwd)
+                guard !device.isExternal, info.succeeded, let row = Self.plist(info.detail),
+                      row["Internal"] as? Bool == true,
+                      (row["DeviceLocation"] as? String)?.lowercased() != "external",
+                      row["DeviceIdentifier"] as? String == device.bsdName else {
+                    return .unknown("unverified physical media prevents absence confirmation")
+                }
+            }
+        }
+        guard Self.completeWholeDiskInventory(devices, runner: runner, workingDirectory: cwd) else {
+            return .unknown("whole-disk inventory is incomplete or changed")
+        }
+        return .absent
+    }
+
     public func freshReturnIdentityMatches(_ journal: WholeDeviceEjectJournalRecord) -> Bool {
-        guard let current = observe(physicalIdentity: journal.target.physicalIdentity),
-              journal.target.matchesPhysicalIdentityAndVolumes(current),
+        withObservation { observeReturnIdentityMatches(journal) }
+    }
+
+    private func observeReturnIdentityMatches(_ journal: WholeDeviceEjectJournalRecord) -> Bool {
+        let current = observe(physicalIdentity: journal.target.physicalIdentity)
+            ?? (journal.canCancelUnissuedEject ? freshUnissuedCancellationTopology(journal) : nil)
+        guard let current,
               current.volumes.allSatisfy(\.mounted) else { return false }
+        if journal.canCancelUnissuedEject {
+            guard journal.target.canCancelUnissuedEject(on: current),
+                  current.images.allSatisfy({ image in
+                      guard image.attached, let mounted = image.mountedVolumeIdentities else { return false }
+                      return Set(mounted) == Set(image.volumeIdentities)
+                  }) else { return false }
+            return independentReturnValidator(journal)
+        }
+        let reconnectBoundary = journal.safelyEjected || journal.phase == .disconnected
+            || journal.issuedEjectCanReconcileRemount
+        let physicalIdentityMatches = reconnectBoundary
+            ? journal.target.matchesStablePhysicalIdentityAndVolumes(current)
+            : journal.target.matchesPhysicalIdentityAndVolumes(current)
+        guard physicalIdentityMatches else { return false }
+        if reconnectBoundary {
+            // A new connection can already have been mounted by the user's terminal or
+            // the existing automounter. Recognize the exact stable image/APFS chain even
+            // when the kernel assigned new disk numbers; never detach it to restore history.
+            guard current.images.isEmpty || (sameLoadedImageVolumes(journal.target.images, current.images)
+                && independentLoadedReturnValidator(journal)) else { return false }
+            return independentReturnValidator(journal)
+        }
         let detached = Set(journal.target.images
             .filter { journal.completedSteps.contains("detachImage:\($0.identity)") }.map(\.identity))
         let expected = Dictionary(uniqueKeysWithValues: journal.target.images
@@ -179,7 +289,7 @@ public final class SectoriumWholeDeviceEjectDriver: WholeDeviceEjectDriving {
             .map { ($0.identity, Set($0.volumeIdentities)) })
         let allImagesDetached = detached.count == journal.target.images.count
         let recordedDetachBoundary = allImagesDetached
-            && (journal.phase == .imagesDetached || journal.phase == .verifiedAbsent)
+            && (journal.phase == .imagesDetached || journal.safelyEjected)
         let busyImageBoundary: Bool = {
             guard journal.phase == .interrupted, journal.lastIssuedAction == .imageVolumesUnmount,
                   !expected.isEmpty, case .busy? = journal.lastReceipt else { return false }
@@ -196,7 +306,33 @@ public final class SectoriumWholeDeviceEjectDriver: WholeDeviceEjectDriving {
         return independentReturnValidator(journal)
     }
 
+    private func sameLoadedImageVolumes(_ expected: [WholeDeviceTopology.Image],
+                                       _ current: [WholeDeviceTopology.Image]) -> Bool {
+        func keys(_ images: [WholeDeviceTopology.Image]) -> [String]? {
+            var groups: [String] = []
+            for image in images {
+                guard image.attached, !image.volumeIdentities.isEmpty,
+                      let mounted = image.mountedVolumeIdentities,
+                      Set(mounted) == Set(image.volumeIdentities) else { return nil }
+                let ids = image.volumeIdentities.compactMap { value -> String? in
+                    let parts = value.split(separator: "|", omittingEmptySubsequences: false)
+                    guard parts.count == 2, let uuid = UUID(uuidString: String(parts[0])) else { return nil }
+                    return uuid.uuidString.lowercased()
+                }
+                guard ids.count == image.volumeIdentities.count, Set(ids).count == ids.count else { return nil }
+                groups.append(ids.sorted().joined(separator: ","))
+            }
+            return Set(groups).count == groups.count ? groups.sorted() : nil
+        }
+        guard let original = keys(expected), let observed = keys(current) else { return false }
+        return original == observed
+    }
+
     public func freshPhysicalContinuationMatches(_ journal: WholeDeviceEjectJournalRecord) -> Bool {
+        withObservation { observePhysicalContinuationMatches(journal) }
+    }
+
+    private func observePhysicalContinuationMatches(_ journal: WholeDeviceEjectJournalRecord) -> Bool {
         guard journal.lastIssuedAction == .physicalVolumesUnmount,
               journal.phase == .interrupted || journal.phase == .physicalVolumesUnmountIssued
                 || journal.phase == .physicalVolumesUnmounted,
@@ -224,6 +360,10 @@ public final class SectoriumWholeDeviceEjectDriver: WholeDeviceEjectDriving {
     }
 
     public func freshEjectIssuedRecovery(_ journal: WholeDeviceEjectJournalRecord) -> WholeDeviceEjectIssuedRecovery {
+        withObservation { observeEjectIssuedRecovery(journal) }
+    }
+
+    private func observeEjectIssuedRecovery(_ journal: WholeDeviceEjectJournalRecord) -> WholeDeviceEjectIssuedRecovery {
         guard journal.phase == .ejectIssued, journal.lastIssuedAction == .ejectWholeDevice,
               journal.target.isExternal, journal.target.isWholeDevice, !journal.target.isSystemDevice,
               journal.target.inventoryComplete, journal.target.hasUniqueMembers,
@@ -232,7 +372,7 @@ public final class SectoriumWholeDeviceEjectDriver: WholeDeviceEjectDriving {
                 || journal.target.volumes.allSatisfy({ volume in
                     journal.completedSteps.contains("unmountPhysicalVolume:\(volume.identity)")
                 }) else { return .refused }
-        switch presence(physicalIdentity: journal.target.physicalIdentity) {
+        switch presence(of: journal.target) {
         case .absent:
             // This is a new observation of identity absence, not a reconstructed OS receipt.
             return .exactTargetAbsent
@@ -245,6 +385,108 @@ public final class SectoriumWholeDeviceEjectDriver: WholeDeviceEjectDriving {
                   independentContinuationValidator(journal) else { return .refused }
             return .exactTargetPresentUnmounted
         }
+    }
+
+    /// Read-only recovery of the original unique backing-volume anchor after catalog ID
+    /// degradation. This candidate never authorizes unmount, detach, or eject; it is used
+    /// solely to cancel a journal proving no action was ever issued.
+    public static func freshUnissuedCancellationCandidate(
+        journal: WholeDeviceEjectJournalRecord, devices: [SectoriumPhysicalDevice],
+        runner: HESectoriumCommandRunning, workingDirectory: URL
+    ) -> SectoriumPhysicalDevice? {
+        guard journal.canCancelUnissuedEject,
+              journal.target.isWholeDevice, journal.target.isExternal, !journal.target.isSystemDevice,
+              journal.target.inventoryComplete, journal.target.hasUniqueMembers,
+              journal.target.volumes.count == 1,
+              let anchor = UUID(uuidString: journal.target.physicalIdentity),
+              let originalMember = journal.target.volumes.first,
+              let original = physicalMemberIdentity(originalMember.identity),
+              original.uuid == anchor,
+              original.bsd.hasPrefix(journal.target.bsdName + "s"),
+              journal.target.bsdName.range(of: #"^disk[0-9]+$"#, options: .regularExpression) != nil,
+              completeWholeDiskInventory(devices, runner: runner, workingDirectory: workingDirectory) else {
+            return nil
+        }
+        let physical = devices.filter { $0.isVirtual != true }
+        let candidates = physical.filter { device in
+            device.volumeMembers.contains { $0.volumeUUID == anchor }
+        }
+        guard candidates.count == 1, let candidate = candidates.first,
+              candidate.bsdName == journal.target.bsdName,
+              physical.filter({ $0.bsdName == candidate.bsdName }).count == 1,
+              candidate.isVirtual == false, candidate.isExternal, candidate.topologyComplete,
+              !candidate.hasAmbiguousPhysicalStores,
+              !candidate.volumeMembers.isEmpty,
+              candidate.volumeMembers.filter({ $0.volumeUUID == anchor }).count == 1,
+              candidate.volumeMembers.first(where: { $0.volumeUUID == anchor })?.bsdName == original.bsd,
+              Set(candidate.volumeMembers.map(\.volumeUUID)).count == candidate.volumeMembers.count,
+              Set(candidate.volumeMembers.map(\.bsdName)).count == candidate.volumeMembers.count,
+              candidate.volumeMembers.allSatisfy(\.mounted) else { return nil }
+        let resolver = SectoriumPhysicalBackingResolver(runner: runner, cwd: workingDirectory)
+        guard let systemRoots = resolver.physicalRoots(forPath: URL(fileURLWithPath: "/")),
+              let candidateRoots = resolver.physicalRoots(forDevice: candidate.bsdName),
+              !candidateRoots.isEmpty, systemRoots.isDisjoint(with: candidateRoots) else { return nil }
+        for member in candidate.volumeMembers {
+            guard member.bsdName.range(of: #"^disk[0-9]+s[0-9]+$"#, options: .regularExpression) != nil,
+                  member.bsdName.hasPrefix(candidate.bsdName + "s") else { return nil }
+            let result = runner.run("/usr/sbin/diskutil", ["info", "-plist", "/dev/\(member.bsdName)"],
+                                    cwd: workingDirectory)
+            guard result.succeeded, let info = plist(result.detail),
+                  info["DeviceIdentifier"] as? String == member.bsdName,
+                  SectoriumDeviceCatalog.verifiedParentWholeDisk(info) == candidate.bsdName,
+                  let rawUUID = (info["VolumeUUID"] as? String) ?? (info["APFSVolumeUUID"] as? String),
+                  UUID(uuidString: rawUUID) == member.volumeUUID else { return nil }
+        }
+        return candidate
+    }
+
+    private func freshUnissuedCancellationTopology(_ journal: WholeDeviceEjectJournalRecord) -> WholeDeviceTopology? {
+        guard let devices = try? observer.observeDevices(),
+              let candidate = Self.freshUnissuedCancellationCandidate(journal: journal, devices: devices,
+                  runner: runner, workingDirectory: cwd),
+              let images = attachedImages(for: candidate, among: devices) else { return nil }
+        let volumes = candidate.volumeMembers.map {
+            WholeDeviceTopology.Volume(identity: "\($0.volumeUUID.uuidString.lowercased())|\($0.bsdName)",
+                                       mounted: $0.mounted)
+        }
+        let current = WholeDeviceTopology(physicalIdentity: journal.target.physicalIdentity,
+            bsdName: candidate.bsdName, isWholeDevice: true, isExternal: true, isSystemDevice: false,
+            inventoryComplete: true, volumes: volumes, images: images)
+        return current.hasUniqueMembers ? current : nil
+    }
+
+    private static func physicalMemberUUIDs(_ target: WholeDeviceTopology) -> Set<UUID>? {
+        let values = target.volumes.compactMap { physicalMemberIdentity($0.identity)?.uuid }
+        guard values.count == target.volumes.count,
+              Set(values).count == target.volumes.count else { return nil }
+        return Set(values)
+    }
+
+    /// The catalog can omit malformed raw rows. An absence or cancellation decision must
+    /// reconcile the complete whole-disk list with the parsed rows, not just inspect the
+    /// IDs that survived parsing. A changed list between observations is also uncertain.
+    private static func completeWholeDiskInventory(_ devices: [SectoriumPhysicalDevice],
+                                                   runner: HESectoriumCommandRunning,
+                                                   workingDirectory: URL) -> Bool {
+        let result = runner.run("/usr/sbin/diskutil", ["list", "-plist"], cwd: workingDirectory)
+        guard result.succeeded, let root = plist(result.detail),
+              let rows = root["AllDisksAndPartitions"] as? [[String: Any]] else { return false }
+        let raw = rows.compactMap { $0["DeviceIdentifier"] as? String }
+        let observed = devices.map(\.bsdName)
+        guard raw.count == rows.count, Set(raw).count == raw.count,
+              raw.allSatisfy({ $0.range(of: #"^disk[0-9]+$"#, options: .regularExpression) != nil }),
+              Set(observed).count == observed.count,
+              observed.allSatisfy({ $0.range(of: #"^disk[0-9]+$"#, options: .regularExpression) != nil }) else {
+            return false
+        }
+        return Set(raw) == Set(observed)
+    }
+
+    private static func physicalMemberIdentity(_ identity: String) -> (uuid: UUID, bsd: String)? {
+        let parts = identity.split(separator: "|", omittingEmptySubsequences: false)
+        guard parts.count == 2, let uuid = UUID(uuidString: String(parts[0])),
+              String(parts[1]).range(of: #"^disk[0-9]+s[0-9]+$"#, options: .regularExpression) != nil else { return nil }
+        return (uuid, String(parts[1]))
     }
 
     private func systemPhysicalRoots() -> Set<String>? {
@@ -444,6 +686,14 @@ public final class SectoriumWholeDeviceEjectDriver: WholeDeviceEjectDriving {
 public enum SectoriumOffTargetDependencyCheck {
     public static func canFinishOffTarget(paths: HESectoriumPaths, targetBSDName: String,
                                            runner: HESectoriumCommandRunning) -> Bool {
+        if let scoped = runner as? SectoriumObservationCommandRunner {
+            return scoped.withObservation { observeDependencies(paths: paths, targetBSDName: targetBSDName, runner: runner) }
+        }
+        return observeDependencies(paths: paths, targetBSDName: targetBSDName, runner: runner)
+    }
+
+    private static func observeDependencies(paths: HESectoriumPaths, targetBSDName: String,
+                                            runner: HESectoriumCommandRunning) -> Bool {
         guard targetBSDName.range(of: #"^disk[0-9]+$"#, options: .regularExpression) != nil else { return false }
         let resolver = SectoriumPhysicalBackingResolver(runner: runner, cwd: paths.workingDirectory)
         guard let targetRoots = resolver.physicalRoots(forDevice: targetBSDName), !targetRoots.isEmpty else { return false }
@@ -505,16 +755,24 @@ private struct SectoriumPhysicalBackingResolver {
               Self.deviceID(plist["DeviceIdentifier"] as? String ?? "") == bsd else { return nil }
         var nextVisited = visited
         nextVisited.insert(bsd)
+        let isWholeDisk = bsd.range(of: #"^disk[0-9]+$"#, options: .regularExpression) != nil
+        let isPartition = bsd.range(of: #"^disk[0-9]+(?:s[0-9]+)+$"#, options: .regularExpression) != nil
+        if let wholeClaim = plist["WholeDisk"] {
+            guard let whole = wholeClaim as? Bool, whole == isWholeDisk else { return nil }
+        }
 
         // Partition metadata commonly omits VirtualOrPhysical. Its explicit parent is
         // the first trust edge; following the APFS container reference here can cycle
         // from a physical store back into its own synthesized container.
-        if bsd.contains("s"), plist["ParentWholeDisk"] != nil || plist["PartOfWhole"] != nil {
-            guard let rawParent = SectoriumDeviceCatalog.verifiedParentWholeDisk(plist),
-           let parent = Self.deviceID(rawParent),
-           parent.range(of: #"^disk[0-9]+$"#, options: .regularExpression) != nil,
-           bsd.hasPrefix(parent + "s") else { return nil }
-            return resolveDevice(parent, visited: nextVisited, imageDepth: imageDepth)
+        if plist["ParentWholeDisk"] != nil || plist["PartOfWhole"] != nil {
+            guard let parent = SectoriumDeviceCatalog.verifiedParentWholeDisk(plist) else { return nil }
+            if isPartition {
+                guard bsd.hasPrefix(parent + "s") else { return nil }
+                return resolveDevice(parent, visited: nextVisited, imageDepth: imageDepth)
+            }
+            // diskutil also reports self-parent claims for physical and synthesized
+            // whole disks. They must continue through the APFS/type checks below.
+            guard isWholeDisk, parent == bsd else { return nil }
         }
 
         if let containerID = plist["APFSContainerReference"] as? String {
@@ -532,12 +790,17 @@ private struct SectoriumPhysicalBackingResolver {
         guard let kind = plist["VirtualOrPhysical"] as? String else { return nil }
         switch kind.lowercased() {
         case "physical":
-            if plist["ParentWholeDisk"] != nil || plist["PartOfWhole"] != nil {
-                guard let parent = SectoriumDeviceCatalog.verifiedParentWholeDisk(plist),
-                      let whole = Self.deviceID(parent), whole.range(of: #"^disk[0-9]+$"#, options: .regularExpression) != nil else { return nil }
-                return [whole]
-            }
-            guard bsd.range(of: #"^disk[0-9]+$"#, options: .regularExpression) != nil else { return nil }
+            guard isWholeDisk else { return nil }
+            return [bsd]
+        case "unknown":
+            // Built-in Apple storage can report Unknown for its physical whole disk.
+            // Use the catalog's internal/GUID evidence, plus an explicit self-parent;
+            // external, missing, contradictory, or APFS-backed claims remain unknown.
+            guard isWholeDisk, SectoriumDeviceCatalog.verifiedParentWholeDisk(plist) == bsd,
+                  (plist["Internal"] as? Bool) == true, (plist["WholeDisk"] as? Bool) == true,
+                  (plist["Content"] as? String) == "GUID_partition_scheme",
+                  (plist["DeviceLocation"] as? String)?.lowercased() != "external",
+                  plist["APFSPhysicalStores"] == nil, plist["APFSContainerReference"] == nil else { return nil }
             return [bsd]
         case "virtual":
             guard imageDepth < maximumImageDepth,

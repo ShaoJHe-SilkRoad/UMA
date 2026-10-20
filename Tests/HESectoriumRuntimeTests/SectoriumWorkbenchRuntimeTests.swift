@@ -4,12 +4,28 @@ import Testing
 import HESectoriumCore
 @testable import HESectoriumRuntime
 
-private final class WorkbenchMemoryStore: DurableStateStore {
+private func waitForFixtureSignal(_ semaphore: DispatchSemaphore, seconds: Double) -> Bool {
+    semaphore.wait(timeout: .now() + seconds) == .success
+}
+
+final class WorkbenchMemoryStore: DurableStateStore {
     var value = StoragePersistentState(ejectIntent: false)
+    private(set) var history: [StoragePersistentState] = []
+    var rejectNextCompletedStep: String?
+    var rejectNextMarkerClear = false
+    var onSavedState: ((StoragePersistentState) -> Void)?
     func load() throws -> StoragePersistentState { value }
     func compareAndSwap(expectedRevision: UInt64, newState: StoragePersistentState) throws -> Bool {
+        if let step = rejectNextCompletedStep, newState.workbenchCompletedStep == step {
+            rejectNextCompletedStep = nil; return false
+        }
+        if rejectNextMarkerClear, value.workbenchOperation != nil, newState.workbenchOperation == nil {
+            rejectNextMarkerClear = false; return false
+        }
         guard value.revision == expectedRevision else { return false }
         value = newState
+        history.append(newState)
+        onSavedState?(newState)
         return true
     }
 }
@@ -20,15 +36,39 @@ private final class WorkbenchMemoryLock: OperationLock {
     func release() { held = false }
 }
 
-private final class WorkbenchFixtureObserver: SectoriumDeviceObserving {
+final class WorkbenchFixtureObserver: SectoriumDeviceObserving {
     var device: SectoriumPhysicalDevice
+    var otherDevices: [SectoriumPhysicalDevice] = []
+    var isPresent = true
     init(device: SectoriumPhysicalDevice) { self.device = device }
-    func observeDevices() throws -> [SectoriumPhysicalDevice] { [device] }
+    func observeDevices() throws -> [SectoriumPhysicalDevice] { (isPresent ? [device] : []) + otherDevices }
+}
+
+final class WorkbenchPortableWriter: SectoriumPortableDocumentWriting {
+    private(set) var events: [String] = []
+    var outcome: SectoriumPortableDocumentResult = .updated
+    private(set) var contexts: [SectoriumPortableDocumentContext] = []
+    var beforeUpdate: (() -> Void)?
+    func update(context: SectoriumPortableDocumentContext, events incoming: [SectoriumPortableDocumentEvent]) -> SectoriumPortableDocumentResult {
+        beforeUpdate?()
+        contexts.append(context)
+        events = incoming.filter { $0.phase == .completed }.map { "\($0.profileID):\($0.kind)" }
+        return outcome
+    }
+    func update(profile: SectoriumDevelopmentProfile, event: String) -> SectoriumPortableDocumentResult {
+        events.append("\(profile.id):\(event)")
+        return outcome
+    }
+}
+
+private func workbenchFixtureInstaller(_ paths: HESectoriumPaths) -> HESectoriumInstaller {
+    HESectoriumInstaller(paths: paths, home: paths.root.appendingPathComponent("fixture-home", isDirectory: true))
 }
 
 private final class BusyImageReturnFixtureDriver: WholeDeviceEjectDriving {
     let topology: WholeDeviceTopology
     private(set) var calls: [String] = []
+    var observedPresence: WholeDevicePresence = .present
     init(_ topology: WholeDeviceTopology) { self.topology = topology }
     func observe(physicalIdentity: String) -> WholeDeviceTopology? {
         calls.append("observe")
@@ -38,7 +78,15 @@ private final class BusyImageReturnFixtureDriver: WholeDeviceEjectDriving {
     func detachImageNonForce(_ imageIdentity: String, from target: WholeDeviceTopology) -> WholeDeviceActionReceipt { .busy("not used") }
     func unmountAllPhysicalVolumesNonForce(_ target: WholeDeviceTopology) -> WholeDeviceActionReceipt { .busy("not used") }
     func ejectWholeDeviceNonForce(_ target: WholeDeviceTopology) -> WholeDeviceActionReceipt { .busy("not used") }
-    func presence(physicalIdentity: String) -> WholeDevicePresence { .present }
+    func presence(physicalIdentity: String) -> WholeDevicePresence {
+        calls.append("presence")
+        return observedPresence
+    }
+    func presence(of target: WholeDeviceTopology) -> WholeDevicePresence {
+        calls.append("presence")
+        return target.physicalIdentity == topology.physicalIdentity ? observedPresence
+            : .unknown("fixture target mismatch")
+    }
     func freshReturnIdentityMatches(_ journal: WholeDeviceEjectJournalRecord) -> Bool {
         calls.append("return-check")
         guard journal.target.matchesPhysicalIdentityAndVolumes(topology), topology.volumes.allSatisfy(\.mounted),
@@ -51,10 +99,60 @@ private final class BusyImageReturnFixtureDriver: WholeDeviceEjectDriving {
     }
 }
 
-private final class WorkbenchFixtureRunner: HESectoriumCommandRunning, HESectoriumSecureCommandRunning {
+private final class TargetBindingFixtureDriver: WholeDeviceEjectDriving {
+    var observations: [String: WholeDeviceTopology]
+    private(set) var storageActions = 0
+    init(_ observations: [String: WholeDeviceTopology]) { self.observations = observations }
+    func observe(physicalIdentity: String) -> WholeDeviceTopology? { observations[physicalIdentity] }
+    func unmountImageVolumesNonForce(_ imageIdentity: String, volumeIdentities: [String],
+                                     from target: WholeDeviceTopology) -> WholeDeviceActionReceipt {
+        storageActions += 1; return .busy("fixture action withheld")
+    }
+    func detachImageNonForce(_ imageIdentity: String, from target: WholeDeviceTopology) -> WholeDeviceActionReceipt {
+        storageActions += 1; return .busy("fixture action withheld")
+    }
+    func unmountAllPhysicalVolumesNonForce(_ target: WholeDeviceTopology) -> WholeDeviceActionReceipt {
+        storageActions += 1; return .busy("fixture action withheld")
+    }
+    func ejectWholeDeviceNonForce(_ target: WholeDeviceTopology) -> WholeDeviceActionReceipt {
+        storageActions += 1; return .busy("fixture action withheld")
+    }
+    func presence(physicalIdentity: String) -> WholeDevicePresence { .present }
+    func presence(of target: WholeDeviceTopology) -> WholeDevicePresence {
+        observations[target.physicalIdentity] == nil ? .unknown("fixture target unavailable") : .present
+    }
+    func freshReturnIdentityMatches(_ journal: WholeDeviceEjectJournalRecord) -> Bool { false }
+}
+
+private final class CompletingEjectFixtureDriver: WholeDeviceEjectDriving {
+    var topology: WholeDeviceTopology
+    var absent = false
+    var actions: [String] = []
+    var afterEject: (() -> Void)?
+    init(_ topology: WholeDeviceTopology) { self.topology = topology }
+    func observe(physicalIdentity: String) -> WholeDeviceTopology? { physicalIdentity == topology.physicalIdentity && !absent ? topology : nil }
+    func unmountImageVolumesNonForce(_ imageIdentity: String, volumeIdentities: [String], from target: WholeDeviceTopology) -> WholeDeviceActionReceipt { .failed("unexpected image") }
+    func detachImageNonForce(_ imageIdentity: String, from target: WholeDeviceTopology) -> WholeDeviceActionReceipt { .failed("unexpected image") }
+    func unmountAllPhysicalVolumesNonForce(_ target: WholeDeviceTopology) -> WholeDeviceActionReceipt {
+        actions.append("unmount")
+        topology = .init(physicalIdentity: target.physicalIdentity, bsdName: target.bsdName,
+            isWholeDevice: true, isExternal: true, isSystemDevice: false, inventoryComplete: true,
+            volumes: target.volumes.map { .init(identity: $0.identity, mounted: false) }, images: [])
+        return .completed("fixture unmounted")
+    }
+    func ejectWholeDeviceNonForce(_ target: WholeDeviceTopology) -> WholeDeviceActionReceipt {
+        actions.append("eject"); absent = true; afterEject?(); return .completed("fixture ejected")
+    }
+    func presence(physicalIdentity: String) -> WholeDevicePresence { absent ? .absent : .present }
+    func presence(of target: WholeDeviceTopology) -> WholeDevicePresence { presence(physicalIdentity: target.physicalIdentity) }
+    func freshReturnIdentityMatches(_ journal: WholeDeviceEjectJournalRecord) -> Bool { false }
+}
+
+final class WorkbenchFixtureRunner: HESectoriumCommandRunning, HESectoriumSecureCommandRunning {
     let mountPoint: String
     let volumeUUID: UUID
     private(set) var commands: [[String]] = []
+    private(set) var commandDirectories: [String] = []
     private(set) var secureInputs: [Data] = []
     var imageInventory: [[String: Any]]?
     var diskInventory: [[String: Any]]?
@@ -62,18 +160,42 @@ private final class WorkbenchFixtureRunner: HESectoriumCommandRunning, HESectori
     var detachedDiskInfos: [String: [String: Any]] = [:]
     var apfsContainers: [[String: Any]]?
     var imageBackingDevice = "disk81s1"
+    var systemBackingDevice: String?
     var mountParentWholeDisk: String?
     var mountPartOfWholeDisk: String?
     var imageFormatOutput = CommandOutcome(exitCode: 0, detail: "UDSB\n")
     var encryptionOutput = CommandOutcome(exitCode: 127, detail: "fixture encryption observation unavailable")
     var attachOutcome = CommandOutcome(exitCode: 127, detail: "fixture command not configured")
+    var mountOutcome: CommandOutcome?
+    var modernImageAttachSupported = false
+    var modernImageAttachOutcome: CommandOutcome?
     var attachedImageInventory: [[String: Any]]?
     var ejectAfterUnmountEnabled = false
+    var failNextImageEject = false
     var occupancyIsClear = false
+    var simulateLifecycle = false
+    var ignoreNativeModification = false
+    var offTargetRuntime = false
+    var beforeCreate: (() -> Void)?
+    var afterNativeModification: (() -> Void)?
+    var afterNativeUnmount: (() -> Void)?
+    var unavailableInfoPaths: Set<String> = []
+    private struct SimulatedImage { var name: String; var bytes: UInt64; let fs: String; let uuid: UUID }
+    private var simulatedImages: [String: SimulatedImage] = [:]
     init(mountPoint: String, volumeUUID: UUID) { self.mountPoint = mountPoint; self.volumeUUID = volumeUUID }
 
     func run(_ executable: String, _ arguments: [String], cwd: URL) -> CommandOutcome {
         commands.append([executable] + arguments)
+        commandDirectories.append(cwd.path)
+        if executable == "/usr/sbin/diskutil", arguments.count == 3,
+           arguments.prefix(2) == ["info", "-plist"], unavailableInfoPaths.contains(arguments[2]) {
+            return .init(exitCode: 127, detail: "fixture postcheck observation unavailable")
+        }
+        if executable == "/usr/bin/hdiutil", arguments.first == "create" { beforeCreate?() }
+        if executable == "/usr/sbin/diskutil", arguments == ["image", "attach", "--help"], modernImageAttachSupported {
+            return .init(exitCode: 0, detail: "diskutil image attach --nobrowse --mountPoint path image")
+        }
+        if simulateLifecycle, let outcome = simulate(executable, arguments) { return outcome }
         if executable == "/usr/sbin/diskutil", arguments == ["info", "-plist", mountPoint] {
             var info: [String: Any] = [
                 "VolumeUUID": volumeUUID.uuidString, "MountPoint": mountPoint,
@@ -101,7 +223,10 @@ private final class WorkbenchFixtureRunner: HESectoriumCommandRunning, HESectori
             return .init(exitCode: 0, detail: String(decoding: data, as: UTF8.self))
         }
         if executable == "/usr/sbin/diskutil", arguments == ["list", "-plist"], let diskInventory,
-           let data = try? PropertyListSerialization.data(fromPropertyList: ["AllDisksAndPartitions": diskInventory], format: .xml, options: 0) {
+           let data = try? PropertyListSerialization.data(fromPropertyList: [
+               "AllDisksAndPartitions": diskInventory,
+               "AllDisks": diskInventory.compactMap { $0["DeviceIdentifier"] as? String }
+           ] as [String: Any], format: .xml, options: 0) {
             return .init(exitCode: 0, detail: String(decoding: data, as: UTF8.self))
         }
         if executable == "/usr/sbin/diskutil", arguments == ["apfs", "list", "-plist"],
@@ -110,7 +235,9 @@ private final class WorkbenchFixtureRunner: HESectoriumCommandRunning, HESectori
             return .init(exitCode: 0, detail: String(decoding: data, as: UTF8.self))
         }
         if executable == "/bin/df", arguments.count == 2, arguments[0] == "-P" {
-            return .init(exitCode: 0, detail: "Filesystem 512-blocks Used Available Capacity iused ifree %iused Mounted on\n/dev/\(imageBackingDevice) 1000 100 900 10% 1 2 1% \(mountPoint)\n")
+            let backing = offTargetRuntime && !arguments[1].hasPrefix(mountPoint) ? "disk0s1"
+                : (arguments[1] == "/" ? (systemBackingDevice ?? imageBackingDevice) : imageBackingDevice)
+            return .init(exitCode: 0, detail: "Filesystem 512-blocks Used Available Capacity iused ifree %iused Mounted on\n/dev/\(backing) 1000 100 900 10% 1 2 1% \(mountPoint)\n")
         }
         if executable == "/usr/bin/hdiutil", arguments == ["info", "-plist"], let imageInventory,
            let data = try? PropertyListSerialization.data(fromPropertyList: ["images": imageInventory], format: .xml, options: 0) {
@@ -120,7 +247,7 @@ private final class WorkbenchFixtureRunner: HESectoriumCommandRunning, HESectori
             return imageFormatOutput
         }
         if executable == "/usr/bin/hdiutil", arguments.first == "isencrypted" { return encryptionOutput }
-        if executable == "/usr/sbin/diskutil", arguments.first == "image", arguments.dropFirst().first == "attach" {
+        if executable == "/usr/bin/hdiutil", arguments.first == "attach" {
             if attachOutcome.succeeded, let attachedImageInventory { imageInventory = attachedImageInventory }
             return attachOutcome
         }
@@ -128,6 +255,7 @@ private final class WorkbenchFixtureRunner: HESectoriumCommandRunning, HESectori
         if executable == "/bin/sync", arguments.isEmpty { return .success }
         if executable == "/usr/sbin/diskutil", arguments.first == "unmount", occupancyIsClear { return .success }
         if executable == "/usr/sbin/diskutil", arguments.first == "eject", occupancyIsClear {
+            if failNextImageEject { failNextImageEject = false; return .init(exitCode: 1, detail: "fixture interrupted before image detach") }
             if ejectAfterUnmountEnabled { imageInventory = [] }
             return .success
         }
@@ -139,6 +267,113 @@ private final class WorkbenchFixtureRunner: HESectoriumCommandRunning, HESectori
         }
         return .init(exitCode: 127, detail: "fixture command not configured")
     }
+    private func simulate(_ executable: String, _ arguments: [String]) -> CommandOutcome? {
+        func plist(_ value: [String: Any]) -> CommandOutcome {
+            let data = try! PropertyListSerialization.data(fromPropertyList: value, format: .xml, options: 0)
+            return .init(exitCode: 0, detail: String(decoding: data, as: UTF8.self))
+        }
+        let parent: [String: Any] = ["VolumeUUID": volumeUUID.uuidString, "MountPoint": mountPoint,
+            "FilesystemType": "ExFAT", "WritableVolume": true, "VolumeName": "Fixture HE",
+            "DeviceIdentifier": "disk81s1", "PartOfWhole": "disk81", "TotalSize": UInt64(500) * 1_073_741_824]
+        if executable == "/usr/sbin/diskutil", arguments.count == 3, arguments.prefix(2) == ["info", "-plist"] {
+            let target = arguments[2]
+            if target == "/dev/disk81s1" { return plist(parent) }
+            if target == "/dev/disk81" { return plist(["DeviceIdentifier": "disk81", "VirtualOrPhysical": "Physical", "WholeDisk": true]) }
+            // Native diskutil info accepts a mounted volume or device, not an
+            // ordinary directory on a parent volume. Resolve containing storage
+            // through df/native mount metadata instead of inventing this result.
+            if target.hasPrefix(mountPoint + "/"), additionalDiskInfos[target] == nil {
+                return .init(exitCode: 1, detail: "Could not find disk: \(target)")
+            }
+        }
+        if executable == "/usr/sbin/diskutil", arguments.prefix(2) == ["image", "attach"],
+           modernImageAttachSupported, let i = arguments.firstIndex(of: "--mountPoint"),
+           arguments.indices.contains(i + 1), let path = arguments.last {
+            if let modernImageAttachOutcome, !modernImageAttachOutcome.succeeded { return modernImageAttachOutcome }
+            return simulate("/usr/bin/hdiutil", ["attach", "-mountpoint", arguments[i + 1], path])
+        }
+        if executable == "/usr/bin/hdiutil", arguments.first == "create", let path = arguments.last {
+            func after(_ flag: String) -> String { arguments[arguments.firstIndex(of: flag)! + 1] }
+            let gib = UInt64(after("-size").dropLast())!
+            simulatedImages[path] = .init(name: after("-volname"), bytes: gib * 1_073_741_824,
+                                          fs: after("-fs"), uuid: UUID())
+            return nil // ordinary fixture creates only a disposable empty directory
+        }
+        if executable == "/usr/bin/hdiutil", arguments.first == "attach", let path = arguments.last,
+           let image = simulatedImages[path], let i = arguments.firstIndex(of: "-mountpoint") {
+            let mount = arguments[i + 1]
+            let info: [String: Any] = ["VolumeUUID": image.uuid.uuidString, "MountPoint": mount, "Mounted": true,
+                "FilesystemType": "APFS", "FileSystemPersonality": image.fs == "APFSX" ? "Case-sensitive APFS" : "APFS",
+                "WritableVolume": true, "VolumeName": image.name, "DeviceIdentifier": "disk31s1",
+                "APFSContainerReference": "disk31", "TotalSize": image.bytes]
+            additionalDiskInfos[mount] = info; additionalDiskInfos["/dev/disk31s1"] = info
+            imageInventory = [["image-path": path, "system-entities": [
+                ["content-hint": "GUID_partition_scheme", "dev-entry": "/dev/disk30"],
+                ["content-hint": "Apple_APFS", "dev-entry": "/dev/disk30s2"],
+                ["mount-point": mount, "volume-uuid": image.uuid.uuidString, "dev-entry": "/dev/disk31s1"]]]]
+            apfsContainers = [["ContainerReference": "disk31", "PhysicalStores": [["DeviceIdentifier": "disk30s2"]],
+                               "Volumes": [["APFSVolumeUUID": image.uuid.uuidString, "DeviceIdentifier": "disk31s1"]]]]
+            return .success
+        }
+        if executable == "/usr/sbin/diskutil", arguments.first == "mount", arguments.count == 4,
+           arguments[1] == "-mountPoint", let info = additionalDiskInfos[arguments[3]],
+           (info["Mounted"] as? Bool == false || info["MountPoint"] as? String == ""),
+           let uuid = info["VolumeUUID"] as? String {
+            if let mountOutcome, !mountOutcome.succeeded { return mountOutcome }
+            var mounted = info; mounted["MountPoint"] = arguments[2]; mounted["Mounted"] = true
+            additionalDiskInfos[arguments[3]] = mounted; additionalDiskInfos[arguments[2]] = mounted
+            imageInventory = imageInventory?.map { image in
+                var image = image
+                if let entities = image["system-entities"] as? [[String: Any]] {
+                    image["system-entities"] = entities.map { entity in
+                        var entity = entity
+                        if entity["volume-uuid"] as? String == uuid { entity["mount-point"] = arguments[2] }
+                        return entity
+                    }
+                }
+                return image
+            }
+            return .success
+        }
+        if executable == "/usr/sbin/diskutil", arguments.first == "unmount", arguments.count == 2,
+           occupancyIsClear, let info = additionalDiskInfos[arguments[1]],
+           let uuid = info["VolumeUUID"] as? String {
+            additionalDiskInfos.removeValue(forKey: arguments[1])
+            for key in Array(additionalDiskInfos.keys) where additionalDiskInfos[key]?["VolumeUUID"] as? String == uuid {
+                additionalDiskInfos[key]?.removeValue(forKey: "MountPoint")
+                additionalDiskInfos[key]?["Mounted"] = false
+            }
+            imageInventory = imageInventory?.map { image in
+                var image = image
+                if let entities = image["system-entities"] as? [[String: Any]] {
+                    image["system-entities"] = entities.map { entity in
+                        var entity = entity
+                        if entity["volume-uuid"] as? String == uuid { entity.removeValue(forKey: "mount-point") }
+                        return entity
+                    }
+                }
+                return image
+            }
+            afterNativeUnmount?()
+            return .success
+        }
+        if executable == "/usr/bin/hdiutil", arguments.first == "resize", let path = arguments.last,
+           var image = simulatedImages[path], let i = arguments.firstIndex(of: "-size"),
+           let gib = UInt64(arguments[i + 1].dropLast()) {
+            if !ignoreNativeModification { image.bytes = gib * 1_073_741_824; simulatedImages[path] = image }
+            afterNativeModification?(); return .success
+        }
+        if executable == "/usr/sbin/diskutil", arguments.first == "renameVolume", arguments.count == 3,
+           let path = imageInventory?.first?["image-path"] as? String, var image = simulatedImages[path] {
+            if !ignoreNativeModification { image.name = arguments[2]; simulatedImages[path] = image }
+            for key in Array(additionalDiskInfos.keys) where additionalDiskInfos[key]?["VolumeUUID"] as? String == image.uuid.uuidString {
+                additionalDiskInfos[key]?["VolumeName"] = image.name
+            }
+            afterNativeModification?()
+            return .success
+        }
+        return nil
+    }
     func run(_ executable: String, _ arguments: [String], cwd: URL, standardInput: Data) -> CommandOutcome {
         secureInputs.append(standardInput)
         return run(executable, arguments, cwd: cwd)
@@ -147,6 +382,87 @@ private final class WorkbenchFixtureRunner: HESectoriumCommandRunning, HESectori
 
 @Suite("Sectorium workbench inventory fixtures")
 struct SectoriumWorkbenchRuntimeTests {
+    @Test("Explicit whole-eject target stays bound across another store's selection and rejects observation drift")
+    func explicitWholeEjectTargetIsIndependentOfSharedSelection() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let aID = fixture.device.id
+        let aVolume = try #require(fixture.device.volumeUUIDs.first)
+        let bID = UUID().uuidString, bVolume = UUID()
+        let bDevice = SectoriumPhysicalDevice(id: bID, bsdName: "disk82", name: "Other fixture drive",
+            isExternal: true, identityVerified: true, wholeDeviceBytes: 64_000_000_000,
+            mountedVolumePaths: [], volumeUUIDs: [bVolume], readBytes: nil, writtenBytes: nil)
+        fixture.observer.otherDevices = [bDevice]
+        let aTopology = WholeDeviceTopology(physicalIdentity: aID, bsdName: "disk81",
+            isWholeDevice: true, isExternal: true, isSystemDevice: false, inventoryComplete: true,
+            volumes: [.init(identity: "\(aVolume.uuidString.lowercased())|disk81s1", mounted: true)], images: [])
+        let bTopology = WholeDeviceTopology(physicalIdentity: bID, bsdName: "disk82",
+            isWholeDevice: true, isExternal: true, isSystemDevice: false, inventoryComplete: true,
+            volumes: [.init(identity: "\(bVolume.uuidString.lowercased())|disk82s1", mounted: true)], images: [])
+        let driver = TargetBindingFixtureDriver([aID: aTopology, bID: bTopology])
+        let service = HESectoriumService(paths: fixture.service.paths, backend: WorkbenchNoopBackend(),
+            store: fixture.store, operationLock: WorkbenchMemoryLock(),
+            installer: workbenchFixtureInstaller(fixture.service.paths), runner: fixture.runner,
+            identityPolicy: fixture.service.coreController.identityPolicy,
+            sectoriumDeviceObserver: fixture.observer, wholeDeviceEjectDriverOverride: driver,
+            portableDocumentWriter: fixture.portableWriter)
+        service.selectSectoriumDevice(bID)
+
+        let promptA = try #require(service.prepareWholeDeviceEjectConfirmation(physicalIdentity: aID))
+        #expect(promptA.physicalIdentity == aID)
+        #expect(service.prepareWholeDeviceEjectConfirmation(physicalIdentity: bID)?.physicalIdentity == bID)
+        let checkpointA = promptA.checkpoint(knownWritersClosed: true)
+        #expect(!service.ejectSelectedExternalDevice(physicalIdentity: bID, checkpoint: checkpointA).succeeded)
+        driver.observations[aID] = bTopology
+        #expect(service.prepareWholeDeviceEjectConfirmation(physicalIdentity: aID) == nil)
+        #expect(!service.ejectSelectedExternalDevice(physicalIdentity: aID, checkpoint: checkpointA).succeeded)
+        #expect(driver.storageActions == 0)
+        #expect(fixture.store.value.ejectIntent == false)
+    }
+
+    @Test("Malformed registered-profile bytes fail closed without creating an image")
+    func malformedProfileRegistryPreservesBytes() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try FileManager.default.createDirectory(at: fixture.service.paths.root, withIntermediateDirectories: true)
+        let original = Data("{invalid registered profile".utf8)
+        try original.write(to: fixture.service.paths.sectoriumProfiles, options: .atomic)
+
+        let created = fixture.service.createDevelopmentDisk(deviceID: fixture.device.id,
+            parentDirectory: fixture.mount, name: "Development", capacityGiB: 1,
+            caseSensitive: false, password: nil)
+
+        #expect(!created.succeeded)
+        #expect(try Data(contentsOf: fixture.service.paths.sectoriumProfiles) == original)
+        #expect(!fixture.runner.commands.contains { $0.first == "/usr/bin/hdiutil" && $0.dropFirst().first == "create" })
+        #expect(!fixture.service.setAutomationEnabled(true).succeeded)
+        #expect(!fixture.service.runAutomationAgentAtStartup().succeeded)
+        #expect(fixture.service.sectoriumReadiness(deviceID: fixture.device.id,
+            devices: [fixture.device], profiles: []) ==
+            .unknown("Registered profile configuration is unavailable or invalid"))
+    }
+
+    @Test("Portable documentation can remain pending and retry without changing the disk operation")
+    func portableDocumentPendingIsIndependent() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.portableWriter.outcome = .pending("fixture write withheld")
+
+        let created = fixture.service.createDevelopmentDisk(deviceID: fixture.device.id,
+            parentDirectory: fixture.mount, name: "Development", capacityGiB: 1,
+            caseSensitive: false, password: nil)
+
+        #expect(created.succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        #expect(fixture.portableWriter.events == ["\(profile.id):registered"])
+        #expect(fixture.service.refreshStatus().diagnostics.contains { $0.category == "portableDocumentPending" })
+
+        fixture.portableWriter.outcome = .updated
+        #expect(fixture.service.retryPortableDocumentation(profileID: profile.id) == .updated)
+        #expect(fixture.portableWriter.events == ["\(profile.id):registered"], "Retry retains the original event instead of inventing validation history")
+        #expect(!fixture.service.refreshStatus().diagnostics.contains { $0.category == "portableDocumentPending" })
+    }
+
     @Test("Fresh service explicitly returns a busy mounted managed image without replaying eject")
     func freshProcessReturnsBusyManagedImage() throws {
         let fixture = try makeWorkbenchFixture()
@@ -184,19 +500,237 @@ struct SectoriumWorkbenchRuntimeTests {
                 workbenchCompletedStep: journal.completedSteps.last)))
         let driver = BusyImageReturnFixtureDriver(topology)
         let freshProcessService = HESectoriumService(paths: support, store: JSONStateStore(url: support.state),
-            operationLock: WorkbenchMemoryLock(), runner: fixture.runner,
+            operationLock: WorkbenchMemoryLock(), installer: workbenchFixtureInstaller(support),
+            runner: fixture.runner,
             identityPolicy: fixture.service.coreController.identityPolicy,
-            wholeDeviceEjectDriverOverride: driver)
+            wholeDeviceEjectDriverOverride: driver,
+            portableDocumentWriter: WorkbenchPortableWriter())
 
         let genericRecovery = freshProcessService.resumePendingSectoriumOperation()
         #expect(!genericRecovery.succeeded)
         #expect(try JSONStateStore(url: support.state).load().ejectIntent)
         #expect(!fixture.runner.commands.contains { $0.contains("attach") || $0.contains("eject") })
+        freshProcessService.selectSectoriumDevice(fixture.device.id)
         let returned = freshProcessService.returnToDevelopment()
         #expect(returned.succeeded, "\(String(describing: returned.failure))")
         #expect(try !JSONStateStore(url: support.state).load().ejectIntent)
         #expect(driver.calls == ["return-check"])
         #expect(!fixture.runner.commands.contains { $0.contains("attach") || $0.contains("eject") })
+    }
+
+    @Test("Refresh maps a previously returned eject to its registered profile and releases stale reconnect suppression")
+    func returnedEjectRefreshMapsStaleSuppressionToRegisteredProfile() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        #expect(fixture.service.createDevelopmentDisk(deviceID: fixture.device.id,
+            parentDirectory: fixture.mount, name: "Development", capacityGiB: 1,
+            caseSensitive: false, password: nil).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        let topology = WholeDeviceTopology(physicalIdentity: fixture.device.id, bsdName: fixture.device.bsdName,
+            isWholeDevice: true, isExternal: true, isSystemDevice: false, inventoryComplete: true,
+            volumes: [.init(identity: "\(profile.backingVolumeUUID.uuidString.lowercased())|disk81s1", mounted: true)], images: [])
+        let journal = WholeDeviceEjectJournalRecord(operationID: "prior-verified-return", target: topology,
+            phase: .verifiedAbsent, completedSteps: ["unmountAllPhysicalVolumes", "ejectWholeDevice"],
+            lastReceipt: .completed("Disk /dev/disk81 ejected\n"), lastIssuedAction: .ejectWholeDevice)
+        let unrelated = UUID().uuidString
+        fixture.store.value = StoragePersistentState(revision: fixture.store.value.revision + 1, ejectIntent: false,
+            operationID: journal.operationID, suppressedProfileIDs: [profile.id, unrelated],
+            disconnectedProfileIDs: [profile.id, unrelated], reconnectAttemptedProfileIDs: [profile.id],
+            workbenchPhase: "eject:return-validated", workbenchTarget: try JSONEncoder().encode(journal).base64EncodedString(),
+            workbenchTerminalResult: "returned-to-development")
+        let driver = BusyImageReturnFixtureDriver(topology)
+        let service = HESectoriumService(paths: fixture.service.paths, backend: WorkbenchNoopBackend(),
+            store: fixture.store, operationLock: WorkbenchMemoryLock(),
+            installer: workbenchFixtureInstaller(fixture.service.paths), runner: fixture.runner,
+            identityPolicy: fixture.service.coreController.identityPolicy,
+            sectoriumDeviceObserver: fixture.observer, wholeDeviceEjectDriverOverride: driver,
+            portableDocumentWriter: fixture.portableWriter)
+        let commandsBefore = fixture.runner.commands.count
+        #expect(service.reconcileWholeDeviceEjectRecovery())
+        #expect(fixture.store.value.suppressedProfileIDs == [unrelated])
+        #expect(fixture.store.value.disconnectedProfileIDs == [unrelated])
+        #expect(fixture.store.value.reconnectAttemptedProfileIDs.isEmpty)
+        #expect(fixture.store.value.workbenchOperation == nil && !fixture.store.value.ejectIntent)
+        #expect(!service.reconcileWholeDeviceEjectRecovery())
+        #expect(fixture.runner.commands.count == commandsBefore)
+    }
+
+    @Test("An unissued whole eject exposes explicit Return and clears only its durable intent")
+    func unissuedWholeEjectCanReturnWithoutStorageAction() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let volume = try #require(fixture.device.volumeUUIDs.first)
+        let topology = WholeDeviceTopology(physicalIdentity: fixture.device.id, bsdName: fixture.device.bsdName,
+            isWholeDevice: true, isExternal: true, isSystemDevice: false, inventoryComplete: true,
+            volumes: [.init(identity: "\(volume.uuidString.lowercased())|disk81s1", mounted: true)], images: [])
+        let journal = WholeDeviceEjectJournalRecord(operationID: UUID().uuidString, target: topology,
+            phase: .interrupted)
+        fixture.store.value = StoragePersistentState(revision: 1, ejectIntent: true,
+            operationID: journal.operationID, workbenchOperation: "eject:\(journal.operationID)",
+            workbenchPhase: "eject:interrupted", workbenchTarget: try JSONEncoder().encode(journal).base64EncodedString())
+        let driver = BusyImageReturnFixtureDriver(topology)
+        let service = HESectoriumService(paths: fixture.service.paths, backend: WorkbenchNoopBackend(),
+            store: fixture.store, operationLock: WorkbenchMemoryLock(),
+            installer: workbenchFixtureInstaller(fixture.service.paths), runner: fixture.runner,
+            identityPolicy: fixture.service.coreController.identityPolicy,
+            sectoriumDeviceObserver: fixture.observer, wholeDeviceEjectDriverOverride: driver,
+            portableDocumentWriter: fixture.portableWriter)
+        let beforeCommands = fixture.runner.commands.count
+
+        #expect(service.canReturnFromWholeDeviceEject(physicalIdentity: fixture.device.id))
+        #expect(service.prepareContinueWholeDeviceEjectConfirmation(physicalIdentity: fixture.device.id) == nil)
+        let returned = service.returnToDevelopment(physicalIdentity: fixture.device.id)
+        #expect(returned.succeeded)
+        #expect(!fixture.store.value.ejectIntent && fixture.store.value.workbenchOperation == nil)
+        #expect(driver.calls == ["return-check", "return-check"])
+        #expect(fixture.runner.commands.count == beforeCommands)
+    }
+
+    @Test("No-action Return revalidates an old backing UUID after a new physical member changes catalog identity")
+    func unissuedReturnAcceptsOnlyFreshDirectParentAnchor() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        #expect(fixture.service.createDevelopmentDisk(deviceID: fixture.device.id,
+            parentDirectory: fixture.mount, name: "Development", capacityGiB: 1,
+            caseSensitive: false, password: nil).succeeded)
+        let created = try #require(fixture.service.sectoriumProfiles().first)
+        let anchor = created.backingVolumeUUID
+        let newVolume = UUID()
+        let newMount = fixture.root.appendingPathComponent("new-physical-member", isDirectory: true)
+        try FileManager.default.createDirectory(at: newMount, withIntermediateDirectories: true)
+        let profile = SectoriumDevelopmentProfile(id: created.id, name: created.name,
+            deviceID: anchor.uuidString, backingVolumeUUID: anchor,
+            backingMountPoint: created.backingMountPoint, imagePath: created.imagePath,
+            devVolumeName: created.devVolumeName, devMountPoint: created.devMountPoint,
+            devUUID: created.devUUID, encrypted: created.encrypted,
+            caseSensitive: created.caseSensitive, logicalCapacityBytes: created.logicalCapacityBytes,
+            imageFormat: created.imageFormat, validation: created.validation)
+        let paths = fixture.service.paths
+        try JSONEncoder().encode([profile]).write(to: paths.sectoriumProfiles, options: .atomic)
+        let degraded = SectoriumPhysicalDevice(id: "unverified-disk81", bsdName: "disk81",
+            name: "Fixture Drive with a new member", isExternal: true, identityVerified: false,
+            wholeDeviceBytes: fixture.device.wholeDeviceBytes,
+            mountedVolumePaths: [fixture.mount.path, newMount.path],
+            volumeUUIDs: [anchor, newVolume], readBytes: nil, writtenBytes: nil,
+            volumeMembers: [
+                .init(volumeUUID: anchor, bsdName: "disk81s1", mountPoint: fixture.mount.path),
+                .init(volumeUUID: newVolume, bsdName: "disk81s2", mountPoint: newMount.path)
+            ], topologyComplete: true, isVirtual: false, identityBasis: .unavailable,
+            wholeMediaUUID: nil, requiresFreshParentCheck: true)
+        fixture.observer.device = degraded
+        fixture.runner.mountParentWholeDisk = "disk81"
+        fixture.runner.systemBackingDevice = "disk0s1"
+        fixture.runner.imageInventory = []
+        fixture.runner.additionalDiskInfos = [
+            "/dev/disk0s1": ["DeviceIdentifier": "disk0s1", "ParentWholeDisk": "disk0"],
+            "/dev/disk0": ["DeviceIdentifier": "disk0", "VirtualOrPhysical": "Physical"],
+            "/dev/disk81": ["DeviceIdentifier": "disk81", "VirtualOrPhysical": "Physical"],
+            "/dev/disk81s1": ["DeviceIdentifier": "disk81s1", "ParentWholeDisk": "disk81",
+                                "VolumeUUID": anchor.uuidString],
+            "/dev/disk81s2": ["DeviceIdentifier": "disk81s2", "ParentWholeDisk": "disk81",
+                                "VolumeUUID": newVolume.uuidString]
+        ]
+        fixture.runner.diskInventory = [["DeviceIdentifier": "disk81", "Partitions": [
+            ["DeviceIdentifier": "disk81s1"], ["DeviceIdentifier": "disk81s2"]
+        ]]]
+        let original = WholeDeviceTopology(physicalIdentity: anchor.uuidString, bsdName: "disk81",
+            isWholeDevice: true, isExternal: true, isSystemDevice: false, inventoryComplete: true,
+            volumes: [.init(identity: "\(anchor.uuidString.lowercased())|disk81s1", mounted: true)], images: [])
+        let journal = WholeDeviceEjectJournalRecord(operationID: "no-action-anchor-return",
+            target: original, phase: .interrupted)
+        let encodedJournal = try JSONEncoder().encode(journal).base64EncodedString()
+        let durableStore = JSONStateStore(url: paths.state)
+        let initial = try durableStore.load()
+        #expect(try durableStore.compareAndSwap(expectedRevision: initial.revision,
+            newState: StoragePersistentState(revision: initial.revision + 1, ejectIntent: true,
+                operationID: journal.operationID, workbenchOperation: "eject:\(journal.operationID)",
+                workbenchPhase: "eject:interrupted", workbenchTarget: encodedJournal)))
+        let service = HESectoriumService(paths: paths, backend: WorkbenchNoopBackend(),
+            store: JSONStateStore(url: paths.state), operationLock: WorkbenchMemoryLock(),
+            installer: workbenchFixtureInstaller(paths), runner: fixture.runner,
+            identityPolicy: fixture.service.coreController.identityPolicy,
+            sectoriumDeviceObserver: fixture.observer, portableDocumentWriter: fixture.portableWriter)
+        let commandsBeforeReturn = fixture.runner.commands.count
+
+        let wrongAnchor = SectoriumPhysicalDevice(id: degraded.id, bsdName: degraded.bsdName,
+            name: degraded.name, isExternal: true, identityVerified: false,
+            wholeDeviceBytes: degraded.wholeDeviceBytes, mountedVolumePaths: [newMount.path],
+            volumeUUIDs: [newVolume], readBytes: nil, writtenBytes: nil,
+            volumeMembers: [.init(volumeUUID: newVolume, bsdName: "disk81s2", mountPoint: newMount.path)],
+            topologyComplete: true, isVirtual: false, identityBasis: .unavailable,
+            requiresFreshParentCheck: true)
+        fixture.observer.device = wrongAnchor
+        #expect(!service.canReturnFromWholeDeviceEject(physicalIdentity: anchor.uuidString))
+        #expect(!service.returnToDevelopment(physicalIdentity: anchor.uuidString).succeeded)
+        #expect(try durableStore.load().ejectIntent)
+
+        fixture.observer.device = degraded
+        fixture.runner.additionalDiskInfos["/dev/disk81s2"]?["ParentWholeDisk"] = "disk99"
+        #expect(!service.canReturnFromWholeDeviceEject(physicalIdentity: anchor.uuidString))
+        #expect(try durableStore.load().ejectIntent)
+        fixture.runner.additionalDiskInfos["/dev/disk81s2"]?["ParentWholeDisk"] = "disk81"
+
+        #expect(service.canReturnFromWholeDeviceEject(physicalIdentity: anchor.uuidString))
+        #expect(service.prepareContinueWholeDeviceEjectConfirmation(physicalIdentity: anchor.uuidString) == nil)
+        let returned = service.returnToDevelopment(physicalIdentity: anchor.uuidString)
+        #expect(returned.succeeded, "\(String(describing: returned.failure))")
+        #expect(try !durableStore.load().ejectIntent)
+        #expect(try durableStore.load().workbenchOperation == nil)
+        #expect(Array(fixture.runner.commands.dropFirst(commandsBeforeReturn)).allSatisfy { command in
+            !command.contains("attach") && !command.contains("detach")
+                && !command.contains("unmount") && !command.contains("eject")
+        })
+    }
+
+    @Test("Successful eject callback with unknown presence offers a read-only Continue recheck")
+    func postCallbackWholeEjectRequiresFreshAbsentObservation() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let volume = try #require(fixture.device.volumeUUIDs.first)
+        let topology = WholeDeviceTopology(physicalIdentity: fixture.device.id, bsdName: fixture.device.bsdName,
+            isWholeDevice: true, isExternal: true, isSystemDevice: false, inventoryComplete: true,
+            volumes: [.init(identity: "\(volume.uuidString.lowercased())|disk81s1", mounted: false)], images: [])
+        let journal = WholeDeviceEjectJournalRecord(operationID: UUID().uuidString, target: topology,
+            phase: .interrupted, completedSteps: ["unmountAllPhysicalVolumes", "ejectWholeDevice"],
+            lastReceipt: .completed("fixture callback succeeded"), lastIssuedAction: .ejectWholeDevice)
+        fixture.store.value = StoragePersistentState(revision: 1, ejectIntent: true,
+            operationID: journal.operationID, workbenchOperation: "eject:\(journal.operationID)",
+            workbenchPhase: "eject:interrupted", workbenchTarget: try JSONEncoder().encode(journal).base64EncodedString())
+        let driver = BusyImageReturnFixtureDriver(topology)
+        driver.observedPresence = .unknown("fixture observation unavailable")
+        let service = HESectoriumService(paths: fixture.service.paths, backend: WorkbenchNoopBackend(),
+            store: fixture.store, operationLock: WorkbenchMemoryLock(),
+            installer: workbenchFixtureInstaller(fixture.service.paths), runner: fixture.runner,
+            identityPolicy: fixture.service.coreController.identityPolicy,
+            sectoriumDeviceObserver: fixture.observer, wholeDeviceEjectDriverOverride: driver,
+            portableDocumentWriter: fixture.portableWriter)
+        let prompt = try #require(service.prepareContinueWholeDeviceEjectConfirmation(
+            physicalIdentity: fixture.device.id))
+        #expect(prompt.isContinuation && prompt.isObservationOnly)
+        #expect(service.prepareContinueWholeDeviceEjectConfirmation(physicalIdentity: UUID().uuidString) == nil)
+        let beforeCommands = fixture.runner.commands.count
+        let uncertain = service.continueWholeDeviceEject(physicalIdentity: fixture.device.id,
+            checkpoint: prompt.checkpoint(knownWritersClosed: false))
+        #expect(!uncertain.succeeded)
+        #expect(!uncertain.steps.contains { $0.step == "verifyWholeDeviceEjected" && $0.status == .succeeded })
+        #expect(fixture.store.value.ejectIntent)
+        #expect(fixture.store.value.workbenchOperation == "eject:\(journal.operationID)")
+        driver.observedPresence = .absent
+        let refreshed = try #require(service.prepareContinueWholeDeviceEjectConfirmation(
+            physicalIdentity: fixture.device.id))
+        let complete = service.continueWholeDeviceEject(physicalIdentity: fixture.device.id,
+            checkpoint: refreshed.checkpoint(knownWritersClosed: false))
+        #expect(complete.steps.contains { $0.step == "verifyWholeDeviceEjected" && $0.status == .succeeded })
+        #expect(complete.succeeded, "\(String(describing: complete.failure))")
+        #expect(!fixture.store.value.ejectIntent && fixture.store.value.workbenchOperation == nil)
+        #expect(fixture.store.value.terminalEjectJournals[fixture.device.id] != nil)
+        #expect(driver.calls == ["presence", "presence"])
+        let recoveryCommands = fixture.runner.commands.dropFirst(beforeCommands)
+        #expect(!recoveryCommands.contains { command in
+            let action = command.dropFirst().first ?? ""
+            return (command.first == "/usr/sbin/diskutil" && ["unmount", "eject", "mount"].contains(action))
+                || (command.first == "/usr/bin/hdiutil" && ["attach", "detach", "create"].contains(action))
+        }, "Presence recovery may inspect dependencies but must not dispatch storage mutations")
     }
 
     @Test("Stop rejects legacy calls without checkpoint and never probes occupancy")
@@ -249,9 +783,11 @@ struct SectoriumWorkbenchRuntimeTests {
         let provider = WorkbenchIORegistryFixture(mappings: [])
         let service = HESectoriumService(paths: fixture.service.paths,
             backend: WorkbenchNoopBackend(), store: WorkbenchMemoryStore(),
-            operationLock: WorkbenchMemoryLock(), runner: fixture.runner,
+            operationLock: WorkbenchMemoryLock(), installer: workbenchFixtureInstaller(fixture.service.paths),
+            runner: fixture.runner,
             identityPolicy: .expected, sectoriumDeviceObserver: fixture.observer,
-            sectoriumDeviceIOSampler: SectoriumDeviceIOSampler(provider: provider))
+            sectoriumDeviceIOSampler: SectoriumDeviceIOSampler(provider: provider),
+            portableDocumentWriter: WorkbenchPortableWriter())
         let before = fixture.runner.commands.count
         #expect(service.sampleSectoriumDeviceCounters(for: anchored) == nil)
         #expect(provider.requestedNames.isEmpty)
@@ -572,6 +1108,30 @@ struct SectoriumWorkbenchRuntimeTests {
         #expect(devices.first { $0.bsdName == "disk83" }?.hasAmbiguousPhysicalStores == true)
     }
 
+    @Test("Only confirmed internal location can exclude an unrelated device from disappearance checks")
+    func unknownAndContradictoryLocationsRemainUnconfirmed() throws {
+        let duplicateIdentity = UUID().uuidString
+        let info: [String: [String: Any]] = [
+            "disk80": ["VirtualOrPhysical": "Physical", "Internal": true, "MediaUUID": duplicateIdentity],
+            "disk81": ["VirtualOrPhysical": "Physical", "DeviceLocation": "Internal", "MediaUUID": duplicateIdentity],
+            "disk82": ["VirtualOrPhysical": "Physical"],
+            "disk83": ["VirtualOrPhysical": "Physical", "Internal": true, "DeviceLocation": "External"],
+            "disk84": ["VirtualOrPhysical": "Physical", "Internal": false, "DeviceLocation": "Internal"]
+        ]
+        let rows = info.keys.sorted().map { ["DeviceIdentifier": $0] }
+        let devices = try SectoriumDeviceCatalog().parse(
+            diskInventory: plistData(["AllDisksAndPartitions": rows]), ioRegistry: Data(), deviceInformation: info)
+        for bsd in ["disk80", "disk81"] {
+            let device = try #require(devices.first { $0.bsdName == bsd })
+            #expect(device.isInternalConfirmed)
+            #expect(!device.identityVerified) // Duplicate-identity degradation preserves location evidence.
+        }
+        for bsd in ["disk82", "disk83", "disk84"] {
+            #expect(devices.first { $0.bsdName == bsd }?.isInternalConfirmed == false)
+        }
+        #expect(devices.first { $0.bsdName == "disk82" }?.isExternal == false)
+    }
+
     @Test("A selected backing-volume anchor refuses a fresh BSD attachment change")
     func anchoredSelectionRejectsReconnectBeforeCreate() throws {
         let fixture = try makeWorkbenchFixture()
@@ -765,8 +1325,8 @@ struct SectoriumWorkbenchRuntimeTests {
         })
     }
 
-    @Test("Mounted configured legacy DEV_APFS adopts observed identity while image facts remain unknown")
-    func adoptsOnlyMountedConfiguredLegacyIdentity() throws {
+    @Test("Mounted configured legacy DEV_APFS adopts observed identity while image facts remain unknown", arguments: [false, true])
+    func adoptsOnlyMountedConfiguredLegacyIdentity(mountedFormatBusy: Bool) throws {
         let requestedRoot = URL(fileURLWithPath: "/private/tmp/sectorium-legacy-adoption-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: requestedRoot, withIntermediateDirectories: false)
         let root = requestedRoot.resolvingSymlinksInPath()
@@ -823,8 +1383,11 @@ struct SectoriumWorkbenchRuntimeTests {
         let store = WorkbenchMemoryStore()
         let service = HESectoriumService(paths: HESectoriumPaths(root: root.appendingPathComponent("support")),
             backend: WorkbenchAdoptionBackend(observation: observation), store: store,
-            operationLock: WorkbenchMemoryLock(), runner: runner, identityPolicy: policy,
-            sectoriumDeviceObserver: WorkbenchFixtureObserver(device: device))
+            operationLock: WorkbenchMemoryLock(),
+            installer: workbenchFixtureInstaller(HESectoriumPaths(root: root.appendingPathComponent("support"))),
+            runner: runner, identityPolicy: policy,
+            sectoriumDeviceObserver: WorkbenchFixtureObserver(device: device),
+            portableDocumentWriter: WorkbenchPortableWriter())
         service.selectSectoriumDevice(device.id, observedBSDName: device.bsdName, observedDevice: device)
 
         let originalImageChildren = try FileManager.default.contentsOfDirectory(atPath: image.path)
@@ -836,6 +1399,30 @@ struct SectoriumWorkbenchRuntimeTests {
         #expect(try preimages().map(\.1) == beforePreimages.map(\.1))
         #expect(service.resumePendingSectoriumOperation().succeeded)
         runner.mountParentWholeDisk = "disk91"
+        for (metadataUUID, metadataMount) in [(UUID(), dev.path), (devID, outer.path)] {
+            runner.additionalDiskInfos[dev.path] = ["VolumeUUID": metadataUUID.uuidString,
+                "MountPoint": metadataMount, "FilesystemType": "APFS", "VolumeSize": UInt64(321_912_791_040)]
+            let mismatchedMetadata = service.adoptDevelopmentDisk(deviceID: device.id, imageURL: image)
+            #expect(!mismatchedMetadata.succeeded)
+            #expect(service.sectoriumProfiles().isEmpty)
+            #expect(service.resumePendingSectoriumOperation().succeeded)
+        }
+        runner.additionalDiskInfos.removeValue(forKey: dev.path)
+        if mountedFormatBusy {
+            runner.imageFormatOutput = .init(exitCode: 1,
+                detail: "hdiutil: WARNING: 'hdiutil imageinfo ...' is deprecated.\nhdiutil: imageinfo failed - Resource temporarily unavailable\n")
+            let metadataURL = image.appendingPathComponent("Info.plist")
+            try Data("invalid sparsebundle descriptor".utf8).write(to: metadataURL)
+            let refusedFormat = service.adoptDevelopmentDisk(deviceID: device.id, imageURL: image)
+            #expect(!refusedFormat.succeeded)
+            #expect(service.sectoriumProfiles().isEmpty)
+            #expect(!runner.commands.contains { $0.contains("attach") || $0.contains("create") })
+            #expect(service.resumePendingSectoriumOperation().succeeded)
+            try PropertyListSerialization.data(fromPropertyList: [
+                "diskimage-bundle-type": "com.apple.diskimage.sparsebundle",
+                "bundle-backingstore-version": 2, "band-size": 8_388_608, "size": UInt64(322_122_547_200)
+            ], format: .xml, options: 0).write(to: metadataURL)
+        }
         let result = service.adoptDevelopmentDisk(deviceID: device.id, imageURL: image)
         #expect(result.succeeded, "\(String(describing: result.failure))")
         let profile = try #require(service.sectoriumProfiles().first)
@@ -860,8 +1447,8 @@ struct SectoriumWorkbenchRuntimeTests {
         #expect(store.value.workbenchOperation == nil)
     }
 
-    @Test("Configured legacy DEV_APFS adoption completes isolated Stop Start lifecycle")
-    func configuredLegacyAdoptionStopStartLifecycle() throws {
+    @Test("Configured legacy DEV_APFS adoption completes isolated Stop Start lifecycle", arguments: [false, true])
+    func configuredLegacyAdoptionStopStartLifecycle(capacityAvailable: Bool) throws {
         let requestedRoot = URL(fileURLWithPath: "/private/tmp/sectorium-legacy-lifecycle-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: requestedRoot, withIntermediateDirectories: false)
         let root = requestedRoot.resolvingSymlinksInPath()
@@ -902,7 +1489,8 @@ struct SectoriumWorkbenchRuntimeTests {
             "/dev/disk81": ["DeviceIdentifier": "disk81", "VirtualOrPhysical": "Physical"],
             dev.path: ["VolumeUUID": devID.uuidString, "MountPoint": dev.path, "FilesystemType": "APFS",
                 "WritableVolume": true, "VolumeName": "DEV_APFS", "DeviceIdentifier": "disk31s1",
-                "APFSContainerReference": "disk31"],
+                "APFSContainerReference": "disk31", "VolumeSize": 0,
+                "TotalSize": capacityAvailable ? UInt64(321_912_791_040) : 0],
             "/dev/disk31s1": ["VolumeUUID": devID.uuidString, "MountPoint": dev.path, "FilesystemType": "APFS",
                 "WritableVolume": true, "VolumeName": "DEV_APFS", "DeviceIdentifier": "disk31s1",
                 "APFSContainerReference": "disk31"]
@@ -916,26 +1504,32 @@ struct SectoriumWorkbenchRuntimeTests {
         let store = WorkbenchMemoryStore()
         let service = HESectoriumService(paths: HESectoriumPaths(root: root.appendingPathComponent("support")),
             backend: WorkbenchAdoptionBackend(observation: observation), store: store,
-            operationLock: WorkbenchMemoryLock(), runner: runner, identityPolicy: identity,
-            sectoriumDeviceObserver: WorkbenchFixtureObserver(device: device))
+            operationLock: WorkbenchMemoryLock(),
+            installer: workbenchFixtureInstaller(HESectoriumPaths(root: root.appendingPathComponent("support"))),
+            runner: runner, identityPolicy: identity,
+            sectoriumDeviceObserver: WorkbenchFixtureObserver(device: device),
+            portableDocumentWriter: WorkbenchPortableWriter())
         service.selectSectoriumDevice(device.id)
 
         let adoption = service.adoptDevelopmentDisk(deviceID: device.id, imageURL: image)
         #expect(adoption.succeeded, "\(String(describing: adoption.failure))")
         #expect(service.sectoriumProfiles().first?.imageFormat == "UDSB")
+        #expect(service.sectoriumProfiles().first?.logicalCapacityBytes == (capacityAvailable ? 321_912_791_040 : nil))
+        #expect(service.sectoriumProfiles().first?.filesystem == .apfs)
+        #expect(service.sectoriumProfiles().first?.caseSensitive == false)
         let stopCheckpoint = try #require(service.prepareStopDevelopmentDiskConfirmation())
         let stop = service.stopDevelopmentDisk(checkpoint: stopCheckpoint, knownWritersClosed: true)
         #expect(stop.succeeded, "\(String(describing: stop.failure))")
         #expect(runner.imageInventory?.isEmpty == true)
         #expect(store.value.workbenchOperation == nil)
-        #expect(!runner.commands.contains { $0.first == "/usr/sbin/lsof" })
+        #expect(runner.commands.contains { $0.first == "/usr/sbin/lsof" })
         #expect(!runner.commands.contains { $0.first == "/usr/sbin/diskutil" && $0.dropFirst().first == "eject" && $0.contains("/dev/\(device.bsdName)") })
 
         let start = service.startDevelopmentDisk()
         #expect(start.succeeded, "\(String(describing: start.failure))")
         #expect(runner.imageInventory?.first?["image-path"] as? String == image.path)
         #expect(service.sectoriumProfiles().first?.validation == .validated)
-        #expect(runner.commands.filter { $0.first == "/usr/sbin/diskutil" && $0.contains("attach") }.count == 1)
+        #expect(runner.commands.filter { $0.first == "/usr/bin/hdiutil" && $0.contains("attach") }.count == 1)
     }
 
     @Test("Generic detached sparsebundle adoption records only verified identity and never attaches")
@@ -954,7 +1548,7 @@ struct SectoriumWorkbenchRuntimeTests {
         #expect(profile.name == "Project-Data")
         #expect(profile.imagePath == image.path)
         #expect(profile.backingVolumeUUID == fixture.service.coreController.identityPolicy.outerUUID)
-        #expect(profile.devMountPoint == "/Volumes/Project-Data-DEV")
+        #expect(profile.devMountPoint == fixture.mount.appendingPathComponent(".AUV-Sectorium-Mounts/" + profile.id).path)
         #expect(profile.encrypted == false)
         #expect(profile.devUUID == nil)
         #expect(profile.validation == .pendingValidation)
@@ -966,6 +1560,18 @@ struct SectoriumWorkbenchRuntimeTests {
     func genericDetachedAdoptionStartStopStartLifecycle() throws {
         let fixture = try makeWorkbenchFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let archivedPhysicalID = UUID().uuidString
+        let archivedTopology = WholeDeviceTopology(physicalIdentity: archivedPhysicalID, bsdName: "disk91",
+            isWholeDevice: true, isExternal: true, isSystemDevice: false, inventoryComplete: true,
+            volumes: [.init(identity: "\(UUID().uuidString.lowercased())|disk91s1", mounted: true)], images: [])
+        let archivedJournal = WholeDeviceEjectJournalRecord(operationID: "completed-other-device",
+            target: archivedTopology, phase: .verifiedAbsent, completedSteps: ["ejectWholeDevice"])
+        let encodedArchive = try JSONEncoder().encode(archivedJournal).base64EncodedString()
+        fixture.store.value = StoragePersistentState(ejectIntent: false,
+            terminalEjectJournals: [archivedPhysicalID: encodedArchive])
+        #expect(fixture.service.pendingSectoriumOperation() == nil)
+        #expect(fixture.service.sectoriumReadiness(deviceID: fixture.device.id,
+            devices: [fixture.device], profiles: []) != .operationInProgress("eject:completed-other-device"))
         let image = fixture.mount.appendingPathComponent("Lifecycle.sparsebundle", isDirectory: true)
         let devMount = fixture.root.appendingPathComponent("isolated-apfs-mount", isDirectory: true)
         try FileManager.default.createDirectory(at: image, withIntermediateDirectories: false)
@@ -1017,6 +1623,7 @@ struct SectoriumWorkbenchRuntimeTests {
         let firstStart = fixture.service.startDevelopmentDisk()
         #expect(firstStart.succeeded, "\(String(describing: firstStart.failure))")
         #expect(fixture.store.value.workbenchOperation == nil)
+        #expect(fixture.store.value.terminalEjectJournals[archivedPhysicalID] == encodedArchive)
         #expect(fixture.runner.imageInventory?.first?["image-path"] as? String == image.path)
         #expect(fixture.service.sectoriumProfiles().first?.devUUID == volumeID)
 
@@ -1024,15 +1631,22 @@ struct SectoriumWorkbenchRuntimeTests {
         let stop = fixture.service.stopDevelopmentDisk(checkpoint: stopCheckpoint, knownWritersClosed: true)
         #expect(stop.succeeded, "\(String(describing: stop.failure))")
         #expect(fixture.store.value.workbenchOperation == nil)
+        #expect(fixture.store.value.suppressedProfileIDs.contains(profile.id))
         #expect(fixture.runner.imageInventory?.isEmpty == true)
-        #expect(!fixture.runner.commands.contains { $0.first == "/usr/sbin/lsof" })
+        #expect(fixture.runner.commands.contains { $0.first == "/usr/sbin/lsof" })
         #expect(!fixture.runner.commands.contains { $0.first == "/usr/sbin/diskutil" && $0.dropFirst().first == "eject" && $0.contains("/dev/\(fixture.device.bsdName)") })
 
         let secondStart = fixture.service.startDevelopmentDisk()
         #expect(secondStart.succeeded, "\(String(describing: secondStart.failure))")
         #expect(fixture.store.value.workbenchOperation == nil)
+        #expect(fixture.store.value.terminalEjectJournals[archivedPhysicalID] == encodedArchive)
         #expect(fixture.runner.imageInventory?.first?["image-path"] as? String == image.path)
-        #expect(fixture.runner.commands.filter { $0.first == "/usr/sbin/diskutil" && $0.contains("attach") }.count == 2)
+        #expect(fixture.runner.commands.filter { $0.first == "/usr/bin/hdiutil" && $0.contains("attach") }.count == 2)
+        #expect(!fixture.store.value.suppressedProfileIDs.contains(profile.id))
+        let reused = fixture.service.startDevelopmentDisk()
+        #expect(reused.succeeded, "\(String(describing: reused.failure))")
+        #expect(reused.steps.contains { $0.step == "reuseVerifiedImage" && $0.status == .succeeded })
+        #expect(fixture.runner.commands.filter { $0.first == "/usr/bin/hdiutil" && $0.contains("attach") }.count == 2)
         #expect(!fixture.runner.commands.contains { $0.first == "/usr/sbin/lsof" && $0.contains("/Volumes") })
     }
 
@@ -1091,8 +1705,10 @@ struct SectoriumWorkbenchRuntimeTests {
             writtenBytes: fixture.device.writtenBytes)
         let localService = HESectoriumService(paths: HESectoriumPaths(root: fixture.root.appendingPathComponent("local-support")),
             backend: WorkbenchNoopBackend(), store: WorkbenchMemoryStore(), operationLock: WorkbenchMemoryLock(),
+            installer: workbenchFixtureInstaller(HESectoriumPaths(root: fixture.root.appendingPathComponent("local-support"))),
             runner: fixture.runner, identityPolicy: fixture.service.coreController.identityPolicy,
-            sectoriumDeviceObserver: WorkbenchFixtureObserver(device: localDevice))
+            sectoriumDeviceObserver: WorkbenchFixtureObserver(device: localDevice),
+            portableDocumentWriter: WorkbenchPortableWriter())
         localService.selectSectoriumDevice(localDevice.id)
 
         let result = localService.adoptDevelopmentDisk(deviceID: localDevice.id, imageURL: image)
@@ -1135,8 +1751,11 @@ struct SectoriumWorkbenchRuntimeTests {
         let store = WorkbenchMemoryStore()
         let wrongPathService = HESectoriumService(paths: HESectoriumPaths(root: root.appendingPathComponent("wrong-path-support")),
             backend: WorkbenchAdoptionBackend(observation: observation), store: store,
-            operationLock: WorkbenchMemoryLock(), runner: runner, identityPolicy: policy,
-            sectoriumDeviceObserver: WorkbenchFixtureObserver(device: device))
+            operationLock: WorkbenchMemoryLock(),
+            installer: workbenchFixtureInstaller(HESectoriumPaths(root: root.appendingPathComponent("wrong-path-support"))),
+            runner: runner, identityPolicy: policy,
+            sectoriumDeviceObserver: WorkbenchFixtureObserver(device: device),
+            portableDocumentWriter: WorkbenchPortableWriter())
         wrongPathService.selectSectoriumDevice(device.id)
         runner.imageInventory = []
         #expect(wrongPathService.adoptDevelopmentDisk(deviceID: device.id, imageURL: wrongImage).succeeded)
@@ -1149,8 +1768,11 @@ struct SectoriumWorkbenchRuntimeTests {
         let wrongChainCommandStart = runner.commands.count
         let wrongChainService = HESectoriumService(paths: HESectoriumPaths(root: root.appendingPathComponent("wrong-chain-support")),
             backend: WorkbenchAdoptionBackend(observation: wrongChain), store: WorkbenchMemoryStore(),
-            operationLock: WorkbenchMemoryLock(), runner: runner, identityPolicy: policy,
-            sectoriumDeviceObserver: WorkbenchFixtureObserver(device: device))
+            operationLock: WorkbenchMemoryLock(),
+            installer: workbenchFixtureInstaller(HESectoriumPaths(root: root.appendingPathComponent("wrong-chain-support"))),
+            runner: runner, identityPolicy: policy,
+            sectoriumDeviceObserver: WorkbenchFixtureObserver(device: device),
+            portableDocumentWriter: WorkbenchPortableWriter())
         wrongChainService.selectSectoriumDevice(device.id)
         #expect(!wrongChainService.adoptDevelopmentDisk(deviceID: device.id, imageURL: image).succeeded)
         #expect(wrongChainService.sectoriumProfiles().isEmpty)
@@ -1273,8 +1895,10 @@ struct SectoriumWorkbenchRuntimeTests {
             imagePath: mount.appendingPathComponent("Fixture.sparsebundle").path)
         let firstStore = JSONStateStore(url: paths.state)
         let firstService = HESectoriumService(paths: paths, backend: WorkbenchNoopBackend(), store: firstStore,
-            operationLock: WorkbenchMemoryLock(), runner: runner, identityPolicy: policy,
-            sectoriumDeviceObserver: WorkbenchFixtureObserver(device: device))
+            operationLock: WorkbenchMemoryLock(), installer: workbenchFixtureInstaller(paths),
+            runner: runner, identityPolicy: policy,
+            sectoriumDeviceObserver: WorkbenchFixtureObserver(device: device),
+            portableDocumentWriter: WorkbenchPortableWriter())
         firstService.selectSectoriumDevice(device.id)
 
         let rejected = firstService.createDevelopmentDisk(deviceID: device.id, parentDirectory: mount,
@@ -1285,8 +1909,10 @@ struct SectoriumWorkbenchRuntimeTests {
 
         let freshStore = JSONStateStore(url: paths.state)
         let freshService = HESectoriumService(paths: paths, backend: WorkbenchNoopBackend(), store: freshStore,
-            operationLock: WorkbenchMemoryLock(), runner: runner, identityPolicy: policy,
-            sectoriumDeviceObserver: WorkbenchFixtureObserver(device: device))
+            operationLock: WorkbenchMemoryLock(), installer: workbenchFixtureInstaller(paths),
+            runner: runner, identityPolicy: policy,
+            sectoriumDeviceObserver: WorkbenchFixtureObserver(device: device),
+            portableDocumentWriter: WorkbenchPortableWriter())
         #expect(freshService.pendingSectoriumOperation() != nil)
         let recovered = freshService.resumePendingSectoriumOperation()
         #expect(recovered.succeeded)
@@ -1389,7 +2015,9 @@ struct SectoriumWorkbenchRuntimeTests {
 
             #expect(!result.succeeded)
             #expect(fixture.store.value == before)
-            #expect(fixture.runner.commands.count == commands)
+            #expect(fixture.runner.commands.dropFirst(commands).allSatisfy { command in
+                command.first == "/usr/sbin/diskutil" && command.dropFirst().first == "info"
+            }, "Refusal may recheck identity but must not mutate storage")
         }
     }
 
@@ -1546,7 +2174,9 @@ struct SectoriumWorkbenchRuntimeTests {
 
             #expect(!refused.succeeded)
             #expect(fixture.store.value.workbenchOperation == "eject:eject-operation")
-            #expect(fixture.runner.commands.count == before)
+            #expect(fixture.runner.commands.dropFirst(before).allSatisfy { command in
+                command.first == "/usr/sbin/diskutil" && command.dropFirst().first == "info"
+            }, "Refusal may recheck identity but must not mutate storage")
         }
     }
 
@@ -1592,6 +2222,186 @@ struct SectoriumWorkbenchRuntimeTests {
         #expect(fixture.store.value.workbenchPhase == "mutating:attachImage")
         #expect(fixture.store.value.workbenchCompletedStep == "prepareMountPoint")
         #expect(fixture.runner.commands.filter { $0.first == "/usr/bin/hdiutil" }.allSatisfy { !$0.contains("attach") })
+    }
+
+    @Test("Exact composite start validation is cancellable and legacy format registry mutation is reconcilable")
+    func compositeStartAndImageFormatRecovery() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        #expect(fixture.service.createDevelopmentDisk(deviceID: fixture.device.id,
+            parentDirectory: fixture.mount, name: "Development", capacityGiB: 1,
+            caseSensitive: false, password: nil).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        let otherBacking = fixture.root.appendingPathComponent("unrelated-backing")
+        let other = SectoriumDevelopmentProfile(name: "Other", deviceID: UUID().uuidString,
+            backingVolumeUUID: UUID(), backingMountPoint: otherBacking.path,
+            imagePath: otherBacking.appendingPathComponent("Other.sparsebundle").path,
+            devVolumeName: "Other", devMountPoint: fixture.root.appendingPathComponent("other-dev").path,
+            encrypted: false, caseSensitive: false, logicalCapacityBytes: 1_073_741_824,
+            imageFormat: "UDSB", validation: .validated)
+        try JSONEncoder().encode([profile, other]).write(to: fixture.service.paths.sectoriumProfiles, options: .atomic)
+        let target = "\(profile.deviceID):\(profile.imagePath)"
+        let beforeCommands = fixture.runner.commands.count
+
+        fixture.store.value = StoragePersistentState(revision: fixture.store.value.revision + 1,
+            ejectIntent: false, operationID: "start-validation", workbenchOperation: "start:start-validation",
+            workbenchPhase: "validating", workbenchTarget: "other-device:\(profile.imagePath)")
+        #expect(!fixture.service.resumePendingSectoriumOperation().succeeded)
+        #expect(fixture.store.value.workbenchOperation == "start:start-validation")
+        fixture.store.value = StoragePersistentState(revision: fixture.store.value.revision + 1,
+            ejectIntent: false, operationID: "start-validation", workbenchOperation: "start:start-validation",
+            workbenchPhase: "validating", workbenchTarget: target)
+        let cancelled = fixture.service.resumePendingSectoriumOperation()
+        #expect(cancelled.succeeded)
+        #expect(cancelled.steps.contains { $0.step == "cancelUnmutatedStart" })
+        #expect(fixture.store.value.workbenchOperation == nil)
+
+        let legacy = SectoriumDevelopmentProfile(id: profile.id, name: profile.name,
+            deviceID: profile.deviceID, backingVolumeUUID: profile.backingVolumeUUID,
+            backingMountPoint: profile.backingMountPoint, imagePath: profile.imagePath,
+            devVolumeName: profile.devVolumeName, devMountPoint: profile.devMountPoint,
+            devUUID: profile.devUUID, encrypted: profile.encrypted,
+            caseSensitive: profile.caseSensitive, logicalCapacityBytes: profile.logicalCapacityBytes,
+            imageFormat: nil, validation: profile.validation)
+        try JSONEncoder().encode([legacy, other]).write(to: fixture.service.paths.sectoriumProfiles, options: .atomic)
+        fixture.store.value = StoragePersistentState(revision: fixture.store.value.revision + 1,
+            ejectIntent: false, operationID: "start-format", workbenchOperation: "start:start-format",
+            workbenchPhase: "mutating:saveImageFormat", workbenchTarget: target)
+        let reconciled = fixture.service.resumePendingSectoriumOperation()
+        #expect(reconciled.succeeded, "\(String(describing: reconciled.failure))")
+        #expect(reconciled.steps.contains { $0.step == "reconcileImageFormat" })
+        #expect(fixture.service.sectoriumProfiles().first(where: { $0.id == profile.id })?.imageFormat == "UDSB")
+        #expect(fixture.store.value.workbenchOperation == nil)
+        fixture.store.value = StoragePersistentState(revision: fixture.store.value.revision + 1,
+            ejectIntent: false, operationID: "start-format-saved",
+            workbenchOperation: "start:start-format-saved", workbenchPhase: "mutating",
+            workbenchTarget: target, workbenchCompletedStep: "saveImageFormat")
+        #expect(fixture.service.resumePendingSectoriumOperation().succeeded)
+        #expect(fixture.store.value.workbenchOperation == nil)
+        #expect(Array(fixture.runner.commands.dropFirst(beforeCommands)).allSatisfy { command in
+            !command.contains("attach") && !command.contains("eject") && !command.contains("unmount")
+        })
+    }
+
+    @Test("A fresh process recovers an exact registered backing-volume start without UI selection")
+    func registeredBackingPendingStartRecoversHeadlessly() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        #expect(fixture.service.createDevelopmentDisk(deviceID: fixture.device.id,
+            parentDirectory: fixture.mount, name: "Development", capacityGiB: 1,
+            caseSensitive: false, password: nil).succeeded)
+        let created = try #require(fixture.service.sectoriumProfiles().first)
+        let backing = created.backingVolumeUUID
+        let anchored = SectoriumPhysicalDevice(id: backing.uuidString, bsdName: fixture.device.bsdName,
+            name: fixture.device.name, isExternal: true, identityVerified: true,
+            wholeDeviceBytes: fixture.device.wholeDeviceBytes,
+            mountedVolumePaths: [fixture.mount.path], volumeUUIDs: [backing],
+            readBytes: nil, writtenBytes: nil,
+            volumeMembers: [.init(volumeUUID: backing, bsdName: "disk81s1", mountPoint: fixture.mount.path)],
+            topologyComplete: true, isVirtual: false, identityBasis: .uniqueBackingVolumeUUID,
+            wholeMediaUUID: nil, requiresFreshParentCheck: true)
+        fixture.observer.device = anchored
+        let legacy = SectoriumDevelopmentProfile(id: created.id, name: created.name,
+            deviceID: anchored.id, backingVolumeUUID: backing,
+            backingMountPoint: created.backingMountPoint, imagePath: created.imagePath,
+            devVolumeName: created.devVolumeName, devMountPoint: created.devMountPoint,
+            devUUID: created.devUUID, encrypted: created.encrypted,
+            caseSensitive: created.caseSensitive, logicalCapacityBytes: created.logicalCapacityBytes,
+            imageFormat: nil, validation: created.validation)
+        let paths = fixture.service.paths
+        try JSONEncoder().encode([legacy]).write(to: paths.sectoriumProfiles, options: .atomic)
+        let durableStore = JSONStateStore(url: paths.state)
+        let target = "\(anchored.id):\(legacy.imagePath)"
+        func persist(_ operation: String, phase: String, target: String,
+                     completedStep: String? = nil) throws {
+            let previous = try durableStore.load()
+            let pending = StoragePersistentState(revision: previous.revision + 1, ejectIntent: false,
+                operationID: operation, workbenchOperation: "start:\(operation)",
+                workbenchPhase: phase, workbenchTarget: target,
+                workbenchCompletedStep: completedStep)
+            #expect(try durableStore.compareAndSwap(expectedRevision: previous.revision, newState: pending))
+        }
+        func freshService() -> HESectoriumService {
+            HESectoriumService(paths: paths, backend: WorkbenchNoopBackend(),
+                store: JSONStateStore(url: paths.state), operationLock: WorkbenchMemoryLock(),
+                installer: workbenchFixtureInstaller(paths), runner: fixture.runner,
+                identityPolicy: fixture.service.coreController.identityPolicy,
+                sectoriumDeviceObserver: fixture.observer,
+                portableDocumentWriter: fixture.portableWriter)
+        }
+        let commandsBeforeRecovery = fixture.runner.commands.count
+
+        try persist("wrong-target", phase: "validating", target: "unregistered:\(legacy.imagePath)")
+        #expect(!freshService().resumePendingSectoriumOperation().succeeded)
+        #expect(try durableStore.load().workbenchOperation == "start:wrong-target")
+
+        try persist("validation", phase: "validating", target: target)
+        fixture.runner.mountParentWholeDisk = "disk82"
+        #expect(!freshService().resumePendingSectoriumOperation().succeeded)
+        #expect(try durableStore.load().workbenchOperation == "start:validation")
+        fixture.runner.mountParentWholeDisk = "disk81"
+        let cancelled = freshService().resumePendingSectoriumOperation()
+        #expect(cancelled.succeeded, "\(String(describing: cancelled.failure))")
+        #expect(cancelled.steps.contains { $0.step == "cancelUnmutatedStart" })
+        #expect(try durableStore.load().workbenchOperation == nil)
+
+        try persist("format", phase: "mutating:saveImageFormat", target: target)
+        let registryBeforeDrift = try Data(contentsOf: paths.sectoriumProfiles)
+        fixture.runner.mountParentWholeDisk = "disk82"
+        #expect(!freshService().resumePendingSectoriumOperation().succeeded)
+        #expect(try durableStore.load().workbenchOperation == "start:format")
+        #expect(try Data(contentsOf: paths.sectoriumProfiles) == registryBeforeDrift)
+        fixture.runner.mountParentWholeDisk = "disk81"
+        let reconciled = freshService().resumePendingSectoriumOperation()
+        #expect(reconciled.succeeded, "\(String(describing: reconciled.failure))")
+        #expect(reconciled.steps.contains { $0.step == "reconcileImageFormat" })
+        #expect(freshService().sectoriumProfiles().first?.imageFormat == "UDSB")
+        #expect(try durableStore.load().workbenchOperation == nil)
+
+        try persist("format-saved", phase: "mutating", target: target,
+                    completedStep: "saveImageFormat")
+        #expect(freshService().resumePendingSectoriumOperation().succeeded)
+        #expect(try durableStore.load().workbenchOperation == nil)
+        #expect(Array(fixture.runner.commands.dropFirst(commandsBeforeRecovery)).allSatisfy { command in
+            !command.contains("attach") && !command.contains("eject")
+                && !command.contains("unmount") && !command.contains("create")
+        })
+    }
+
+    @Test("Start records a durable registry boundary before upgrading a legacy image format")
+    func startUpgradeJournalsImageFormatBeforeRegistrySave() throws {
+        let fixture = try makeWorkbenchFixture(isolatedDevelopmentMount: true)
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        #expect(fixture.service.createDevelopmentDisk(deviceID: fixture.device.id,
+            parentDirectory: fixture.mount, name: "Development", capacityGiB: 1,
+            caseSensitive: false, password: nil).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        let isolatedDevMount = fixture.root.appendingPathComponent("isolated-dev-mount", isDirectory: true)
+        let legacy = SectoriumDevelopmentProfile(id: profile.id, name: profile.name,
+            deviceID: profile.deviceID, backingVolumeUUID: profile.backingVolumeUUID,
+            backingMountPoint: profile.backingMountPoint, imagePath: profile.imagePath,
+            devVolumeName: profile.devVolumeName, devMountPoint: isolatedDevMount.path,
+            devUUID: profile.devUUID, encrypted: profile.encrypted,
+            caseSensitive: profile.caseSensitive, logicalCapacityBytes: profile.logicalCapacityBytes,
+            imageFormat: nil, validation: profile.validation)
+        try JSONEncoder().encode([legacy]).write(to: fixture.service.paths.sectoriumProfiles, options: .atomic)
+        fixture.runner.detachedDiskInfos[isolatedDevMount.path] = [
+            "VolumeUUID": profile.backingVolumeUUID.uuidString,
+            "MountPoint": fixture.mount.path, "FilesystemType": "ExFAT", "WritableVolume": true,
+            "VolumeName": "Fixture HE", "DeviceIdentifier": "disk81s1", "PartOfWhole": "disk81"
+        ]
+        fixture.runner.imageInventory = [] // Explicit detached observation permits this fixture's attach.
+        fixture.runner.attachOutcome = .init(exitCode: 130, detail: "fixture attach cancelled")
+        let historyStart = fixture.store.history.count
+
+        _ = fixture.service.startDevelopmentDisk()
+
+        let states = Array(fixture.store.history.dropFirst(historyStart))
+        let target = "\(profile.deviceID):\(profile.imagePath)"
+        #expect(states.contains { $0.workbenchPhase == "mutating:saveImageFormat"
+            && $0.workbenchTarget == target })
+        #expect(states.contains { $0.workbenchCompletedStep == "saveImageFormat" })
+        #expect(fixture.service.sectoriumProfiles().first?.imageFormat == "UDSB")
     }
 
     @Test("Interrupted completed create observes and durably records the documented image format before clearing intent")
@@ -1647,6 +2457,7 @@ struct SectoriumWorkbenchRuntimeTests {
             "MountPoint": fixture.mount.path, "FilesystemType": "ExFAT", "WritableVolume": true,
             "VolumeName": "Fixture HE", "DeviceIdentifier": "disk81s1", "PartOfWhole": "disk81"
         ]
+        fixture.runner.imageInventory = [] // Explicit detached observation permits this fixture's attach.
         fixture.runner.attachOutcome = .init(exitCode: 130, detail: "fixture attach cancelled")
 
         let start = fixture.service.startDevelopmentDisk()
@@ -1656,12 +2467,963 @@ struct SectoriumWorkbenchRuntimeTests {
         #expect(fixture.store.value.workbenchPhase == "mutating:attachImage")
         #expect(fixture.store.value.workbenchCompletedStep == "prepareMountPoint")
         #expect(start.steps.contains { $0.step == "attachImage" && $0.status == .failed })
-        #expect(fixture.runner.commands.contains { $0.first == "/usr/sbin/diskutil" && $0.dropFirst().first == "image" })
+        #expect(fixture.runner.commands.contains { $0.first == "/usr/bin/hdiutil" && $0.dropFirst().first == "attach" })
     }
 
-    private func makeWorkbenchFixture(isolatedDevelopmentMount: Bool = false) throws -> (root: URL, mount: URL, device: SectoriumPhysicalDevice,
+    @Test("Quit refuses new work but drains an accepted create and first-load operation")
+    func quitDrainsAcceptedCompositeOperation() async throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+        fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+        let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+        let drained = DispatchSemaphore(value: 0)
+        fixture.runner.beforeCreate = { entered.signal(); release.wait() }
+        let service = fixture.service, deviceID = fixture.device.id
+        let creation = Task.detached {
+            service.createDevelopmentDisk(.init(deviceID: deviceID, name: "Quit Check",
+                capacityGiB: 1, filesystem: .apfs, autoLoad: true))
+        }
+        let didEnter = await Task.detached { waitForFixtureSignal(entered, seconds: 5) }.value
+        guard didEnter else {
+            release.signal(); _ = await creation.value
+            Issue.record("Create did not reach the isolated blocking command"); return
+        }
+        service.stopAcceptingNewOperations()
+        let waiter = Task { await service.waitForPendingOperations(); drained.signal() }
+        let earlyDrain = await Task.detached { waitForFixtureSignal(drained, seconds: 0.05) }.value
+        #expect(!earlyDrain)
+        // Rejection must occur before the Service serial lock held by creation.
+        #expect(!service.runApplicationAutomationAtStartup().succeeded)
+        release.signal()
+        let result = await creation.value
+        await waiter.value
+        #expect(result.succeeded, "\(result)")
+        let profile = try #require(service.sectoriumProfiles().first)
+        #expect(service.verifiedLoadedState(profileID: profile.id) == true)
+        let commandCount = fixture.runner.commands.count
+        #expect(!service.createDevelopmentDisk(.init(deviceID: deviceID, name: "After Quit",
+            capacityGiB: 1, filesystem: .apfs)).succeeded)
+        #expect(fixture.runner.commands.count == commandCount)
+    }
+
+    @Test("Quit also drains a documentation retry and rejects later retries")
+    func quitDrainsDocumentationRetry() async throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+        fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+        #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id,
+            name: "Document Quit", capacityGiB: 1)).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0), drained = DispatchSemaphore(value: 0)
+        fixture.portableWriter.beforeUpdate = { entered.signal(); release.wait() }
+        let service = fixture.service, profileID = profile.id
+        let retry = Task.detached { service.retryPortableDocumentation(profileID: profileID) }
+        let didEnter = await Task.detached { waitForFixtureSignal(entered, seconds: 5) }.value
+        guard didEnter else {
+            release.signal(); _ = await retry.value
+            Issue.record("Retry did not reach the isolated writer"); return
+        }
+        service.stopAcceptingNewOperations()
+        let waiter = Task { await service.waitForPendingOperations(); drained.signal() }
+        let earlyDrain = await Task.detached { waitForFixtureSignal(drained, seconds: 0.05) }.value
+        #expect(!earlyDrain)
+        #expect(service.retryPortableDocumentation(profileID: profileID) == .pending("AUV is closing; documentation remains pending"))
+        release.signal(); _ = await retry.value; await waiter.value
+        let writes = fixture.portableWriter.contexts.count
+        #expect(service.retryPortableDocumentation(profileID: profileID) == .pending("AUV is closing; documentation remains pending"))
+        #expect(fixture.portableWriter.contexts.count == writes)
+    }
+
+    @Test("Unload only keeps parent and image connected, then Load mounts the existing APFS volume without duplicate attach")
+    func unloadOnlyThenLoadKeepsPhysicalParentAndAttachedImage() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+        fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+        fixture.runner.occupancyIsClear = true
+        #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id,
+            name: "Unload Fixture", capacityGiB: 1, filesystem: .apfs, autoLoad: false)).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        let check = try #require(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id))
+        let startIndex = fixture.runner.commands.count
+        let unloaded = fixture.service.unloadDevelopmentDisk(profileID: profile.id, checkpoint: check)
+        #expect(unloaded.succeeded, "\(unloaded)")
+        #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == false)
+        #expect(fixture.runner.imageInventory?.count == 1)
+        #expect(fixture.store.value.workbenchOperation == nil)
+        #expect(fixture.store.value.suppressedProfileIDs.contains(profile.id))
+        #expect(fixture.observer.isPresent)
+        #expect(!fixture.runner.commands.dropFirst(startIndex).contains { $0.contains("eject") || $0.contains("detach") })
+        #expect(fixture.service.profileReadiness(profileID: profile.id) == .notStarted)
+        #expect(fixture.service.sectoriumReadiness(deviceID: profile.deviceID, selectedProfileID: profile.id,
+            devices: [fixture.device], profiles: [profile]) == .notStarted)
+        // Native diskutil unmount removes its custom mountpoint; Load must restore
+        // it beneath the verified parent before remounting the already-attached image.
+        try FileManager.default.removeItem(atPath: profile.devMountPoint)
+        let loaded = fixture.service.startDevelopmentDisk(profileID: profile.id)
+        #expect(loaded.succeeded, "\(loaded)")
+        #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == true)
+        let commands = Array(fixture.runner.commands.dropFirst(startIndex))
+        #expect(commands.contains(["/usr/sbin/diskutil", "mount", "-mountPoint", profile.devMountPoint, "/dev/disk31s1"]))
+        #expect(!commands.contains { $0.contains("attach") || $0.contains("eject") || $0.contains("detach") })
+        #expect(!fixture.store.value.suppressedProfileIDs.contains(profile.id))
+    }
+
+    @Test("Unload completion recovery is independent of external documentation and never repeats unmount")
+    func unloadRecoveryDoesNotWaitForPortableDocument() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+        fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+        fixture.runner.occupancyIsClear = true
+        #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id,
+            name: "Unload Recovery", capacityGiB: 1, filesystem: .apfs, autoLoad: false)).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        let check = try #require(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id))
+        fixture.portableWriter.outcome = .pending("fixture external document unavailable")
+        let writesBefore = fixture.portableWriter.contexts.count
+        fixture.store.rejectNextMarkerClear = true
+        #expect(!fixture.service.unloadDevelopmentDisk(profileID: profile.id, checkpoint: check).succeeded)
+        #expect(fixture.store.value.workbenchOperation?.hasPrefix("unload:") == true)
+        let commandsBefore = fixture.runner.commands.count
+        let resumed = fixture.service.resumePendingSectoriumOperation()
+        #expect(resumed.succeeded, "\(resumed)")
+        #expect(fixture.store.value.workbenchOperation == nil)
+        #expect(fixture.portableWriter.contexts.count == writesBefore)
+        #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == false)
+        #expect(!fixture.runner.commands.dropFirst(commandsBefore).contains { $0.contains("unmount") || $0.contains("eject") || $0.contains("detach") })
+    }
+
+    @Test("Native APFS empty MountPoint without Mounted completes Unload and enables Load")
+    func nativeUnmountedMetadataCompletesUnloadWithoutMountedBoolean() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+        fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+        fixture.runner.occupancyIsClear = true
+        #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id,
+            name: "Native Unload", capacityGiB: 1, filesystem: .apfs, autoLoad: false)).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        fixture.runner.afterNativeUnmount = {
+            fixture.runner.additionalDiskInfos["/dev/disk31s1"]?.removeValue(forKey: "Mounted")
+            fixture.runner.additionalDiskInfos["/dev/disk31s1"]?["MountPoint"] = ""
+            try? FileManager.default.removeItem(atPath: profile.devMountPoint)
+        }
+        let checkpoint = try #require(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id))
+        let before = fixture.runner.commands.count
+        let result = fixture.service.unloadDevelopmentDisk(profileID: profile.id, checkpoint: checkpoint)
+        #expect(result.succeeded, "\(result)")
+        #expect(result.steps.contains { $0.step == "verifyDevelopmentVolumeUnloaded" && $0.status == .succeeded })
+        #expect(fixture.store.value.workbenchOperation == nil)
+        #expect(fixture.service.profileReadiness(profileID: profile.id) == .notStarted)
+        #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == false)
+        #expect(!FileManager.default.fileExists(atPath: profile.devMountPoint))
+        let mutations = fixture.runner.commands.dropFirst(before).filter { $0.contains("unmount") || $0.contains("eject") || $0.contains("detach") }
+        #expect(mutations == [["/usr/sbin/diskutil", "unmount", profile.devMountPoint]])
+        #expect(fixture.service.startDevelopmentDisk(profileID: profile.id).succeeded)
+        #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == true)
+        #expect(fixture.store.value.workbenchOperation == nil)
+        #expect(!fixture.store.value.suppressedProfileIDs.contains(profile.id))
+    }
+
+    @Test("Unload never trusts contradictory native fields or an ambiguous image/APFS chain", arguments:
+        ["mountedTrue", "mountedInvalid", "mountPointPresent", "wrongContainer", "duplicateImage"])
+    func nativeUnloadRejectsContradictoryOrAmbiguousEvidence(variant: String) throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+        fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+        fixture.runner.occupancyIsClear = true
+        #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id,
+            name: "Contradictory Unload", capacityGiB: 1, autoLoad: false)).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        fixture.runner.afterNativeUnmount = {
+            fixture.runner.additionalDiskInfos["/dev/disk31s1"]?.removeValue(forKey: "Mounted")
+            fixture.runner.additionalDiskInfos["/dev/disk31s1"]?["MountPoint"] = ""
+            switch variant {
+            case "mountedTrue": fixture.runner.additionalDiskInfos["/dev/disk31s1"]?["Mounted"] = true
+            case "mountedInvalid": fixture.runner.additionalDiskInfos["/dev/disk31s1"]?["Mounted"] = "false"
+            case "mountPointPresent": fixture.runner.additionalDiskInfos["/dev/disk31s1"]?["MountPoint"] = profile.devMountPoint
+            case "wrongContainer": fixture.runner.additionalDiskInfos["/dev/disk31s1"]?["APFSContainerReference"] = "disk99"
+            case "duplicateImage":
+                if let image = fixture.runner.imageInventory?.first { fixture.runner.imageInventory?.append(image) }
+            default: break
+            }
+        }
+        let checkpoint = try #require(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id))
+        let result = fixture.service.unloadDevelopmentDisk(profileID: profile.id, checkpoint: checkpoint)
+        #expect(!result.succeeded)
+        #expect(!result.steps.contains { $0.step == "verifyDevelopmentVolumeUnloaded" && $0.status == .succeeded })
+        #expect(!fixture.service.reconcileCompletedUnload())
+        #expect(fixture.store.value.workbenchOperation?.hasPrefix("unload:") == true)
+    }
+
+    @Test("Retained successful unmount reconciles only with explicit native unloaded identity")
+    func retainedNativeUnloadMarkerNeedsExplicitUnmountedEvidence() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+        fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+        fixture.runner.occupancyIsClear = true
+        #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id,
+            name: "Unload Recovery Native", capacityGiB: 1, autoLoad: false)).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        fixture.runner.afterNativeUnmount = {
+            fixture.runner.additionalDiskInfos["/dev/disk31s1"]?.removeValue(forKey: "Mounted")
+            fixture.runner.additionalDiskInfos["/dev/disk31s1"]?.removeValue(forKey: "MountPoint")
+            try? FileManager.default.removeItem(atPath: profile.devMountPoint)
+        }
+        let checkpoint = try #require(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id))
+        let result = fixture.service.unloadDevelopmentDisk(profileID: profile.id, checkpoint: checkpoint)
+        #expect(!result.succeeded)
+        let marker = try #require(fixture.store.value.workbenchOperation)
+        #expect(fixture.store.value.workbenchCompletedStep == "unmountDEV")
+        let before = fixture.runner.commands.count
+        #expect(!fixture.service.reconcileCompletedUnload())
+        #expect(fixture.store.value.workbenchOperation == marker)
+        fixture.runner.additionalDiskInfos["/dev/disk31s1"]?["MountPoint"] = ""
+        let uuid = fixture.runner.additionalDiskInfos["/dev/disk31s1"]?["VolumeUUID"]
+        fixture.runner.additionalDiskInfos["/dev/disk31s1"]?["VolumeUUID"] = UUID().uuidString
+        #expect(!fixture.service.reconcileCompletedUnload())
+        #expect(fixture.store.value.workbenchOperation == marker)
+        fixture.runner.additionalDiskInfos["/dev/disk31s1"]?["VolumeUUID"] = uuid
+        let service = HESectoriumService(paths: fixture.service.paths, backend: WorkbenchNoopBackend(),
+            store: fixture.store, operationLock: WorkbenchMemoryLock(),
+            installer: workbenchFixtureInstaller(fixture.service.paths), runner: fixture.runner,
+            identityPolicy: fixture.service.coreController.identityPolicy, sectoriumDeviceObserver: fixture.observer,
+            portableDocumentWriter: fixture.portableWriter)
+        #expect(service.reconcileCompletedUnload())
+        #expect(fixture.store.value.workbenchOperation == nil)
+        #expect(fixture.store.value.suppressedProfileIDs.contains(profile.id))
+        #expect(service.profileReadiness(profileID: profile.id) == .notStarted)
+        #expect(!fixture.runner.commands.dropFirst(before).contains { $0.contains("unmount") || $0.contains("attach") || $0.contains("eject") || $0.contains("detach") })
+        #expect(service.startDevelopmentDisk(profileID: profile.id).succeeded)
+    }
+
+    @Test("An exact externally reloaded chain supersedes a retained successful Unload without claiming Unloaded")
+    func retainedUnloadMarkerCanBeSupersededByVerifiedExternalLoad() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+        fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+        fixture.runner.occupancyIsClear = true
+        #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id,
+            name: "Externally Reloaded", capacityGiB: 1, autoLoad: false)).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        let checkpoint = try #require(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id))
+        fixture.store.rejectNextMarkerClear = true
+        #expect(!fixture.service.unloadDevelopmentDisk(profileID: profile.id, checkpoint: checkpoint).succeeded)
+        #expect(fixture.runner.run("/usr/sbin/diskutil", ["mount", "-mountPoint", profile.devMountPoint, "/dev/disk31s1"], cwd: fixture.root).succeeded)
+        let before = fixture.runner.commands.count
+        #expect(fixture.service.reconcileCompletedUnload())
+        #expect(fixture.store.value.workbenchOperation == nil)
+        #expect(fixture.store.value.workbenchTerminalResult == "unload-superseded-by-verified-load")
+        #expect(!fixture.store.value.suppressedProfileIDs.contains(profile.id))
+        #expect(fixture.service.profileReadiness(profileID: profile.id) == .ready)
+        #expect(!fixture.runner.commands.dropFirst(before).contains { $0.contains("unmount") || $0.contains("mount") || $0.contains("eject") || $0.contains("detach") })
+    }
+
+    @Test("Loaded state without a durable successful Unload receipt does not discard an interrupted operation")
+    func interruptedUnloadWithoutReceiptRemainsPendingWhenLoaded() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+        fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+        fixture.runner.occupancyIsClear = true
+        #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id,
+            name: "Interrupted Unload", capacityGiB: 1, autoLoad: false)).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        let checkpoint = try #require(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id))
+        fixture.store.rejectNextCompletedStep = "unmountDEV"
+        #expect(!fixture.service.unloadDevelopmentDisk(profileID: profile.id, checkpoint: checkpoint).succeeded)
+        #expect(fixture.store.value.workbenchCompletedStep == nil)
+        #expect(fixture.runner.run("/usr/sbin/diskutil", ["mount", "-mountPoint", profile.devMountPoint, "/dev/disk31s1"], cwd: fixture.root).succeeded)
+        let marker = fixture.store.value.workbenchOperation
+        #expect(!fixture.service.reconcileCompletedUnload())
+        #expect(fixture.store.value.workbenchOperation == marker)
+        #expect(fixture.store.value.suppressedProfileIDs.contains(profile.id))
+    }
+
+    @Test("Activity report preserves process names, PID and working-directory references")
+    func activityFieldOutputNamesBlockingProcessAndCWD() {
+        let report = SectoriumActivityReport.parse(.init(exitCode: 0, detail:
+            "p751\ncCodex\nfcwd\nf12r\np752\ncnode\nfcwd\n"))
+        #expect(report.assessment == .busy(processIDs: [751, 752]))
+        #expect(report.processes.first?.command == "Codex")
+        #expect(report.processes.first?.references == [.init(descriptor: "cwd", path: ""),
+            .init(descriptor: "12r", path: "")])
+        #expect(SectoriumActivityReport.parse(.init(exitCode: 1, detail: "")).assessment == .noVisibleOccupancy)
+        if case .incomplete = SectoriumActivityReport.parse(.init(exitCode: 1, detail: "permission denied")).assessment {} else { Issue.record("Failed scan must remain unknown") }
+        if case .incomplete = SectoriumActivityReport.parse(.init(exitCode: 0, detail: "malformed")).assessment {} else { Issue.record("Malformed scan must remain unknown") }
+    }
+
+    @Test("Create's unchanged registered output loads, changes real settings, unloads and loads again")
+    func createReturnedProfileCompletesNativeFixtureLifecycle() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+        fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+        fixture.runner.occupancyIsClear = true; fixture.runner.ejectAfterUnmountEnabled = true
+        let result = fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id,
+            name: "开发 Disk", capacityGiB: 2, filesystem: .apfs, autoLoad: true))
+        #expect(result.succeeded, "\(result)")
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        #expect(profile.devMountPoint.hasPrefix(fixture.mount.path + "/.AUV-Sectorium-Mounts/"))
+        #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == true)
+        #expect(profile.logicalCapacityBytes == 2 * 1_073_741_824)
+        #expect(profile.autoLoad && profile.imageFileIdentity != nil)
+        #expect(fixture.service.portableDocumentationPending(profileID: profile.id) == false)
+
+        let rename = fixture.service.updateDevelopmentDisk(profileID: profile.id, change: .displayName("新开发 Disk"))
+        #expect(rename.succeeded, "\(rename)")
+        #expect(fixture.runner.commands.contains { $0.first == "/usr/sbin/diskutil" && $0.dropFirst().first == "renameVolume" })
+        #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == true)
+        let checkpoint = try #require(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id))
+        let stop = fixture.service.stopDevelopmentDisk(profileID: profile.id, checkpoint: checkpoint)
+        #expect(stop.succeeded, "\(stop)")
+        #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == false)
+        let grow = fixture.service.updateDevelopmentDisk(profileID: profile.id, change: .capacityGiB(3))
+        #expect(grow.succeeded, "\(grow)")
+        #expect(fixture.service.sectoriumProfiles().first?.logicalCapacityBytes == 3 * 1_073_741_824)
+        #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == false)
+        let location = fixture.mount.appendingPathComponent("Custom Mount").path
+        #expect(fixture.service.updateDevelopmentDisk(profileID: profile.id, change: .mountPoint(location)).succeeded)
+        #expect(fixture.service.updateDevelopmentDisk(profileID: profile.id, change: .autoLoad(false)).succeeded)
+        let start = fixture.service.startDevelopmentDisk(profileID: profile.id)
+        #expect(start.succeeded, "\(start)")
+        #expect(fixture.service.sectoriumProfiles().first?.devMountPoint == location)
+        #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == true)
+        let history = fixture.service.portableDocumentHistory(profileID: profile.id)
+        #expect(history.contains { $0.kind == "capacityChanged" && $0.phase == .completed })
+        #expect(history.contains { $0.kind == "displayNameChanged" && $0.phase == .completed })
+        #expect(history.contains { $0.phase == .intended })
+    }
+
+    @Test("Documentation failure persists original events and retry does not repeat storage")
+    func documentFailureIsDurableAndRetryPreservesHistory() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+        fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+        fixture.portableWriter.outcome = .pending("fixture parent is read-only")
+        let result = fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id, name: "Journal", capacityGiB: 2))
+        #expect(result.succeeded, "\(result)")
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        #expect(fixture.service.portableDocumentationPending(profileID: profile.id))
+        let journal = SectoriumPortableDocumentJournal(url: fixture.root.appendingPathComponent("support/sectorium-document-journal.json"))
+        let before = try journal.events(parentID: profile.deviceID)
+        #expect(!before.isEmpty)
+        let commands = fixture.runner.commands.filter { $0.contains("create") || $0.contains("attach") }
+        fixture.portableWriter.outcome = .updated
+        #expect(fixture.service.retryPortableDocumentation(profileID: profile.id) == .updated)
+        #expect(try journal.events(parentID: profile.deviceID) == before)
+        #expect(fixture.runner.commands.filter { $0.contains("create") || $0.contains("attach") } == commands)
+        #expect(!fixture.service.portableDocumentationPending(profileID: profile.id))
+    }
+
+    @Test("Native success without rename/resize postconditions never saves the requested value")
+    func nativeModificationNeedsPostconditions() throws {
+        for resize in [false, true] {
+            let fixture = try makeWorkbenchFixture()
+            defer { try? FileManager.default.removeItem(at: fixture.root) }
+            fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+            fixture.runner.occupancyIsClear = true; fixture.runner.ejectAfterUnmountEnabled = true
+            fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+            #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id, name: "Original", capacityGiB: 2)).succeeded)
+            let profile = try #require(fixture.service.sectoriumProfiles().first)
+            if resize {
+                let check = try #require(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id))
+                #expect(fixture.service.stopDevelopmentDisk(profileID: profile.id, checkpoint: check).succeeded)
+            }
+            let original = try Data(contentsOf: fixture.service.paths.sectoriumProfiles)
+            fixture.runner.ignoreNativeModification = true
+            let result = fixture.service.updateDevelopmentDisk(profileID: profile.id,
+                change: resize ? .capacityGiB(3) : .displayName("New name"))
+            #expect(!result.succeeded)
+            #expect(try Data(contentsOf: fixture.service.paths.sectoriumProfiles) == original)
+            #expect(fixture.store.value.workbenchOperation?.hasPrefix("modify:") == true)
+            #expect(fixture.service.portableDocumentHistory(profileID: profile.id).contains { $0.phase == .intended && $0.kind == "modificationIntended" })
+        }
+    }
+
+    @Test("Fresh Service reconciles interrupted native changes or proven preimages without repeating modifications")
+    func interruptedModificationReconcilesFromDurableIntent() throws {
+        for resize in [false, true] {
+            for nativeChanged in [false, true] {
+                let fixture = try makeWorkbenchFixture()
+                defer { try? FileManager.default.removeItem(at: fixture.root) }
+                fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+                fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+                fixture.runner.occupancyIsClear = true; fixture.runner.ejectAfterUnmountEnabled = true
+                #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id,
+                    name: "Recover Native", capacityGiB: 2)).succeeded)
+                let profile = try #require(fixture.service.sectoriumProfiles().first)
+                if resize {
+                    let check = try #require(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id))
+                    #expect(fixture.service.stopDevelopmentDisk(profileID: profile.id, checkpoint: check).succeeded)
+                }
+                fixture.runner.ignoreNativeModification = !nativeChanged
+                if nativeChanged {
+                    fixture.runner.afterNativeModification = { fixture.runner.unavailableInfoPaths.insert(profile.devMountPoint) }
+                }
+                #expect(!fixture.service.updateDevelopmentDisk(profileID: profile.id,
+                    change: resize ? .capacityGiB(3) : .displayName("Recovered Name")).succeeded)
+                fixture.runner.afterNativeModification = nil; fixture.runner.unavailableInfoPaths = []
+                let originalMarker = try #require(fixture.store.value.workbenchOperation)
+                let modificationCount = fixture.runner.commands.filter { $0.contains("resize") || $0.contains("renameVolume") }.count
+                let restarted = HESectoriumService(paths: fixture.service.paths, backend: WorkbenchNoopBackend(),
+                    store: fixture.store, operationLock: WorkbenchMemoryLock(),
+                    installer: workbenchFixtureInstaller(fixture.service.paths), runner: fixture.runner,
+                    identityPolicy: fixture.service.coreController.identityPolicy,
+                    sectoriumDeviceObserver: fixture.observer, portableDocumentWriter: fixture.portableWriter)
+                let result = restarted.resumePendingSectoriumOperation()
+                #expect(result.succeeded, "resize=\(resize), nativeChanged=\(nativeChanged): \(result)")
+                #expect(fixture.store.value.workbenchOperation == nil)
+                #expect(fixture.runner.commands.filter { $0.contains("resize") || $0.contains("renameVolume") }.count == modificationCount)
+                let final = try #require(restarted.sectoriumProfiles().first)
+                #expect(final.name == (!resize && nativeChanged ? "Recovered Name" : "Recover Native"))
+                #expect(final.logicalCapacityBytes == UInt64(resize && nativeChanged ? 3 : 2) * 1_073_741_824)
+                #expect(restarted.verifiedLoadedState(profileID: profile.id) == !resize)
+                if resize { #expect(fixture.store.value.suppressedProfileIDs.contains(profile.id)) }
+                let operationID = String(originalMarker.dropFirst("modify:".count))
+                #expect(restarted.portableDocumentHistory(profileID: profile.id).contains {
+                    $0.id == operationID + ":" + profile.id + ":completed"
+                })
+            }
+        }
+    }
+
+    @Test("Saved mount and autoload changes recover after an interrupted completion record")
+    func interruptedRegistryChangeReconcilesWithoutStorageMutation() throws {
+        for mountChange in [false, true] {
+            let fixture = try makeWorkbenchFixture()
+            defer { try? FileManager.default.removeItem(at: fixture.root) }
+            fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+            fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+            fixture.runner.occupancyIsClear = true; fixture.runner.ejectAfterUnmountEnabled = true
+            #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id, name: "Registry Recovery", capacityGiB: 1)).succeeded)
+            let profile = try #require(fixture.service.sectoriumProfiles().first)
+            let check = try #require(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id))
+            #expect(fixture.service.stopDevelopmentDisk(profileID: profile.id, checkpoint: check).succeeded)
+            let requestedPath = fixture.mount.appendingPathComponent("Recovered Mount").path
+            fixture.store.rejectNextCompletedStep = "saveModifiedProfile"
+            #expect(!fixture.service.updateDevelopmentDisk(profileID: profile.id,
+                change: mountChange ? .mountPoint(requestedPath) : .autoLoad(false)).succeeded)
+            let before = fixture.runner.commands.count
+            let restarted = HESectoriumService(paths: fixture.service.paths, backend: WorkbenchNoopBackend(),
+                store: fixture.store, operationLock: WorkbenchMemoryLock(),
+                installer: workbenchFixtureInstaller(fixture.service.paths), runner: fixture.runner,
+                identityPolicy: fixture.service.coreController.identityPolicy,
+                sectoriumDeviceObserver: fixture.observer, portableDocumentWriter: fixture.portableWriter)
+            #expect(restarted.resumePendingSectoriumOperation().succeeded)
+            #expect(fixture.store.value.workbenchOperation == nil)
+            let final = try #require(restarted.sectoriumProfiles().first)
+            #expect(mountChange ? final.devMountPoint == requestedPath : final.autoLoad == false)
+            #expect(!fixture.runner.commands.dropFirst(before).contains { $0.contains("attach") || $0.contains("resize") || $0.contains("renameVolume") })
+        }
+    }
+
+    @Test("Image detach accepts absent optional hdiutil UUID and rejects a conflicting value")
+    func imageDetachResolvesActualPartitionedAPFSChain() throws {
+        for contradictory in [false, true] {
+            let fixture = try makeWorkbenchFixture()
+            defer { try? FileManager.default.removeItem(at: fixture.root) }
+            fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+            fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+            fixture.runner.occupancyIsClear = true; fixture.runner.ejectAfterUnmountEnabled = true
+            #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id,
+                name: "Native Image Shape", capacityGiB: 1)).succeeded)
+            let profile = try #require(fixture.service.sectoriumProfiles().first)
+            let checkpoint = try #require(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id))
+            fixture.runner.imageInventory = fixture.runner.imageInventory?.map { image in
+                var image = image
+                let entities = image["system-entities"] as! [[String: Any]]
+                image["system-entities"] = entities.map { entity in
+                    var entity = entity
+                    if entity["dev-entry"] as? String == "/dev/disk31s1" {
+                        if contradictory { entity["volume-uuid"] = UUID().uuidString }
+                        else { entity.removeValue(forKey: "volume-uuid") }
+                    }
+                    return entity
+                }
+                return image
+            }
+            let commands = fixture.runner.commands.count
+            let result = fixture.service.stopDevelopmentDisk(profileID: profile.id, checkpoint: checkpoint)
+            #expect(result.succeeded == !contradictory, "\(contradictory): \(result)")
+            let ejects = fixture.runner.commands.dropFirst(commands).filter { $0.contains("eject") }
+            #expect(ejects == (contradictory ? [] : [["/usr/sbin/diskutil", "eject", "/dev/disk30"]]))
+        }
+    }
+
+    @Test("A profile stop never ejects an image containing an additional unregistered APFS volume")
+    func imageDetachRefusesUnregisteredContainerMember() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+        fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+        fixture.runner.occupancyIsClear = true; fixture.runner.ejectAfterUnmountEnabled = true
+        #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id,
+            name: "Single Image Contract", capacityGiB: 1)).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        let checkpoint = try #require(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id))
+        let originalMembers = try #require(fixture.runner.apfsContainers?.first?["Volumes"] as? [[String: Any]])
+        fixture.runner.apfsContainers?[0]["Volumes"] = originalMembers + [["APFSVolumeUUID": UUID().uuidString, "DeviceIdentifier": "disk31s2"]]
+        let before = fixture.runner.commands.count
+        #expect(!fixture.service.stopDevelopmentDisk(profileID: profile.id, checkpoint: checkpoint).succeeded)
+        #expect(!fixture.runner.commands.dropFirst(before).contains { $0.contains("eject") })
+        #expect(fixture.store.value.workbenchOperation != nil)
+    }
+
+    @Test("Interrupted verification unload resumes only its remaining verified image detach")
+    func interruptedVerificationUnloadFinishesWithoutRepeatingModification() throws {
+        for resize in [false, true] {
+            let fixture = try makeWorkbenchFixture()
+            defer { try? FileManager.default.removeItem(at: fixture.root) }
+            fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+            fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+            fixture.runner.occupancyIsClear = true; fixture.runner.ejectAfterUnmountEnabled = true
+            #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id,
+                name: "Partial Unload", capacityGiB: 1)).succeeded)
+            let profile = try #require(fixture.service.sectoriumProfiles().first)
+            let check = try #require(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id))
+            #expect(fixture.service.stopDevelopmentDisk(profileID: profile.id, checkpoint: check).succeeded)
+            fixture.runner.failNextImageEject = true
+            let modified = fixture.service.updateDevelopmentDisk(profileID: profile.id,
+                change: resize ? .capacityGiB(2) : .displayName("Partial Renamed"))
+            #expect(!modified.succeeded)
+            #expect(fixture.store.value.workbenchPhase == "mutating:restoreUnloaded")
+            let unmountedInfo = try #require(fixture.runner.additionalDiskInfos["/dev/disk31s1"])
+            #expect(unmountedInfo["Mounted"] as? Bool == false)
+            fixture.runner.imageInventory = fixture.runner.imageInventory?.map { image in
+                var image = image
+                image["system-entities"] = (image["system-entities"] as? [[String: Any]])?.map { entity in
+                    var entity = entity; entity.removeValue(forKey: "volume-uuid"); return entity
+                }
+                return image
+            }
+            let restarted = HESectoriumService(paths: fixture.service.paths, backend: WorkbenchNoopBackend(),
+                store: fixture.store, operationLock: WorkbenchMemoryLock(),
+                installer: workbenchFixtureInstaller(fixture.service.paths), runner: fixture.runner,
+                identityPolicy: fixture.service.coreController.identityPolicy,
+                sectoriumDeviceObserver: fixture.observer, portableDocumentWriter: fixture.portableWriter)
+            // An ambiguous/replaced volume must not authorize even the final detach.
+            let beforeRefusal = fixture.runner.commands.count
+            fixture.runner.additionalDiskInfos["/dev/disk31s1"]?["VolumeUUID"] = UUID().uuidString
+            #expect(!restarted.resumePendingSectoriumOperation().succeeded)
+            #expect(!fixture.runner.commands.dropFirst(beforeRefusal).contains { $0.contains("eject") || $0.contains("attach") })
+            fixture.runner.additionalDiskInfos["/dev/disk31s1"] = unmountedInfo
+            let beforeRecovery = fixture.runner.commands.count
+            let recovered = restarted.resumePendingSectoriumOperation()
+            #expect(recovered.succeeded, "\(resize): \(recovered)")
+            let mutations = fixture.runner.commands.dropFirst(beforeRecovery).filter {
+                $0.contains("eject") || $0.contains("attach") || $0.contains("unmount") || $0.contains("resize") || $0.contains("renameVolume")
+            }
+            #expect(mutations == [["/usr/sbin/diskutil", "eject", "/dev/disk30"]])
+            #expect(fixture.store.value.workbenchOperation == nil)
+            #expect(fixture.store.value.suppressedProfileIDs.contains(profile.id))
+            #expect(restarted.verifiedLoadedState(profileID: profile.id) == false)
+        }
+    }
+
+    @Test("Fresh-process recovery records original create, load and unload completion before clearing its marker")
+    func completedStorageCrashRecoversOriginalDocumentation() throws {
+        for action in ["create", "start", "stop"] {
+            let fixture = try makeWorkbenchFixture()
+            defer { try? FileManager.default.removeItem(at: fixture.root) }
+            fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+            fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+            fixture.runner.occupancyIsClear = true; fixture.runner.ejectAfterUnmountEnabled = true
+            if action != "create" {
+                #expect(fixture.service.createDevelopmentDisk(deviceID: fixture.device.id,
+                    parentDirectory: fixture.mount, name: "Crash History", capacityGiB: 1,
+                    caseSensitive: false, password: nil).succeeded)
+            }
+            if action == "stop" {
+                #expect(fixture.service.startDevelopmentDisk().succeeded)
+            }
+            let journalURL = fixture.service.paths.root.appendingPathComponent("sectorium-document-journal.json")
+            let completedStep = action == "create" ? "createSparsebundle" : action == "start" ? "saveValidatedProfile" : "detachImage"
+            var crashState: StoragePersistentState?
+            var crashJournal: Data?
+            // Capture the actual durable boundary before the completed event. Only
+            // this disposable fixture is restored to emulate process termination.
+            fixture.store.onSavedState = { state in
+                if state.workbenchOperation?.hasPrefix(action + ":") == true,
+                   state.workbenchCompletedStep == completedStep, crashState == nil {
+                    crashState = state
+                    crashJournal = try? Data(contentsOf: journalURL)
+                }
+            }
+            let result: OperationResult
+            if action == "create" {
+                result = fixture.service.createDevelopmentDisk(deviceID: fixture.device.id,
+                    parentDirectory: fixture.mount, name: "Crash History", capacityGiB: 1,
+                    caseSensitive: false, password: nil)
+            } else if action == "start" {
+                result = fixture.service.startDevelopmentDisk()
+            } else {
+                let profile = try #require(fixture.service.sectoriumProfiles().first)
+                let checkpoint = try #require(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id))
+                result = fixture.service.stopDevelopmentDisk(profileID: profile.id, checkpoint: checkpoint)
+            }
+            #expect(result.succeeded, "\(action): \(result)")
+            fixture.store.onSavedState = nil
+            let preservedState = try #require(crashState)
+            let preservedJournal = try #require(crashJournal)
+            fixture.store.value = preservedState
+            try preservedJournal.write(to: journalURL, options: .atomic)
+            let profile = try #require(fixture.service.sectoriumProfiles().first)
+            let original = try #require(preservedState.workbenchOperation?.split(separator: ":", maxSplits: 1).last.map(String.init))
+            let intendedID = original + ":" + profile.id + ":intended"
+            let completedID = original + ":" + profile.id + ":completed"
+            let intended = try #require(fixture.service.portableDocumentHistory(profileID: profile.id).first { $0.id == intendedID })
+            #expect(!fixture.service.portableDocumentHistory(profileID: profile.id).contains { $0.id == completedID })
+            let commands = fixture.runner.commands.count
+            fixture.portableWriter.outcome = .pending("fixture parent document temporarily unavailable")
+            let restarted = HESectoriumService(paths: fixture.service.paths, backend: WorkbenchNoopBackend(),
+                store: fixture.store, operationLock: WorkbenchMemoryLock(),
+                installer: workbenchFixtureInstaller(fixture.service.paths), runner: fixture.runner,
+                identityPolicy: fixture.service.coreController.identityPolicy,
+                sectoriumDeviceObserver: fixture.observer, portableDocumentWriter: fixture.portableWriter)
+            let resumed = restarted.resumePendingSectoriumOperation()
+            #expect(resumed.succeeded, "\(action): \(resumed)")
+            #expect(fixture.store.value.workbenchOperation == nil)
+            let recoveredHistory = restarted.portableDocumentHistory(profileID: profile.id)
+            #expect(recoveredHistory.first { $0.id == intendedID } == intended)
+            let completed = try #require(recoveredHistory.first { $0.id == completedID })
+            #expect(completed.kind == (action == "create" ? "registered" : action == "start" ? "loaded" : "unloaded"))
+            #expect(completed.occurredAt >= intended.occurredAt && completed.before == intended.before)
+            #expect(!fixture.runner.commands.dropFirst(commands).contains {
+                $0.contains("create") || $0.contains("attach") || $0.contains("detach") || $0.contains("unmount")
+            })
+            #expect(restarted.portableDocumentationPending(profileID: profile.id))
+            fixture.portableWriter.outcome = .updated
+            #expect(restarted.retryPortableDocumentation(profileID: profile.id) == .updated)
+            #expect(restarted.portableDocumentHistory(profileID: profile.id) == recoveredHistory)
+        }
+    }
+
+    @Test("A completion-marker write failure retains an already durable unload event across recovery")
+    func markerClearFailureDoesNotDuplicateCompletionHistory() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+        fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+        fixture.runner.occupancyIsClear = true; fixture.runner.ejectAfterUnmountEnabled = true
+        #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id,
+            name: "Marker History", capacityGiB: 1)).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        let check = try #require(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id))
+        fixture.store.rejectNextMarkerClear = true
+        #expect(!fixture.service.stopDevelopmentDisk(profileID: profile.id, checkpoint: check).succeeded)
+        let marker = try #require(fixture.store.value.workbenchOperation)
+        let operation = String(marker.dropFirst("stop:".count))
+        let before = fixture.service.portableDocumentHistory(profileID: profile.id)
+        #expect(before.contains { $0.id == operation + ":" + profile.id + ":completed" })
+        let restarted = HESectoriumService(paths: fixture.service.paths, backend: WorkbenchNoopBackend(),
+            store: fixture.store, operationLock: WorkbenchMemoryLock(),
+            installer: workbenchFixtureInstaller(fixture.service.paths), runner: fixture.runner,
+            identityPolicy: fixture.service.coreController.identityPolicy,
+            sectoriumDeviceObserver: fixture.observer, portableDocumentWriter: fixture.portableWriter)
+        #expect(restarted.resumePendingSectoriumOperation().succeeded)
+        #expect(restarted.portableDocumentHistory(profileID: profile.id) == before)
+    }
+
+    @Test("Inventory and eject availability reuse one metadata graph, while a click observes identity changes")
+    func inventoryAndEjectAvailabilityShareCommandContext() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let backing = try #require(fixture.device.volumeUUIDs.first)
+        try FileManager.default.createDirectory(at: fixture.service.paths.workingDirectory, withIntermediateDirectories: true)
+        fixture.runner.diskInventory = [["DeviceIdentifier": "disk81",
+            "Partitions": [["DeviceIdentifier": "disk81s1"]]]]
+        fixture.runner.additionalDiskInfos["/dev/disk81"] = [
+            "DeviceIdentifier": "disk81", "VirtualOrPhysical": "Physical", "WholeDisk": true,
+            "DeviceLocation": "External", "MediaUUID": fixture.device.id, "MediaName": "Fixture Drive"]
+        fixture.runner.additionalDiskInfos["/dev/disk81s1"] = [
+            "DeviceIdentifier": "disk81s1", "VolumeUUID": backing.uuidString,
+            "MountPoint": fixture.mount.path, "PartOfWhole": "disk81"]
+        // Use the real metadata parser and driver with a disposable command
+        // runner, rather than replacing the device observer under test.
+        let service = HESectoriumService(paths: fixture.service.paths, backend: WorkbenchNoopBackend(),
+            store: fixture.store, operationLock: WorkbenchMemoryLock(),
+            installer: workbenchFixtureInstaller(fixture.service.paths), runner: fixture.runner,
+            identityPolicy: fixture.service.coreController.identityPolicy)
+        try service.withReadOnlyObservation {
+            let devices = try service.observeSectoriumDevices()
+            #expect(devices.count == 1 && devices.first?.identityVerified == true)
+            #expect(!service.canPrepareWholeDeviceEjectConfirmation(physicalIdentity: fixture.device.id))
+        }
+        // The fixture deliberately places / on the same physical root: it must
+        // remain ineligible. Reaching df proves the real driver read inventory.
+        #expect(fixture.runner.commands.contains { $0 == ["/bin/df", "-P", "/"] })
+        for arguments in [["list", "-plist"], ["info", "-plist", "/dev/disk81"],
+                          ["info", "-plist", "/dev/disk81s1"]] {
+            #expect(fixture.runner.commands.filter { $0 == ["/usr/sbin/diskutil"] + arguments }.count == 1)
+        }
+        #expect(Set(fixture.runner.commandDirectories) == [service.paths.workingDirectory.path])
+        let previousReads = fixture.runner.commands.count
+        fixture.runner.additionalDiskInfos["/dev/disk81"]?["MediaUUID"] = UUID().uuidString
+        #expect(service.prepareWholeDeviceEjectConfirmation(physicalIdentity: fixture.device.id) == nil)
+        #expect(fixture.runner.commands.count > previousReads)
+        #expect(fixture.runner.commands.filter { $0 == ["/usr/sbin/diskutil", "list", "-plist"] }.count == 2)
+        #expect(!fixture.runner.commands.contains { $0.contains("eject") || $0.contains("unmountDisk") })
+    }
+
+    @Test("Display inventory still works before the first support-directory installation")
+    func inventoryDoesNotCreateSupportDirectory() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.diskInventory = [["DeviceIdentifier": "disk81", "Partitions": []]]
+        fixture.runner.additionalDiskInfos["/dev/disk81"] = [
+            "DeviceIdentifier": "disk81", "VirtualOrPhysical": "Physical", "WholeDisk": true,
+            "DeviceLocation": "External", "MediaUUID": fixture.device.id, "MediaName": "Fixture Drive"]
+        let paths = HESectoriumPaths(root: fixture.root.appendingPathComponent("not-installed"))
+        let service = HESectoriumService(paths: paths, backend: WorkbenchNoopBackend(),
+            store: fixture.store, operationLock: WorkbenchMemoryLock(),
+            installer: workbenchFixtureInstaller(paths), runner: fixture.runner,
+            identityPolicy: fixture.service.coreController.identityPolicy)
+        #expect(try service.observeSectoriumInventoryForDisplay().count == 1)
+        #expect(!FileManager.default.fileExists(atPath: paths.root.path))
+        #expect(Set(fixture.runner.commandDirectories) == [FileManager.default.temporaryDirectory.path])
+    }
+
+    @Test("Startup qualifies an already loaded image without writing queued IMPORTANT history", arguments: [false, true])
+    func startupDefersOptionalDocumentAndBoundsRepeatedMetadata(pending: Bool) throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+        fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+        fixture.portableWriter.outcome = pending ? .pending("fixture IMPORTANT unavailable") : .updated
+        #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id,
+            name: "Startup History", capacityGiB: 1, autoLoad: true)).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        #expect(fixture.service.portableDocumentationPending(profileID: profile.id) == pending)
+        let writes = fixture.portableWriter.contexts.count
+        let history = fixture.service.portableDocumentHistory(profileID: profile.id)
+        let commandsBefore = fixture.runner.commands.count
+        fixture.portableWriter.beforeUpdate = { Issue.record("Startup must not invoke the external document writer") }
+
+        let result = fixture.service.runApplicationAutomationAtStartup()
+
+        #expect(result.succeeded, "\(result)")
+        #expect(result.steps.contains { $0.step == "profile.\(profile.id).reuseVerifiedImage" })
+        #expect(result.steps.contains { $0.step == "profile.\(profile.id).recordProfileReady" })
+        #expect(fixture.portableWriter.contexts.count == writes)
+        let newEvents = fixture.service.portableDocumentHistory(profileID: profile.id).filter { event in
+            !history.contains(where: { $0.id == event.id })
+        }
+        #expect(newEvents.contains { $0.kind == "loaded" && $0.phase == .intended })
+        #expect(newEvents.contains { $0.kind == "loaded" && $0.phase == .completed && $0.after?.lastVerifiedLoadedAt != nil })
+        #expect(fixture.service.portableDocumentationPending(profileID: profile.id))
+        let reads = Array(fixture.runner.commands.dropFirst(commandsBefore))
+        let imageGraphs = reads.filter { $0 == ["/usr/bin/hdiutil", "info", "-plist"] }
+        // Intent, Core qualification and fresh completion each observe once;
+        // document records within the same phase reuse that phase's metadata.
+        #expect(imageGraphs.count == 3, "Startup metadata: \(reads)")
+        #expect(!reads.contains { $0.contains("attach") || $0.contains("unmount") || $0.contains("eject") })
+        // Disk Arbitration also emits an initial appearance for the same
+        // already-connected disk. That callback must not undo startup deferral.
+        let beforeAppearanceReads = fixture.runner.commands.count
+        let beforeAppearanceHistory = fixture.service.portableDocumentHistory(profileID: profile.id)
+        let repeatedAppearance = fixture.service.runApplicationAutomation(.outerReappeared(uuid: profile.backingVolumeUUID))
+        #expect(repeatedAppearance.succeeded)
+        #expect(repeatedAppearance.steps.contains { $0.step == "profile.\(profile.id).ignoreEvent" })
+        #expect(fixture.portableWriter.contexts.count == writes)
+        #expect(fixture.service.portableDocumentationPending(profileID: profile.id))
+        #expect(fixture.runner.commands.count == beforeAppearanceReads)
+        #expect(fixture.service.portableDocumentHistory(profileID: profile.id) == beforeAppearanceHistory)
+
+        // Unrelated system-volume appearances must not start registered-profile
+        // recovery or write a new portable intent either.
+        let unrelated = fixture.service.runApplicationAutomation(.outerReappeared(uuid: UUID()))
+        #expect(unrelated.succeeded && unrelated.steps.contains { $0.step == "ignoreEvent" })
+        #expect(fixture.runner.commands.count == beforeAppearanceReads)
+        #expect(fixture.service.portableDocumentHistory(profileID: profile.id) == beforeAppearanceHistory)
+
+        let restarted = HESectoriumService(paths: fixture.service.paths, backend: WorkbenchNoopBackend(),
+            store: fixture.store, operationLock: WorkbenchMemoryLock(),
+            installer: workbenchFixtureInstaller(fixture.service.paths), runner: fixture.runner,
+            identityPolicy: fixture.service.coreController.identityPolicy,
+            sectoriumDeviceObserver: fixture.observer, portableDocumentWriter: fixture.portableWriter)
+        #expect(restarted.portableDocumentationPending(profileID: profile.id))
+        #expect(newEvents.allSatisfy { restarted.portableDocumentHistory(profileID: profile.id).contains($0) })
+        fixture.portableWriter.beforeUpdate = nil; fixture.portableWriter.outcome = .updated
+        #expect(restarted.retryPortableDocumentation(profileID: profile.id) == .updated)
+        #expect(!restarted.portableDocumentationPending(profileID: profile.id))
+    }
+
+    @Test("Disabled startup with no queued documentation does not probe image metadata")
+    func disabledStartupSkipsUnneededPortableContext() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+        fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+        #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id,
+            name: "Manual Only", capacityGiB: 1, autoLoad: false)).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        #expect(!fixture.service.portableDocumentationPending(profileID: profile.id))
+        let before = fixture.runner.commands.count, writes = fixture.portableWriter.contexts.count
+        let result = fixture.service.runApplicationAutomationAtStartup()
+        #expect(result.succeeded)
+        #expect(result.steps.contains { $0.step == "profile.\(profile.id).autoLoadDisabled" })
+        #expect(fixture.runner.commands.count == before)
+        #expect(fixture.portableWriter.contexts.count == writes)
+    }
+
+    @Test("Application startup honors per-volume preference and manual-unload suppression until physical reconnect")
+    func applicationAutomationUsesDurablePerVolumeChoice() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+        fixture.runner.occupancyIsClear = true; fixture.runner.ejectAfterUnmountEnabled = true
+        fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+        #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id, name: "Automatic", capacityGiB: 2)).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        let check = try #require(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id))
+        #expect(fixture.service.stopDevelopmentDisk(profileID: profile.id, checkpoint: check).succeeded)
+        let before = fixture.runner.commands.filter { $0.contains("attach") }.count
+        #expect(fixture.service.runApplicationAutomationAtStartup().succeeded)
+        #expect(fixture.runner.commands.filter { $0.contains("attach") }.count == before)
+        #expect(fixture.store.value.suppressedProfileIDs.contains(profile.id))
+        fixture.observer.isPresent = false
+        fixture.runner.diskInventory = [["DeviceIdentifier": "disk0", "Partitions": []]]
+        fixture.runner.additionalDiskInfos["/dev/disk0"] = ["DeviceIdentifier": "disk0", "VolumeUUID": UUID().uuidString]
+        #expect(fixture.service.runApplicationAutomation(.outerDisappeared(uuid: profile.backingVolumeUUID)).succeeded)
+        #expect(fixture.store.value.disconnectedProfileIDs.contains(profile.id))
+        fixture.observer.isPresent = true
+        let reconnected = fixture.service.runApplicationAutomation(.outerReappeared(uuid: profile.backingVolumeUUID))
+        #expect(reconnected.succeeded, "\(reconnected)")
+        #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == true)
+        #expect(!fixture.store.value.suppressedProfileIDs.contains(profile.id))
+    }
+
+    @Test("Whole-device eject records completion internally after absence and never writes the departed parent")
+    func wholeEjectLeavesDurablePortableCompletionPending() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []; fixture.runner.occupancyIsClear = true
+        #expect(fixture.service.createDevelopmentDisk(deviceID: fixture.device.id, parentDirectory: fixture.mount,
+            name: "Offline history", capacityGiB: 2, caseSensitive: false, password: nil).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        fixture.runner.offTargetRuntime = true
+        fixture.runner.additionalDiskInfos["/dev/disk0s1"] = ["DeviceIdentifier": "disk0s1", "PartOfWhole": "disk0"]
+        fixture.runner.additionalDiskInfos["/dev/disk0"] = ["DeviceIdentifier": "disk0", "VirtualOrPhysical": "Physical", "WholeDisk": true]
+        let topology = WholeDeviceTopology(physicalIdentity: profile.deviceID, bsdName: "disk81", isWholeDevice: true,
+            isExternal: true, isSystemDevice: false, inventoryComplete: true,
+            volumes: [.init(identity: "\(profile.backingVolumeUUID.uuidString.lowercased())|disk81s1", mounted: true)], images: [])
+        let driver = CompletingEjectFixtureDriver(topology)
+        var writesAtEject = 0
+        driver.afterEject = { fixture.observer.isPresent = false; writesAtEject = fixture.portableWriter.contexts.count }
+        let service = HESectoriumService(paths: fixture.service.paths, backend: WorkbenchNoopBackend(), store: fixture.store,
+            operationLock: WorkbenchMemoryLock(), installer: workbenchFixtureInstaller(fixture.service.paths), runner: fixture.runner,
+            identityPolicy: fixture.service.coreController.identityPolicy, sectoriumDeviceObserver: fixture.observer,
+            wholeDeviceEjectDriverOverride: driver, portableDocumentWriter: fixture.portableWriter)
+        let confirmation = try #require(service.prepareWholeDeviceEjectConfirmation(physicalIdentity: profile.deviceID))
+        let result = service.ejectExternalDevice(physicalIdentity: profile.deviceID, confirmation: confirmation)
+        #expect(result.succeeded, "\(result)")
+        #expect(driver.actions == ["unmount", "eject"])
+        #expect(result.steps.contains { $0.step == "verifyWholeDeviceEjected" && $0.status == .succeeded })
+        #expect(fixture.portableWriter.contexts.count == writesAtEject)
+        let events = service.portableDocumentHistory(profileID: profile.id)
+        #expect(events.contains { $0.phase == .intended && $0.kind == "ejected" })
+        #expect(events.contains { $0.phase == .completed && $0.kind == "ejected" })
+        #expect(service.portableDocumentationPending(profileID: profile.id))
+        #expect(service.runApplicationAutomationAtStartup().succeeded)
+        #expect(service.portableDocumentHistory(profileID: profile.id) == events)
+        #expect(driver.actions == ["unmount", "eject"])
+    }
+
+    @Test("Eject history precondition refuses native mutation and runs only once on success")
+    func ejectHistoryPreconditionIsEnforced() {
+        let topology = WholeDeviceTopology(physicalIdentity: "fixture", bsdName: "disk81", isWholeDevice: true,
+            isExternal: true, isSystemDevice: false, inventoryComplete: true,
+            volumes: [.init(identity: "physical", mounted: true)], images: [])
+        let base = CompletingEjectFixtureDriver(topology)
+        let denied = SectoriumDocumentedEjectDriver(base: base, beforeMutation: { false })
+        #expect(denied.unmountAllPhysicalVolumesNonForce(topology) == .failed("Portable operation history could not be durably recorded"))
+        #expect(base.actions.isEmpty)
+        var calls = 0
+        let allowed = SectoriumDocumentedEjectDriver(base: base, beforeMutation: { calls += 1; return true })
+        _ = allowed.unmountAllPhysicalVolumesNonForce(topology)
+        _ = allowed.ejectWholeDeviceNonForce(topology)
+        #expect(calls == 1)
+        #expect(base.actions == ["unmount", "eject"])
+    }
+
+    @Test("A passive refresh shares loaded facts, keeps pending documentation separate, and the next action reads again")
+    func passiveLoadedObservationDoesNotFanOutOrTurnDocumentPendingIntoReadiness() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+        fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+        fixture.portableWriter.outcome = .pending("fixture document is temporarily unavailable")
+        #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id,
+            name: "Observed Development", capacityGiB: 1)).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        let registry = try Data(contentsOf: fixture.service.paths.sectoriumProfiles)
+        let before = fixture.runner.commands.count
+        fixture.service.withReadOnlyObservation {
+            #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == true)
+            let afterFirstRow = fixture.runner.commands.count
+            #expect(afterFirstRow > before)
+            for _ in 0..<12 {
+                #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == true)
+                #expect(fixture.service.portableDocumentationPending(profileID: profile.id))
+                _ = fixture.service.portableDocumentHistory(profileID: profile.id)
+            }
+            #expect(fixture.service.refreshStatus(observedReadiness: .ready).readiness == .ready)
+            #expect(fixture.runner.commands.count == afterFirstRow)
+        }
+        let beforeAction = fixture.runner.commands.count
+        #expect(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id) != nil)
+        #expect(fixture.runner.commands.count > beforeAction)
+        fixture.runner.imageInventory = []
+        #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == false)
+        #expect(try Data(contentsOf: fixture.service.paths.sectoriumProfiles) == registry)
+    }
+
+    @Test("Passive whole-drive availability is computed once, but confirmation refuses a newly missing target")
+    func foregroundConfirmationNeverReusesPassiveAvailability() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let volume = try #require(fixture.device.volumeUUIDs.first)
+        let topology = WholeDeviceTopology(physicalIdentity: fixture.device.id, bsdName: fixture.device.bsdName,
+            isWholeDevice: true, isExternal: true, isSystemDevice: false, inventoryComplete: true,
+            volumes: [.init(identity: "\(volume.uuidString.lowercased())|disk81s1", mounted: true)], images: [])
+        let driver = TargetBindingFixtureDriver([fixture.device.id: topology])
+        let service = HESectoriumService(paths: fixture.service.paths, backend: WorkbenchNoopBackend(),
+            store: fixture.store, operationLock: WorkbenchMemoryLock(),
+            installer: workbenchFixtureInstaller(fixture.service.paths), runner: fixture.runner,
+            identityPolicy: fixture.service.coreController.identityPolicy,
+            sectoriumDeviceObserver: fixture.observer, wholeDeviceEjectDriverOverride: driver,
+            portableDocumentWriter: fixture.portableWriter)
+        service.withReadOnlyObservation {
+            #expect(service.canPrepareWholeDeviceEjectConfirmation(physicalIdentity: fixture.device.id))
+            let count = fixture.runner.commands.count
+            #expect(service.canPrepareWholeDeviceEjectConfirmation(physicalIdentity: fixture.device.id))
+            #expect(fixture.runner.commands.count == count)
+            #expect(!fixture.runner.commands.contains { $0.first == "/bin/df" })
+            fixture.runner.additionalDiskInfos["/dev/disk81"] = ["DeviceIdentifier": "disk81",
+                "ParentWholeDisk": "disk81", "WholeDisk": true, "VirtualOrPhysical": "Physical"]
+            let confirmation = service.prepareWholeDeviceEjectConfirmation(physicalIdentity: fixture.device.id)
+            #expect(confirmation != nil && confirmation?.dependenciesCanFinishOffTarget == false)
+            #expect(fixture.runner.commands.contains { $0.first == "/bin/df" })
+            driver.observations.removeValue(forKey: fixture.device.id)
+            #expect(service.prepareWholeDeviceEjectConfirmation(physicalIdentity: fixture.device.id) == nil)
+        }
+        #expect(!service.canPrepareWholeDeviceEjectConfirmation(physicalIdentity: fixture.device.id))
+        #expect(driver.storageActions == 0)
+        #expect(fixture.store.history.isEmpty)
+    }
+
+    func makeWorkbenchFixture(isolatedDevelopmentMount: Bool = false) throws -> (root: URL, mount: URL, device: SectoriumPhysicalDevice,
                                                     runner: WorkbenchFixtureRunner, store: WorkbenchMemoryStore,
-                                                    observer: WorkbenchFixtureObserver, service: HESectoriumService) {
+                                                    observer: WorkbenchFixtureObserver, portableWriter: WorkbenchPortableWriter,
+                                                    service: HESectoriumService) {
         let requestedRoot = URL(fileURLWithPath: "/private/tmp/sectorium-workbench-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: requestedRoot, withIntermediateDirectories: false)
         let root = requestedRoot.resolvingSymlinksInPath()
@@ -1680,10 +3442,13 @@ struct SectoriumWorkbenchRuntimeTests {
             devVolumeName: isolatedDevelopmentMount ? "Development" : "Fixture-DEV",
             imagePath: mount.appendingPathComponent(isolatedDevelopmentMount ? "Development.sparsebundle" : "Fixture.sparsebundle").path)
         let observer = WorkbenchFixtureObserver(device: device)
+        let portableWriter = WorkbenchPortableWriter()
         let service = HESectoriumService(paths: HESectoriumPaths(root: root.appendingPathComponent("support")),
             backend: WorkbenchNoopBackend(), store: store, operationLock: WorkbenchMemoryLock(),
-            runner: runner, identityPolicy: policy, sectoriumDeviceObserver: observer)
-        return (root, mount, device, runner, store, observer, service)
+            installer: workbenchFixtureInstaller(HESectoriumPaths(root: root.appendingPathComponent("support"))),
+            runner: runner, identityPolicy: policy, sectoriumDeviceObserver: observer,
+            portableDocumentWriter: portableWriter)
+        return (root, mount, device, runner, store, observer, portableWriter, service)
     }
 
     private func plistData(_ value: Any) throws -> Data {
@@ -1703,6 +3468,10 @@ private final class PassphraseStorageFixtureRunner: HESectoriumSecureCommandRunn
     }
     func run(_ executable: String, _ arguments: [String], cwd: URL) -> CommandOutcome {
         allArguments.append([executable] + arguments)
+        if executable == "/usr/bin/hdiutil", arguments == ["info", "-plist"],
+           let data = try? PropertyListSerialization.data(fromPropertyList: ["images": []], format: .xml, options: 0) {
+            return .init(exitCode: 0, detail: String(decoding: data, as: UTF8.self))
+        }
         if executable == "/usr/sbin/diskutil", arguments == ["info", "-plist", outerMountPoint],
            let data = try? PropertyListSerialization.data(fromPropertyList: [
                "VolumeUUID": outerUUID.uuidString, "MountPoint": outerMountPoint,
@@ -1820,6 +3589,74 @@ struct SectoriumInventoryRepairTests {
 
 @Suite("Sectorium existing-installation discovery fixtures")
 struct SectoriumLegacyDiscoveryRepairTests {
+    @Test("A registered single-volume backing starts and reconnects headlessly after fresh parent verification")
+    func registeredBackingAnchorWorksWithoutSelection() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let backing = fixture.policy.outerUUID
+        let device = SectoriumPhysicalDevice(id: backing.uuidString, bsdName: "disk90",
+            name: "Registered external fixture", isExternal: true, identityVerified: true,
+            wholeDeviceBytes: 1_000_000, mountedVolumePaths: [fixture.policy.outerMountPoint],
+            volumeUUIDs: [backing], readBytes: nil, writtenBytes: nil,
+            volumeMembers: [.init(volumeUUID: backing, bsdName: "disk90s1",
+                                  mountPoint: fixture.policy.outerMountPoint)],
+            topologyComplete: true, isVirtual: false, identityBasis: .uniqueBackingVolumeUUID,
+            wholeMediaUUID: nil, requiresFreshParentCheck: true)
+        let profile = SectoriumDevelopmentProfile(name: "FixtureDEV", deviceID: device.id,
+            backingVolumeUUID: backing, backingMountPoint: fixture.policy.outerMountPoint,
+            imagePath: fixture.policy.imagePath, devVolumeName: fixture.policy.devVolumeName,
+            devMountPoint: fixture.policy.devMountPoint, devUUID: fixture.policy.devUUID,
+            encrypted: false, caseSensitive: false, logicalCapacityBytes: 1_073_741_824,
+            imageFormat: "UDSB", validation: .validated)
+        let paths = HESectoriumPaths(root: fixture.root.appendingPathComponent("support"))
+        try FileManager.default.createDirectory(at: paths.root, withIntermediateDirectories: true)
+        try JSONEncoder().encode([profile]).write(to: paths.sectoriumProfiles, options: .atomic)
+        let store = WorkbenchMemoryStore(), lock = WorkbenchMemoryLock()
+        let observer = WorkbenchFixtureObserver(device: device)
+        let installer = workbenchFixtureInstaller(paths)
+        let writer = WorkbenchPortableWriter()
+        let service = HESectoriumService(paths: paths, backend: WorkbenchNoopBackend(), store: store,
+            operationLock: lock, installer: installer, runner: fixture.runner,
+            identityPolicy: fixture.policy, sectoriumDeviceObserver: observer,
+            portableDocumentWriter: writer)
+        #expect(service.setAutomationEnabled(true).succeeded)
+
+        fixture.runner.mountParentWholeDisk = "disk91"
+        let drifted = service.runAutomationAgentAtStartup()
+        #expect(!drifted.succeeded)
+        #expect(drifted.steps.contains { $0.step == "profile.\(profile.id).verifyPhysicalBacking" })
+        #expect(!store.value.reconnectAttemptedProfileIDs.contains(profile.id))
+
+        fixture.runner.mountParentWholeDisk = "disk90"
+        let started = service.runAutomationAgentAtStartup()
+        #expect(started.succeeded, "\(String(describing: started.failure))")
+        #expect(started.steps.contains { $0.step == "profile.\(profile.id).reuseVerifiedImage" })
+        #expect(writer.events.isEmpty, "Startup preserves history internally without an external IMPORTANT write")
+        #expect(service.portableDocumentHistory(profileID: profile.id).contains { $0.kind == "loaded" && $0.phase == .completed })
+        #expect(service.portableDocumentationPending(profileID: profile.id))
+
+        let inventory = fixture.runner.diskInventory
+        fixture.runner.diskInventory = [["DeviceIdentifier": "disk99", "Partitions": []]]
+        fixture.runner.additionalDiskInfos["/dev/disk99"] = [
+            "DeviceIdentifier": "disk99", "VolumeUUID": UUID().uuidString
+        ]
+        observer.isPresent = false
+        let disappeared = service.runAutomationAgent(.outerDisappeared(uuid: backing))
+        #expect(disappeared.succeeded)
+        #expect(store.value.disconnectedProfileIDs.contains(profile.id))
+        fixture.runner.diskInventory = inventory
+        observer.isPresent = true
+        let freshProcess = HESectoriumService(paths: paths, backend: WorkbenchNoopBackend(), store: store,
+            operationLock: lock, installer: installer, runner: fixture.runner,
+            identityPolicy: fixture.policy, sectoriumDeviceObserver: observer,
+            portableDocumentWriter: writer)
+        let returned = freshProcess.runAutomationAgent(.outerReappeared(uuid: backing))
+        #expect(returned.succeeded, "\(String(describing: returned.failure))")
+        #expect(returned.steps.contains { $0.step == "profile.\(profile.id).reuseVerifiedImage" })
+        #expect(writer.events.contains("\(profile.id):reconnected"))
+        #expect(fixture.runner.commands.allSatisfy { !$0.contains("attach") })
+    }
+
     @Test func readOnlyLegacyChainAcceptsMissingEntityUUIDAndUniqueParentInventory() throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
@@ -1902,7 +3739,7 @@ struct SectoriumLegacyDiscoveryRepairTests {
             SectoriumDevelopmentProfile(name: "Other\(index)", deviceID: UUID().uuidString,
                 backingVolumeUUID: UUID(), backingMountPoint: "/Volumes/Other",
                 imagePath: "/Volumes/Other/Other\(index).sparsebundle",
-                devVolumeName: "Other\(index)", devMountPoint: "/Volumes/Other-DEV",
+                devVolumeName: "Other\(index)", devMountPoint: "/Volumes/Other\(index)-DEV",
                 encrypted: nil, caseSensitive: nil, logicalCapacityBytes: nil)
         }
         try FileManager.default.createDirectory(at: fixture.service.paths.sectoriumProfiles.deletingLastPathComponent(),
@@ -2001,7 +3838,9 @@ struct SectoriumLegacyDiscoveryRepairTests {
         fixture.runner.diskInventory = inventory
         let noConfig = HESectoriumService(paths: HESectoriumPaths(root: fixture.root.appendingPathComponent("no-config-support")),
             backend: MacStorageBackend(paths: fixture.service.paths, runner: fixture.runner, policy: fixture.policy),
-            store: WorkbenchMemoryStore(), operationLock: WorkbenchMemoryLock(), runner: fixture.runner)
+            store: WorkbenchMemoryStore(), operationLock: WorkbenchMemoryLock(),
+            installer: workbenchFixtureInstaller(HESectoriumPaths(root: fixture.root.appendingPathComponent("no-config-support"))),
+            runner: fixture.runner, portableDocumentWriter: WorkbenchPortableWriter())
         #expect(!noConfig.discoveredLegacyDevelopmentDisk())
         #expect(fixture.service.sectoriumProfiles().isEmpty)
     }
@@ -2045,7 +3884,8 @@ struct SectoriumLegacyDiscoveryRepairTests {
         let paths = HESectoriumPaths(root: root.appendingPathComponent("support"))
         let backend = MacStorageBackend(paths: paths, runner: runner, policy: policy)
         let service = HESectoriumService(paths: paths, backend: backend, store: WorkbenchMemoryStore(),
-            operationLock: WorkbenchMemoryLock(), runner: runner, identityPolicy: policy)
+            operationLock: WorkbenchMemoryLock(), installer: workbenchFixtureInstaller(paths),
+            runner: runner, identityPolicy: policy, portableDocumentWriter: WorkbenchPortableWriter())
         return (root, runner, service, policy, backend)
     }
 }

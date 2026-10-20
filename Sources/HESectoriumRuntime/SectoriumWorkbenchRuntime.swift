@@ -214,6 +214,9 @@ public struct SectoriumPhysicalDevice: Identifiable, Equatable, Sendable {
     public let bsdName: String
     public let name: String
     public let isExternal: Bool
+    /// False includes unknown location; only corroborated internal media can be
+    /// excluded when proving that an unrelated external drive disappeared.
+    public let isInternalConfirmed: Bool
     public let identityVerified: Bool
     public let identityBasis: SectoriumDeviceIdentityBasis
     /// Only a whole-media UUID may be used to correlate I/O counters.
@@ -238,8 +241,10 @@ public struct SectoriumPhysicalDevice: Identifiable, Equatable, Sendable {
                 identityBasis: SectoriumDeviceIdentityBasis? = nil, wholeMediaUUID: UUID? = nil,
                 requiresFreshParentCheck: Bool = false,
                 apfsContainers: [SectoriumAPFSContainerDetail] = [],
-                hasAmbiguousPhysicalStores: Bool = false) {
+                hasAmbiguousPhysicalStores: Bool = false,
+                isInternalConfirmed: Bool = false) {
         self.id = id; self.bsdName = bsdName; self.name = name; self.isExternal = isExternal
+        self.isInternalConfirmed = isInternalConfirmed && !isExternal
         self.identityVerified = identityVerified; self.isVirtual = isVirtual
         self.identityBasis = identityBasis ?? (identityVerified ? .wholeMediaUUID : .unavailable)
         self.wholeMediaUUID = wholeMediaUUID ?? (self.identityBasis == .wholeMediaUUID ? UUID(uuidString: id) : nil)
@@ -309,6 +314,8 @@ public struct SectoriumDeviceCatalog {
                     && info["APFSPhysicalStores"] == nil ? false : nil)
             let external = (info["DeviceLocation"] as? String)?.lowercased() == "external"
                 || (info["Internal"] as? Bool) == false
+            let confirmedInternal = !external && ((info["Internal"] as? Bool) == true
+                || (info["DeviceLocation"] as? String)?.lowercased() == "internal")
             let name = (info["MediaName"] as? String) ?? (info["VolumeName"] as? String) ?? "Unnamed device"
             let bytes = (info["TotalSize"] as? NSNumber)?.uint64Value ?? (info["DiskSize"] as? NSNumber)?.uint64Value
             let partitions = entry["Partitions"] as? [[String: Any]] ?? []
@@ -403,7 +410,8 @@ public struct SectoriumDeviceCatalog {
                 requiresFreshParentCheck: true,
                 apfsContainers: containerDetails.sorted { $0.bsdName < $1.bsdName },
                 hasAmbiguousPhysicalStores: isVirtual == true
-                    && ((info["APFSPhysicalStores"] as? [[String: Any]])?.count ?? 0) > 1
+                    && ((info["APFSPhysicalStores"] as? [[String: Any]])?.count ?? 0) > 1,
+                isInternalConfirmed: confirmedInternal
             )
         }
         let identityCounts = candidates.reduce(into: [String: Int]()) { counts, device in
@@ -419,7 +427,8 @@ public struct SectoriumDeviceCatalog {
                 isVirtual: device.isVirtual, identityBasis: .unavailable,
                 requiresFreshParentCheck: device.requiresFreshParentCheck,
                 apfsContainers: device.apfsContainers,
-                hasAmbiguousPhysicalStores: device.hasAmbiguousPhysicalStores)
+                hasAmbiguousPhysicalStores: device.hasAmbiguousPhysicalStores,
+                isInternalConfirmed: device.isInternalConfirmed)
         }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 }
@@ -467,6 +476,85 @@ public final class SystemSectoriumDeviceObserver: SectoriumDeviceObserving {
     }
 }
 
+/// Read-only evidence for a normal application-quit prompt. Open references
+/// include working directories: a process can block unmount without writing.
+public struct SectoriumActivityReference: Equatable, Sendable {
+    public let descriptor: String
+    public let path: String
+    public init(descriptor: String, path: String) { self.descriptor = descriptor; self.path = path }
+}
+public struct SectoriumActivityProcess: Equatable, Sendable {
+    public let processID: Int32
+    public let command: String
+    public let executablePath: String?
+    public let bundleIdentifier: String?
+    public let applicationName: String?
+    public let owningApplicationProcessID: Int32?
+    public let references: [SectoriumActivityReference]
+    public init(processID: Int32, command: String, executablePath: String? = nil,
+                bundleIdentifier: String? = nil, applicationName: String? = nil, owningApplicationProcessID: Int32? = nil,
+                references: [SectoriumActivityReference] = []) {
+        self.processID = processID; self.command = command; self.executablePath = executablePath
+        self.bundleIdentifier = bundleIdentifier; self.applicationName = applicationName
+        self.owningApplicationProcessID = owningApplicationProcessID; self.references = references
+    }
+}
+public struct SectoriumActivityReport: Equatable, Sendable {
+    public let assessment: OccupancyAssessment
+    public let processes: [SectoriumActivityProcess]
+    public init(assessment: OccupancyAssessment, processes: [SectoriumActivityProcess] = []) {
+        self.assessment = assessment; self.processes = processes
+    }
+    /// Supports lsof's field protocol and legacy fixture/table output. Malformed
+    /// or failed scans never become "no applications are using the volume".
+    static func parse(_ outcome: CommandOutcome) -> SectoriumActivityReport {
+        if outcome.exitCode == 1 && outcome.detail.isEmpty { return .init(assessment: .noVisibleOccupancy) }
+        guard outcome.succeeded else {
+            return .init(assessment: .incomplete(reason: "lsof exit=\(outcome.exitCode): \(String(outcome.detail.prefix(180)))"))
+        }
+        var processes: [SectoriumActivityProcess] = []
+        let lines = outcome.detail.split(whereSeparator: \.isNewline).map(String.init)
+        if lines.first?.first == "p", lines.first.flatMap({ Int32($0.dropFirst()) }) != nil {
+            var pid: Int32?, command = "", descriptor = "", references: [SectoriumActivityReference] = []
+            func append() {
+                guard let pid else { return }
+                processes.append(.init(processID: pid, command: command.isEmpty ? "PID \(pid)" : command,
+                    executablePath: references.first(where: { $0.descriptor == "txt" })?.path, references: references))
+            }
+            for line in lines {
+                guard let key = line.first else { continue }; let value = String(line.dropFirst())
+                switch key {
+                case "p": append(); pid = Int32(value); command = ""; descriptor = ""; references = []
+                case "c": command = value
+                case "f":
+                    descriptor = value
+                    if pid != nil { references.append(.init(descriptor: descriptor, path: "")) }
+                case "n":
+                    if pid != nil {
+                        if references.last?.descriptor == descriptor && references.last?.path == "" { references.removeLast() }
+                        references.append(.init(descriptor: descriptor, path: value))
+                    }
+                default: break
+                }
+            }
+            append()
+        } else {
+            for line in lines.dropFirst() {
+                let fields = line.split(maxSplits: 8, whereSeparator: \.isWhitespace).map(String.init)
+                guard fields.count >= 2, let pid = Int32(fields[1]) else { continue }
+                let refs: [SectoriumActivityReference] = fields.count >= 9 ? [.init(descriptor: fields[3], path: fields[8])] : []
+                processes.append(.init(processID: pid, command: fields[0], references: refs))
+            }
+        }
+        guard !processes.isEmpty else { return .init(assessment: .incomplete(reason: "lsof returned rows without a PID")) }
+        let grouped = Dictionary(grouping: processes, by: \.processID).map { pid, rows in
+            SectoriumActivityProcess(processID: pid, command: rows[0].command,
+                executablePath: rows.compactMap(\.executablePath).first, references: rows.flatMap(\.references))
+        }.sorted { $0.processID < $1.processID }
+        return .init(assessment: .busy(processIDs: grouped.map(\.processID)), processes: grouped)
+    }
+}
+
 public enum SectoriumWorkbenchReadiness: Equatable, Sendable {
     case noDevice
     case connected
@@ -495,13 +583,50 @@ public enum SectoriumProfileValidation: String, Codable, Equatable, Sendable {
     case pendingValidation, validated, unavailable
 }
 
+/// Only formats for which the native sparsebundle creation path has a writable
+/// filesystem argument. Detection of a readable filesystem is not permission
+/// to offer it for creation.
+public enum SectoriumFilesystem: String, Codable, CaseIterable, Equatable, Sendable {
+    case apfs = "APFS"
+    case apfsCaseSensitive = "APFSX"
+
+    public var caseSensitive: Bool { self == .apfsCaseSensitive }
+}
+
+public struct SectoriumCreateRequest: Sendable {
+    public let deviceID: String
+    public let parentDirectory: URL?
+    public let name: String
+    public let capacityGiB: Int
+    public let filesystem: SectoriumFilesystem
+    public let autoLoad: Bool
+    public let mountPoint: String?
+    public let password: String?
+
+    public init(deviceID: String, parentDirectory: URL? = nil, name: String, capacityGiB: Int,
+                filesystem: SectoriumFilesystem = .apfs, autoLoad: Bool = true,
+                mountPoint: String? = nil, password: String? = nil) {
+        self.deviceID = deviceID; self.parentDirectory = parentDirectory; self.name = name
+        self.capacityGiB = capacityGiB; self.filesystem = filesystem; self.autoLoad = autoLoad
+        self.mountPoint = mountPoint; self.password = password
+    }
+}
+
+public enum SectoriumProfileChange: Codable, Equatable, Sendable {
+    case displayName(String)
+    case autoLoad(Bool)
+    case mountPoint(String)
+    case capacityGiB(Int)
+    case filesystem(SectoriumFilesystem)
+}
+
 public struct SectoriumDevelopmentProfile: Identifiable, Codable, Equatable, Sendable {
     public let id: String
-    public let name: String
+    public var name: String
     public let deviceID: String
     public let backingVolumeUUID: UUID
-    public let backingMountPoint: String
-    public let imagePath: String
+    public var backingMountPoint: String
+    public var imagePath: String
     public var devVolumeName: String
     public var devMountPoint: String
     public var devUUID: UUID?
@@ -509,21 +634,92 @@ public struct SectoriumDevelopmentProfile: Identifiable, Codable, Equatable, Sen
     /// Optional storage preserves previously encoded concrete values without migration.
     public var encrypted: Bool?
     public let caseSensitive: Bool?
-    public let logicalCapacityBytes: UInt64?
+    public var logicalCapacityBytes: UInt64?
     /// `hdiutil imageinfo -format` output. Older profiles decode with an unknown format.
-    public let imageFormat: String?
+    public var imageFormat: String?
     public var validation: SectoriumProfileValidation
+    public var filesystem: SectoriumFilesystem?
+    public var autoLoad: Bool
+    public var createdAt: Date?
+    public var modifiedAt: Date?
+    public var lastVerifiedLoadedAt: Date?
+    /// File identity is pinned within the verified backing volume; replacement requires explicit re-registration.
+    public var imageFileIdentity: String?
+    public var autoLoadWasConfigured: Bool
 
     public init(id: String = UUID().uuidString, name: String, deviceID: String, backingVolumeUUID: UUID,
                 backingMountPoint: String, imagePath: String, devVolumeName: String, devMountPoint: String,
                 devUUID: UUID? = nil, encrypted: Bool?, caseSensitive: Bool?, logicalCapacityBytes: UInt64?,
                 imageFormat: String? = nil,
-                validation: SectoriumProfileValidation = .pendingValidation) {
+                validation: SectoriumProfileValidation = .pendingValidation,
+                filesystem: SectoriumFilesystem? = nil, autoLoad: Bool = true,
+                createdAt: Date? = nil, modifiedAt: Date? = nil, lastVerifiedLoadedAt: Date? = nil,
+                imageFileIdentity: String? = nil, autoLoadWasConfigured: Bool = true) {
         self.id = id; self.name = name; self.deviceID = deviceID; self.backingVolumeUUID = backingVolumeUUID
         self.backingMountPoint = backingMountPoint; self.imagePath = imagePath; self.devVolumeName = devVolumeName
         self.devMountPoint = devMountPoint; self.devUUID = devUUID; self.encrypted = encrypted
         self.caseSensitive = caseSensitive; self.logicalCapacityBytes = logicalCapacityBytes
         self.imageFormat = imageFormat; self.validation = validation
+        self.filesystem = filesystem ?? caseSensitive.map { $0 ? .apfsCaseSensitive : .apfs }
+        self.autoLoad = autoLoad; self.createdAt = createdAt; self.modifiedAt = modifiedAt
+        self.lastVerifiedLoadedAt = lastVerifiedLoadedAt
+        self.imageFileIdentity = imageFileIdentity; self.autoLoadWasConfigured = autoLoadWasConfigured
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, deviceID, backingVolumeUUID, backingMountPoint, imagePath
+        case devVolumeName, devMountPoint, devUUID, encrypted, caseSensitive
+        case logicalCapacityBytes, imageFormat, validation, filesystem, autoLoad
+        case createdAt, modifiedAt, lastVerifiedLoadedAt, imageFileIdentity, autoLoadWasConfigured
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(id: try c.decode(String.self, forKey: .id),
+            name: try c.decode(String.self, forKey: .name),
+            deviceID: try c.decode(String.self, forKey: .deviceID),
+            backingVolumeUUID: try c.decode(UUID.self, forKey: .backingVolumeUUID),
+            backingMountPoint: try c.decode(String.self, forKey: .backingMountPoint),
+            imagePath: try c.decode(String.self, forKey: .imagePath),
+            devVolumeName: try c.decode(String.self, forKey: .devVolumeName),
+            devMountPoint: try c.decode(String.self, forKey: .devMountPoint),
+            devUUID: try c.decodeIfPresent(UUID.self, forKey: .devUUID),
+            encrypted: try c.decodeIfPresent(Bool.self, forKey: .encrypted),
+            caseSensitive: try c.decodeIfPresent(Bool.self, forKey: .caseSensitive),
+            logicalCapacityBytes: try c.decodeIfPresent(UInt64.self, forKey: .logicalCapacityBytes),
+            imageFormat: try c.decodeIfPresent(String.self, forKey: .imageFormat),
+            validation: try c.decode(SectoriumProfileValidation.self, forKey: .validation),
+            filesystem: try c.decodeIfPresent(SectoriumFilesystem.self, forKey: .filesystem),
+            autoLoad: try c.decodeIfPresent(Bool.self, forKey: .autoLoad) ?? false,
+            createdAt: try c.decodeIfPresent(Date.self, forKey: .createdAt),
+            modifiedAt: try c.decodeIfPresent(Date.self, forKey: .modifiedAt),
+            lastVerifiedLoadedAt: try c.decodeIfPresent(Date.self, forKey: .lastVerifiedLoadedAt),
+            imageFileIdentity: try c.decodeIfPresent(String.self, forKey: .imageFileIdentity),
+            autoLoadWasConfigured: try c.decodeIfPresent(Bool.self, forKey: .autoLoadWasConfigured) ?? c.contains(.autoLoad))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id); try c.encode(name, forKey: .name)
+        try c.encode(deviceID, forKey: .deviceID)
+        try c.encode(backingVolumeUUID, forKey: .backingVolumeUUID)
+        try c.encode(backingMountPoint, forKey: .backingMountPoint)
+        try c.encode(imagePath, forKey: .imagePath)
+        try c.encode(devVolumeName, forKey: .devVolumeName)
+        try c.encode(devMountPoint, forKey: .devMountPoint)
+        try c.encodeIfPresent(devUUID, forKey: .devUUID)
+        try c.encodeIfPresent(encrypted, forKey: .encrypted)
+        try c.encodeIfPresent(caseSensitive, forKey: .caseSensitive)
+        try c.encodeIfPresent(logicalCapacityBytes, forKey: .logicalCapacityBytes)
+        try c.encodeIfPresent(imageFormat, forKey: .imageFormat)
+        try c.encode(validation, forKey: .validation)
+        try c.encodeIfPresent(filesystem, forKey: .filesystem)
+        try c.encode(autoLoad, forKey: .autoLoad)
+        try c.encodeIfPresent(createdAt, forKey: .createdAt)
+        try c.encodeIfPresent(modifiedAt, forKey: .modifiedAt)
+        try c.encodeIfPresent(lastVerifiedLoadedAt, forKey: .lastVerifiedLoadedAt)
+        try c.encodeIfPresent(imageFileIdentity, forKey: .imageFileIdentity)
+        try c.encode(autoLoadWasConfigured, forKey: .autoLoadWasConfigured)
     }
 
     public var hasVerifiedImageMetadata: Bool {

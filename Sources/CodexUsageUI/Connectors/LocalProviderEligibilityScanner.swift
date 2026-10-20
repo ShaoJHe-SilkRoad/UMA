@@ -32,6 +32,8 @@ struct ProviderSurfaceAdmissionRecord: Sendable, Equatable, Identifiable {
     let priority: Int
     let admission: ProviderSurfaceAdmission
     let loginOption: ProviderLoginOption?
+    /// Closed error classification only; failed reads never become quota cards.
+    var safeFailure: AgentSafeFailure? = nil
 }
 
 struct ProviderLoginOption: Sendable, Equatable, Identifiable {
@@ -251,7 +253,9 @@ actor LocalProviderEligibilityScanner {
                     loginOption: loginOption(
                         for: candidate.descriptor,
                         admission: admission
-                    )
+                    ),
+                    safeFailure: excludedProviderIDs.contains(candidate.descriptor.id)
+                        ? nil : await candidate.connector.currentSnapshot().safeFailure
                 )
             )
         }

@@ -797,8 +797,15 @@ public final class UsageStore: ObservableObject {
                 ? .idle
                 : .notAuthorizedByMonitor
             freshness = previewDisplaysFixtureData ? .fixture : .noRealData
-            lastFailure = nil
-            lastError = nil
+            // Admission deliberately hides invalid quota values, but must not
+            // erase the reason a first connection failed.
+            lastFailure = currentAdmissionRecords.first(where: { $0.id == primaryConnectorID })?
+                .safeFailure.map(Self.codexFailure)
+            lastError = codexFailureDescription(lastFailure)
+            if let lastFailure {
+                connectionState = lastFailure.blocksConnection
+                    ? .blockedFailure(lastFailure) : .recoverableFailure(lastFailure)
+            }
             return
         }
         snapshot = UsageSnapshot(agentSnapshot: primary, language: language)

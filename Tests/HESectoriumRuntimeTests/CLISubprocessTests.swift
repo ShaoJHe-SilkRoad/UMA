@@ -385,12 +385,14 @@ private final class CancellationOutcome: @unchecked Sendable {
         #expect(result["pending"] is NSNull)
         let commands = try #require(result["commands"] as? [[String]])
         #expect(!commands.contains { $0.contains("attach") || $0.contains("unmount") || $0.contains("eject") })
-        if suffix == "nil" { #expect(commands.isEmpty) }
-        else {
-            let canonicalOuter = evidence.appendingPathComponent("validation-eject-known/outer", isDirectory: true)
-                .resolvingSymlinksInPath().standardizedFileURL.path
-            #expect(commands.contains(["/usr/sbin/diskutil", "info", "-plist", canonicalOuter]))
-        }
+        let canonicalOuter = root.appendingPathComponent("outer", isDirectory: true)
+            .resolvingSymlinksInPath().standardizedFileURL.path
+        let allowedObservation = ["/usr/sbin/diskutil", "info", "-plist", canonicalOuter]
+        // Cancelling the pre-intent marker may refresh its selected backing
+        // identity for documentation. Permit only that scoped read, never an
+        // attach/unmount/eject or an observation of a different fixture root.
+        #expect(commands.allSatisfy { $0 == allowedObservation })
+        if suffix == "known" { #expect(commands.contains(allowedObservation)) }
     }
 
     let ambiguousRoot = evidence.appendingPathComponent("validation-eject-ambiguous", isDirectory: true)
@@ -480,6 +482,15 @@ private final class CancellationOutcome: @unchecked Sendable {
     #expect(seedValue["succeeded"] as? Bool == false)
     #expect(seedValue["intent"] as? Bool == true)
     #expect(seedValue["phase"] as? String == "eject:interrupted")
+    let managedRegistryURL = HESectoriumPaths(root: managedRoot.appendingPathComponent("support")).sectoriumProfiles
+    let managedRegistryBefore = try Data(contentsOf: managedRegistryURL)
+    let managedProfiles = try JSONDecoder().decode([SectoriumDevelopmentProfile].self, from: managedRegistryBefore)
+    let managedProfile = try #require(managedProfiles.first)
+    let managedDocumentJournal = SectoriumPortableDocumentJournal(
+        url: managedRoot.appendingPathComponent("support/sectorium-document-journal.json"))
+    #expect(try managedDocumentJournal.events(parentID: managedProfile.deviceID).contains {
+        $0.profileID == managedProfile.id && $0.phase == .intended && $0.kind == "ejected"
+    })
     let managedRecovery = try runR3("R3-recover-managed-second", scenario: "recover-managed-second", root: managedRoot)
     #expect(managedRecovery.pid != managedSeed.pid)
     #expect(managedRecovery.status == 0, "\(managedRecovery.stderr)\n\(managedRecovery.stdout)")
@@ -487,6 +498,51 @@ private final class CancellationOutcome: @unchecked Sendable {
     #expect(managedValue["confirmationAvailable"] as? Bool == true, "\(managedValue)")
     #expect(managedValue["succeeded"] as? Bool == true, "\(managedValue)")
     #expect(managedValue["durableBeforeEveryMutation"] as? Bool == true)
+    #expect(try Data(contentsOf: managedRegistryURL) == managedRegistryBefore,
+        "fresh-process recovery must retain the exact original registered profile")
+    #expect(try managedDocumentJournal.events(parentID: managedProfile.deviceID).contains {
+        $0.profileID == managedProfile.id && $0.phase == .completed && $0.kind == "ejected"
+    })
+
+    // macOS can complete eject while the USB node remains enumerated. Recovery
+    // must finish from the native receipt plus fresh unmounted topology, retaining
+    // the exact original profile and releasing the active operation slot.
+    let retainedRoot = evidence.appendingPathComponent("r3-eject-node-retained", isDirectory: true)
+    try FileManager.default.createDirectory(at: retainedRoot, withIntermediateDirectories: true)
+    let retainedSeed = try runR3("R3-seed-eject-node-retained", scenario: "seed-managed-second", root: retainedRoot)
+    #expect(retainedSeed.status == 0, "\(retainedSeed.stderr)")
+    let retainedRegistryURL = HESectoriumPaths(root: retainedRoot.appendingPathComponent("support")).sectoriumProfiles
+    let retainedRegistryBefore = try Data(contentsOf: retainedRegistryURL)
+    let retainedRecovery = try runR3("R3-recover-eject-node-retained",
+        scenario: "recover-managed-second-eject-node-retained", root: retainedRoot)
+    #expect(retainedRecovery.pid != retainedSeed.pid)
+    #expect(retainedRecovery.status == 0, "\(retainedRecovery.stderr)")
+    let retainedValue = try json(retainedRecovery)
+    #expect(retainedValue["confirmationAvailable"] as? Bool == true)
+    #expect(retainedValue["succeeded"] as? Bool == true, "\(retainedValue)")
+    #expect(retainedValue["intent"] as? Bool == false)
+    #expect(retainedValue["pending"] as? String == "none")
+    #expect(retainedValue["targetStillEnumerated"] as? Bool == true)
+    #expect(retainedValue["mountedTargetMembers"] as? [String] == [])
+    #expect(retainedValue["attachedImageCount"] as? Int == 0)
+    #expect(retainedValue["durableBeforeEveryMutation"] as? Bool == true)
+    let retainedMutations = try #require(retainedValue["mutations"] as? [[String: Any]])
+    #expect(retainedMutations.compactMap { $0["command"] as? [String] } == [
+        ["/usr/sbin/diskutil", "unmount", "/dev/disk81s2"],
+        ["/usr/sbin/diskutil", "eject", "/dev/disk81"]
+    ])
+    let retainedState = try JSONStateStore(url: retainedRoot.appendingPathComponent("support/state.json")).load()
+    #expect(retainedState.workbenchTerminalResult == "safe-to-unplug")
+    #expect(retainedState.terminalEjectJournals.count == 1)
+    let retainedEncoded = try #require(retainedState.terminalEjectJournals.values.first)
+    let retainedJournal = try JSONDecoder().decode(WholeDeviceEjectJournalRecord.self,
+        from: try #require(Data(base64Encoded: retainedEncoded)))
+    #expect(retainedJournal.phase == .ejected && retainedJournal.safelyEjected)
+    #expect(retainedJournal.lastIssuedAction == .ejectWholeDevice)
+    if case .completed? = retainedJournal.lastReceipt {} else {
+        Issue.record("logical eject must retain its successful native receipt")
+    }
+    #expect(try Data(contentsOf: retainedRegistryURL) == retainedRegistryBefore)
 
     for negative in ["busy-again", "postcheck", "new-member", "missing-member", "replacement", "unknown",
                      "no-ack", "stale", "wrong-checkpoint", "held-lock", "eject-present"] {
@@ -494,6 +550,8 @@ private final class CancellationOutcome: @unchecked Sendable {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let seed = try runR3("R3-seed-negative-\(negative)", scenario: "seed-managed-second", root: root)
         #expect(seed.status == 0, "negative seed \(negative): \(seed.stderr)")
+        let registryURL = HESectoriumPaths(root: root.appendingPathComponent("support")).sectoriumProfiles
+        let registryBefore = try Data(contentsOf: registryURL)
         let recovered = try runR3("R3-recover-negative-\(negative)",
             scenario: "recover-managed-second-\(negative)", root: root)
         #expect(recovered.pid != seed.pid)
@@ -502,6 +560,13 @@ private final class CancellationOutcome: @unchecked Sendable {
         #expect(value["succeeded"] as? Bool == false, "\(negative): \(value)")
         #expect(value["intent"] as? Bool == true, "\(negative): intent must remain durable")
         #expect(value["durableBeforeEveryMutation"] as? Bool == true)
+        if negative == "eject-present" {
+            #expect(value["targetStillEnumerated"] as? Bool == true)
+            #expect(value["mountedTargetMembers"] as? [String] == ["disk81s1"],
+                "a successful eject receipt must not hide a freshly mounted member")
+        }
+        #expect(try Data(contentsOf: registryURL) == registryBefore,
+            "negative recovery must not replace the original registered profile")
     }
 
     let repeatRoot = evidence.appendingPathComponent("r3-repeat", isDirectory: true)

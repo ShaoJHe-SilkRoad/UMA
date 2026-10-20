@@ -51,6 +51,7 @@ private final class FixtureCommandService: HESectoriumCommandServing {
                                   name: "HE", rootMatchesExpected: true)
         }
         backend.failPostAttachObservation = scenario == "postcheck-mount"
+        if backend.failPostAttachObservation { backend.observation = nil }
         backend.failFlush = scenario == "failed-eject"
         controller = StorageController(backend: backend, store: FixtureStateStore(), lock: FixtureOperationLock())
     }

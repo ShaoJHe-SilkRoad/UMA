@@ -528,6 +528,7 @@ enum ProviderProductStatePolicy {
                 entry: entry,
                 snapshot: snapshotByID[entry.connectorID],
                 admission: admittedByID[entry.connectorID]?.admission,
+                admissionFailure: admittedByID[entry.connectorID]?.safeFailure,
                 monitoringEnabled: monitoringEnabledIDs.contains(entry.connectorID),
                 configuredOrDetected: configuredOrDetectedIDs.contains(entry.connectorID),
                 pendingInitialAdmission: pendingInitialAdmissionIDs.contains(
@@ -554,6 +555,7 @@ enum ProviderProductStatePolicy {
         entry: CatalogEntry,
         snapshot: AgentUsageSnapshot?,
         admission: ProviderSurfaceAdmission?,
+        admissionFailure: AgentSafeFailure?,
         monitoringEnabled: Bool,
         configuredOrDetected: Bool,
         pendingInitialAdmission: Bool,
@@ -636,6 +638,7 @@ enum ProviderProductStatePolicy {
             sourceSummary: sourceSummary,
             diagnosticReason: diagnosticReason(
                 snapshot: snapshot,
+                admissionFailure: admissionFailure,
                 admission: admission,
                 availability: availability,
                 hasQualifiedClaudeLocalSmartUsage: hasQualifiedClaudeLocalSmartUsage
@@ -1031,11 +1034,23 @@ enum ProviderProductStatePolicy {
 
     private static func diagnosticReason(
         snapshot: AgentUsageSnapshot?,
+        admissionFailure: AgentSafeFailure?,
         admission: ProviderSurfaceAdmission?,
         availability: ProviderProductAvailability,
         hasQualifiedClaudeLocalSmartUsage: Bool
     ) -> ProviderProductDiagnosticReason? {
         if availability == .disabled { return nil }
+        if let failure = admissionFailure ?? snapshot?.safeFailure {
+            switch failure {
+            case .authorizationRequired: return .authorizationRequired
+            case .unavailable: return .sourceUnavailable
+            case .timedOut: return .timedOut
+            case .unsupported: return .unsupported
+            case .malformedResponse: return .invalidData
+            case .processExited: return .processUnavailable
+            case .unknown: return .unknown
+            }
+        }
         if !hasQualifiedClaudeLocalSmartUsage {
             switch admission {
             case .hiddenNotAuthenticated: return .setupRequired

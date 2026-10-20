@@ -36,6 +36,11 @@ public final class HESectoriumInstaller: @unchecked Sendable {
         "8c1376bd15e41fb24eb0b50679df84ec7e0568f6671d061b068b548d48b2c913",
         "471f364713dc5077adf199fabbaa13b1f57b51407fb0ace850c9b97986f8177e"
     ]
+    // Exact control bytes shipped in the 0.14.1 / 2026100403 preview. Limit this
+    // upgrade allowance to the control target; it does not admit arbitrary files.
+    static func isAcceptedPreviousControl(hash: String, targetKey: String) -> Bool {
+        targetKey == "control" && hash == "3266c4dd532a3106d66a18d7a94ac7808d8afdcca2093a2ec29dde79e34810c7"
+    }
     public init(paths: HESectoriumPaths, home: URL = FileManager.default.homeDirectoryForCurrentUser,
                 fileManager: FileManager = .default, beforePreimageCheck: ((URL) -> Void)? = nil,
                 writeFile: ((Data, URL, Int) throws -> Void)? = nil) {
@@ -51,9 +56,11 @@ public final class HESectoriumInstaller: @unchecked Sendable {
     }
     private var automationURL: URL { paths.root.appendingPathComponent("automation.json") }
 
-    public func status() -> HESectoriumInstalledStatus {
+    /// A registered profile is the configuration authority for its disk. The fixed
+    /// identity file remains a compatibility target only while no profiles exist.
+    public func status(profileConfigured: Bool = false) -> HESectoriumInstalledStatus {
         var missing = false
-        for target in targets {
+        for target in targets where !profileConfigured || target.key != "identityConfig" {
             var isDirectory: ObjCBool = false
             if !fileManager.fileExists(atPath: target.url.path, isDirectory: &isDirectory) {
                 if isSymlink(target.url) { return .conflict("Managed target is a dangling symbolic link: \(target.key)") }
@@ -79,22 +86,30 @@ public final class HESectoriumInstaller: @unchecked Sendable {
                 }
             }
             if target.key == "launchAgent" {
-                guard let text = String(data: data, encoding: .utf8), text.contains(paths.root.appendingPathComponent("HESectoriumControl").path),
-                      text.contains("com.juliushe.dev-apfs-mounter") else { return .conflict("LaunchAgent is not bound to the shared controller") }
+                guard SectoriumLaunchAgentConfiguration.matchesInstalledPlist(data,
+                    controlPath: paths.root.appendingPathComponent("HESectoriumControl").path,
+                    standardOutPath: paths.logs.appendingPathComponent("launch-agent.out.log").path,
+                    standardErrorPath: paths.logs.appendingPathComponent("launch-agent.err.log").path) else {
+                    return .conflict("LaunchAgent is not bound to the shared controller")
+                }
             }
         }
         return missing ? .missing : .installed
     }
-    public func apply(_ assets: HESectoriumAssets?, action: HESectoriumInstallAction) -> HESectoriumInstallResult {
+    public func apply(_ assets: HESectoriumAssets?, action: HESectoriumInstallAction,
+                      profileConfigured: Bool = false) -> HESectoriumInstallResult {
         guard let assets else { return .init(succeeded: false, summary: "Install assets must be supplied by the app bundle or caller") }
-        guard let identityConfig = assets.identityConfig else { return .init(succeeded: false, summary: "Identity configuration asset is required") }
-        let assetURLs: [String: URL] = ["control": assets.control, "identityConfig": identityConfig, "devMount": assets.devMountWrapper,
+        guard profileConfigured || assets.identityConfig != nil else {
+            return .init(succeeded: false, summary: "Identity configuration asset is required")
+        }
+        let assetURLs: [String: URL] = ["control": assets.control, "devMount": assets.devMountWrapper,
                                        "eject": assets.ejectWrapper, "launchAgent": assets.launchAgent]
+            .merging(assets.identityConfig.map { ["identityConfig": $0] } ?? [:]) { current, _ in current }
         var outcomes: [HESectoriumFileInstallOutcome] = []
         var recoveryDirectory: URL?
         var transactionPlans: [Preimage] = []
         do {
-            for target in targets {
+            for target in targets where !profileConfigured || target.key != "identityConfig" {
                 guard let source = assetURLs[target.key], fileManager.fileExists(atPath: source.path) else {
                     throw RuntimeError.installConflict("Missing asset: \(target.key)")
                 }
@@ -116,7 +131,13 @@ public final class HESectoriumInstaller: @unchecked Sendable {
                         outcomes.append(.init(file: target.key, state: .adopted, detail: "Exact bytes and mode already present"))
                         continue
                     }
-                    guard oldData.map({ knownLegacyHashes.contains(Self.sha256($0)) }) == true else {
+                    guard oldData.map({
+                        let hash = Self.sha256($0)
+                        return knownLegacyHashes.contains(hash)
+                            || Self.isAcceptedPreviousControl(hash: hash, targetKey: target.key)
+                            || (oldMode.map { $0 & 0o777 } == target.mode
+                                && hasManagedControlReceipt(hash: hash, target: target))
+                    }) == true else {
                         throw RuntimeError.installConflict("Existing target is not a recognized legacy component: \(target.key)")
                     }
                 }
@@ -231,16 +252,27 @@ public final class HESectoriumInstaller: @unchecked Sendable {
         } catch { /* diagnostics are best-effort and never change operation outcome */ }
     }
     private func prepared(_ raw: Data, key: String) throws -> Data {
-        guard ["launchAgent", "devMount", "eject"].contains(key), let template = String(data: raw, encoding: .utf8) else { return raw }
+        guard ["launchAgent", "devMount", "eject"].contains(key) else { return raw }
+        guard let template = String(data: raw, encoding: .utf8) else {
+            throw RuntimeError.installConflict("Managed text asset is not valid UTF-8: \(key)")
+        }
         var value = template.replacingOccurrences(of: "__UMA_CONTROL_PATH__", with: paths.root.appendingPathComponent("HESectoriumControl").path)
         if key == "launchAgent" {
             value = value
-            .replacingOccurrences(of: "__UMA_CONTROL_PATH__", with: paths.root.appendingPathComponent("HESectoriumControl").path)
             .replacingOccurrences(of: "__UMA_LOG_OUT__", with: paths.logs.appendingPathComponent("launch-agent.out.log").path)
             .replacingOccurrences(of: "__UMA_LOG_ERR__", with: paths.logs.appendingPathComponent("launch-agent.err.log").path)
         }
         guard !value.contains("__UMA_") else { throw RuntimeError.installConflict("LaunchAgent path token unresolved") }
-        return Data(value.utf8)
+        let prepared = Data(value.utf8)
+        if key == "launchAgent" {
+            guard SectoriumLaunchAgentConfiguration.matchesInstalledPlist(prepared,
+                controlPath: paths.root.appendingPathComponent("HESectoriumControl").path,
+                standardOutPath: paths.logs.appendingPathComponent("launch-agent.out.log").path,
+                standardErrorPath: paths.logs.appendingPathComponent("launch-agent.err.log").path) else {
+                throw RuntimeError.installConflict("LaunchAgent asset has an unexpected label, program, arguments, or configuration")
+            }
+        }
+        return prepared
     }
     private func secureDirectory(_ directory: URL) throws {
         try SecureDirectory.ensure(directory)
@@ -302,6 +334,63 @@ public final class HESectoriumInstaller: @unchecked Sendable {
         let encoded = try JSONEncoder().encode(manifest)
         try durableAtomicWrite(encoded, to: directory.appendingPathComponent("manifest.json"), mode: 0o600)
         return directory
+    }
+    /// The existing durable installation record also identifies a previously managed
+    /// control executable. Match its exact postimage, never a name or arbitrary binary.
+    /// This is local upgrade provenance, not signature verification or host permission.
+    private func hasManagedControlReceipt(hash: String, target: Target) -> Bool {
+        guard target.key == "control", target.url == paths.root.appendingPathComponent("HESectoriumControl"),
+              plainOwnedItem(target.url, type: .typeRegular, mode: target.mode),
+              plainOwnedItem(paths.root, type: .typeDirectory, mode: 0o700) else { return false }
+        let recoveryRoot = paths.root.appendingPathComponent("Recovery", isDirectory: true)
+        guard plainOwnedItem(recoveryRoot, type: .typeDirectory, mode: 0o700),
+              let directories = try? fileManager.contentsOfDirectory(at: recoveryRoot,
+                  includingPropertiesForKeys: nil) else { return false }
+        let expectedKeys = Set(targets.map(\.key))
+        let profileKeys = expectedKeys.subtracting(["identityConfig"])
+        for directory in directories {
+            guard let transaction = UUID(uuidString: directory.lastPathComponent),
+                  transaction.uuidString == directory.lastPathComponent,
+                  plainOwnedItem(directory, type: .typeDirectory, mode: 0o700) else { continue }
+            let receipt = directory.appendingPathComponent("manifest.json")
+            guard plainOwnedItem(receipt, type: .typeRegular, mode: 0o600),
+                  let size = try? fileManager.attributesOfItem(atPath: receipt.path)[.size] as? NSNumber,
+                  size.intValue > 0, size.intValue <= 65_536,
+                  let data = try? Data(contentsOf: receipt),
+                  let manifest = try? JSONDecoder().decode(RecoveryManifest.self, from: data),
+                  manifest.schema == 1, manifest.transactionID == transaction.uuidString,
+                  ISO8601DateFormatter().date(from: manifest.createdAt) != nil else { continue }
+            let keys = Set(manifest.records.map(\.key))
+            guard keys.count == manifest.records.count,
+                  keys == expectedKeys || keys == profileKeys,
+                  manifest.records.allSatisfy({ record in
+                      targets.contains { $0.key == record.key && $0.url.path == record.targetPath }
+                  }),
+                  let control = manifest.records.first(where: { $0.key == "control" }),
+                  control.postimageSHA256 == hash else { continue }
+            // A retained preimage must remain usable when the transaction replaced
+            // an earlier control. New installations explicitly have no preimage.
+            if control.existed {
+                guard control.backupFile == "control.preimage", let priorMode = control.mode,
+                      (0...0o777).contains(priorMode), let priorHash = control.sha256 else { continue }
+                let backup = directory.appendingPathComponent("control.preimage")
+                guard plainOwnedItem(backup, type: .typeRegular, mode: 0o600),
+                      let bytes = try? Data(contentsOf: backup), Self.sha256(bytes) == priorHash else { continue }
+            } else if control.backupFile != nil || control.mode != nil || control.sha256 != nil { continue }
+            return true
+        }
+        return false
+    }
+    private func plainOwnedItem(_ url: URL, type: FileAttributeType, mode: Int) -> Bool {
+        guard url.standardizedFileURL.path == url.resolvingSymlinksInPath().path,
+              let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType == type,
+              let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue,
+              permissions & 0o7777 == mode else { return false }
+        #if canImport(Darwin)
+        guard (attributes[.ownerAccountID] as? NSNumber)?.uint32Value == geteuid() else { return false }
+        #endif
+        return true
     }
     /// Restores only the targets that still contain an exact transaction postimage. A fresh
     /// process may call this explicit, fixture-testable recovery using the retained manifest.

@@ -197,6 +197,24 @@ final class MainSurfaceNavigationState: ObservableObject {
     @Published var selectedAgent: ProviderProductID = .codex
 }
 
+@MainActor
+final class MainSectoriumStoreLifetime: ObservableObject {
+    private let makeStore: () -> HESectoriumStore
+    private var retainedStore: HESectoriumStore?
+
+    init(makeStore: @escaping () -> HESectoriumStore = { HESectoriumStore() }) {
+        self.makeStore = makeStore
+    }
+
+    func resolve(injected: HESectoriumStore?) -> HESectoriumStore {
+        if let injected { return injected }
+        if let retainedStore { return retainedStore }
+        let store = makeStore()
+        retainedStore = store
+        return store
+    }
+}
+
 struct MainWindowRootView: View {
     @ObservedObject var store: UsageStore
     @ObservedObject var navigation: MainSurfaceNavigationState
@@ -215,6 +233,9 @@ struct MainWindowRootView: View {
     var referenceDate: Date? = nil
     var agentRailDisplayNames: [ProviderProductID: String] = [:]
     var initiallyExpandedResetProviderID: ProviderProductID? = nil
+    // Tab removal stops observation, but must not discard the known volume rows.
+    // The service is created lazily so visiting AUV/ThreadOS alone does no storage work.
+    @StateObject private var sectoriumStoreLifetime = MainSectoriumStoreLifetime()
     @State private var sheetProviderID: ProviderProductID?
     @State private var agentSettingsFocusBridge = MainAgentSettingsFocusBridge()
 
@@ -237,10 +258,13 @@ struct MainWindowRootView: View {
                 )
             case .sectorium:
                 SectoriumWorkbenchView(
-                    store: hesectoriumStore ?? HESectoriumStore(),
+                    store: sectoriumStoreLifetime.resolve(injected: hesectoriumStore),
                     isChinese: store.language == .simplifiedChinese
                 )
             }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            versionFooter
         }
         .frame(minWidth: 760, minHeight: 488)
         .background(UMAVisualStyle.canvas)
@@ -252,6 +276,22 @@ struct MainWindowRootView: View {
                 sheetProviderID = nil
             }
         }
+    }
+
+    private var versionFooter: some View {
+        HStack {
+            if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
+                Text("AUV \(version)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("auv.main.version")
+                    .help("Build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—")")
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(UMAVisualStyle.canvas)
     }
 
     private var toolbar: some View {

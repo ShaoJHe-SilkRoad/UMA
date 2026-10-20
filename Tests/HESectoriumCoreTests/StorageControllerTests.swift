@@ -138,17 +138,20 @@ final class StorageControllerTests: XCTestCase {
         XCTAssertTrue(rig.backend.performed.isEmpty)
     }
 
-    func testExitDoesNotClearIntentOnlyValidatedRecoveryDoes() throws {
+    func testExitAndAutomaticReconnectRetainIntentUntilValidatedManualRecovery() throws {
         let rig = ControllerRig()
         rig.state.current = .init(ejectIntent: true, operationID: "interrupted")
         XCTAssertTrue(try XCTUnwrap(rig.controller.processExit()).ejectIntent)
         _ = rig.controller.handle(.outerDisappeared(uuid: StorageIdentityPolicy.expected.outerUUID))
         XCTAssertTrue(try XCTUnwrap(rig.state.current).ejectIntent)
+        let reconnected = rig.controller.handle(.outerReappeared(uuid: StorageIdentityPolicy.expected.outerUUID))
+        XCTAssertEqual(reconnected.failure, .recoveryRequiresManualMount)
+        XCTAssertTrue(try XCTUnwrap(rig.state.current).ejectIntent)
+        XCTAssertEqual(rig.backend.attachCount, 0)
         _ = rig.controller.handle(.outerReappeared(uuid: StorageIdentityPolicy.expected.outerUUID))
+        XCTAssertEqual(rig.backend.attachCount, 0)
+        XCTAssertTrue(rig.controller.recoverPendingIntentManually().succeeded)
         XCTAssertFalse(try XCTUnwrap(rig.state.current).ejectIntent)
-        XCTAssertEqual(rig.backend.attachCount, 1)
-        _ = rig.controller.handle(.outerReappeared(uuid: StorageIdentityPolicy.expected.outerUUID))
-        XCTAssertEqual(rig.backend.attachCount, 1)
     }
 
     func testReinsertWithoutKnownDisappearanceNeedsExplicitCheckedRecovery() throws {
@@ -163,7 +166,7 @@ final class StorageControllerTests: XCTestCase {
         let explicit = rig.controller.recoverPendingIntentManually()
         XCTAssertTrue(explicit.succeeded)
         XCTAssertFalse(try XCTUnwrap(rig.state.current).ejectIntent)
-        XCTAssertEqual(rig.backend.attachCount, 1)
+        XCTAssertEqual(rig.backend.attachCount, 0, "Verified existing image must be reused")
     }
 
     func testManualRecoveryRequiresValidatedOuterAndInnerIdentity() throws {
@@ -183,75 +186,47 @@ final class StorageControllerTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(rig.state.current).ejectIntent)
     }
 
-    func testOnlyOuterPhysicalReconnectRecoversIntent() throws {
+    func testOnlyVerifiedPhysicalReconnectIsRecordedWhileIntentRemainsPending() throws {
         let rig = ControllerRig()
         rig.state.current = .init(ejectIntent: true, operationID: "interrupted")
         _ = rig.controller.handle(.devMounted(uuid: StorageIdentityPolicy.expected.devUUID!))
         _ = rig.controller.handle(.imageChanged)
         XCTAssertTrue(try XCTUnwrap(rig.state.current).ejectIntent)
+        rig.backend.finalState = .stillPresent
+        XCTAssertEqual(rig.controller.handle(.outerDisappeared(uuid: StorageIdentityPolicy.expected.outerUUID)).failure,
+                       .outerStillPresent)
+        XCTAssertFalse(rig.state.current.outerDisappearedAfterIntent)
+        rig.backend.finalState = .absent
         _ = rig.controller.handle(.outerDisappeared(uuid: StorageIdentityPolicy.expected.outerUUID))
-        var invalidReinsert = StorageObservation.expectedReady
-        invalidReinsert.dev.uuid = UUID()
-        rig.backend.observation = invalidReinsert
         XCTAssertEqual(rig.controller.handle(.outerReappeared(uuid: StorageIdentityPolicy.expected.outerUUID)).failure,
-                       .readiness(.devUUIDMismatch))
+                       .recoveryRequiresManualMount)
         XCTAssertTrue(try XCTUnwrap(rig.state.current).ejectIntent)
         XCTAssertTrue(try XCTUnwrap(rig.state.current).outerReconnectAttempted)
         let duplicate = rig.controller.handle(.outerReappeared(uuid: StorageIdentityPolicy.expected.outerUUID))
         XCTAssertTrue(duplicate.steps.contains(where: { $0.status == .skipped }))
-        XCTAssertEqual(rig.backend.attachCount, 1)
-        // Only a new confirmed physical disconnect may permit a subsequent attach attempt.
-        _ = rig.controller.handle(.outerDisappeared(uuid: StorageIdentityPolicy.expected.outerUUID))
-        rig.backend.observation = .expectedReady
-        _ = rig.controller.handle(.outerReappeared(uuid: StorageIdentityPolicy.expected.outerUUID))
-        XCTAssertFalse(try XCTUnwrap(rig.state.current).ejectIntent)
-        XCTAssertEqual(rig.backend.attachCount, 2)
+        XCTAssertEqual(rig.backend.attachCount, 0)
     }
 
-    func testDetachedReconnectAttachesBeforeFullObservationAndRetainsIntentOnFailures() throws {
+    func testDetachedReconnectNeverAutomaticallyAttachesAndManualRecoveryValidates() throws {
         let rig = ControllerRig()
         rig.state.current = .init(ejectIntent: true, operationID: "detached-reconnect",
                                   outerDisappearedAfterIntent: true)
-        // While the outer disk is detached, the inner DEV/image chain must not be observable.
         rig.backend.observation = nil
-
-        rig.backend.attachResult = .init(exitCode: 7, detail: "fixture attach failure")
-        let attachFailure = rig.controller.handle(.outerReappeared(uuid: StorageIdentityPolicy.expected.outerUUID))
-        XCTAssertEqual(attachFailure.failure, .attachFailed(7, "fixture attach failure"))
-        XCTAssertTrue(try XCTUnwrap(rig.state.current).ejectIntent)
-        XCTAssertEqual(rig.backend.attachCount, 1)
-        XCTAssertEqual(rig.backend.observation, nil)
-
-        let repeatedAfterAttachFailure = rig.controller.handle(.outerReappeared(uuid: StorageIdentityPolicy.expected.outerUUID))
-        XCTAssertTrue(repeatedAfterAttachFailure.steps.contains(where: { $0.status == .skipped }))
-        XCTAssertEqual(rig.backend.attachCount, 1)
-
-        // Only a newly confirmed physical disconnect authorizes another attempt. Attach now
-        // succeeds, but a failed full-chain check must still retain durable suppression.
-        _ = rig.controller.handle(.outerDisappeared(uuid: StorageIdentityPolicy.expected.outerUUID))
-        rig.backend.attachResult = .success
+        let observed = rig.controller.handle(.outerReappeared(uuid: StorageIdentityPolicy.expected.outerUUID))
+        XCTAssertEqual(observed.failure, .recoveryRequiresManualMount)
+        XCTAssertEqual(rig.backend.attachCount, 0)
         var invalidAttachedChain = StorageObservation.expectedReady
         invalidAttachedChain.dev.uuid = UUID()
         rig.backend.observationAfterAttach = invalidAttachedChain
-        let postAttachFailure = rig.controller.handle(.outerReappeared(uuid: StorageIdentityPolicy.expected.outerUUID))
-        XCTAssertEqual(postAttachFailure.failure, .readiness(.devUUIDMismatch))
+        XCTAssertEqual(rig.controller.recoverPendingIntentManually().failure, .readiness(.devUUIDMismatch))
         XCTAssertTrue(try XCTUnwrap(rig.state.current).ejectIntent)
-        XCTAssertEqual(rig.backend.attachCount, 2)
-        XCTAssertEqual(rig.backend.observation, invalidAttachedChain)
-
-        // A subsequent confirmed detach/reinsert revalidates the outer first, then attach
-        // makes the inner chain observable; intent clears only after that full validation.
-        _ = rig.controller.handle(.outerDisappeared(uuid: StorageIdentityPolicy.expected.outerUUID))
+        XCTAssertEqual(rig.backend.attachCount, 1)
         rig.backend.observationAfterAttach = .expectedReady
-        let recovered = rig.controller.handle(.outerReappeared(uuid: StorageIdentityPolicy.expected.outerUUID))
+        let recovered = rig.controller.recoverPendingIntentManually()
         XCTAssertTrue(recovered.succeeded)
         XCTAssertEqual(recovered.steps.map(\.step), ["verifyOuterIdentity", "attachImage", "verifyReadiness", "clearEjectIntent"])
         XCTAssertFalse(try XCTUnwrap(rig.state.current).ejectIntent)
-        XCTAssertEqual(rig.backend.attachCount, 3)
-
-        let duplicateAfterRecovery = rig.controller.handle(.outerReappeared(uuid: StorageIdentityPolicy.expected.outerUUID))
-        XCTAssertTrue(duplicateAfterRecovery.steps.contains(where: { $0.status == .skipped }))
-        XCTAssertEqual(rig.backend.attachCount, 3)
+        XCTAssertEqual(rig.backend.attachCount, 2)
     }
 
     func testDetachedReinsertRejectsWrongEventOrObservedOuterIdentity() throws {
@@ -317,6 +292,214 @@ final class StorageControllerTests: XCTestCase {
         XCTAssertEqual(rig.controller.safeEjectHE().failure, .ejectAlreadyPending)
         XCTAssertTrue(rig.backend.performed.isEmpty)
     }
+
+    func testTwoRegisteredProfilesKeepSuppressionSeparateAcrossRestart() throws {
+        let rig = ControllerRig()
+        let (policyA, readyA) = registeredFixture("A")
+        let (policyB, readyB) = registeredFixture("B")
+        var suppressedState = rig.state.current.advancingRevision()
+        XCTAssertTrue(suppressedState.suppressProfile("profile-A"))
+        XCTAssertTrue(try rig.state.compareAndSwap(expectedRevision: rig.state.current.revision,
+                                                    newState: suppressedState))
+        let backendA = FakeBackend()
+        backendA.outerObservation = readyA.outer
+        backendA.observation = readyA
+        let backendB = FakeBackend()
+        backendB.outerObservation = readyB.outer
+        backendB.observation = nil
+        backendB.observationAfterAttach = readyB
+
+        let suppressed = rig.controller.mountRegisteredProfileAtStartup(
+            profileID: "profile-A", policy: policyA, backend: backendA)
+        XCTAssertTrue(suppressed.steps.contains { $0.step == "profileSuppressed" && $0.status == .skipped })
+        XCTAssertEqual(backendA.attachCount, 0)
+        XCTAssertEqual(backendA.observation, readyA, "Suppression must not alter observed mounted state")
+        XCTAssertTrue(rig.controller.mountRegisteredProfileAtStartup(
+            profileID: "profile-B", policy: policyB, backend: backendB).succeeded)
+        XCTAssertEqual(backendB.attachCount, 1)
+        XCTAssertEqual(rig.state.current.suppressedProfileIDs, ["profile-A"])
+        XCTAssertEqual(rig.state.current.reconnectAttemptedProfileIDs, ["profile-B"])
+
+        let restarted = StorageController(backend: rig.backend, store: rig.state, lock: rig.lock)
+        let duplicate = restarted.mountRegisteredProfileAtStartup(
+            profileID: "profile-B", policy: policyB, backend: backendB)
+        XCTAssertTrue(duplicate.steps.contains { $0.step == "reuseVerifiedImage" })
+        XCTAssertEqual(backendB.attachCount, 1)
+    }
+
+    func testRegisteredFirstArrivalLoadsOnceAndVerifiedReconnectReusesMountedImage() {
+        let rig = ControllerRig()
+        let (policy, ready) = registeredFixture("A")
+        let backend = FakeBackend()
+        backend.outerObservation = ready.outer
+        backend.observation = nil
+        backend.observationAfterAttach = ready
+        let event = StorageEvent.outerReappeared(uuid: policy.outerUUID)
+        let firstAppear = rig.controller.handleRegisteredProfileEvent(
+            event, profileID: "profile-A", policy: policy, backend: backend)
+        XCTAssertTrue(firstAppear.succeeded)
+        XCTAssertEqual(backend.attachCount, 1, "The first insertion need not have been observed disconnecting")
+        XCTAssertTrue(rig.controller.handleRegisteredProfileEvent(
+            event, profileID: "profile-A", policy: policy, backend: backend)
+            .steps.contains { $0.status == .skipped })
+        XCTAssertEqual(backend.attachCount, 1)
+
+        backend.finalState = .unknown("incomplete device inventory")
+        XCTAssertEqual(rig.controller.handleRegisteredProfileEvent(
+            .outerDisappeared(uuid: policy.outerUUID), profileID: "profile-A", policy: policy,
+            backend: backend).failure, .finalStateUnknown("incomplete device inventory"))
+        XCTAssertTrue(rig.state.current.disconnectedProfileIDs.isEmpty)
+        backend.finalState = .absent
+        backend.observation = nil
+        XCTAssertTrue(rig.controller.handleRegisteredProfileEvent(
+            .outerDisappeared(uuid: policy.outerUUID), profileID: "profile-A", policy: policy,
+            backend: backend).succeeded)
+        XCTAssertTrue(rig.controller.handleRegisteredProfileEvent(
+            event, profileID: "profile-A", policy: policy, backend: backend).succeeded)
+        XCTAssertEqual(backend.attachCount, 2)
+        XCTAssertFalse(rig.state.current.disconnectedProfileIDs.contains("profile-A"))
+        XCTAssertTrue(rig.state.current.reconnectAttemptedProfileIDs.contains("profile-A"))
+        XCTAssertTrue(rig.controller.handleRegisteredProfileEvent(
+            event, profileID: "profile-A", policy: policy, backend: backend)
+            .steps.contains { $0.status == .skipped })
+        XCTAssertEqual(backend.attachCount, 2)
+
+        backend.observation = nil
+        XCTAssertTrue(rig.controller.handleRegisteredProfileEvent(
+            .outerDisappeared(uuid: policy.outerUUID), profileID: "profile-A", policy: policy,
+            backend: backend).succeeded)
+        backend.observation = ready
+        let reused = rig.controller.handleRegisteredProfileEvent(
+            event, profileID: "profile-A", policy: policy, backend: backend)
+        XCTAssertTrue(reused.succeeded)
+        XCTAssertTrue(reused.steps.contains { $0.step == "reuseVerifiedImage" })
+        XCTAssertEqual(backend.attachCount, 2)
+    }
+
+    func testManualUnloadSurvivesRestartAndNoiseButTrueReconnectResumesAutoload() {
+        let rig = ControllerRig()
+        let (policy, ready) = registeredFixture("A")
+        let backend = FakeBackend()
+        backend.outerObservation = ready.outer
+        backend.observation = nil
+        backend.observationAfterAttach = ready
+        rig.state.current = .init(ejectIntent: false,
+            suppressedProfileIDs: ["profile-A", "profile-B"],
+            reconnectAttemptedProfileIDs: ["profile-A"])
+        let restarted = StorageController(backend: rig.backend, store: rig.state, lock: rig.lock)
+        XCTAssertTrue(restarted.mountRegisteredProfileAtStartup(profileID: "profile-A", policy: policy,
+            backend: backend).steps.contains { $0.step == "profileSuppressed" })
+        XCTAssertTrue(restarted.handleRegisteredProfileEvent(.outerReappeared(uuid: policy.outerUUID),
+            profileID: "profile-A", policy: policy, backend: backend)
+            .steps.contains { $0.step == "profileSuppressed" })
+        backend.finalState = .stillPresent
+        XCTAssertEqual(restarted.handleRegisteredProfileEvent(.outerDisappeared(uuid: policy.outerUUID),
+            profileID: "profile-A", policy: policy, backend: backend).failure, .outerStillPresent)
+        XCTAssertEqual(backend.attachCount, 0)
+        XCTAssertEqual(rig.state.current.suppressedProfileIDs, ["profile-A", "profile-B"])
+
+        backend.finalState = .absent
+        XCTAssertTrue(restarted.handleRegisteredProfileEvent(.outerDisappeared(uuid: policy.outerUUID),
+            profileID: "profile-A", policy: policy, backend: backend).succeeded)
+        // Disappearance alone does not undo the user's intent. A matching,
+        // freshly verified device must return before its load is claimed.
+        XCTAssertTrue(rig.state.current.suppressedProfileIDs.contains("profile-A"))
+        backend.outerObservation?.uuid = UUID()
+        XCTAssertEqual(restarted.handleRegisteredProfileEvent(.outerReappeared(uuid: policy.outerUUID),
+            profileID: "profile-A", policy: policy, backend: backend).failure, .readiness(.outerUUIDMismatch))
+        XCTAssertTrue(rig.state.current.suppressedProfileIDs.contains("profile-A"))
+        backend.outerObservation = ready.outer
+        XCTAssertTrue(restarted.handleRegisteredProfileEvent(.outerReappeared(uuid: policy.outerUUID),
+            profileID: "profile-A", policy: policy, backend: backend).succeeded)
+        XCTAssertEqual(backend.attachCount, 1)
+        XCTAssertEqual(rig.state.current.suppressedProfileIDs, ["profile-B"])
+        XCTAssertFalse(rig.state.current.disconnectedProfileIDs.contains("profile-A"))
+    }
+
+    func testReconnectNeverOverridesAnUnfinishedEjectOrFailedClaim() {
+        let rig = ControllerRig()
+        let (policy, ready) = registeredFixture("A")
+        let backend = FakeBackend()
+        backend.outerObservation = ready.outer
+        backend.observation = nil
+        backend.observationAfterAttach = ready
+        rig.state.current = .init(ejectIntent: true, suppressedProfileIDs: ["profile-A"],
+            disconnectedProfileIDs: ["profile-A"])
+        XCTAssertEqual(rig.controller.mountRegisteredProfileAtStartup(profileID: "profile-A",
+            policy: policy, backend: backend).failure, .recoveryRequiresManualMount)
+        rig.state.current.ejectIntent = false
+        rig.state.rejectWrites = true
+        let before = rig.state.current
+        XCTAssertEqual(rig.controller.mountRegisteredProfileAtStartup(profileID: "profile-A",
+            policy: policy, backend: backend).failure, .stateConflict)
+        XCTAssertEqual(rig.state.current, before)
+        XCTAssertEqual(backend.attachCount, 0)
+    }
+
+    func testFailedRegisteredAttachRetriesOnlyOnNewStartupOrFreshDisconnect() {
+        let rig = ControllerRig()
+        let (policy, ready) = registeredFixture("A")
+        let backend = FakeBackend()
+        backend.outerObservation = ready.outer
+        backend.observation = nil
+        backend.attachResult = .init(exitCode: 7, detail: "fixture failure")
+        _ = rig.controller.handleRegisteredProfileEvent(.outerDisappeared(uuid: policy.outerUUID),
+            profileID: "profile-A", policy: policy, backend: backend)
+        XCTAssertEqual(rig.controller.handleRegisteredProfileEvent(.outerReappeared(uuid: policy.outerUUID),
+            profileID: "profile-A", policy: policy, backend: backend).failure, .attachFailed(7, "fixture failure"))
+        XCTAssertTrue(rig.state.current.reconnectAttemptedProfileIDs.contains("profile-A"))
+        let restarted = StorageController(backend: rig.backend, store: rig.state, lock: rig.lock)
+        XCTAssertEqual(restarted.mountRegisteredProfileAtStartup(
+            profileID: "profile-A", policy: policy, backend: backend).failure, .attachFailed(7, "fixture failure"))
+        XCTAssertEqual(backend.attachCount, 2)
+        XCTAssertTrue(restarted.mountRegisteredProfileAtStartup(
+            profileID: "profile-A", policy: policy, backend: backend).steps.contains { $0.status == .skipped })
+        _ = restarted.handleRegisteredProfileEvent(.outerReappeared(uuid: policy.outerUUID),
+            profileID: "profile-A", policy: policy, backend: backend)
+        XCTAssertEqual(backend.attachCount, 2, "Duplicate startup/arrival must not retry a failed attempt")
+
+        _ = restarted.handleRegisteredProfileEvent(.outerDisappeared(uuid: policy.outerUUID),
+            profileID: "profile-A", policy: policy, backend: backend)
+        backend.attachResult = .success
+        backend.observationAfterAttach = ready
+        XCTAssertTrue(restarted.handleRegisteredProfileEvent(.outerReappeared(uuid: policy.outerUUID),
+            profileID: "profile-A", policy: policy, backend: backend).succeeded)
+        XCTAssertEqual(backend.attachCount, 3)
+    }
+
+    func testOnlyFreshManualProfileValidationClearsItsSuppression() {
+        let (policyA, readyA) = registeredFixture("A")
+        let (_, readyB) = registeredFixture("B")
+        var state = StoragePersistentState(ejectIntent: false, suppressedProfileIDs: ["profile-A", "profile-B"],
+            disconnectedProfileIDs: ["profile-A", "profile-B"])
+        XCTAssertFalse(state.clearProfileSuppressionAfterValidatedLoad(
+            "profile-A", policy: policyA, observation: readyB))
+        XCTAssertEqual(state.suppressedProfileIDs, ["profile-A", "profile-B"])
+        XCTAssertTrue(state.clearProfileSuppressionAfterValidatedLoad(
+            "profile-A", policy: policyA, observation: readyA))
+        XCTAssertEqual(state.suppressedProfileIDs, ["profile-B"])
+        XCTAssertEqual(state.disconnectedProfileIDs, ["profile-B"])
+        XCTAssertTrue(state.reconnectAttemptedProfileIDs.contains("profile-A"))
+        state.ejectIntent = true
+        XCTAssertFalse(state.clearProfileSuppressionAfterValidatedLoad(
+            "profile-B", policy: policyA, observation: readyA))
+    }
+
+    func testInvalidObservedRegisteredImageRefusesBeforeAnotherAttach() {
+        let rig = ControllerRig()
+        let (policy, ready) = registeredFixture("A")
+        let backend = FakeBackend()
+        backend.outerObservation = ready.outer
+        var wrong = ready
+        wrong.image.attachedVolumeUUID = UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")
+        backend.observation = wrong
+        backend.observationAfterAttach = ready
+        let result = rig.controller.mountRegisteredProfileAtStartup(
+            profileID: "profile-A", policy: policy, backend: backend)
+        XCTAssertEqual(result.failure, .readiness(.imageRelationMismatch))
+        XCTAssertTrue(result.steps.contains { $0.step == "verifyExistingImage" && $0.status == .failed })
+        XCTAssertEqual(backend.attachCount, 0)
+    }
 }
 
 private final class ControllerRig {
@@ -335,6 +518,23 @@ private func outerIdentity(_ mutate: (inout VolumeIdentity) -> Void) -> VolumeId
     var value = StorageObservation.expectedReady.outer
     mutate(&value)
     return value
+}
+
+private func registeredFixture(_ suffix: String) -> (StorageIdentityPolicy, StorageObservation) {
+    let outerUUID = UUID(uuidString: suffix == "A" ? "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA" : "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")!
+    let devUUID = UUID(uuidString: suffix == "A" ? "AAAAAAAA-0000-0000-0000-AAAAAAAAAAAA" : "BBBBBBBB-0000-0000-0000-BBBBBBBBBBBB")!
+    let outer = "/Volumes/FIXTURE-\(suffix)"
+    let dev = "\(outer)/DEV"
+    let image = "\(outer)/.DEV-\(suffix).sparsebundle"
+    let policy = StorageIdentityPolicy(outerUUID: outerUUID, devUUID: devUUID,
+        outerMountPoint: outer, devMountPoint: dev, devVolumeName: "DEV_\(suffix)", imagePath: image)
+    let observation = StorageObservation(
+        outer: .init(uuid: outerUUID, mountPoint: outer, fileSystem: "ExFAT", writable: true,
+                     name: "FIXTURE-\(suffix)", rootMatchesExpected: true),
+        dev: .init(uuid: devUUID, mountPoint: dev, fileSystem: "APFS", writable: true,
+                   name: "DEV_\(suffix)", rootMatchesExpected: true),
+        image: .init(backingVolumeUUID: outerUUID, attachedVolumeUUID: devUUID, path: image))
+    return (policy, observation)
 }
 
 private final class FakeBackend: StorageBackend {
@@ -389,4 +589,46 @@ private final class FakeLock: OperationLock {
         return true
     }
     func release() { isHeld = false }
+}
+
+// Regression cases supplied by independent review; safe injected backends only.
+extension StorageControllerTests {
+    func testReview_NewerManualUnloadMustOverrideEarlierDisconnectEvidence() {
+        let rig = ControllerRig()
+        let (policy, ready) = registeredFixture("A")
+        let backend = FakeBackend()
+        backend.outerObservation = ready.outer
+        backend.finalState = .absent
+        XCTAssertTrue(rig.controller.handleRegisteredProfileEvent(.outerDisappeared(uuid: policy.outerUUID),
+            profileID: "profile-A", policy: policy, backend: backend).succeeded)
+        // Device returns with autoLoad disabled. An external/native image attach
+        // is verified and then manually stopped through AUV. Service uses this
+        // exact Core suppressProfile API before its normal flush/unmount/detach.
+        XCTAssertTrue(rig.state.current.suppressProfile("profile-A"))
+        backend.observation = nil
+        backend.observationAfterAttach = ready
+        // A later startup/arrival after enabling autoLoad is still the same
+        // physical connection as that newer manual unload.
+        _ = rig.controller.handleRegisteredProfileEvent(.outerReappeared(uuid: policy.outerUUID),
+            profileID: "profile-A", policy: policy, backend: backend)
+        XCTAssertEqual(backend.attachCount, 0, "A disconnect preceding manual unload cannot authorize a later remount")
+        XCTAssertTrue(rig.state.current.suppressedProfileIDs.contains("profile-A"))
+    }
+    func testReview_StartupMustReconcileUnsuppressedLostAttachment() {
+        let rig = ControllerRig()
+        let (policy, ready) = registeredFixture("A")
+        let backend = FakeBackend()
+        backend.outerObservation = ready.outer
+        backend.observation = nil
+        backend.observationAfterAttach = ready
+        XCTAssertTrue(rig.controller.mountRegisteredProfileAtStartup(profileID: "profile-A", policy: policy,
+            backend: backend).succeeded)
+        XCTAssertEqual(backend.attachCount, 1)
+        // macOS restarts with the parent still connected. The old process cannot
+        // record physical absence, while the image attachment no longer exists.
+        backend.observation = nil
+        let restarted = StorageController(backend: rig.backend, store: rig.state, lock: rig.lock)
+        _ = restarted.mountRegisteredProfileAtStartup(profileID: "profile-A", policy: policy, backend: backend)
+        XCTAssertEqual(backend.attachCount, 2, "Startup must reconcile an unsuppressed registered volume, not trust an old attempt")
+    }
 }

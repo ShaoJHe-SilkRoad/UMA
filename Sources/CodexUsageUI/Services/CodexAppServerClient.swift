@@ -64,6 +64,8 @@ actor CodexAppServerClient: CodexUsageClient {
     private var ownedProcessMonitor: Task<Void, Never>?
     private let refreshCoordinator = CodexRefreshCoordinator<CodexLiveUsage>()
     private let ownedProcessMonitorInterval: Duration
+    private let optionalUsageTimeout: TimeInterval
+    private var optionalUsageUnavailable = false
     /// Invalidates an asynchronous provider read when disconnect changes the
     /// session ownership.  It is intentionally separate from JSON-RPC IDs.
     private var lifecycleGeneration: UInt64 = 0
@@ -71,11 +73,13 @@ actor CodexAppServerClient: CodexUsageClient {
     init(
         resolver: any CodexExecutableResolving = CodexExecutableResolver(),
         session: CodexAppServerSession = CodexAppServerSession(),
-        ownedProcessMonitorInterval: Duration = .seconds(1)
+        ownedProcessMonitorInterval: Duration = .seconds(1),
+        optionalUsageTimeout: TimeInterval = 1
     ) {
         self.resolver = resolver
         self.session = session
         self.ownedProcessMonitorInterval = ownedProcessMonitorInterval
+        self.optionalUsageTimeout = optionalUsageTimeout
     }
 
     func connectionState() async -> CodexConnectionState {
@@ -98,6 +102,7 @@ actor CodexAppServerClient: CodexUsageClient {
         await session.shutdown()
         executableURL = nil
         hasVerifiedAccountInCurrentSession = false
+        optionalUsageUnavailable = false
         state = .idle
     }
 
@@ -167,7 +172,7 @@ actor CodexAppServerClient: CodexUsageClient {
         do {
             try await prepareSession(lifecycleGeneration: lifecycleGeneration)
             try ensureCurrentLifecycle(lifecycleGeneration)
-            if requiresFreshAccountRead {
+            if requiresFreshAccountRead || !hasVerifiedAccountInCurrentSession {
                 guard try await readAccountAvailability(lifecycleGeneration: lifecycleGeneration) else {
                     try ensureCurrentLifecycle(lifecycleGeneration)
                     hasVerifiedAccountInCurrentSession = false
@@ -175,8 +180,6 @@ actor CodexAppServerClient: CodexUsageClient {
                 }
                 try ensureCurrentLifecycle(lifecycleGeneration)
                 hasVerifiedAccountInCurrentSession = true
-            } else if !hasVerifiedAccountInCurrentSession {
-                throw CodexUsageClientError(.accountAuthorizationRequired)
             }
 
             state = .loadingRateLimits
@@ -185,22 +188,38 @@ actor CodexAppServerClient: CodexUsageClient {
             )
             try ensureCurrentLifecycle(lifecycleGeneration)
             let rateLimits = rateLimitResponse.snapshot
+            let quotaCapturedAt = Date()
 
-            state = .loadingUsage
-            let accountUsage: AccountUsageResult = try await session.requestWithExplicitNullParameters(
-                method: "account/usage/read"
-            )
+            // Aggregate statistics are optional and version-dependent. Never
+            // discard an independently verified quota when they are absent.
+            var accountUsage: AccountUsageResult?
+            if !optionalUsageUnavailable {
+                state = .loadingUsage
+                do {
+                    accountUsage = try await session.requestWithExplicitNullParameters(
+                        method: "account/usage/read", timeout: optionalUsageTimeout,
+                        optionalResponse: true
+                    )
+                } catch {
+                    try ensureCurrentLifecycle(lifecycleGeneration)
+                    if error is CancellationError { throw error }
+                    // Bound first-load delay and avoid probing an unsupported
+                    // endpoint on every refresh. A reconnect retries it.
+                    optionalUsageUnavailable = true
+                }
+            }
             try ensureCurrentLifecycle(lifecycleGeneration)
             let usage = CodexLiveUsage(
                 rateLimits: rateLimits,
                 availableResetCount: rateLimitResponse.rateLimitResetCredits?.availableCount,
-                lifetimeTokens: accountUsage.summary.lifetimeTokens,
-                dailyUsage: accountUsage.dailyUsageBuckets,
+                lifetimeTokens: accountUsage?.summary.lifetimeTokens,
+                dailyUsage: accountUsage?.dailyUsageBuckets,
                 recentActivityCount: 0,
-                apiCostEstimate: nil
+                apiCostEstimate: nil,
+                providerCapturedAt: quotaCapturedAt
             )
             state = .ready
-            hasVerifiedAccountInCurrentSession = true
+            hasVerifiedAccountInCurrentSession = await session.hasUsableInitializedTransport()
             return usage
         } catch {
             guard lifecycleGeneration == self.lifecycleGeneration else {
@@ -333,7 +352,9 @@ struct CodexUsageClientError: LocalizedError, Sendable, Equatable {
         case .codexExecutableNotExecutable:
             return language == .simplifiedChinese ? "本机 Codex 无法运行" : "Local Codex executable cannot run"
         case .accountAuthorizationRequired:
-            return language == .simplifiedChinese ? "需要 Codex 授权" : "Codex authorization is required"
+            return language == .simplifiedChinese ? "请在 Codex 中登录 ChatGPT，然后刷新 AUV" : "Sign in with ChatGPT in Codex, then refresh AUV"
+        case .protocolIncompatible, .initializationRejected:
+            return language == .simplifiedChinese ? "请更新 Codex，然后刷新 AUV" : "Update Codex, then refresh AUV"
         case .accountAuthorizationCanceled:
             return language == .simplifiedChinese ? "Codex 授权已取消" : "Codex authorization was canceled"
         case .accountAuthorizationFailed:
