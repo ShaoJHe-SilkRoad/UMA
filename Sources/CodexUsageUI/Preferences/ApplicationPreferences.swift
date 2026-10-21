@@ -298,6 +298,16 @@ public enum UMAApplicationPreferenceKeys {
         "app.quickPanelShowsReset",
         default: true
     )
+    /// User-declared Claude plan. No Claude transport reports a plan — the
+    /// status-line allowlist cannot carry one and the desktop reader discards
+    /// `org` — and `LowRemainingUsagePolicy` must never guess. Until the user
+    /// states their plan the low-remaining thresholds stay neutral, which is
+    /// why Claude quota bars render grey at every level. Empty means unstated;
+    /// the value is still filtered through the policy allowlist.
+    public static let claudeDeclaredPlan = ApplicationPreferenceKey<String>(
+        "claude.declaredPlan",
+        default: ""
+    )
     public static let quickPanelShowsConnectivity = ApplicationPreferenceKey<Bool>(
         "app.quickPanelShowsConnectivity",
         default: true

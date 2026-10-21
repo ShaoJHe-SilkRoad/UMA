@@ -59,10 +59,12 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
         "AUV"
     }
 
-    public func remainingAccessibilityLabel(percent: Int) -> String {
+    /// The menu bar is not Codex-only. The provider whose quota is shown must
+    /// name itself, or a fallback reading is announced under the wrong agent.
+    public func remainingAccessibilityLabel(provider: String, percent: Int) -> String {
         switch self {
-        case .simplifiedChinese: "Codex 剩余额度 \(percent)%"
-        case .english: "Codex usage, \(percent)% remaining"
+        case .simplifiedChinese: "\(provider) 剩余额度 \(percent)%"
+        case .english: "\(provider) usage, \(percent)% remaining"
         }
     }
 

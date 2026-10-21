@@ -299,8 +299,23 @@ public final class UsageStore: ObservableObject {
         reconcileBackgroundRefreshPolicy()
     }
 
+    /// Which provider the menu bar reading belongs to. Codex keeps priority so
+    /// existing installs are unchanged; any other quick-panel-eligible provider
+    /// is used only when Codex reports no usable quota. Without this a
+    /// Claude-only user sees a permanent placeholder.
+    public var menuProvider: ProviderProductID? {
+        if productInventory.provider(.codex)?
+            .primaryQuota?.value.remainingPercent != nil {
+            return .codex
+        }
+        return productInventory.quickPanelProviders.first {
+            $0.primaryQuota?.value.remainingPercent != nil
+        }?.id
+    }
+
     public var menuPercent: Int? {
-        if let remaining = productInventory.provider(.codex)?
+        if let provider = menuProvider,
+           let remaining = productInventory.provider(provider)?
             .primaryQuota?.value.remainingPercent {
             return Int(remaining.rounded())
         }
@@ -567,6 +582,12 @@ public final class UsageStore: ObservableObject {
 
     private func beginApplicationPreferenceObservation() {
         applicationPreferenceObservation = preferences?.observe { [weak self] change in
+            // The declared plan only changes how an existing reading is graded,
+            // so rebuild presentation rather than waiting for the next refresh.
+            if change.key == UMAApplicationPreferenceKeys.claudeDeclaredPlan.name {
+                self?.rebuildPresentation()
+                return
+            }
             guard change.key == UMAApplicationPreferenceKeys.automaticBackgroundRefresh.name
                     || change.key == UMAApplicationPreferenceKeys.backgroundRefreshInterval.name
                     || change.key == UMAApplicationPreferenceKeys.keepMonitoringWhenWindowsClose.name
@@ -765,6 +786,10 @@ public final class UsageStore: ObservableObject {
                     : nil
             }
         )
+        let declaredClaudePlan = preferences?
+            .value(for: UMAApplicationPreferenceKeys.claudeDeclaredPlan) ?? ""
+        let declaredPlans: [ProviderProductID: String] = declaredClaudePlan.isEmpty
+            ? [:] : [.claude: declaredClaudePlan]
         let reduction = ProviderProductStatePolicy.reduce(
             snapshots: providerSnapshots,
             admissions: currentAdmissionRecords,
@@ -773,7 +798,8 @@ public final class UsageStore: ObservableObject {
             pendingInitialAdmissionIDs: pendingInitialAdmissionProviderIDs,
             previousCards: presentationCards,
             language: language,
-            publicationRevision: currentRegistryRevision
+            publicationRevision: currentRegistryRevision,
+            declaredPlans: declaredPlans
         )
         presentationCards = reduction.presentationCards
         productInventory = reduction.inventory

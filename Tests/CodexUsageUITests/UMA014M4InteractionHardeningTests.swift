@@ -85,12 +85,51 @@ struct UMA014M4InteractionHardeningTests {
         #expect(controller.contains("displayPreferenceObservation?.cancel()"))
     }
 
+    // Reset times are shown again, so the guard no longer asserts that the
+    // rendering code is absent. It asserts the invariant that absence used to
+    // buy: one gate decides whether a reset is shown, the row body and the
+    // accessibility label both read it, and a hidden reset is therefore never
+    // announced to VoiceOver while invisible on screen.
     @Test("Hidden reset times stay hidden from VoiceOver and login-item state refreshes on return")
     func accessibilityAndSystemSettingsReturnStaySynchronized() throws {
         let surfaces = try source("Sources/CodexUsageUI/Views/AgentSurfaceViews.swift")
 
-        #expect(!surfaces.contains("let reset = resetDate.map"))
-        #expect(!surfaces.contains("language.resetDescription(for: reset"))
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let quota = ProviderProductQuotaState(
+            id: "fiveHour",
+            kind: .fiveHour,
+            compactLabel: "5H",
+            value: .remainingPercent(42),
+            precision: .exact,
+            freshness: .fresh,
+            comparison: .eligibleRemainingPercent(42),
+            resetsAt: now.addingTimeInterval(7_200)
+        )
+
+        for language in [AppLanguage.english, .simplifiedChinese] {
+            // Hidden means hidden everywhere, including the spoken label.
+            #expect(
+                AgentGlanceRow.resetLine(
+                    quota: quota, showsReset: false, language: language, now: now
+                ) == nil
+            )
+            // Shown only when the provider actually reported a reset.
+            #expect(
+                AgentGlanceRow.resetLine(
+                    quota: quota, showsReset: true, language: language, now: now
+                ) != nil
+            )
+            #expect(
+                AgentGlanceRow.resetLine(
+                    quota: nil, showsReset: true, language: language, now: now
+                ) == nil
+            )
+        }
+
+        // The spoken label must read the same gate the body does.
+        #expect(surfaces.contains("if let resetLine { label += \", \\(resetLine)\" }"))
+        #expect(surfaces.contains("guard showsReset, let resetsAt = quota?.resetsAt else { return nil }"))
+
         #expect(surfaces.contains("NSApplication.didBecomeActiveNotification"))
         #expect(surfaces.contains("model.refreshLaunchAtLoginState()"))
         #expect(surfaces.contains("launchAtLoginError = nil"))

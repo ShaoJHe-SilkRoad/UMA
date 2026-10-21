@@ -512,6 +512,7 @@ enum ProviderProductStatePolicy {
         language: AppLanguage,
         publicationRevision: UInt64 = 0,
         activeAgentCount: Int? = nil,
+        declaredPlans: [ProviderProductID: String] = [:],
         now: Date = Date()
     ) -> ProviderProductReduction {
         let admittedByID = Dictionary(uniqueKeysWithValues: admissions.map { ($0.id, $0) })
@@ -534,7 +535,8 @@ enum ProviderProductStatePolicy {
                 pendingInitialAdmission: pendingInitialAdmissionIDs.contains(
                     entry.connectorID
                 ),
-                card: cardsByID[entry.connectorID.rawValue]
+                card: cardsByID[entry.connectorID.rawValue],
+                declaredPlan: declaredPlans[entry.productID]
             )
         }
         return ProviderProductReduction(
@@ -559,7 +561,8 @@ enum ProviderProductStatePolicy {
         monitoringEnabled: Bool,
         configuredOrDetected: Bool,
         pendingInitialAdmission: Bool,
-        card: SharedUsageCardPresentation?
+        card: SharedUsageCardPresentation?,
+        declaredPlan: String? = nil
     ) -> ProviderProductState {
         let freshness = freshness(snapshot?.freshness)
         let quotas = makeQuotas(
@@ -622,7 +625,13 @@ enum ProviderProductStatePolicy {
 
         return ProviderProductState(
             id: entry.productID,
-            planLabel: LowRemainingUsagePolicy.admittedPlanIdentifier(providerID: entry.productID.rawValue, label: card?.planLabel),
+            // A provider-reported plan always wins. The declared plan is only a
+            // fallback for providers that report none, and it is still filtered
+            // through the policy allowlist rather than trusted as typed.
+            planLabel: LowRemainingUsagePolicy.admittedPlanIdentifier(
+                providerID: entry.productID.rawValue,
+                label: card?.planLabel ?? declaredPlan
+            ),
             quotas: quotas,
             primaryQuotaID: primaryQuotaID,
             precision: precision,

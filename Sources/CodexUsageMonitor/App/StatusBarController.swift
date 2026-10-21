@@ -334,10 +334,16 @@ final class StatusBarController: NSObject {
         statusItem.button?.title = showsRemainingValue
             ? (store?.menuPercent.map { " " + String($0) + "%" } ?? " —")
             : ""
-        statusItem.button?.toolTip = store?.language.appTitle ?? "AUV"
+        let providerName = store?.menuProvider?.displayName
+        statusItem.button?.toolTip = providerName.map {
+            "\($0) · " + (store?.language.appTitle ?? "AUV")
+        } ?? store?.language.appTitle ?? "AUV"
         statusItem.button?.setAccessibilityLabel(
-            store?.menuPercent.map {
-                store?.language.remainingAccessibilityLabel(percent: $0) ?? "AUV"
+            store?.menuPercent.map { percent in
+                store?.language.remainingAccessibilityLabel(
+                    provider: providerName ?? "AUV",
+                    percent: percent
+                ) ?? "AUV"
             } ?? store?.language.appTitle ?? "AUV"
         )
     }

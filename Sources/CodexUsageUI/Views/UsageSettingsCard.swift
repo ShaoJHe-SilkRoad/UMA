@@ -376,6 +376,53 @@ private struct AgentSettingsList: View {
     }
 }
 
+/// Claude reports no plan over any transport, so `LowRemainingUsagePolicy`
+/// grades it as `.unknownPlan` and every Claude quota bar renders grey — a 3%
+/// reading looks exactly like a 90% one. The plan is asked for here rather than
+/// inferred: the app must never guess an account tier, and the value is still
+/// filtered through the policy allowlist before it reaches any threshold.
+private struct ClaudePlanSelectionRow: View {
+    let language: AppLanguage
+    @AppStorage("claude.declaredPlan") private var declaredPlan = ""
+
+    private var title: String {
+        language == .simplifiedChinese ? "Claude 方案" : "Claude plan"
+    }
+
+    private var notStated: String {
+        language == .simplifiedChinese ? "未说明" : "Not stated"
+    }
+
+    private var guidance: String {
+        language == .simplifiedChinese
+            ? "Claude 不报告订阅方案。说明后，额度偏低时才会显示颜色提醒；未说明时保持中性灰色。"
+            : "Claude does not report your plan. State it to get low-remaining colour warnings; until then quota bars stay neutral grey."
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Label(title, systemImage: "person.badge.shield.checkmark")
+                    .font(AppTypography.font(11, weight: .medium, language: language))
+                Spacer()
+                Picker(title, selection: $declaredPlan) {
+                    Text(notStated).tag("")
+                    Text("Pro").tag("pro")
+                    Text("Max").tag("max")
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(maxWidth: 140)
+            }
+            Text(guidance)
+                .font(AppTypography.font(9, language: language))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityIdentifier("uma.agent.settings.claude.plan")
+    }
+}
+
 private struct AgentSpecificSettingsContent: View {
     @ObservedObject var coordinator: AgentSettingsCoordinator
     let providerID: AgentConnectorID
@@ -471,6 +518,11 @@ private struct AgentSpecificSettingsContent: View {
                 )
             )
             .accessibilityIdentifier("uma.agent.settings.monitoring.\(providerID.rawValue)")
+
+            if providerID == AgentPreferenceRecord.claudeProviderID {
+                Divider().opacity(0.35)
+                ClaudePlanSelectionRow(language: language)
+            }
 
             if providerID == AgentPreferenceRecord.codexProviderID {
                 Divider().opacity(0.35)

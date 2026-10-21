@@ -562,6 +562,8 @@ struct PreviewRendererTool {
                                 provider: provider,
                                 style: .mainList,
                                 language: language,
+                                // Mirrors the shipped rail in NativeShellViews.
+                                showsReset: false,
                                 referenceDate: M3RFixture.fixedNow
                             )
                         }
@@ -1785,6 +1787,8 @@ private struct M3RMainReviewSurface: View {
                             style: .mainList,
                             selected: provider.id == selectedProviderID,
                             language: store.language,
+                            // Mirrors the shipped rail in NativeShellViews.
+                            showsReset: false,
                             referenceDate: M3RFixture.fixedNow
                         )
                     }

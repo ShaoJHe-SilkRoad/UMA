@@ -227,6 +227,12 @@ public struct AgentGlanceRow: View {
                         .font(.system(size: secondaryFontSize))
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
+                    if let resetLine {
+                        Text(resetLine)
+                            .font(.system(size: secondaryFontSize - 1))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if !usesFullWidthName {
@@ -301,12 +307,39 @@ public struct AgentGlanceRow: View {
         provider.health == .error ? .red : .primary
     }
 
+    /// The single gate for showing a reset time. The row body and the
+    /// accessibility label both read this, so a reset that is hidden on screen
+    /// can never still be announced to VoiceOver, and one that is shown is
+    /// never silently dropped from the label.
+    static func resetLine(
+        quota: ProviderProductQuotaState?,
+        showsReset: Bool,
+        language: AppLanguage,
+        now: Date
+    ) -> String? {
+        guard showsReset, let resetsAt = quota?.resetsAt else { return nil }
+        return language.resetDescription(for: resetsAt, now: now)
+    }
+
+    private var displayNow: Date { referenceDate ?? Date() }
+
+    private var resetLine: String? {
+        Self.resetLine(
+            quota: provider.primaryQuota,
+            showsReset: showsReset,
+            language: language,
+            now: displayNow
+        )
+    }
+
     private var accessibilityLabel: String {
         let quota = provider.primaryQuota.map {
             "\($0.compactLabel), \($0.displayText) \(localized("remaining", "剩余"))"
         }
             ?? localized("usage unavailable", "用量不可用")
-        return "\(displayName), \(statusLabel), \(quota)"
+        var label = "\(displayName), \(statusLabel), \(quota)"
+        if let resetLine { label += ", \(resetLine)" }
+        return label
     }
 
     private var displayName: String {

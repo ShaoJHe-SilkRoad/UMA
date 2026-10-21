@@ -373,6 +373,11 @@ struct MainWindowRootView: View {
                                             style: .mainList,
                                             selected: selectedProviderID == provider.id,
                                             language: store.language,
+                                            // The dense rail stays compact; the
+                                            // reset preference is the quick
+                                            // panel's, and the workspace detail
+                                            // is one click away.
+                                            showsReset: false,
                                             referenceDate: referenceDate,
                                             displayNameOverride: agentRailDisplayNames[provider.id]
                                         )
