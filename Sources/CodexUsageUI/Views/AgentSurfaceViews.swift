@@ -751,6 +751,7 @@ public struct AgentWorkspaceSurface: View {
             spacing: AgentWorkspaceLayoutPolicy.moduleSpacing
         ) {
             usageModule
+            if localCostEstimate != nil { localCostModule }
             connectionModule
             controlsModule
             if providerID == .claude { claudeSmartModule }
@@ -1147,6 +1148,48 @@ public struct AgentWorkspaceSurface: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// `store.snapshot` is the primary provider's only, so a workspace that is
+    /// not the primary had no way to read its own local metrics.
+    private var localCostEstimate: APICostEstimateSnapshot? {
+        store.snapshot(for: providerID)?.apiCostEstimate
+    }
+
+    /// Aggregate API-equivalent estimate, published under the connector privacy
+    /// allowlist. Derived from the already-allowlisted local token total and a
+    /// frozen public price list: never a bill, never per task.
+    private var localCostModule: some View {
+        module(
+            localized("Local Cost Estimate", "本地费用估算"),
+            systemImage: "dollarsign.circle"
+        ) {
+            VStack(spacing: 7) {
+                if let estimate = localCostEstimate {
+                    factRow(
+                        localized("Last 7 days", "近 7 天"),
+                        estimate.sevenDayUSD.formatted(.currency(code: "USD"))
+                    )
+                    factRow(
+                        localized("Lifetime", "累计"),
+                        estimate.lifetimeUSD.formatted(.currency(code: "USD"))
+                    )
+                    factRow(
+                        localized("Priced coverage", "计价覆盖率"),
+                        "\(estimate.coveragePercent)%"
+                    )
+                }
+                Text(localized(
+                    "An API-equivalent estimate from local token totals and public list prices. It is not a subscription bill, and no billing or payment information is read.",
+                    "根据本地令牌总量和公开价目表得出的 API 等效估算，不是订阅账单，也不会读取任何账单或支付信息。"
+                ))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.callout)
+        }
+    }
+
     private var connectionModule: some View {
         module(localized("Connection & Source", "连接与来源"), systemImage: "link") {
             VStack(spacing: 7) {
@@ -1248,8 +1291,8 @@ public struct AgentWorkspaceSurface: View {
                 Label(claudeSmartLabel, systemImage: "lock.shield")
                     .font(.callout.weight(.medium))
                 Text(localized(
-                    "Local Smart and one-shot Accuracy Sync retain only approved usage metadata. Prompts, responses, credentials, and raw page content do not enter AUV.",
-                    "本地智能和一次性精确同步仅保留已批准的用量元数据；提示、回复、凭据和原始页面内容不会进入 AUV。"
+                    "Local Smart and one-shot Accuracy Sync retain only approved usage metadata: usage percentages, aggregate token totals, and an API-equivalent cost estimate derived from them. Prompts, responses, credentials, and raw page content do not enter AUV.",
+                    "本地智能和一次性精确同步仅保留已批准的用量元数据：用量百分比、令牌总量，以及据此得出的 API 等效费用估算；提示、回复、凭据和原始页面内容不会进入 AUV。"
                 ))
                     .font(.callout)
                     .foregroundStyle(.secondary)

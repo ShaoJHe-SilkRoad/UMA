@@ -41,7 +41,13 @@ only directory/file permissions.
 
 Local Activity may examine prompt-bearing Claude session files only to
 immediately project allowlisted aggregate token count, bounded model-family
-classification, activity time, and parser coverage. Raw lines and decoded
+classification, activity time, parser coverage, and an aggregate
+API-equivalent cost estimate derived from that token count and a frozen
+public list-price table. The cost estimate is a scalar pair (seven-day and
+lifetime); per-task token counts, per-task timestamps and raw model
+identifiers remain outside the allowlist, so the estimate cannot be
+decomposed back into individual activity. It is not billing, invoice,
+payment or account information, none of which is read. Raw lines and decoded
 prompt/response objects remain transient and must not be retained. Exact-anchor
 state may contain only window kind, used percentage, reset, observation time,
 sanitized activity counter, source/schema, bounded model family, and continuity
@@ -306,9 +312,10 @@ consume three independent, locally sanitized inputs:
 
 - exact five-hour/seven-day observations written by the bounded status-line
   relay; and
-- aggregate local usage/token count, bounded model-family classification, and
-  activity timestamp projected one bounded JSONL record at a time by
-  `ClaudeLocalActivityReader`; and
+- aggregate local usage/token count, bounded model-family classification,
+  activity timestamp, and the aggregate seven-day/lifetime API-equivalent cost
+  estimate derived from that token count, projected one bounded JSONL record at
+  a time by `ClaudeLocalActivityReader`; and
 - an estimated-only five-hour/seven-day remaining projection from the newest
   bounded sample in the exact Claude Desktop v2 plan-usage cache.
 

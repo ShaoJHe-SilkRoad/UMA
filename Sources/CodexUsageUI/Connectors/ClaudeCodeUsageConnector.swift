@@ -300,6 +300,13 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
             "localActivityLatestActivityAt",
             "localActivityModelFamilyKey",
             "localActivityCoveragePercent",
+            // Aggregate local API-equivalent estimate, derived from the token
+            // total already published above and public list prices. Not billing
+            // data, and never per task: `localActivityTokenCounts`,
+            // `localActivityTimestamp` and `localActivityModelIdentifier`
+            // remain off this list.
+            "localActivitySevenDayCostEstimate",
+            "localActivityLifetimeCostEstimate",
             "desktopPlanFiveHourRemainingEstimate",
             "desktopPlanSevenDayRemainingEstimate",
             "desktopPlanObservedAt",
@@ -1618,8 +1625,8 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
                 recentTaskTokens: [],
                 recentTaskCapturedAt: [],
                 sessionTokens: activity.totalTokens,
-                estimatedSevenDayUSD: nil,
-                estimatedLifetimeUSD: nil,
+                estimatedSevenDayUSD: activity.sevenDayCostUSD,
+                estimatedLifetimeUSD: activity.lifetimeCostUSD,
                 coveragePercent: activity.coveragePercent,
                 recognizedModelCount: activity.modelFamilyKey == nil ? 0 : 1
             ),

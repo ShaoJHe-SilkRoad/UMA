@@ -299,6 +299,16 @@ public final class UsageStore: ObservableObject {
         reconcileBackgroundRefreshPolicy()
     }
 
+    /// A normalized snapshot for one provider. `snapshot` is the primary
+    /// provider's only, so an agent workspace that is not the primary had no
+    /// way to read its own local metrics.
+    func snapshot(for productID: ProviderProductID) -> UsageSnapshot? {
+        guard let connectorID = ProviderProductStatePolicy.connectorID(for: productID),
+              let agentSnapshot = providerSnapshots.first(where: { $0.id == connectorID })
+        else { return nil }
+        return UsageSnapshot(agentSnapshot: agentSnapshot, language: language)
+    }
+
     /// Which provider the menu bar reading belongs to. Codex keeps priority so
     /// existing installs are unchanged; any other quick-panel-eligible provider
     /// is used only when Codex reports no usable quota. Without this a

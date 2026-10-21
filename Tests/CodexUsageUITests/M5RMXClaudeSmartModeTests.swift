@@ -1122,6 +1122,10 @@ struct M5RMXClaudeSmartModeTests {
         let local = snapshot.channels.first(where: { $0.id == .localActivity })
         #expect(snapshot.state == .ready)
         #expect(local?.localActivityMetrics?.sessionTokens == 1_234)
+        // The aggregate API-equivalent estimate must survive the sanitizing
+        // projection; it is allowlisted and was previously dropped to nil.
+        #expect(local?.localActivityMetrics?.estimatedSevenDayUSD == 1.25)
+        #expect(local?.localActivityMetrics?.estimatedLifetimeUSD == 3.50)
         #expect(snapshot.channels.flatMap(\.rateLimitWindows).isEmpty)
         #expect((await connector.diagnostics()).lastLiveLinkStage
             == .localCallbackWithoutQuotaWindows)
@@ -1743,8 +1747,8 @@ private struct SmartActivityReader: ClaudeLocalActivityReading {
             excludedFileCount: 0,
             tasks: [ClaudeLocalActivityTask(totalTokens: 1_234, modifiedAt: now)],
             apiEquivalentCost: ClaudeAPICostEstimate(
-                sevenDayUSD: 0,
-                lifetimeUSD: 0,
+                sevenDayUSD: 1.25,
+                lifetimeUSD: 3.50,
                 pricedTokens: 1_234,
                 observedTokens: 1_234,
                 recognizedModelCount: 1,

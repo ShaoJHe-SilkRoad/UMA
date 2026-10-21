@@ -39,9 +39,22 @@ struct M5RMXSafariG1PrivacyDecouplingTests {
         #expect(descriptor.supportedScopes == [.account, .session])
         #expect(descriptor.capabilities.contains(.localActivity))
         #expect(!descriptor.capabilities.contains(.automaticRefresh))
+        // The aggregate API-equivalent estimate is admitted: it is derived from
+        // the already-allowlisted local token total and a frozen public price
+        // list. Per-task counts, per-task timestamps and raw model identifiers
+        // stay out, so the estimate can never be decomposed back into activity.
+        #expect(descriptor.privacyAllowlist.contains("localActivitySevenDayCostEstimate"))
+        #expect(descriptor.privacyAllowlist.contains("localActivityLifetimeCostEstimate"))
         #expect(!descriptor.privacyAllowlist.contains("localActivityTokenCounts"))
         #expect(!descriptor.privacyAllowlist.contains("localActivityModelIdentifier"))
         #expect(!descriptor.privacyAllowlist.contains("localActivityTimestamp"))
+        // The sanitized projection stays aggregate: it carries two scalar cost
+        // figures, never a per-task list.
+        let engine = try source("Sources/CodexUsageUI/Services/ClaudeSmartUsageEngine.swift")
+        #expect(engine.contains("let sevenDayCostUSD: Double?"))
+        #expect(engine.contains("let lifetimeCostUSD: Double?"))
+        #expect(!engine.contains("let taskTokens:"))
+        #expect(!engine.contains("let taskTimestamps:"))
         #expect(descriptor.unsupportedFields.contains("prompt"))
         #expect(descriptor.unsupportedFields.contains("transcript"))
         #expect(descriptor.unsupportedFields.contains("project"))

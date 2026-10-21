@@ -34,6 +34,10 @@ struct ClaudeSanitizedLocalActivity: Codable, Equatable, Sendable {
     let latestActivityAt: Date?
     let modelFamilyKey: String?
     let coveragePercent: Int?
+    /// Aggregate API-equivalent estimate in USD. Optional so older persisted
+    /// records keep decoding.
+    let sevenDayCostUSD: Double?
+    let lifetimeCostUSD: Double?
     let observedSurfaces: [ClaudeLocalActivitySurface]
     let deduplicationConfidence: ClaudeLocalDeduplicationConfidence
 
@@ -43,6 +47,8 @@ struct ClaudeSanitizedLocalActivity: Codable, Equatable, Sendable {
         latestActivityAt: Date?,
         modelFamilyKey: String?,
         coveragePercent: Int?,
+        sevenDayCostUSD: Double? = nil,
+        lifetimeCostUSD: Double? = nil,
         observedSurfaces: [ClaudeLocalActivitySurface] = [],
         deduplicationConfidence: ClaudeLocalDeduplicationConfidence = .exact
     ) {
@@ -51,6 +57,8 @@ struct ClaudeSanitizedLocalActivity: Codable, Equatable, Sendable {
         self.latestActivityAt = latestActivityAt
         self.modelFamilyKey = modelFamilyKey
         self.coveragePercent = coveragePercent
+        self.sevenDayCostUSD = sevenDayCostUSD
+        self.lifetimeCostUSD = lifetimeCostUSD
         self.observedSurfaces = observedSurfaces
         self.deduplicationConfidence = deduplicationConfidence
     }
@@ -76,6 +84,8 @@ struct ClaudeSanitizedLocalActivity: Codable, Equatable, Sendable {
             latestActivityAt: snapshot.tasks.map(\.modifiedAt).max(),
             modelFamilyKey: key,
             coveragePercent: coverage.map { min(100, max(0, $0)) },
+            sevenDayCostUSD: estimate.sevenDayUSD,
+            lifetimeCostUSD: estimate.lifetimeUSD,
             observedSurfaces: snapshot.observedSurfaces.sorted {
                 $0.rawValue < $1.rawValue
             },
