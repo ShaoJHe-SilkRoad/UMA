@@ -8,9 +8,26 @@ MIN_SYSTEM_VERSION="14.0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
+
+# Xcode carries the SwiftUI macro plugins; Command Line Tools does not, so an
+# unset DEVELOPER_DIR fails every @State with "plugin for module
+# 'SwiftUIMacros' not found". Matches the toolchain package_uma014_rc.py uses.
+DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer}"
+[[ -d "$DEVELOPER_DIR" ]] || {
+  printf '%s\n' "UMA_DEVELOPER_DIR_UNAVAILABLE $DEVELOPER_DIR" >&2
+  exit 2
+}
+export DEVELOPER_DIR
+
 SDK_PATH="$(/usr/bin/xcrun --sdk macosx --show-sdk-path)"
 SWIFT_BIN="$(/usr/bin/xcrun --find swift)"
-CACHE_DIR="$ROOT_DIR/work/xcode-build-cache"
+
+# Build products must stay off the iCloud-synced Desktop: the file provider
+# re-stamps com.apple.FinderInfo on the generated resource bundle, and codesign
+# then refuses it ("resource fork, Finder information, or similar detritus not
+# allowed"). Clearing the attribute does not stick. Override with
+# UMA_BUILD_CACHE_DIR to point at another non-synced volume.
+CACHE_DIR="${UMA_BUILD_CACHE_DIR:-$HOME/Library/Caches/com.silkrd.uma/build}"
 BUILD_DIR="$CACHE_DIR/build"
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/CodexUsageMonitor.XXXXXX")"
 APP_BUNDLE="$STAGING_DIR/$APP_NAME.app"
@@ -69,6 +86,7 @@ PLIST
 /usr/bin/xattr -cr "$APP_BUNDLE"
 /usr/bin/codesign --force --deep --sign - "$APP_BUNDLE"
 /usr/bin/ditto "$APP_BUNDLE" "$FINAL_APP_BUNDLE"
+/usr/bin/xattr -cr "$FINAL_APP_BUNDLE"
 /usr/bin/codesign --verify --deep "$FINAL_APP_BUNDLE"
 
 open_app() {
