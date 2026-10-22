@@ -25,7 +25,9 @@ The figure appears only when this Mac has local Claude Code activity to measure.
 
 Package checks ran on macOS 27.2 on Apple silicon, including the Intel executable through Rosetta 2. Physical Intel Macs and macOS 14/15 were not tested. The package is Developer ID signed, Apple notarized and stapled, and passed Gatekeeper assessment after a clean re-extraction.
 
-The colour thresholds, menu bar fallback and reset display were verified by automated tests and rendered review images. The cost panel's data path was verified by test; it was not exercised against a live Claude account, because the Mac used for release checks had no local Claude activity. Provider availability still depends on the installed provider app and account.
+The colour thresholds, menu bar fallback and reset display were verified by automated tests and rendered review images. The cost panel's data path was verified by test, but the panel itself was not exercised against real data during these release checks. Provider availability still depends on the installed provider app and account.
+
+**Correction, 2026-10-22.** This section originally said the cost panel was not exercised because the Mac used for release checks had no local Claude Code activity. That reason was false: the check behind it used a shell command that failed silently instead of reporting no matches. That Mac did have local Claude Code activity, and in a later build the cost panel was seen rendering real figures from it. The panel genuinely was not exercised at release time — only the reason given for it was wrong.
 
 Sectorium is unchanged in this release and was not re-tested. Its existing guidance stands: keep important data backed up and wait for successful disconnection before unplugging.
 
@@ -72,7 +74,9 @@ Sectorium is unchanged in this release and was not re-tested. Its existing guida
 
 包验证在 macOS 27.2 的 Apple silicon Mac 上完成，并通过 Rosetta 2 运行 Intel 程序。尚未测试 Intel 实机或 macOS 14/15。安装包已完成 Developer ID 签名、Apple 公证与票据装订，重新解压后仍通过 Gatekeeper 检查。
 
-颜色阈值、菜单栏回退和重置时间显示已通过自动化测试与渲染审阅图验证。费用面板的数据链路已通过测试验证，但未在真实 Claude 账户下实测，因为用于发布验证的 Mac 没有本地 Claude 活动。各智能体能否取得数据，仍取决于其客户端与账户。
+颜色阈值、菜单栏回退和重置时间显示已通过自动化测试与渲染审阅图验证。费用面板的数据链路已通过测试验证，但发布验证期间未用真实数据实测面板本身。各智能体能否取得数据，仍取决于其客户端与账户。
+
+**更正（2026-10-22）。** 本节原先称费用面板未实测的原因，是用于发布验证的 Mac 没有本地 Claude Code 活动。该理由不成立：得出它的检查用了一条静默失败、而非报告“无匹配”的 shell 命令。那台 Mac 确有本地 Claude Code 活动，且在后续构建中已见费用面板用这些数据渲染出真实数值。发布时确实未实测该面板——错的只是给出的理由。
 
 本版未改动分区工，也未重新测试。既有提示依然适用：请备份重要数据，断开成功后再拔线。
 
