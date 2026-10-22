@@ -126,17 +126,20 @@ struct M5LAG1ClaudeLocalActivityTests {
         #expect(record.counts.cacheReadTokens == 0)
     }
 
+    // Deliberately narrowed. This used to assert that an over-long *line* also
+    // failed the whole file closed. The per-line cap bounds memory, not
+    // schema, and real local activity runs close to it — the longest line
+    // measured was 954,251 bytes, 91% of the cap — so that rule was about to
+    // discard entire files of valid records. An over-long line now costs that
+    // line alone and the file is reported as partially read, which
+    // ClaudeLocalActivitySilentLossTests covers. The file-size cap is
+    // untouched and still fails closed.
     @Test
-    func streamingReaderFailsClosedForOversizedLineAndFile() throws {
+    func streamingReaderFailsClosedForOversizedFile() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("uma-claude-local-stream-bounds-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-
-        let oversizedLine = root.appendingPathComponent("line.jsonl")
-        try Data(repeating: 0x20, count: ClaudeLocalActivityReader.Bounds.maximumBytesPerLine + 1)
-            .write(to: oversizedLine)
-        #expect(!ClaudeLocalActivityReader.streamRecords(inFileAt: oversizedLine) { _ in true })
 
         let oversizedFile = root.appendingPathComponent("file.jsonl")
         FileManager.default.createFile(atPath: oversizedFile.path, contents: nil)

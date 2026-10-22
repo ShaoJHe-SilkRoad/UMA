@@ -158,8 +158,18 @@ struct ClaudeLocalActivitySnapshot: Sendable {
     let scope: String
     let capturedAt: Date
     let discoveredFileCount: Int
+    /// Files read in full. `coverage` is derived from this, so a file that
+    /// contributed only some of its records must not be counted here.
     let readableFileCount: Int
     let excludedFileCount: Int
+    /// Read, but with at least one line dropped for exceeding
+    /// `Bounds.maximumBytesPerLine`. Its records still count; it is kept out
+    /// of `readableFileCount` so coverage does not claim the whole file.
+    let partiallyReadFileCount: Int
+    /// Dropped because the file changed while open. Reported apart from
+    /// `excludedFileCount` so an actively written transcript is diagnosable
+    /// rather than indistinguishable from an unreadable file.
+    let changedDuringReadFileCount: Int
     /// At most three, most recently written first.
     let tasks: [ClaudeLocalActivityTask]
     let apiEquivalentCost: ClaudeAPICostEstimate?
@@ -177,7 +187,9 @@ struct ClaudeLocalActivitySnapshot: Sendable {
         tasks: [ClaudeLocalActivityTask],
         apiEquivalentCost: ClaudeAPICostEstimate?,
         observedSurfaces: Set<ClaudeLocalActivitySurface> = [],
-        deduplicationConfidence: ClaudeLocalDeduplicationConfidence = .exact
+        deduplicationConfidence: ClaudeLocalDeduplicationConfidence = .exact,
+        partiallyReadFileCount: Int = 0,
+        changedDuringReadFileCount: Int = 0
     ) {
         self.availability = availability
         self.source = source
@@ -190,6 +202,8 @@ struct ClaudeLocalActivitySnapshot: Sendable {
         self.apiEquivalentCost = apiEquivalentCost
         self.observedSurfaces = observedSurfaces
         self.deduplicationConfidence = deduplicationConfidence
+        self.partiallyReadFileCount = partiallyReadFileCount
+        self.changedDuringReadFileCount = changedDuringReadFileCount
     }
 
     static func unavailable(capturedAt: Date) -> ClaudeLocalActivitySnapshot {
@@ -321,6 +335,10 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
         static let maximumTotalBytes = 512 * 1_024 * 1_024
         static let maximumRecordCount = 200_000
         static let recentTaskCount = 3
+        /// A session transcript is appended to in bursts, so a read abandoned
+        /// because the file moved is worth one more immediate attempt. Kept at
+        /// two because every attempt re-reads the whole file.
+        static let maximumReadAttempts = 2
     }
 
     private let sources: [Source]
@@ -391,6 +409,8 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
         var recordCount = 0
         var readableFileCount = 0
         var excludedFileCount = 0
+        var partiallyReadFileCount = 0
+        var changedDuringReadFileCount = 0
         let recentDays = Self.sevenDayKeys(now: now, calendar: calendar)
 
         for discoveredFile in discovered {
@@ -404,17 +424,31 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
             // path integrity has passed. A failed file must not poison global
             // dedupe, surface, activity, token, model, or cost state.
             var pendingRecords: [ClaudeLocalUsageRecord] = []
-            let streamResult = Self.streamRecordsBounded(
-                inFileAt: file,
-                maximumBytes: min(Bounds.maximumBytesPerFile, remainingBudget),
-                afterRead: { afterFileReadForTesting?(file) }
-            ) { record in
-                guard pendingRecords.count < Bounds.maximumRecordCount else { return false }
-                pendingRecords.append(record)
-                return true
+            var streamResult = Self.StreamOutcome.refused
+            for _ in 0..<Bounds.maximumReadAttempts {
+                // Each attempt starts from nothing, so a retry can never
+                // append to the records an abandoned attempt had collected.
+                pendingRecords.removeAll(keepingCapacity: true)
+                streamResult = Self.streamRecordsBounded(
+                    inFileAt: file,
+                    maximumBytes: min(Bounds.maximumBytesPerFile, remainingBudget),
+                    afterRead: { afterFileReadForTesting?(file) }
+                ) { record in
+                    guard pendingRecords.count < Bounds.maximumRecordCount else { return false }
+                    pendingRecords.append(record)
+                    return true
+                }
+                // Only a file that moved under us is worth another attempt. A
+                // refusal is a property of the file, not of the timing.
+                guard !streamResult.succeeded, streamResult.changedDuringRead else { break }
             }
-            guard streamResult.succeeded else {
-                excludedFileCount += 1
+            guard let bytesRead = streamResult.bytesRead else {
+                if streamResult.changedDuringRead {
+                    changedDuringReadFileCount += 1
+                } else {
+                    excludedFileCount += 1
+                }
+                pendingRecords.removeAll()
                 continue
             }
 
@@ -448,8 +482,12 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
                 recognizedModels.insert(rate.displayName)
                 modelTokenTotals[rate.displayName, default: 0] += tokens
             }
-            totalBytes += streamResult.bytesRead
-            readableFileCount += 1
+            totalBytes += bytesRead
+            if streamResult.skippedLines > 0 {
+                partiallyReadFileCount += 1
+            } else {
+                readableFileCount += 1
+            }
 
 
             if fileTokens > 0, let modifiedAt = fileModifiedAt {
@@ -457,7 +495,26 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
             }
         }
 
-        guard observedTokens > 0 else { return .unavailable(capturedAt: now) }
+        guard observedTokens > 0 else {
+            // Report why there is nothing instead of discarding the counts
+            // that explain it. Files refused, dropped because they moved, or
+            // read only in part are exactly what is worth knowing here, and
+            // the bare `.unavailable` threw all of it away. Surfaces and the
+            // cost estimate stay absent: nothing qualified to be published.
+            return ClaudeLocalActivitySnapshot(
+                availability: .unavailable,
+                source: "No readable local Claude session metadata",
+                scope: "unavailable",
+                capturedAt: now,
+                discoveredFileCount: discovered.count,
+                readableFileCount: readableFileCount,
+                excludedFileCount: excludedFileCount,
+                tasks: [],
+                apiEquivalentCost: nil,
+                partiallyReadFileCount: partiallyReadFileCount,
+                changedDuringReadFileCount: changedDuringReadFileCount
+            )
+        }
 
         let tasks = Array(
             perFile.sorted { $0.modifiedAt > $1.modifiedAt }.prefix(Bounds.recentTaskCount)
@@ -484,7 +541,9 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
             tasks: tasks,
             apiEquivalentCost: estimate,
             observedSurfaces: observedSurfaces,
-            deduplicationConfidence: deduplicationConfidence
+            deduplicationConfidence: deduplicationConfidence,
+            partiallyReadFileCount: partiallyReadFileCount,
+            changedDuringReadFileCount: changedDuringReadFileCount
         )
     }
 
@@ -558,7 +617,29 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
         return files
     }
 
-    /// Nil when the file cannot be read at all, so the caller can count it as
+    /// How a bounded read ended. The caller needs to tell "this file is not
+    /// safe to read" from "this file moved under us", because only the second
+    /// is worth retrying.
+    struct StreamOutcome: Sendable, Equatable {
+        /// Nil when nothing may be published from this attempt.
+        let bytesRead: Int?
+        /// Lines dropped for exceeding `Bounds.maximumBytesPerLine`.
+        let skippedLines: Int
+        /// The file changed while open. Nothing from this attempt is
+        /// published, exactly as before; the flag only says a retry is sound.
+        let changedDuringRead: Bool
+
+        var succeeded: Bool { bytesRead != nil }
+
+        static let refused = StreamOutcome(
+            bytesRead: nil, skippedLines: 0, changedDuringRead: false
+        )
+        static let changed = StreamOutcome(
+            bytesRead: nil, skippedLines: 0, changedDuringRead: true
+        )
+    }
+
+    /// False when the file cannot be read at all, so the caller can count it as
     /// excluded rather than silently treating it as empty.
     static func streamRecords(
         inFileAt url: URL,
@@ -569,6 +650,19 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
             maximumBytes: Bounds.maximumBytesPerFile,
             consume: consume
         ).succeeded
+    }
+
+    /// The full outcome, for tests that assert on skipped lines rather than
+    /// only on success.
+    static func streamOutcomeForTesting(
+        inFileAt url: URL,
+        consume: (ClaudeLocalUsageRecord) -> Bool
+    ) -> StreamOutcome {
+        streamRecordsBounded(
+            inFileAt: url,
+            maximumBytes: Bounds.maximumBytesPerFile,
+            consume: consume
+        )
     }
 
     static func streamRecordsForTesting(
@@ -592,16 +686,16 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
         afterOpen: (() -> Void)? = nil,
         afterRead: (() -> Void)? = nil,
         consume: (ClaudeLocalUsageRecord) -> Bool
-    ) -> (succeeded: Bool, bytesRead: Int) {
+    ) -> StreamOutcome {
         let standardizedURL = url.standardizedFileURL
         guard standardizedURL.resolvingSymlinksInPath().path == standardizedURL.path,
               maximumBytes >= 0
-        else { return (false, 0) }
+        else { return .refused }
         let descriptor = open(
             standardizedURL.path,
             O_RDONLY | O_CLOEXEC | O_NOFOLLOW
         )
-        guard descriptor >= 0 else { return (false, 0) }
+        guard descriptor >= 0 else { return .refused }
         defer { close(descriptor) }
 
         var before = stat()
@@ -609,55 +703,86 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
               safeLocalRecordFile(before),
               before.st_size >= 0,
               UInt64(before.st_size) <= UInt64(maximumBytes)
-        else { return (false, 0) }
+        else { return .refused }
         afterOpen?()
 
         var lineBuffer = Data()
         var recordCount = 0
         var actualBytesRead = 0
         var consumeRecords = true
+        var skippedLines = 0
+        var droppingOverlongLine = false
         var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
         while true {
             let count = Darwin.read(descriptor, &buffer, buffer.count)
             if count < 0, errno == EINTR { continue }
-            guard count >= 0 else { return (false, 0) }
+            guard count >= 0 else { return .refused }
             if count == 0 { break }
             guard actualBytesRead + count <= maximumBytes else {
-                return (false, 0)
+                return .refused
             }
             actualBytesRead += count
             lineBuffer.append(contentsOf: buffer.prefix(count))
             while let newline = lineBuffer.firstIndex(of: 0x0A) {
                 var line = Data(lineBuffer[..<newline])
                 lineBuffer.removeSubrange(...newline)
+                // This newline closes the line we already gave up on, so it
+                // ends the drop rather than delimiting a record.
+                if droppingOverlongLine {
+                    droppingOverlongLine = false
+                    continue
+                }
                 if line.last == 0x0D { line.removeLast() }
-                guard line.count <= Bounds.maximumBytesPerLine else { return (false, 0) }
+                // One line over the cap costs that line, not the file. The cap
+                // bounds memory, and legitimate activity approaches it: the
+                // longest line measured in real local activity was 954,251
+                // bytes, 91% of the cap. Failing the whole file there threw
+                // away every valid record beside it.
+                guard line.count <= Bounds.maximumBytesPerLine else {
+                    skippedLines += 1
+                    continue
+                }
                 if consumeRecords, let record = record(fromData: line) {
                     recordCount += 1
-                    guard recordCount <= Bounds.maximumRecordCount else { return (false, 0) }
+                    guard recordCount <= Bounds.maximumRecordCount else { return .refused }
                     if !consume(record) { consumeRecords = false }
                 }
             }
-            guard lineBuffer.count <= Bounds.maximumBytesPerLine else { return (false, 0) }
-        }
-        if !lineBuffer.isEmpty {
-            guard lineBuffer.count <= Bounds.maximumBytesPerLine else { return (false, 0) }
-            if consumeRecords, let record = record(fromData: lineBuffer) {
-                recordCount += 1
-                guard recordCount <= Bounds.maximumRecordCount else { return (false, 0) }
-                _ = consume(record)
+            // No newline yet. Hold at most one cap's worth of a line in
+            // memory: past that, drop bytes until the line ends.
+            if droppingOverlongLine {
+                lineBuffer.removeAll(keepingCapacity: true)
+            } else if lineBuffer.count > Bounds.maximumBytesPerLine {
+                skippedLines += 1
+                droppingOverlongLine = true
+                lineBuffer.removeAll(keepingCapacity: true)
             }
+        }
+        // The file ended inside a line we had given up on; it is already counted.
+        if droppingOverlongLine { lineBuffer.removeAll() }
+        if !lineBuffer.isEmpty, consumeRecords, let record = record(fromData: lineBuffer) {
+            recordCount += 1
+            guard recordCount <= Bounds.maximumRecordCount else { return .refused }
+            _ = consume(record)
         }
         afterRead?()
         var after = stat()
         var path = stat()
         guard fstat(descriptor, &after) == 0,
               lstat(standardizedURL.path, &path) == 0,
-              stableLocalRecordFile(before, after),
-              sameLocalRecordIdentity(after, path),
+              sameLocalRecordIdentity(after, path)
+        else { return .refused }
+        // The read stays transactional: a file that moved while open publishes
+        // nothing, which is what the close-security tests pin. Reporting it
+        // apart from a refusal is what lets the caller retry.
+        guard stableLocalRecordFile(before, after),
               Int64(actualBytesRead) == after.st_size
-        else { return (false, 0) }
-        return (true, actualBytesRead)
+        else { return .changed }
+        return StreamOutcome(
+            bytesRead: actualBytesRead,
+            skippedLines: skippedLines,
+            changedDuringRead: false
+        )
     }
 
 
@@ -727,11 +852,17 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
             && info.st_uid == getuid()
     }
 
+    /// The mode asks one question: could anyone but this user have written
+    /// the bytes we are about to trust? Only the group and other *write* bits
+    /// answer it. Requiring `0o077 == 0` also rejected files others may merely
+    /// read, which says nothing about tampering, and so discarded every
+    /// `journal.jsonl` Claude Code writes as 0644 — five of fifty-six files on
+    /// the machine this was traced on, each excluded whole.
     private static func safeLocalRecordFile(_ info: stat) -> Bool {
         (info.st_mode & S_IFMT) == S_IFREG
             && info.st_uid == getuid()
             && info.st_nlink == 1
-            && (info.st_mode & 0o077) == 0
+            && (info.st_mode & 0o022) == 0
     }
 
     private static func sameLocalRecordIdentity(_ lhs: stat, _ rhs: stat) -> Bool {
