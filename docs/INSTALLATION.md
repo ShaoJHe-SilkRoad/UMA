@@ -1,21 +1,21 @@
 # Install AUV / 安装 AUV
 
-[English](#english-installation-guide) · [中文](#中文安装指南) · [Mac 0.17.3](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.3/AUV_Mac_0.17.3_Universal.zip) · [Windows 0.16.3](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Win_0.16.3.zip)
+[English](#english-installation-guide) · [中文](#中文安装指南) · [Mac 0.17.4](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.4/AUV_Mac_0.17.4_Universal.zip) · [Windows 0.16.3](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Win_0.16.3.zip)
 
 ## English installation guide
 
 <a id="mac-installation-guide"></a>
 
-### Mac 0.17.3
+### Mac 0.17.4
 
-**macOS 14+ · Apple silicon or Intel · Universal app · build 2026102101.** This package is Developer ID signed and Apple notarized. See [tested configurations](MAC_COMPATIBILITY.md) for the distinction between the build's requirements and real-device coverage.
+**macOS 14+ · Apple silicon or Intel · Universal app · build 2026102102.** This package is Developer ID signed and Apple notarized. See [tested configurations](MAC_COMPATIBILITY.md) for the distinction between the build's requirements and real-device coverage.
 
 #### Install
 
-1. [Download AUV_Mac_0.17.3_Universal.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.3/AUV_Mac_0.17.3_Universal.zip). Choose the application ZIP, not GitHub's source archive.
+1. [Download AUV_Mac_0.17.4_Universal.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.4/AUV_Mac_0.17.4_Universal.zip). Choose the application ZIP, not GitHub's source archive.
 2. Double-click the ZIP in Finder. It extracts **`UMA.app`**, which opens as **AUV**.
 3. Drag the app to **Applications** on your Mac's internal disk. Keeping it there lets Sectorium disconnect an external drive without ejecting the app itself.
-4. Open AUV and follow the normal macOS first-open prompt. The main window's lower-left corner shows **AUV 0.17.3**. Finder → Get Info shows the app version too.
+4. Open AUV and follow the normal macOS first-open prompt. The main window's lower-left corner shows **AUV 0.17.4**. Finder → Get Info shows the app version too.
 
 #### Upgrade
 
@@ -45,16 +45,16 @@ Codex is a separate download. AUV reads the allowance supplied by Codex; it does
 For the ZIP in Downloads, run:
 
 ```sh
-shasum -a 256 ~/Downloads/AUV_Mac_0.17.3_Universal.zip
+shasum -a 256 ~/Downloads/AUV_Mac_0.17.4_Universal.zip
 ```
 
 Expected SHA-256:
 
 ```text
-2822fa3f74f2f51c8f58978e9c497fa2328c6aaa7393ada383f015a7d61a9265
+595be654c07527e16980ce28a20e33a9b49c6684655ed99017079720c95e04a7
 ```
 
-[Mac release notes](releases/AUV_Mac_0.17.3.md) · [Release downloads](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.17.3)
+[Mac release notes](releases/AUV_Mac_0.17.4.md) · [Release downloads](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.17.4)
 
 <a id="windows-installation-guide"></a>
 
@@ -90,16 +90,16 @@ Expected SHA-256: **bc1577aae1d3ffdc3e3b104de15c6649ab4fb83f452a04865d548002f432
 
 <a id="mac-中文安装指南"></a>
 
-### Mac 0.17.3
+### Mac 0.17.4
 
-**macOS 14 及以上 · Apple silicon 或 Intel · 通用包 · 构建号 2026102101。** 本包已完成 Developer ID 签名和 Apple 公证。安装要求与实机测试范围有所区别，详见[已测试环境](MAC_COMPATIBILITY.md#中文)。
+**macOS 14 及以上 · Apple silicon 或 Intel · 通用包 · 构建号 2026102102。** 本包已完成 Developer ID 签名和 Apple 公证。安装要求与实机测试范围有所区别，详见[已测试环境](MAC_COMPATIBILITY.md#中文)。
 
 #### 安装
 
-1. [下载 AUV_Mac_0.17.3_Universal.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.3/AUV_Mac_0.17.3_Universal.zip)。请选择应用 ZIP，不要选 GitHub 的源码压缩包。
+1. [下载 AUV_Mac_0.17.4_Universal.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.4/AUV_Mac_0.17.4_Universal.zip)。请选择应用 ZIP，不要选 GitHub 的源码压缩包。
 2. 在 Finder 中双击解压，得到 **`UMA.app`**，打开后显示为 **AUV**。
 3. 将应用拖入 Mac 内置盘的**“应用程序”**文件夹。这样分区工弹出外接硬盘时，应用本身仍能正常运行。
-4. 打开 AUV，按 macOS 正常首次启动提示操作。主窗口左下角应显示 **AUV 0.17.3**，Finder →“显示简介”也可以查看版本。
+4. 打开 AUV，按 macOS 正常首次启动提示操作。主窗口左下角应显示 **AUV 0.17.4**，Finder →“显示简介”也可以查看版本。
 
 #### 升级
 
@@ -129,16 +129,16 @@ Codex 需单独安装。AUV 显示 Codex 返回的额度，不统计 ChatGPT 网
 ZIP 位于“下载”文件夹时，在终端运行：
 
 ```sh
-shasum -a 256 ~/Downloads/AUV_Mac_0.17.3_Universal.zip
+shasum -a 256 ~/Downloads/AUV_Mac_0.17.4_Universal.zip
 ```
 
 SHA-256 应为：
 
 ```text
-2822fa3f74f2f51c8f58978e9c497fa2328c6aaa7393ada383f015a7d61a9265
+595be654c07527e16980ce28a20e33a9b49c6684655ed99017079720c95e04a7
 ```
 
-[Mac 更新说明](releases/AUV_Mac_0.17.3.md#中文) · [发布下载页](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.17.3)
+[Mac 更新说明](releases/AUV_Mac_0.17.4.md#中文) · [发布下载页](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.17.4)
 
 <a id="windows-中文安装指南"></a>
 

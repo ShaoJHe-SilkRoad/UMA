@@ -2,7 +2,7 @@
 
 ## English
 
-**AUV 0.17.3 · build 2026102101 · macOS 14 or later.**
+**AUV 0.17.4 · build 2026102102 · macOS 14 or later.**
 
 The Universal download contains both **Apple silicon (arm64)** and **Intel (x86_64)** versions of AUV and its bundled helpers. It is Developer ID signed, Apple notarized, and includes the notarization ticket. The final package passed Gatekeeper assessment.
 
@@ -36,7 +36,7 @@ Routine account setup does not require Full Disk Access or disabling macOS secur
 
 ## 中文
 
-**AUV 0.17.3 · 构建号 2026102101 · macOS 14 及以上。**
+**AUV 0.17.4 · 构建号 2026102102 · macOS 14 及以上。**
 
 通用包同时包含 **Apple silicon（arm64）**与 **Intel（x86_64）**版本的主程序及辅助程序。已完成 Developer ID 签名、Apple 公证，并附有公证票据；最终包已通过 Gatekeeper 检查。
 

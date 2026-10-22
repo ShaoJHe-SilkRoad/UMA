@@ -674,6 +674,10 @@ enum CodexDashboardPresentation {
 
 public struct AgentWorkspaceSurface: View {
     @Environment(\.colorScheme) private var colorScheme
+    /// The same key the agent settings sheet writes for the Claude cost toggle.
+    /// Without reading it the module ignored a preference that exists to hide
+    /// exactly this card.
+    @AppStorage("display.showAPICostCard") private var showsAPICostCard = false
     @ObservedObject private var store: UsageStore
     public let providerID: ProviderProductID
     private let refresh: () -> Void
@@ -751,7 +755,7 @@ public struct AgentWorkspaceSurface: View {
             spacing: AgentWorkspaceLayoutPolicy.moduleSpacing
         ) {
             usageModule
-            if localCostEstimate != nil { localCostModule }
+            if showsAPICostCard, localCostEstimate != nil { localCostModule }
             connectionModule
             controlsModule
             if providerID == .claude { claudeSmartModule }

@@ -135,6 +135,21 @@ struct UMA014M4InteractionHardeningTests {
         #expect(surfaces.contains("launchAtLoginError = nil"))
     }
 
+    // A card the user can switch off must read the switch. The Claude cost
+    // module shipped in 0.17.3 reading only whether data existed, so it
+    // appeared even with Token Cost Estimate turned off.
+    @Test("The Claude cost module honours the same preference its toggle writes")
+    func costCardRespectsItsOwnPreference() throws {
+        let surfaces = try source("Sources/CodexUsageUI/Views/AgentSurfaceViews.swift")
+        let settings = try source("Sources/CodexUsageUI/Views/UsageSettingsCard.swift")
+
+        let key = "display.showAPICostCard"
+        #expect(settings.contains("@AppStorage(\"\(key)\")"))
+        #expect(surfaces.contains("@AppStorage(\"\(key)\")"))
+        // Gated on the preference first, so data alone can never reveal it.
+        #expect(surfaces.contains("if showsAPICostCard, localCostEstimate != nil { localCostModule }"))
+    }
+
     @Test("Deterministic review surfaces use one injected reference date")
     func deterministicReviewClockContract() throws {
         let surfaces = try source("Sources/CodexUsageUI/Views/AgentSurfaceViews.swift")
