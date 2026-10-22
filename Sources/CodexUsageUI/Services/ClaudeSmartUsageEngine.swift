@@ -63,6 +63,15 @@ struct ClaudeSanitizedLocalActivity: Codable, Equatable, Sendable {
         self.deduplicationConfidence = deduplicationConfidence
     }
 
+    /// How many model families `modelFamilyKey` represents. `project` joins
+    /// families with "+" and admits only `^[a-z0-9 -]{1,24}$`, so "+" cannot
+    /// occur inside a family name and is an unambiguous separator. Counted as
+    /// a set because the field means distinct recognized models, not segments.
+    var modelFamilyCount: Int {
+        guard let modelFamilyKey, !modelFamilyKey.isEmpty else { return 0 }
+        return Set(modelFamilyKey.split(separator: "+")).count
+    }
+
     static func project(
         _ snapshot: ClaudeLocalActivitySnapshot
     ) -> ClaudeSanitizedLocalActivity? {

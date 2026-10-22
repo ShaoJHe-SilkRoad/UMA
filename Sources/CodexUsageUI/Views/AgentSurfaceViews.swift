@@ -1101,12 +1101,17 @@ public struct AgentWorkspaceSurface: View {
             } else {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(localized("No current usage", "暂无当前用量")).font(.callout.weight(.medium))
-                    Text(localized(
-                        "Connect or refresh this agent to retrieve qualified usage data.",
-                        "连接或刷新此智能体以获取合格的用量数据。"
-                    ))
+                    // Claude earns its own explanation: "connect or refresh"
+                    // cannot produce a percentage here, so saying it misleads.
+                    Text(providerID == .claude
+                        ? store.language.claudeMissingQuotaGuidance
+                        : localized(
+                            "Connect or refresh this agent to retrieve qualified usage data.",
+                            "连接或刷新此智能体以获取合格的用量数据。"
+                        ))
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.vertical, 5)
             }

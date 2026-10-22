@@ -6,6 +6,32 @@ import Testing
 
 @Suite("M5RMX Claude Local Smart Mode", .timeLimit(.minutes(1)))
 struct M5RMXClaudeSmartModeTests {
+    // The published count used to be a flat 0 or 1, discarding families the
+    // key already carried. "+" cannot occur inside a family name, so the key
+    // is an exact source for the count.
+    @Test("Recognized model count reflects every family in the key")
+    func recognizedModelCountReadsTheKey() {
+        func activity(_ key: String?) -> ClaudeSanitizedLocalActivity {
+            ClaudeSanitizedLocalActivity(
+                observedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                totalTokens: 1_000,
+                latestActivityAt: nil,
+                modelFamilyKey: key,
+                coveragePercent: 100
+            )
+        }
+        #expect(activity(nil).modelFamilyCount == 0)
+        #expect(activity("").modelFamilyCount == 0)
+        #expect(activity("sonnet").modelFamilyCount == 1)
+        #expect(activity("opus+sonnet").modelFamilyCount == 2)
+        #expect(activity("haiku+opus+sonnet").modelFamilyCount == 3)
+        // Families are joined from a set upstream, but the field means
+        // distinct models, so a repeated name must not inflate the count.
+        #expect(activity("sonnet+sonnet").modelFamilyCount == 1)
+        // A hyphen or space is part of a family name, never a separator.
+        #expect(activity("claude-3 opus").modelFamilyCount == 1)
+    }
+
     @Test
     func wakeAgesLocalExactWithoutRenewingItsSuccessfulTimestampOrReadingSafari() async throws {
         let fixture = BrowserConnectorFixture(consent: true)

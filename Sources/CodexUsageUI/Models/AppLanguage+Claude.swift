@@ -144,6 +144,19 @@ extension AppLanguage {
         }
     }
 
+    /// Why the Claude page can show no remaining percentage, and what produces
+    /// one. The generic "connect or refresh" line is wrong here: refreshing
+    /// re-reads the same local sources, and local activity never carries a
+    /// remaining percentage at all.
+    var claudeMissingQuotaGuidance: String {
+        switch self {
+        case .simplifiedChinese:
+            "本地活动只包含令牌用量，不含剩余额度。额度来自精确用量锚点：在终端运行 Claude Code 时，它会通过官方状态栏写入一个；使用 Claude 桌面版后的 20 分钟内，其本地额度缓存会提供一个估算值。"
+        case .english:
+            "Local activity records token usage, not a remaining allowance. A percentage comes from an exact usage anchor: Claude Code writes one through its official status line when you run it in a terminal, and Claude Desktop's local plan cache supplies an estimated one for 20 minutes after you use it."
+        }
+    }
+
     func claudeLiveLinkStatus(_ stage: ClaudeLiveLinkStageReason?) -> String {
         switch (self, stage) {
         case (.english, .localStatusLinePending):

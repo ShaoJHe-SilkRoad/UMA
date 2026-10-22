@@ -1628,7 +1628,9 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
                 estimatedSevenDayUSD: activity.sevenDayCostUSD,
                 estimatedLifetimeUSD: activity.lifetimeCostUSD,
                 coveragePercent: activity.coveragePercent,
-                recognizedModelCount: activity.modelFamilyKey == nil ? 0 : 1
+                // The key already carries every recognized family, so a flat
+                // 0-or-1 under-reported a count that cost nothing to read.
+                recognizedModelCount: activity.modelFamilyCount
             ),
             safeFailure: nil
         )

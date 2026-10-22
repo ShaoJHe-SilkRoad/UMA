@@ -350,6 +350,28 @@ actor LocalProviderEligibilityScanner {
             break
         }
 
+        // A provider can observe real local activity long before any exact
+        // quota anchor exists. The connector publishes that channel on purpose
+        // — "without manufacturing a remaining percentage" — but requiring an
+        // account channel hid the whole provider, discarding measured usage
+        // and stopping the connector that produced it.
+        //
+        // Admit it only when nothing here can be read as a quota: no account
+        // channel to weaken, and no rate-limit window anywhere in the snapshot,
+        // so every percentage surface keeps rendering its existing unknown
+        // state rather than inventing a number. Stale local data stays hidden,
+        // matching the conservatism of the account path above.
+        if snapshot.channels.allSatisfy({ $0.id != .account }),
+           let local = snapshot.channels.first(where: { $0.id == .localActivity }),
+           descriptor.hasSurfaceAdmissibleReadContract,
+           snapshot.safeFailure == nil,
+           local.safeFailure == nil,
+           snapshot.channels.allSatisfy({ $0.rateLimitWindows.isEmpty }),
+           [.fresh, .cached].contains(local.freshness),
+           [.fresh, .cached].contains(snapshot.freshness) {
+            return .admitted(LocalLiveProviderSnapshot(snapshot: snapshot))
+        }
+
         guard descriptor.hasSurfaceAdmissibleReadContract,
               let account = snapshot.channels.first(where: { $0.id == .account }),
               account.sourceTier != .manualUserConfirmed,
