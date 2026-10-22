@@ -6,10 +6,10 @@
 
 | Platform | Download | Requirements |
 | --- | --- | --- |
-| macOS | [Download for Mac — 0.17.2](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.2/AUV_Mac_0.17.2_Universal.zip) | macOS 14+ · Apple silicon and Intel · Universal app · signed and notarized |
+| macOS | [Download for Mac — 0.17.3](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.3/AUV_Mac_0.17.3_Universal.zip) | macOS 14+ · Apple silicon and Intel · Universal app · signed and notarized |
 | Windows | [Download for Windows — 0.16.3](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Win_0.16.3.zip) | Windows 11 · x64 · portable ZIP · **unsigned** |
 
-[Install or upgrade](docs/INSTALLATION.md) · [Mac release notes](docs/releases/AUV_Mac_0.17.2.md) · [Mac compatibility](docs/MAC_COMPATIBILITY.md) · [中文](#中文)
+[Install or upgrade](docs/INSTALLATION.md) · [Mac release notes](docs/releases/AUV_Mac_0.17.3.md) · [Mac compatibility](docs/MAC_COMPATIBILITY.md) · [中文](#中文)
 
 ## Three workspaces
 
@@ -23,11 +23,11 @@ Supports English and Chinese, light and dark appearance, and keyboard navigation
 
 ## Get started on Mac
 
-1. [Download the Universal ZIP](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.2/AUV_Mac_0.17.2_Universal.zip) and double-click it to unpack.
+1. [Download the Universal ZIP](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.3/AUV_Mac_0.17.3_Universal.zip) and double-click it to unpack.
 2. Move **`UMA.app`** to **Applications** on your Mac's internal disk. It opens as **AUV**; the filename is retained for existing installations.
 3. Open AUV. To see Codex allowance, install and sign in to the official Codex app with your ChatGPT account, then allow the local connection in AUV and choose **Scan for Agents → Refresh**.
 
-Upgrading? Quit the old AUV before replacing it. Keep your saved settings. Version **0.17.2**, build **2026102001**, is Developer ID signed and Apple notarized.
+Upgrading? Quit the old AUV before replacing it. Keep your saved settings. Version **0.17.3**, build **2026102101**, is Developer ID signed and Apple notarized.
 
 The package includes Apple silicon and Intel versions. Package checks ran on macOS 27.2 on Apple silicon, including the Intel executable through Rosetta 2. Physical Intel Macs and macOS 14/15 have not yet been tested. [Compatibility details](docs/MAC_COMPATIBILITY.md).
 
@@ -36,6 +36,10 @@ The package includes Apple silicon and Intel versions. Package checks ran on mac
 AUV reads the allowance reported by the Codex app on this Mac. It does not count messages on the ChatGPT website. Version 0.17.2 improves compatibility with Codex versions that return fewer connection details. An unavailable optional token statistic does not hide an otherwise valid account allowance.
 
 Already signed in but no usage appears? Follow [First connection and troubleshooting](docs/FIRST_INSTALL_TROUBLESHOOTING.md). Each provider still needs its own supported account and setup.
+
+### Claude usage
+
+Claude quota bars turn red when little remains and green when plenty does. Claude does not report which plan you are on and AUV does not guess, so set **Claude plan** to Pro or Max in the Claude agent's settings; until then the bars stay neutral grey. When this Mac has local Claude Code activity, the Claude page also shows an API-equivalent cost estimate for the last seven days and lifetime, calculated here from token totals and public list prices. It is an estimate, not a subscription bill, and no billing or payment information is read.
 
 ### ThreadOS: choose, copy, apply
 
@@ -74,10 +78,10 @@ Windows build **20261011.1** remains a separate release. Codex read-only usage i
 
 | 平台 | 下载 | 要求 |
 | --- | --- | --- |
-| macOS | [下载 Mac 版 · 0.17.2](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.2/AUV_Mac_0.17.2_Universal.zip) | macOS 14 及以上 · Apple silicon 和 Intel · 通用包 · 已签名并通过公证 |
+| macOS | [下载 Mac 版 · 0.17.3](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.3/AUV_Mac_0.17.3_Universal.zip) | macOS 14 及以上 · Apple silicon 和 Intel · 通用包 · 已签名并通过公证 |
 | Windows | [下载 Windows 版 · 0.16.3](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Win_0.16.3.zip) | Windows 11 · x64 · 便携 ZIP · **未签名** |
 
-[安装与升级](docs/INSTALLATION.md#中文安装指南) · [Mac 更新说明](docs/releases/AUV_Mac_0.17.2.md#中文) · [Mac 兼容性](docs/MAC_COMPATIBILITY.md#中文)
+[安装与升级](docs/INSTALLATION.md#中文安装指南) · [Mac 更新说明](docs/releases/AUV_Mac_0.17.3.md#中文) · [Mac 兼容性](docs/MAC_COMPATIBILITY.md#中文)
 
 ### 三个功能区
 
@@ -91,11 +95,11 @@ Windows build **20261011.1** remains a separate release. Codex read-only usage i
 
 ### Mac 快速开始
 
-1. [下载通用 ZIP](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.2/AUV_Mac_0.17.2_Universal.zip)，双击解压。
+1. [下载通用 ZIP](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.3/AUV_Mac_0.17.3_Universal.zip)，双击解压。
 2. 将 **`UMA.app`** 移入 Mac 内置盘的**“应用程序”**文件夹。打开后显示为 **AUV**，文件名保留以兼容已有安装。
 3. 打开 AUV。查看 Codex 额度时，先安装官方 Codex 并用 ChatGPT 账户登录，再在 AUV 中允许本机连接，点击**“扫描智能体”→“刷新”**。
 
-升级前先正常退出旧版，再替换应用，保留已有设置。当前 Mac 版本为 **0.17.2**，构建号 **2026102001**，已完成 Developer ID 签名和 Apple 公证。
+升级前先正常退出旧版，再替换应用，保留已有设置。当前 Mac 版本为 **0.17.3**，构建号 **2026102101**，已完成 Developer ID 签名和 Apple 公证。
 
 通用包包含 Apple silicon 与 Intel 版本。包验证在 macOS 27.2 的 Apple silicon Mac 上进行，并通过 Rosetta 2 运行 Intel 程序。尚未在 Intel 实机或 macOS 14/15 上测试。[兼容性详情](docs/MAC_COMPATIBILITY.md#中文)。
 
@@ -104,6 +108,10 @@ Windows build **20261011.1** remains a separate release. Codex read-only usage i
 AUV 显示本机 Codex 返回的账户额度，不统计 ChatGPT 网页消息数。0.17.2 改善了不同 Codex 版本的连接兼容性；缺少可选 token 统计时，已取得的账户额度仍能显示。
 
 已经登录却看不到额度时，请查看[首次连接与排错](docs/FIRST_INSTALL_TROUBLESHOOTING.md#中文)。各智能体仍需自己的受支持账户与连接设置。
+
+### Claude 用量
+
+Claude 额度条在余量偏低时变红、充足时变绿。Claude 不报告订阅方案，AUV 也不猜测，请在 Claude 智能体设置中将 **Claude 方案**设为 Pro 或 Max；未设置前保持中性灰色。当本机存在本地 Claude Code 活动时，Claude 页面还会显示近 7 天与累计的 API 等效费用估算，依据令牌总量和公开价目表在本机计算。该数值属于估算而非订阅账单，也不会读取任何账单或支付信息。
 
 ### 线程工：选择、复制、执行
 
