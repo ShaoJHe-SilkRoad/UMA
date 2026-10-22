@@ -1500,20 +1500,25 @@ final class GlobalSettingsViewModel: ObservableObject {
     @Published private(set) var launchAtLoginState: LaunchAtLoginState
     @Published private(set) var launchAtLoginError: String?
     @Published private(set) var dataActionStatus: String?
+    @Published private(set) var grokBotPresence: GrokBotPresenceClassification
 
     private let retainedDataService: SettingsRetainedDataService
     private let preferences: ApplicationPreferences
     private let store: UsageStore
+    private let grokBotPresenceProbe: any GrokBotPresenceProbing
     private var observation: ApplicationPreferences.Observation?
 
     init(
         preferences: ApplicationPreferences,
         store: UsageStore,
-        dataPaths: ApplicationDataPaths = .current()
+        dataPaths: ApplicationDataPaths = .current(),
+        grokBotPresenceProbe: any GrokBotPresenceProbing = GrokBotPresenceProbe()
     ) {
         retainedDataService = SettingsRetainedDataService(dataPaths: dataPaths)
         self.preferences = preferences
         self.store = store
+        self.grokBotPresenceProbe = grokBotPresenceProbe
+        grokBotPresence = grokBotPresenceProbe.diagnose(now: Date())
         language = preferences.value(for: UMAApplicationPreferenceKeys.language)
             .flatMap(AppLanguage.init(rawValue:)) ?? .english
         appearance = UMAApplicationAppearance(
@@ -1707,7 +1712,12 @@ final class GlobalSettingsViewModel: ObservableObject {
         }
     }
 
+    func refreshGrokBotPresence(now: Date = Date()) {
+        grokBotPresence = grokBotPresenceProbe.diagnose(now: now)
+    }
+
     func exportSanitizedDiagnostics() {
+        refreshGrokBotPresence()
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "UMA-sanitized-diagnostics.json"
         panel.canCreateDirectories = true
@@ -1716,7 +1726,8 @@ final class GlobalSettingsViewModel: ObservableObject {
             let activeCount = store.productInventory.providers.filter(\.isActive).count
             let data = try SettingsDiagnosticsExporter.data(
                 activeProviderCount: activeCount,
-                preferences: preferences
+                preferences: preferences,
+                grokBotPresence: grokBotPresence
             )
             try SettingsDiagnosticsExporter.write(data, to: destination)
             dataActionStatus = language == .simplifiedChinese
@@ -1866,13 +1877,17 @@ public struct GlobalSettingsSurface: View {
             .frame(width: viewport.size.width, height: viewport.size.height, alignment: .topLeading)
         }
         .environment(\.locale, model.language.locale)
-        .onAppear(perform: model.refreshLaunchAtLoginState)
+        .onAppear {
+            model.refreshLaunchAtLoginState()
+            model.refreshGrokBotPresence()
+        }
         .onReceive(
             NotificationCenter.default.publisher(
                 for: NSApplication.didBecomeActiveNotification
             )
         ) { _ in
             model.refreshLaunchAtLoginState()
+            model.refreshGrokBotPresence()
         }
         .accessibilityIdentifier("uma.settings.surface")
     }
@@ -2111,6 +2126,11 @@ public struct GlobalSettingsSurface: View {
                         localized("Credentials", "凭据"),
                         localized("Passwords, tokens, cookies, and conversation content are not retained.", "不会保留密码、令牌、Cookie 或对话内容。")
                     )
+                    settingFact(
+                        localized("Grok Bot", "Grok Bot"),
+                        model.grokBotPresence.settingsSummary(language: model.language)
+                    )
+                    .accessibilityIdentifier("uma.settings.privacy.grok-bot-presence")
                     HStack {
                         Button(
                             localized("Clear Retained Local Data", "清除保留的本地数据"),
