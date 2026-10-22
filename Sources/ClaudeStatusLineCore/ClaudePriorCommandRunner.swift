@@ -42,8 +42,16 @@ public struct ClaudePriorCommandRunner: Sendable {
         process.standardInput = input
         process.standardOutput = FileHandle.standardOutput
         process.standardError = FileHandle.standardError
+        // The command below is free to ignore its stdin. Without this, the
+        // write that follows would be killed by SIGPIPE rather than failing.
+        PipeWriteSignalDisposition.ensureIgnored()
         try process.run()
-        input.fileHandleForWriting.write(rawInput)
+        // A prior command is free to exit without reading its stdin, which
+        // makes this write fail with EPIPE. `write(_:)` raises on that and the
+        // exception would abort the relay; the throwing form lets the
+        // command's own exit status stand as the result, which is all this
+        // function reports.
+        try? input.fileHandleForWriting.write(contentsOf: rawInput)
         try? input.fileHandleForWriting.close()
         process.waitUntilExit()
         return .exited(process.terminationStatus)

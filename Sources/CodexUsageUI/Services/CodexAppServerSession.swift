@@ -1,3 +1,4 @@
+import ClaudeStatusLineCore
 @preconcurrency import Foundation
 
 /// Injectable stdio boundary.  Tests supply a deterministic fake transport;
@@ -133,6 +134,9 @@ final class ProcessCodexAppServerTransport: CodexAppServerTransport, @unchecked 
         // needs its safe failure vocabulary, so deliberately discard it.
         process.standardError = FileHandle.nullDevice
 
+        // This child can exit at any moment, and `write(_:)` to its stdin
+        // afterwards would be killed by SIGPIPE before it could report EPIPE.
+        PipeWriteSignalDisposition.ensureIgnored()
         do {
             try process.run()
         } catch {
@@ -156,7 +160,16 @@ final class ProcessCodexAppServerTransport: CodexAppServerTransport, @unchecked 
         guard let process, process.isRunning, let input else {
             throw CodexAppServerTransportError.notRunning
         }
-        input.write(JSONLineJSONRPCFraming.encode(data))
+        // `FileHandle.write(_:)` raises on a dead pipe, and that exception
+        // aborts the process just as the read one did. A child can exit
+        // between the `isRunning` check above and this write, so EPIPE is
+        // reachable however the check is ordered. The throwing form turns it
+        // into the error the caller already handles for a missing child.
+        do {
+            try input.write(contentsOf: JSONLineJSONRPCFraming.encode(data))
+        } catch {
+            throw CodexAppServerTransportError.notRunning
+        }
     }
 
     func readMessage() async throws -> Data? {
@@ -240,11 +253,24 @@ enum JSONLineJSONRPCFraming {
         return framed
     }
 
+    /// `readData(ofLength:)` raises `NSFileHandleOperationException` when the
+    /// underlying read fails, and an Objective-C exception unwinding through
+    /// Swift frames cannot be caught: it reaches `std::terminate` and aborts
+    /// the whole process. That failure is the ordinary path here, not an edge
+    /// case — `stop()` closes stdout precisely to unblock a read parked in
+    /// this loop, `closeHandlesLocked()` does the same when the child is
+    /// replaced, and a child that exits on its own closes it too. The read
+    /// runs outside the lock, so it is still parked when the handle goes.
+    ///
+    /// `read(upToCount:)` reports the same condition as a Swift error, which
+    /// means exactly what the end of the stream means here: this session has
+    /// no further message.
     static func readMessage(from handle: FileHandle) -> Data? {
         var message = Data()
         while message.count <= maximumMessageBytes {
-            let byte = handle.readData(ofLength: 1)
-            guard !byte.isEmpty else { return nil }
+            guard let byte = try? handle.read(upToCount: 1), !byte.isEmpty else {
+                return nil
+            }
             if byte == Data([0x0A]) {
                 if message.last == 0x0D { message.removeLast() }
                 return message
