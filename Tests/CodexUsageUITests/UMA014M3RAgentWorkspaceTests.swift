@@ -19,7 +19,10 @@ struct UMA014M3RAgentWorkspaceTests {
         #expect(source.contains("AgentGlanceRow("))
         #expect(source.contains("AgentWorkspaceSurface("))
         #expect(source.contains("connectClaude: connectClaude"))
-        #expect(source.contains("store.productInventory.agentWorkspaceProviders"))
+        // The workspace rail reads the store's ordered accessor rather than
+        // the inventory directly, so the user's arrangement decides what it
+        // shows. UMA014M2PublicationTests pins that boundary in full.
+        #expect(source.contains("store.orderedWorkspaceProviders"))
         #expect(source.contains("basicUsage: store.basicUsagePresentation"))
         #expect(!source.contains("ThreadOSRuntime"))
         #expect(!source.contains("ThreadOSClient"))
@@ -113,7 +116,9 @@ struct UMA014M3RAgentWorkspaceTests {
     func quickPanelHasOneOuterSurfaceOwner() throws {
         let source = try read("Sources/CodexUsageUI/Views/AgentSurfaceViews.swift")
 
-        #expect(source.contains("store.productInventory.quickPanelProviders"))
+        // Same boundary as the workspace rail: the quick panel follows the
+        // arrangement instead of reading the inventory for itself.
+        #expect(source.contains("store.orderedQuickPanelProviders"))
         #expect(source.contains(".frame(width: 320)"))
         #expect(source.contains("No active agents"))
         #expect(source.contains("Scan for Agents"))

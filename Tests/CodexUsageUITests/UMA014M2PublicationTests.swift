@@ -22,9 +22,21 @@ struct UMA014M2PublicationTests {
         let status = try source("Sources/CodexUsageMonitor/App/StatusBarController.swift")
         let store = try source("Sources/CodexUsageUI/Stores/UsageStore.swift")
 
-        #expect(main.contains("store.productInventory.agentWorkspaceProviders"))
+        // Narrowed deliberately. The contract is that every surface consumes
+        // one shared inventory boundary instead of assembling its own list.
+        // That boundary moved into the store when the list became something
+        // the user can arrange: the surfaces now read the store's ordered
+        // accessors, and the store is the single place that derives them from
+        // the inventory. Asserting it this way is stricter than before — a
+        // surface reading the raw accessor would bypass the arrangement, and
+        // is now forbidden rather than merely unmentioned.
+        #expect(main.contains("store.orderedWorkspaceProviders"))
+        #expect(!main.contains("store.productInventory.agentWorkspaceProviders"))
         #expect(main.contains("ForEach(workspaceProviders)"))
-        #expect(quick.contains("store.productInventory.quickPanelProviders"))
+        #expect(quick.contains("store.orderedQuickPanelProviders"))
+        #expect(!quick.contains("store.productInventory.quickPanelProviders"))
+        #expect(store.contains("productInventory.agentWorkspaceProviders"))
+        #expect(store.contains("productInventory.quickPanelProviders"))
         #expect(quick.contains("AgentGlanceRow"))
         #expect(shell.contains("store.$productInventory"))
         #expect(status.contains("store.$productInventory"))

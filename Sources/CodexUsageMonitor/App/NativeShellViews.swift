@@ -365,25 +365,46 @@ struct MainWindowRootView: View {
                         ScrollView {
                             VStack(spacing: 3) {
                                 ForEach(workspaceProviders) { provider in
-                                    Button {
-                                        navigation.selectedAgent = provider.id
-                                    } label: {
-                                        AgentGlanceRow(
-                                            provider: provider,
-                                            style: .mainList,
-                                            selected: selectedProviderID == provider.id,
-                                            language: store.language,
-                                            // The dense rail stays compact; the
-                                            // reset preference is the quick
-                                            // panel's, and the workspace detail
-                                            // is one click away.
-                                            showsReset: false,
-                                            referenceDate: referenceDate,
-                                            displayNameOverride: agentRailDisplayNames[provider.id]
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
+                                    // Deliberately not a Button. A Button's own
+                                    // gesture swallows the drag, so the row
+                                    // never lifted; a plain row with an explicit
+                                    // tap keeps selection working and leaves the
+                                    // drag to start. The button role and
+                                    // keyboard action are restored below so
+                                    // assistive technology is unaffected.
+                                    AgentGlanceRow(
+                                        provider: provider,
+                                        style: .mainList,
+                                        selected: selectedProviderID == provider.id,
+                                        language: store.language,
+                                        // The dense rail stays compact; the
+                                        // reset preference is the quick panel's,
+                                        // and the workspace detail is one click
+                                        // away.
+                                        showsReset: false,
+                                        referenceDate: referenceDate,
+                                        displayNameOverride: agentRailDisplayNames[provider.id]
+                                    )
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { navigation.selectedAgent = provider.id }
+                                    .accessibilityElement(children: .combine)
+                                    .accessibilityAddTraits(.isButton)
+                                    .accessibilityAction { navigation.selectedAgent = provider.id }
                                     .accessibilityIdentifier("uma.agent.list.\(provider.id.rawValue)")
+                                    // Drag a row onto another to rearrange the
+                                    // list. The arrangement is saved as soon as
+                                    // it changes and decides both lists and
+                                    // which agent the menu bar reads.
+                                    .onDrag {
+                                        NSItemProvider(object: provider.id.rawValue as NSString)
+                                    }
+                                    .dropDestination(for: String.self) { items, _ in
+                                        guard let dropped = items.first,
+                                              let moved = ProviderProductID(rawValue: dropped)
+                                        else { return false }
+                                        store.moveAgent(moved, onto: provider.id)
+                                        return true
+                                    }
                                 }
                             }
                             .padding(.horizontal, 6)
@@ -411,7 +432,7 @@ struct MainWindowRootView: View {
     }
 
     private var workspaceProviders: [ProviderProductState] {
-        store.productInventory.agentWorkspaceProviders
+        store.orderedWorkspaceProviders
     }
 
     private var selectedProviderID: ProviderProductID {

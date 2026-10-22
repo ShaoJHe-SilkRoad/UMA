@@ -486,7 +486,7 @@ public struct QuickPanelSurface: View {
     }
 
     private var providers: [ProviderProductState] {
-        store.productInventory.quickPanelProviders
+        store.orderedQuickPanelProviders
     }
 
     private var header: some View {

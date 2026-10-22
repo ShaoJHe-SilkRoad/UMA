@@ -14,6 +14,9 @@ public final class UsageStore: ObservableObject {
     @Published private(set) var providerSnapshots: [AgentUsageSnapshot] = []
     @Published public private(set) var presentationCards: [SharedUsageCardPresentation] = []
     @Published public private(set) var productInventory: ProviderProductInventory
+    /// The arrangement the user dragged the agent list into, as raw provider
+    /// identifiers. Empty until they arrange it.
+    @Published public private(set) var agentOrder: [String] = []
     /// Frozen read-only presentation projection. Reading it does not trigger collection or refresh.
     public var basicUsagePresentation: BasicSharedUsagePresentation {
         .make(snapshot: snapshot, provider: productInventory.provider(.codex))
@@ -249,6 +252,8 @@ public final class UsageStore: ObservableObject {
         self.allowsLaunchScan = autoRefresh
         self.consentDefaults = consentDefaults
         self.preferences = effectivePreferences
+        self.agentOrder = effectivePreferences?
+            .value(for: UMAApplicationPreferenceKeys.agentOrder) ?? []
         self.agentSettings = previewOnly
             ? agentSettings
             : (
@@ -309,18 +314,56 @@ public final class UsageStore: ObservableObject {
         return UsageSnapshot(agentSnapshot: agentSnapshot, language: language)
     }
 
-    /// Which provider the menu bar reading belongs to. Codex keeps priority so
-    /// existing installs are unchanged; any other quick-panel-eligible provider
-    /// is used only when Codex reports no usable quota. Without this a
-    /// Claude-only user sees a permanent placeholder.
+    /// The agent list in the order the user arranged it. Both the main
+    /// workspace rail and the quick panel read these, so the two lists and the
+    /// menu bar can never disagree about which agent is on top.
+    public var orderedWorkspaceProviders: [ProviderProductState] {
+        AgentDisplayOrder.apply(
+            productInventory.agentWorkspaceProviders,
+            order: agentOrder,
+            id: { $0.id.rawValue }
+        )
+    }
+
+    public var orderedQuickPanelProviders: [ProviderProductState] {
+        AgentDisplayOrder.apply(
+            productInventory.quickPanelProviders,
+            order: agentOrder,
+            id: { $0.id.rawValue }
+        )
+    }
+
+    /// Records the agent list as the user just rearranged it, and keeps it
+    /// until they rearrange it again. The whole visible order is written, not
+    /// the one row that moved, so what they see is what is stored.
+    public func moveAgent(_ moved: ProviderProductID, onto target: ProviderProductID) {
+        let displayed = orderedWorkspaceProviders.map(\.id.rawValue)
+        guard let updated = AgentDisplayOrder.moving(
+            moved.rawValue,
+            onto: target.rawValue,
+            in: displayed
+        ) else { return }
+        agentOrder = updated
+        preferences?.set(updated, for: UMAApplicationPreferenceKeys.agentOrder)
+    }
+
+    /// Which provider the menu bar reading belongs to.
+    ///
+    /// Until the list has been arranged, Codex keeps priority and any other
+    /// quick-panel-eligible provider is used only when Codex reports no usable
+    /// quota, which is exactly what existing installs already see. Once the
+    /// list has been arranged, the arrangement decides: the reading belongs to
+    /// the topmost agent that has one, so an agent pinned to the top with
+    /// nothing to report hands the menu bar down the list rather than blanking
+    /// it.
     public var menuProvider: ProviderProductID? {
-        if productInventory.provider(.codex)?
-            .primaryQuota?.value.remainingPercent != nil {
-            return .codex
-        }
-        return productInventory.quickPanelProviders.first {
-            $0.primaryQuota?.value.remainingPercent != nil
-        }?.id
+        AgentDisplayOrder.menuReading(
+            amongEligible: orderedQuickPanelProviders
+                .filter { $0.primaryQuota?.value.remainingPercent != nil }
+                .map(\.id),
+            isArranged: !agentOrder.isEmpty,
+            preferred: .codex
+        )
     }
 
     public var menuPercent: Int? {
@@ -596,6 +639,13 @@ public final class UsageStore: ObservableObject {
             // so rebuild presentation rather than waiting for the next refresh.
             if change.key == UMAApplicationPreferenceKeys.claudeDeclaredPlan.name {
                 self?.rebuildPresentation()
+                return
+            }
+            // The arrangement is process-global state; adopt an external write
+            // rather than keeping a stale copy of it.
+            if change.key == UMAApplicationPreferenceKeys.agentOrder.name {
+                self?.agentOrder = self?.preferences?
+                    .value(for: UMAApplicationPreferenceKeys.agentOrder) ?? []
                 return
             }
             guard change.key == UMAApplicationPreferenceKeys.automaticBackgroundRefresh.name

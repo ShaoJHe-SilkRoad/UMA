@@ -51,6 +51,24 @@ public extension ApplicationPreferenceKey where Value == String {
     }
 }
 
+public extension ApplicationPreferenceKey where Value == [String] {
+    /// Decoding filters rather than fails: a defaults value written by another
+    /// build, or hand-edited, yields the strings it does contain instead of
+    /// discarding an arrangement wholesale.
+    init(_ name: String, default defaultValue: [String] = []) {
+        self.init(
+            name: name,
+            defaultValue: defaultValue,
+            decode: { value in
+                guard let values = value as? [Any] else { return nil }
+                return values.compactMap { $0 as? String }
+            },
+            encode: { $0 },
+            equals: ==
+        )
+    }
+}
+
 public extension ApplicationPreferenceKey where Value == String? {
     init(optional name: String) {
         self.init(
@@ -290,6 +308,13 @@ public enum UMAApplicationPreferenceKeys {
         "app.appearance",
         default: UMAApplicationAppearance.system.rawValue
     )
+    /// The order the user dragged the agent list into, as raw provider
+    /// identifiers. Empty until they arrange it, which is what keeps an
+    /// install that never touches the list on its existing ordering.
+    public static let agentOrder = ApplicationPreferenceKey<[String]>(
+        "app.agentOrder"
+    )
+
     public static let menuBarShowsRemaining = ApplicationPreferenceKey<Bool>(
         "app.menuBarShowsRemaining",
         default: true
