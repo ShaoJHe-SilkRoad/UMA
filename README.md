@@ -6,10 +6,10 @@
 
 | Platform | Download | Requirements |
 | --- | --- | --- |
-| macOS | [Download for Mac — 0.17.5](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.5/AUV_Mac_0.17.5_Universal.zip) | macOS 14+ · Apple silicon and Intel · Universal app · signed and notarized |
+| macOS | [Download for Mac — 0.17.6](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.6/AUV_Mac_0.17.6_Universal.zip) | macOS 14+ · Apple silicon and Intel · Universal app · signed and notarized |
 | Windows | [Download for Windows — 0.16.3](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Win_0.16.3.zip) | Windows 11 · x64 · portable ZIP · **unsigned** |
 
-[Install or upgrade](docs/INSTALLATION.md) · [Mac release notes](docs/releases/AUV_Mac_0.17.5.md) · [Mac compatibility](docs/MAC_COMPATIBILITY.md) · [中文](#中文)
+[Install or upgrade](docs/INSTALLATION.md) · [Mac release notes](docs/releases/AUV_Mac_0.17.6.md) · [Mac compatibility](docs/MAC_COMPATIBILITY.md) · [中文](#中文)
 
 ## Three workspaces
 
@@ -23,11 +23,11 @@ Supports English and Chinese, light and dark appearance, and keyboard navigation
 
 ## Get started on Mac
 
-1. [Download the Universal ZIP](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.5/AUV_Mac_0.17.5_Universal.zip) and double-click it to unpack.
+1. [Download the Universal ZIP](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.6/AUV_Mac_0.17.6_Universal.zip) and double-click it to unpack.
 2. Move **`UMA.app`** to **Applications** on your Mac's internal disk. It opens as **AUV**; the filename is retained for existing installations.
 3. Open AUV. To see Codex allowance, install and sign in to the official Codex app with your ChatGPT account, then allow the local connection in AUV and choose **Scan for Agents → Refresh**.
 
-Upgrading? Quit the old AUV before replacing it. Keep your saved settings. Version **0.17.5**, build **2026102201**, is Developer ID signed and Apple notarized.
+Upgrading? Quit the old AUV before replacing it. Keep your saved settings. Version **0.17.6**, build **2026102202**, is Developer ID signed and Apple notarized.
 
 The package includes Apple silicon and Intel versions. Package checks ran on macOS 27.2 on Apple silicon, including the Intel executable through Rosetta 2. Physical Intel Macs and macOS 14/15 have not yet been tested. [Compatibility details](docs/MAC_COMPATIBILITY.md).
 
@@ -78,10 +78,10 @@ Windows build **20261011.1** remains a separate release. Codex read-only usage i
 
 | 平台 | 下载 | 要求 |
 | --- | --- | --- |
-| macOS | [下载 Mac 版 · 0.17.5](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.5/AUV_Mac_0.17.5_Universal.zip) | macOS 14 及以上 · Apple silicon 和 Intel · 通用包 · 已签名并通过公证 |
+| macOS | [下载 Mac 版 · 0.17.6](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.6/AUV_Mac_0.17.6_Universal.zip) | macOS 14 及以上 · Apple silicon 和 Intel · 通用包 · 已签名并通过公证 |
 | Windows | [下载 Windows 版 · 0.16.3](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Win_0.16.3.zip) | Windows 11 · x64 · 便携 ZIP · **未签名** |
 
-[安装与升级](docs/INSTALLATION.md#中文安装指南) · [Mac 更新说明](docs/releases/AUV_Mac_0.17.5.md#中文) · [Mac 兼容性](docs/MAC_COMPATIBILITY.md#中文)
+[安装与升级](docs/INSTALLATION.md#中文安装指南) · [Mac 更新说明](docs/releases/AUV_Mac_0.17.6.md#中文) · [Mac 兼容性](docs/MAC_COMPATIBILITY.md#中文)
 
 ### 三个功能区
 
@@ -95,11 +95,11 @@ Windows build **20261011.1** remains a separate release. Codex read-only usage i
 
 ### Mac 快速开始
 
-1. [下载通用 ZIP](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.5/AUV_Mac_0.17.5_Universal.zip)，双击解压。
+1. [下载通用 ZIP](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.6/AUV_Mac_0.17.6_Universal.zip)，双击解压。
 2. 将 **`UMA.app`** 移入 Mac 内置盘的**“应用程序”**文件夹。打开后显示为 **AUV**，文件名保留以兼容已有安装。
 3. 打开 AUV。查看 Codex 额度时，先安装官方 Codex 并用 ChatGPT 账户登录，再在 AUV 中允许本机连接，点击**“扫描智能体”→“刷新”**。
 
-升级前先正常退出旧版，再替换应用，保留已有设置。当前 Mac 版本为 **0.17.5**，构建号 **2026102201**，已完成 Developer ID 签名和 Apple 公证。
+升级前先正常退出旧版，再替换应用，保留已有设置。当前 Mac 版本为 **0.17.6**，构建号 **2026102202**，已完成 Developer ID 签名和 Apple 公证。
 
 通用包包含 Apple silicon 与 Intel 版本。包验证在 macOS 27.2 的 Apple silicon Mac 上进行，并通过 Rosetta 2 运行 Intel 程序。尚未在 Intel 实机或 macOS 14/15 上测试。[兼容性详情](docs/MAC_COMPATIBILITY.md#中文)。
 
