@@ -133,7 +133,7 @@ struct UMA011G1ProviderCardTests {
             )
         )
 
-        #expect(header.contains("Text(\"UMA\")"))
+        #expect(header.contains("Text(\"AUV\")"))
         #expect(header.contains("active Agents"))
         #expect(!header.contains("store.snapshot.planLabel"))
         #expect(!header.contains("store.statusText"))

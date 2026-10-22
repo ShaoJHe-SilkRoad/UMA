@@ -1709,7 +1709,11 @@ final class GlobalSettingsViewModel: ObservableObject {
 
     func exportSanitizedDiagnostics() {
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "UMA-sanitized-diagnostics.json"
+        // The name a user sees in the save panel, so it carries the
+        // product name. Nothing reads the file back, so renaming it
+        // strands no existing data — unlike the Application Support
+        // directory, which keeps its UMA path for that reason.
+        panel.nameFieldStringValue = "AUV-sanitized-diagnostics.json"
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let destination = panel.url else { return }
         do {

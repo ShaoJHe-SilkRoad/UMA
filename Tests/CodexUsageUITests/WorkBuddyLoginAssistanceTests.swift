@@ -345,7 +345,8 @@ struct WorkBuddyLoginAssistanceTests {
                     + language.workBuddyLoginSteps(.enterprise)
                     + [language.workBuddySafeCompletionResult]
             ).joined(separator: " ")
-            #expect(copy.contains("UMA"))
+            // The copy names the product doing the reading, which is AUV.
+            #expect(copy.contains("AUV"))
             #expect(
                 copy.contains("Credits")
                     || copy.contains("Credits")

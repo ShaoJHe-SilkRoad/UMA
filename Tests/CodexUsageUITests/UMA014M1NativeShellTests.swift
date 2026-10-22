@@ -85,7 +85,11 @@ struct UMA014M1NativeShellTests {
         let views = try source("Sources/CodexUsageMonitor/App/NativeShellViews.swift")
         let windows = try source("Sources/CodexUsageMonitor/App/NativeWindowControllers.swift")
 
-        #expect(windows.contains("window.title = \"UMA\""))
+        // The product is AUV. Its bundle filename (UMA.app), bundle
+        // identifier (com.silkrd.uma) and CFBundleName stay UMA so existing
+        // installs upgrade in place, so a stray "UMA" in this file is not
+        // automatically wrong — but the chrome a user reads is AUV.
+        #expect(windows.contains("window.title = \"AUV\""))
         #expect(!views.contains(".navigationTitle(\"Overview\")"))
         #expect(!views.contains(".navigationTitle(\"Providers\")"))
     }
@@ -156,7 +160,7 @@ struct UMA014M1NativeShellTests {
     func nativeMenuContract() throws {
         let menu = try source("Sources/CodexUsageMonitor/App/ApplicationMenuController.swift")
         for required in [
-            "About UMA", "Settings…", "Quit UMA", "Refresh All",
+            "About AUV", "Settings…", "Quit AUV", "Refresh All",
             "Open Main Window", "Show Menu Bar Panel", "ThreadOS",
             "key: \",\"", "key: \"r\"", "key: \"1\"", "key: \"2\"", "key: \"q\"",
             "coordinator?.showSettingsWindow()", "coordinator?.showMainWindow()",
