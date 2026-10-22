@@ -20,7 +20,9 @@ The app is named **AUV** when opened; the extracted bundle remains **`UMA.app`**
 
 Package checks ran on macOS 27.2 on Apple silicon, including the Intel executable through Rosetta 2. The package is Developer ID signed, Apple notarized and stapled, and passed Gatekeeper assessment after a clean re-extraction, including with a download quarantine flag applied. Physical Intel Macs and macOS 14/15 were not tested.
 
-The fix is covered by a test that asserts the panel reads the same preference its switch writes; the test was confirmed to fail when the check is removed. As in 0.17.3, the cost panel's data path is covered by automated tests but was not exercised against a live Claude account. Sectorium is unchanged and was not retested.
+The fix is covered by a test that asserts the panel reads the same preference its switch writes; the test was confirmed to fail when the check is removed. As in 0.17.3, the cost panel's data path is covered by automated tests but was not exercised against real data during these release checks. Sectorium is unchanged and was not retested.
+
+**Correction, 2026-10-22.** That sentence originally said the panel was not exercised against a live Claude account. The framing was misleading: the estimate is computed on your Mac from local Claude Code activity and a fixed public price table, and reads no account at all, so a live account was never what it needed. What it had not been run against was real local activity — and it has since been seen rendering real figures from that, in this build. The 0.17.3 note carries its own dated correction to the same section.
 
 [Windows remains at 0.16.3](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Win_0.16.3.zip), with its existing support limits. Windows Sectorium is UI only; storage actions are disabled.
 
@@ -60,7 +62,9 @@ The fix is covered by a test that asserts the panel reads the same preference it
 
 包验证在 macOS 27.2 的 Apple silicon Mac 上完成，并通过 Rosetta 2 运行 Intel 程序。安装包已完成 Developer ID 签名、Apple 公证与票据装订；重新解压后（含加上下载隔离标记的情况）仍通过 Gatekeeper 检查。尚未测试 Intel 实机或 macOS 14/15。
 
-本次修复有对应测试，核验面板读取的正是其开关所写入的设置；移除该判断后测试确实失败。与 0.17.3 相同，费用面板的数据链路由自动化测试覆盖，但未在真实 Claude 账户下实测。分区工未改动，也未重新测试。
+本次修复有对应测试，核验面板读取的正是其开关所写入的设置；移除该判断后测试确实失败。与 0.17.3 相同，费用面板的数据链路由自动化测试覆盖，但发布验证期间未用真实数据实测。分区工未改动，也未重新测试。
+
+**更正（2026-10-22）。** 上面这句原先写的是“未在真实 Claude 账户下实测”。该说法有误导：该估算在本机依据本地 Claude Code 活动和固定的公开价目表算出，完全不读取账户，因此“真实账户”从来不是它所需的条件。真正未实测的是真实的本地活动——而此后已在本版构建中见到该面板用这些数据渲染出真实数值。0.17.3 的说明对同一节另有一条带日期的更正。
 
 [Windows 保持 0.16.3](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Win_0.16.3.zip)及原有支持范围；Windows 分区工仅有界面，磁盘操作禁用。
 
