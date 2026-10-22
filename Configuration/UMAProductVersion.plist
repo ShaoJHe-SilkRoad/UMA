@@ -11,7 +11,7 @@
 		<key>DefaultBuildNumber</key>
 		<string>1</string>
 		<key>MarketingVersion</key>
-		<string>0.17.4</string>
+		<string>0.17.5</string>
 		<key>PackageStem</key>
 		<string>uma-0.17-m1-dev</string>
 	</dict>
@@ -27,7 +27,7 @@
 		<key>ApplicationName</key>
 		<string>UMA</string>
 		<key>BuildNumber</key>
-		<string>2026102102</string>
+		<string>2026102201</string>
 		<key>BundleIdentifier</key>
 		<string>com.silkrd.uma</string>
 		<key>FrozenHostBuild</key>
