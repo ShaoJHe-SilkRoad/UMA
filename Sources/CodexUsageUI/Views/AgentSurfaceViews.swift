@@ -512,7 +512,7 @@ public struct QuickPanelSurface: View {
             headerButton(localized("Scan All", "全部扫描"), "sparkle.magnifyingglass", scanAll)
             headerButton(localized("Refresh All", "全部刷新"), "arrow.clockwise", refreshAll)
                 .disabled(!store.allowsManualRefresh)
-            headerButton(localized("Desktop Wizard", "桌面向导"), "wand.and.stars", toggleWizard)
+            headerButton(localized("Desktop Assistant", "桌面助手"), "macwindow", toggleWizard)
             headerButton(localized("Settings", "设置"), "gearshape", openSettings)
         }
         .padding(.horizontal, 11)
@@ -1703,8 +1703,8 @@ final class GlobalSettingsViewModel: ObservableObject {
     func resetAssistantPosition() {
         preferences.remove(UMAApplicationPreferenceKeys.assistantPosition)
         dataActionStatus = language == .simplifiedChinese
-            ? "桌面向导位置已重置。"
-            : "Desktop Wizard position reset."
+            ? "桌面助手位置已重置。"
+            : "Desktop Assistant position reset."
     }
 
     func clearRetainedUsageData() {
@@ -2054,11 +2054,11 @@ public struct GlobalSettingsSurface: View {
                 }
             case .desktopWizard:
                 settingsSection(
-                    title: localized("Desktop Wizard", "桌面向导"),
+                    title: localized("Desktop Assistant", "桌面助手"),
                     subtitle: localized("A compact usage surface that stays available on the desktop", "常驻桌面的紧凑用量视图")
                 ) {
                     Toggle(
-                        localized("Show Desktop Wizard", "显示桌面向导"),
+                        localized("Show Desktop Assistant", "显示桌面助手"),
                         isOn: Binding(
                             get: { model.assistantEnabled },
                             set: model.setAssistantEnabled
@@ -2192,7 +2192,7 @@ public struct GlobalSettingsSurface: View {
         switch pane {
         case .general: "gearshape"
         case .appearance: "paintbrush"
-        case .desktopWizard: "wand.and.stars"
+        case .desktopWizard: "macwindow"
         case .privacy: "hand.raised"
         case .hesectorium: "externaldrive"
         }
@@ -2202,9 +2202,9 @@ public struct GlobalSettingsSurface: View {
         switch pane {
         case .general: localized("General", "通用")
         case .appearance: localized("Appearance", "外观")
-        case .desktopWizard: localized("Desktop Wizard", "桌面向导")
+        case .desktopWizard: localized("Desktop Assistant", "桌面助手")
         case .privacy: localized("Privacy & Data", "隐私与数据")
-        case .hesectorium: "HESectorium"
+        case .hesectorium: localized("Sectorium", "分区工")
         }
     }
 

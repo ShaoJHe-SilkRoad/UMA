@@ -339,7 +339,7 @@ final class DesktopAssistantPanelController: NSObject, NSMenuDelegate {
     }
 
     private func makeContextMenu() -> NSMenu {
-        let menu = NSMenu(title: "Desktop Wizard")
+        let menu = NSMenu(title: "Desktop Assistant")
         menu.identifier = NSUserInterfaceItemIdentifier("uma.desktop-wizard.context")
         menu.autoenablesItems = false
         menu.delegate = self
@@ -356,8 +356,8 @@ final class DesktopAssistantPanelController: NSObject, NSMenuDelegate {
 
         let visibilityItem = NSMenuItem(
             title: panel.isVisible
-                ? localized("Hide Desktop Wizard", "隐藏桌面向导")
-                : localized("Show Desktop Wizard", "显示桌面向导"),
+                ? localized("Hide Desktop Assistant", "隐藏桌面助手")
+                : localized("Show Desktop Assistant", "显示桌面助手"),
             action: #selector(toggleVisibilityFromContextMenu),
             keyEquivalent: ""
         )

@@ -171,7 +171,7 @@ struct UMA014M1NativeShellTests {
         }
         #expect(menu.contains("root.isEnabled = false"))
         #expect(menu.contains("action: nil"))
-        #expect(menu.contains("title: \"Show or Hide Desktop Wizard\""))
+        #expect(menu.contains("title: \"Show or Hide Desktop Assistant\""))
         #expect(!menu.contains("return coordinator?.assistantIsEnabled == true"))
         #expect(menu.contains("action: #selector(toggleDesktopAssistant)"))
         for forbidden in ["ThreadOSRuntime", "ThreadOSClient", "UsageMonitorRuntime.live"] {

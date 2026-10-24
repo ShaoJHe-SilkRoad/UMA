@@ -1126,8 +1126,8 @@ private struct MonitorHeaderView: View {
         case (.english, 0): "No active Agents"
         case (.english, 1): "1 active Agent"
         case (.english, _): "\(count) active Agents"
-        case (.simplifiedChinese, 0): "没有活跃 Agent"
-        case (.simplifiedChinese, _): "\(count) 个活跃 Agent"
+        case (.simplifiedChinese, 0): "没有活跃智能体"
+        case (.simplifiedChinese, _): "\(count) 个活跃智能体"
         }
     }
 }

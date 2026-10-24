@@ -483,7 +483,7 @@ final class StatusBarController: NSObject {
     private func desktopAssistantMenuItem() -> NSMenuItem {
         guard let assistantController else { return NSMenuItem() }
         let root = NSMenuItem(
-            title: assistantText(english: "Desktop Wizard", chinese: "桌面向导"),
+            title: assistantText(english: "Desktop Assistant", chinese: "桌面助手"),
             action: nil,
             keyEquivalent: ""
         )
