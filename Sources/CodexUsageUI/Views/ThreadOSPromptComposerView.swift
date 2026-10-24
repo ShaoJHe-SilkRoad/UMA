@@ -855,13 +855,24 @@ public struct ThreadOSPromptComposerView: View {
 
     private func effortLabel(_ effort: String) -> String {
         if language == .simplifiedChinese {
-            return ["low": "低", "medium": "中", "high": "高", "xhigh": "极高", "ultra": "Ultra"][effort] ?? effort
+            return ["low": "低", "medium": "中", "high": "高", "xhigh": "极高", "ultra": "超高"][effort] ?? effort
         }
         return ["low": "Low", "medium": "Medium", "high": "High", "xhigh": "Ex High", "ultra": "Ultra"][effort] ?? effort
     }
 
     private func effortOptions(for role: ThreadOSPromptRole) -> [ThreadOSPromptPopup.Option] {
-        var values = ThreadOSLeaderPrompt.supportedEfforts.map { ThreadOSPromptPopup.Option(title: $0 == "ultra" && form.ultraAvailability(for: role) == .unverified ? "Ultra · ?" : effortLabel($0), value: $0, enabled: form.canSelect(model: form.selection(for: role).model, effort: $0)) }
+        var values = ThreadOSLeaderPrompt.supportedEfforts.map { effort in
+            // The unverified marker hangs off the translated label rather than
+            // replacing it: it used to be the literal "Ultra · ?", so Chinese
+            // lost the translation precisely when the state was unknown.
+            let unverified = effort == "ultra"
+                && form.ultraAvailability(for: role) == .unverified
+            return ThreadOSPromptPopup.Option(
+                title: unverified ? "\(effortLabel(effort)) · ?" : effortLabel(effort),
+                value: effort,
+                enabled: form.canSelect(model: form.selection(for: role).model, effort: effort)
+            )
+        }
         let current = form.selection(for: role).effort
         if !ThreadOSLeaderPrompt.supportedEfforts.contains(current) {
             let title = language == .simplifiedChinese
@@ -932,9 +943,12 @@ enum ThreadOSPromptComposerSummary {
         }
     }
 
-    private static func effortLabel(_ effort: String, language: AppLanguage) -> String {
+    /// Not private: a test pins that every effort the menu can show has a
+    /// label in both languages, which is how `ultra` was found rendering
+    /// its raw key in Chinese.
+    static func effortLabel(_ effort: String, language: AppLanguage) -> String {
         if language == .simplifiedChinese {
-            return ["low": "低", "medium": "中", "high": "高", "xhigh": "极高", "ultra": "Ultra"][effort] ?? effort
+            return ["low": "低", "medium": "中", "high": "高", "xhigh": "极高", "ultra": "超高"][effort] ?? effort
         }
         return ["low": "Low", "medium": "Medium", "high": "High", "xhigh": "Ex High", "ultra": "Ultra"][effort] ?? effort
     }

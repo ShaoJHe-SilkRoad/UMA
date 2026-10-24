@@ -608,7 +608,10 @@ import Testing
                 let efforts = effort.itemArray.map { $0.title }
                 #expect(efforts.count == effortTitles.count + 1)
                 #expect(Array(efforts.prefix(effortTitles.count)) == effortTitles)
-                #expect(efforts.last?.hasPrefix("Ultra") == true)
+                // The fifth entry is the translated Ultra label, plus the
+                // role's verification state when that is still unknown.
+                let ultraLabel = language == .simplifiedChinese ? "超高" : "Ultra"
+                #expect(efforts.last?.hasPrefix(ultraLabel) == true)
                 #expect(model.target != nil && model.action != nil && model.selectedItem != nil)
                 #expect(effort.target != nil && effort.action != nil && effort.selectedItem != nil)
                 #expect(model.frame.width > 0 && model.frame.height > 0)
