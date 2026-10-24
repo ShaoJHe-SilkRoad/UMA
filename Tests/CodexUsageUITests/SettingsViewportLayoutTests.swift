@@ -20,8 +20,13 @@ struct SettingsViewportLayoutTests {
         let actions = descendants(fixture.host).compactMap { $0 as? NSButton }.filter {
             $0.accessibilityIdentifier().hasPrefix("uma.settings.hesectorium.")
         }
-        let expected: Set<String> = ["install", "repair", "automation", "mount", "eject", "refresh"]
+        // Mounting left this pane in 0.17.2, which moved per-volume loading to
+        // the Sectorium page; the pane now says so itself in the footer row
+        // below. A `mount` button here would be the defect, not its absence —
+        // but this set kept naming one, and had been failing unread since.
+        let expected: Set<String> = ["install", "repair", "automation", "eject", "refresh"]
         #expect(Set(actions.compactMap { $0.accessibilityIdentifier().split(separator: ".").last.map(String.init) }) == expected)
+        var pinned: Set<String> = []
         for action in actions {
             let rect = action.convert(action.bounds, to: fixture.host)
             #expect(rect.minX >= 180 && rect.maxX <= size.width + 1,
@@ -32,8 +37,16 @@ struct SettingsViewportLayoutTests {
                 if let scroll = view as? NSScrollView { scrolls.append(scroll) }
                 ancestor = view.superview
             }
+            guard let scroll = scrolls.first else {
+                // Outside the scrolling content: a pinned control, which has to
+                // be inside the viewport as it stands, because no amount of
+                // scrolling could ever bring it into view.
+                pinned.insert(String(action.accessibilityIdentifier().split(separator: ".").last ?? ""))
+                #expect(fixture.host.bounds.insetBy(dx: -1, dy: -1).contains(rect),
+                        "A pinned action must be visible without scrolling: \(action.title), \(rect)")
+                continue
+            }
             #expect(scrolls.count == 1, "Storage actions need one scrolling viewport, not a nested form")
-            let scroll = try #require(scrolls.first)
             let document = try #require(scroll.documentView)
             let target = action.convert(action.bounds, to: document)
             document.scrollToVisible(target)
@@ -42,6 +55,10 @@ struct SettingsViewportLayoutTests {
                     "Every action must be fully reachable by vertical scrolling: \(action.title)")
             #expect(abs(scroll.contentView.bounds.minX) < 1, "No horizontal scrolling is needed")
         }
+        // Pinning is the exception, so it is named: an action that quietly left
+        // the scrolling content would otherwise stop being checked for reach at
+        // all, and this is the assertion that would notice.
+        #expect(pinned == ["refresh"])
         #expect(fixture.runner.mutatingCalls == 0)
     }
 

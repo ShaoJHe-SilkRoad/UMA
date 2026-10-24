@@ -112,7 +112,14 @@ struct M5RMXUIFIXG1DesktopAssistantTests {
         #expect(panel.backgroundColor.alphaComponent == 0)
         #expect(panel.contentView?.layer?.borderWidth == 0)
         #expect(panel.contentView?.layer?.shadowOpacity == 0)
-        #expect(panel.contentView?.gestureRecognizers.count == 1)
+        // Counts only what the app installs. The content view is an
+        // NSHostingView, and SwiftUI puts its own FocusTapGestureRecognizer
+        // there too — the total reads two, one of them SwiftUI's — so the
+        // total was never the app's to keep. What matters is that the app
+        // owns exactly one drag recognizer.
+        let ownRecognizers = (panel.contentView?.gestureRecognizers ?? [])
+            .filter { $0 is DesktopAssistantDragGestureRecognizer }
+        #expect(ownRecognizers.count == 1)
         #expect(!panel.canBecomeKey)
         #expect(!panel.canBecomeMain)
         #expect(panel.styleMask.contains(.nonactivatingPanel))
