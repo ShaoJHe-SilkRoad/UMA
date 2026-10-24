@@ -48,12 +48,24 @@ private final class ObservationOperationGate: OperationLock, @unchecked Sendable
     let resume = DispatchSemaphore(value: 0)
     func acquire() -> Bool {
         entered.signal()
-        _ = resume.wait(timeout: .now() + 5)
+        // Self-releases only so a failing test cannot hang forever. It has to
+        // outlast every positive wait below: were it to come free on its own
+        // first, a caller that really does block on the lock would complete
+        // anyway and look as though it had never blocked.
+        _ = resume.wait(timeout: .now() + 120)
         return false
     }
     func release() {}
 }
 
+/// Waits for a fixture signal.
+///
+/// Every bound passed here is a hang-guard, not a speed contract: what these
+/// tests assert is that something happens, or — for the one deliberately short
+/// bound below — that it has not happened yet. A full parallel suite run was
+/// measured delaying these handoffs by seconds where an isolated run takes
+/// tens of milliseconds, so the positive bounds carry that much slack. The
+/// short bound is itself an assertion and is left alone.
 private func observationSignal(_ semaphore: DispatchSemaphore, seconds: Double) -> Bool {
     semaphore.wait(timeout: .now() + seconds) == .success
 }
@@ -73,14 +85,16 @@ struct SectoriumObservationBudgetTests {
             installer: HESectoriumInstaller(paths: paths, home: root.appendingPathComponent("home")),
             runner: base, sectoriumDeviceObserver: source)
         let operation = Task.detached { service.installRepair(.repair) }
-        let held = await Task.detached { observationSignal(gate.entered, seconds: 3) }.value
+        let held = await Task.detached { observationSignal(gate.entered, seconds: 30) }.value
         guard held else { gate.resume.signal(); _ = await operation.value; Issue.record("Fixture gate unavailable"); return }
         let displayed = DispatchSemaphore(value: 0)
         let display = Task.detached {
             defer { displayed.signal() }
             return try service.observeSectoriumInventoryForDisplay()
         }
-        let completedBeforeRelease = await Task.detached { observationSignal(displayed, seconds: 1) }.value
+        // Independence, not speed: the display inventory has to finish before
+        // the signal on the next line, while the Service still owns its lock.
+        let completedBeforeRelease = await Task.detached { observationSignal(displayed, seconds: 15) }.value
         gate.resume.signal()
         #expect(completedBeforeRelease)
         #expect(try await display.value.isEmpty)
@@ -102,7 +116,7 @@ struct SectoriumObservationBudgetTests {
             installer: HESectoriumInstaller(paths: paths, home: root.appendingPathComponent("home")),
             runner: base, sectoriumDeviceObserver: source)
         let operation = Task.detached { service.installRepair(.repair) }
-        let held = await Task.detached { observationSignal(gate.entered, seconds: 3) }.value
+        let held = await Task.detached { observationSignal(gate.entered, seconds: 30) }.value
         guard held else {
             gate.resume.signal(); _ = await operation.value
             Issue.record("The isolated operation did not acquire the Service lock")
@@ -119,7 +133,11 @@ struct SectoriumObservationBudgetTests {
                 return first.isEmpty && nested.isEmpty
             }
         }
-        let queued = await Task.detached { observationSignal(requested, seconds: 3) }.value
+        let queued = await Task.detached { observationSignal(requested, seconds: 30) }.value
+        // Short on purpose, and not widened with the others: this one is the
+        // assertion. `queued` above already proves the task is running, so a
+        // scope that has not started by now is being held off by the lock
+        // rather than merely waiting to be scheduled.
         let startedWhileBlocked = await Task.detached { observationSignal(observing, seconds: 0.05) }.value
         gate.resume.signal()
         #expect(queued && !startedWhileBlocked)
@@ -159,7 +177,7 @@ struct SectoriumObservationBudgetTests {
                 #expect(throws: CountingObservationDeviceSource.Unavailable.self) { try service.observeSectoriumDevices() }
             }
         }
-        let released = await Task.detached { observationSignal(completed, seconds: 3) }.value
+        let released = await Task.detached { observationSignal(completed, seconds: 30) }.value
         #expect(released)
         if released { await next.value }
         #expect(source.calls == 2)

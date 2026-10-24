@@ -335,13 +335,19 @@ struct M1AG1ProtocolContractTests {
             response(2, result: ["account": NSNull(), "requiresOpenaiAuth": true])
         ])
         let queue = TransportQueue([firstTransport, secondTransport])
-        let session = CodexAppServerSession(transportFactory: { queue.next() })
+        // The optional statistics request is never answered, so elapsed time
+        // is the only evidence that the optional timeout was applied at all:
+        // dropping it falls back to the session's request timeout, pinned here
+        // rather than left at its default so the two are far apart. The bound
+        // sits between them instead of near either, because a full parallel
+        // suite run was measured inflating the 0.03s wait to 4.1 seconds.
+        let session = CodexAppServerSession(transportFactory: { queue.next() }, requestTimeout: 60)
         let client = CodexAppServerClient(resolver: FixedResolver(), session: session, optionalUsageTimeout: 0.03)
         let start = ContinuousClock.now
         let usage = try await client.fetchUsage()
         let elapsed = start.duration(to: .now)
         print("FIRST_INSTALL_FIXTURE optional_timeout_first_quota=\(elapsed)")
-        #expect(elapsed < .seconds(1))
+        #expect(elapsed < .seconds(20))
         #expect(usage.rateLimits.primary?.usedPercent == 20)
         #expect(!firstTransport.isRunning)
         do {

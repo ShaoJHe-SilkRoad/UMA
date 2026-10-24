@@ -1002,7 +1002,10 @@ struct SectoriumVisibleStateTests {
         let started = ProcessInfo.processInfo.systemUptime
         fixture.store.selectDevice(fixture.device.id)
         fixture.store.selectProfile(fixture.profile.id)
-        #expect(ProcessInfo.processInfo.systemUptime - started < 1,
+        // What selection must not wait for is the gate above, which holds for
+        // two minutes, so any bound far below that catches the regression. One
+        // second did not survive a full parallel suite run.
+        #expect(ProcessInfo.processInfo.systemUptime - started < 10,
             "Selection must not wait for the service observation gate or perform UI-thread I/O")
         #expect(fixture.store.workbench.selectedDeviceID == fixture.device.id)
         #expect(fixture.store.workbench.selectedProfileID == fixture.profile.id)
@@ -1036,7 +1039,7 @@ struct SectoriumVisibleStateTests {
         defer { freshGate.release() }
         let started = ProcessInfo.processInfo.systemUptime
         fixture.store.selectDevice(other.id)
-        #expect(ProcessInfo.processInfo.systemUptime - started < 1)
+        #expect(ProcessInfo.processInfo.systemUptime - started < 10)
         #expect(fixture.store.workbench.selectedDeviceID == other.id)
         #expect(!fixture.store.hasObservedStatus && !fixture.store.canBeginWholeDeviceEject)
         oldGate.release()
@@ -2009,7 +2012,11 @@ struct SectoriumVisibleStateTests {
 
     private func eventually(diagnostics: @autoclosure @MainActor () -> String, _ condition: @MainActor () -> Bool,
                             line: Int = #line) async throws {
-        let deadline = ProcessInfo.processInfo.systemUptime + 5
+        // A hang-guard, not a speed bound. The loop below drives the store by
+        // pumping the run loop in 5ms slices, which progresses far slower under
+        // a full parallel suite run than in isolation; a 5-second deadline
+        // failed there while passing every isolated run.
+        let deadline = ProcessInfo.processInfo.systemUptime + 60
         while !condition(), ProcessInfo.processInfo.systemUptime < deadline {
             deliverScheduledObservation()
             try await Task.sleep(for: .milliseconds(5))
@@ -2233,7 +2240,11 @@ private final class VisibleStateGate: @unchecked Sendable {
     var entered: Bool { lock.withLock { didEnter } }
     func wait() {
         lock.withLock { didEnter = true }
-        _ = semaphore.wait(timeout: .now() + 10)
+        // Self-releases only so a failing test cannot hang forever, and must
+        // outlast `eventually`'s deadline: a gate that came free on its own
+        // mid-test would let blocked work through and prove the opposite of
+        // what the test around it asserts.
+        _ = semaphore.wait(timeout: .now() + 120)
     }
     func release() {
         let shouldRelease = lock.withLock { if didRelease { return false }; didRelease = true; return true }

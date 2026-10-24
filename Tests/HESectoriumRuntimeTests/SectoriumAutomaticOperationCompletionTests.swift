@@ -59,14 +59,17 @@ struct SectoriumAutomaticOperationCompletionTests {
             }
             // A synchronous observer must be able to take both locks on another
             // thread; recursive same-thread access would hide an early signal.
-            #expect(observed.wait(timeout: .now() + 2) == .success)
+            // The bound is a deadlock guard rather than a speed claim, and is
+            // generous because a full parallel suite run delays this handoff by
+            // seconds where an isolated run takes milliseconds.
+            #expect(observed.wait(timeout: .now() + 60) == .success)
         }
         defer { NotificationCenter.default.removeObserver(token) }
         #expect(service.runApplicationAutomationAtStartup().succeeded)
         #expect(service.runApplicationAutomation(.imageChanged).succeeded)
         #expect(service.runAutomationAgentAtStartup().succeeded)
         #expect(service.runAutomationAgent(.imageChanged).succeeded)
-        #expect(observations.wait(timeout: .now() + 2) == .success)
+        #expect(observations.wait(timeout: .now() + 60) == .success)
         #expect(signals.count == 4)
         #expect(fixture.runner.calls == 0)
     }
