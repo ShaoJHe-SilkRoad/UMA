@@ -208,6 +208,16 @@ public struct AgentGlanceRow: View {
         .padding(.vertical, verticalPadding)
         .background { rowBackground }
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay {
+            // The remaining-use fill tints the whole row once usage is high,
+            // which a 7.5% selection tint cannot show through. An outline in
+            // the accent colour marks the selected row at any fill.
+            if selected {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(Color(nsColor: .controlAccentColor), lineWidth: 2)
+                    .allowsHitTesting(false)
+            }
+        }
         .contentShape(Rectangle())
         .help(displayName)
         .accessibilityElement(children: .ignore)
