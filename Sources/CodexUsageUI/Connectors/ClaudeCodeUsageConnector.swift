@@ -265,6 +265,12 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
     static let automaticRefreshTimeout: TimeInterval = 45
     static let maximumRetainedAge: TimeInterval = 30 * 60
     static let maximumFutureSkew: TimeInterval = 30
+    /// The least time between two full reads of local activity that file
+    /// changes start. Claude Code appends to its transcript many times a
+    /// second while it works, and each full read costs about two seconds of
+    /// CPU on a busy machine, so reads that followed every change kept a core
+    /// busy. Explicit refreshes are not held back by this.
+    static let minimumObservedLocalReadInterval: TimeInterval = 4
 
     private static let capabilities: Set<AgentConnectorCapability> = [
         .connect,
@@ -349,8 +355,13 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
     private let desktopPlanUsageReader: (any ClaudeDesktopPlanUsageReading)?
     private let desktopActivityContract: ClaudeDesktopActivityContract
     private let anchorStore: (any ClaudeSmartAnchorStoring)?
+    private let observedLocalReadInterval: TimeInterval
     private var localActivityObserver: CodexLocalActivityObserver?
     private var desktopPlanUsageMonitor: ClaudeDesktopPlanUsageMonitor?
+    private var observedLocalReadTask: Task<Void, Never>?
+    private var observedLocalReadPending = false
+    private var observedLocalReadGeneration: UInt64 = 0
+    private var lastLocalInputsReadAt: ContinuousClock.Instant?
 
     private var snapshot: AgentUsageSnapshot
     private var lastGood: AgentUsageSnapshot?
@@ -412,9 +423,11 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         localActivityReader: (any ClaudeLocalActivityReading)? = nil,
         desktopPlanUsageReader: (any ClaudeDesktopPlanUsageReading)? = nil,
         desktopActivityContract: ClaudeDesktopActivityContract = .notApplicable,
-        anchorStore: (any ClaudeSmartAnchorStoring)? = nil
+        anchorStore: (any ClaudeSmartAnchorStoring)? = nil,
+        observedLocalReadInterval: TimeInterval = minimumObservedLocalReadInterval
     ) {
         self.integration = integration
+        self.observedLocalReadInterval = observedLocalReadInterval
         self.hasConsent = hasConsent
         self.clearConsent = clearConsent
         // Legacy Browser Sync cache reads/writes are intentionally retired.
@@ -659,6 +672,7 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         statusStateMonitor?.stop()
         localActivityObserver?.stop()
         desktopPlanUsageMonitor?.stop()
+        cancelObservedLocalRead()
         lastGood = nil
         await clearCache()
         try? await anchorStore?.clear()
@@ -694,6 +708,7 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         statusStateMonitor?.stop()
         localActivityObserver?.stop()
         desktopPlanUsageMonitor?.stop()
+        cancelObservedLocalRead()
     }
 
     func currentSnapshot() async -> AgentUsageSnapshot {
@@ -1060,8 +1075,55 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         await acceptStatusLine(packet)
     }
 
+    /// The status line is one small file. Its change does not mean the
+    /// project transcripts changed; when they did, their own observer says so.
     private func statusStateChanged() async {
-        await refreshLocalInputs()
+        guard await hasConsent() else { return }
+        await loadSmartStateIfNeeded()
+        localSmartReadError = false
+        await applyStatusAndPublish()
+    }
+
+    /// One lane for the reads that file changes start. A change while the lane
+    /// is idle reads at once; changes during a read, or within
+    /// `minimumObservedLocalReadInterval` of the last read, collapse into one
+    /// read when the interval has passed.
+    private func scheduleObservedLocalRead() {
+        guard localSmartStarted else { return }
+        observedLocalReadPending = true
+        guard observedLocalReadTask == nil else { return }
+        let generation = observedLocalReadGeneration
+        observedLocalReadTask = Task { await self.drainObservedLocalReads(generation: generation) }
+    }
+
+    private func drainObservedLocalReads(generation: UInt64) async {
+        defer {
+            // A lane cancelled by stop must not clear the one a later start made.
+            if generation == observedLocalReadGeneration { observedLocalReadTask = nil }
+        }
+        while observedLocalReadPending, !Task.isCancelled, localSmartStarted {
+            if let last = lastLocalInputsReadAt {
+                let elapsed = last.duration(to: .now)
+                let interval = Duration.seconds(observedLocalReadInterval)
+                if elapsed < interval {
+                    let wait = interval - elapsed
+                    try? await sleep(
+                        Double(wait.components.seconds)
+                            + Double(wait.components.attoseconds) / 1e18
+                    )
+                    guard !Task.isCancelled, localSmartStarted else { break }
+                }
+            }
+            observedLocalReadPending = false
+            await refreshLocalInputs()
+        }
+    }
+
+    private func cancelObservedLocalRead() {
+        observedLocalReadGeneration &+= 1
+        observedLocalReadTask?.cancel()
+        observedLocalReadTask = nil
+        observedLocalReadPending = false
     }
 
     /// Starts only the sanitized Browser Accuracy callback boundary. This is
@@ -1098,7 +1160,7 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
             as? any ClaudeLocalActivityObservationProviding
         else { return }
         let observer = provider.makeLocalActivityObserver { [weak self] in
-            Task { await self?.refreshLocalInputs() }
+            Task { await self?.scheduleObservedLocalRead() }
         }
         localActivityObserver = observer
         observer.start()
@@ -1113,7 +1175,7 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
             as? any ClaudeDesktopPlanUsageObservationProviding
         else { return }
         let monitor = provider.makeMonitor { [weak self] in
-            Task { await self?.refreshLocalInputs() }
+            Task { await self?.scheduleObservedLocalRead() }
         }
         desktopPlanUsageMonitor = monitor
         monitor.start()
@@ -1137,6 +1199,7 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
         guard await hasConsent() else { return }
         await loadSmartStateIfNeeded()
         localSmartReadError = false
+        lastLocalInputsReadAt = .now
         if let localActivityReader {
             localActivityReaderInvocationCount += 1
             claudeProjectsAccessCount += 1
@@ -1151,6 +1214,10 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
                 desktopPlanUsageAcceptedCount += 1
             }
         }
+        await applyStatusAndPublish()
+    }
+
+    private func applyStatusAndPublish() async {
         if let statusStateStore {
             do {
                 if let packet = try statusStateStore.read() {
