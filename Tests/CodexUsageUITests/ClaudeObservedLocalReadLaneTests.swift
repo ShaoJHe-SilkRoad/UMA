@@ -60,20 +60,25 @@ struct ClaudeObservedLocalReadLaneTests {
 
     @Test("Stopping drops a read that was still waiting")
     func stopDropsWaitingRead() async throws {
+        // Long enough that stop() always lands inside it, even when a loaded
+        // machine stretches the pause below; the full parallel suite once
+        // stretched a 0.1 s pause past a 0.5 s interval.
+        let interval: TimeInterval = 5
         let probe = LaneReaderProbe()
         let connector = ClaudeCodeUsageConnector(
             integration: .unavailable(),
             hasConsent: { true },
             localActivityReader: LaneCountingReader(probe: probe),
-            observedLocalReadInterval: Self.interval
+            observedLocalReadInterval: interval
         )
         await connector.start()
         let change = try #require(probe.onChange)
         change()
         // Let the change reach the lane, which is now waiting out the interval.
-        try await Task.sleep(for: .seconds(Self.interval / 5))
+        try await Task.sleep(for: .milliseconds(200))
         await connector.stop()
-        try await Task.sleep(for: .seconds(Self.interval * 3))
+        // Past the point where the waiting read would have run.
+        try await Task.sleep(for: .seconds(interval + 1))
         #expect(probe.reads == 1)
     }
 
