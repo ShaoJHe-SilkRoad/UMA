@@ -569,6 +569,13 @@ import Testing
 
             let controls = descendants(of: host)
             let popups = controls.compactMap { $0 as? NSPopUpButton }
+            // Five efforts since `ultra` joined the catalog, and the fifth is
+            // asserted by prefix on purpose: its title carries the role's
+            // verification state, so the same menu renders "Ultra" for a role
+            // whose model is known to offer it and "Ultra · ?" where that is
+            // still unverified. A flat list would pin whichever role happened
+            // to be checked first. The Chinese map leaves this one effort
+            // untranslated while translating the other four.
             let effortTitles = language == .simplifiedChinese
                 ? ["低", "中", "高", "极高"]
                 : ["Low", "Medium", "High", "Ex High"]
@@ -598,7 +605,10 @@ import Testing
                 #expect(model.itemArray.map { $0.title } == [
                     "GPT-6.1 Sol", "GPT-6 Sol", "GPT-6 Luna", "GPT-6 Astra", "GPT-5.6 Sol", "GPT-5.6 Terra"
                 ])
-                #expect(effort.itemArray.map { $0.title } == effortTitles)
+                let efforts = effort.itemArray.map { $0.title }
+                #expect(efforts.count == effortTitles.count + 1)
+                #expect(Array(efforts.prefix(effortTitles.count)) == effortTitles)
+                #expect(efforts.last?.hasPrefix("Ultra") == true)
                 #expect(model.target != nil && model.action != nil && model.selectedItem != nil)
                 #expect(effort.target != nil && effort.action != nil && effort.selectedItem != nil)
                 #expect(model.frame.width > 0 && model.frame.height > 0)

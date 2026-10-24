@@ -86,28 +86,71 @@ public struct FactoriumV2SettingsDraft: Codable, Equatable, Sendable {
         catalogRevision: String? = nil,
         id: String = "cfg-" + UUID().uuidString.lowercased(),
         revision: Int = 1,
-        roles: [FactoriumV2Role: FactoriumV2RoleSetting] = Self.defaultRoles,
+        roles: [FactoriumV2Role: FactoriumV2RoleSetting]? = nil,
         coderWorkers: [FactoriumV2WorkerSlot]? = nil,
         reviewerWorkers: [FactoriumV2WorkerSlot]? = nil
     ) {
         self.project = project
-        self.catalogRevision = catalogRevision ?? Self.catalogRevision
+        let revisionInUse = catalogRevision ?? Self.catalogRevision
+        self.catalogRevision = revisionInUse
         self.id = id
         self.revision = revision
-        self.roles = roles
-        let coder = roles[.coder]?.selection ?? Self.defaultRoles[.coder]!.selection
-        let reviewer = roles[.reviewer]?.selection ?? Self.defaultRoles[.reviewer]!.selection
+        // Defaults come from the catalog this draft is pinned to, not from a
+        // frozen table. A draft pinned to an older revision used to be born
+        // invalid, because the frozen defaults named models that revision
+        // never had.
+        let resolved = roles ?? Self.defaultRoles(for: revisionInUse)
+        self.roles = resolved
+        let coder = resolved[.coder]?.selection ?? Self.fallbackRoles[.coder]!.selection
+        let reviewer = resolved[.reviewer]?.selection ?? Self.fallbackRoles[.reviewer]!.selection
         self.coderWorkers = coderWorkers ?? Array(repeating: .init(selection: coder), count: 3)
         self.reviewerWorkers = reviewerWorkers ?? Array(repeating: .init(selection: reviewer), count: 3)
     }
 
-    public static let defaultRoles: [FactoriumV2Role: FactoriumV2RoleSetting] = [
+    /// The role each catalog preset entry stands for. The catalog models a
+    /// coding team, not Factorium's five roles, so `repair` — which has no
+    /// preset of its own — takes the worker tier it belongs to.
+    private static let presetRoleNames: [FactoriumV2Role: String] = [
+        .leader: "LEADER", .qa: "QA", .coder: "FOREMAN",
+        .repair: "CODING_WORKER", .reviewer: "REVIEWER",
+    ]
+
+    /// `astra-balanced` is the catalog's own middle preset and exists in every
+    /// published revision, so it is what a draft starts from. Resolving it per
+    /// revision is the whole point: an older catalog yields the models that
+    /// catalog actually has.
+    public static func defaultRoles(
+        for revision: String
+    ) -> [FactoriumV2Role: FactoriumV2RoleSetting] {
+        guard let catalog = try? ThreadOSSettingsCodec.loadCatalog(revision: revision),
+              let preset = catalog.presets["astra-balanced"]
+        else { return fallbackRoles }
+        var resolved: [FactoriumV2Role: FactoriumV2RoleSetting] = [:]
+        for (role, name) in presetRoleNames {
+            guard let spec = preset.roles[name] else { return fallbackRoles }
+            resolved[role] = .init(selection: .init(
+                model: spec.model, effort: spec.reasoningEffort, speed: "standard"
+            ))
+        }
+        return resolved
+    }
+
+    /// What the draft started from before defaults became catalog-resolved.
+    /// Reached only when a catalog cannot be read at all, so a draft is still
+    /// constructible rather than silently empty.
+    public static let fallbackRoles: [FactoriumV2Role: FactoriumV2RoleSetting] = [
         .leader: .init(selection: .init(model: "gpt-6.1-sol", effort: "high", speed: "standard")),
         .qa: .init(selection: .init(model: "gpt-6.1-sol", effort: "high", speed: "standard")),
         .coder: .init(selection: .init(model: "gpt-6-luna", effort: "medium", speed: "standard")),
         .repair: .init(selection: .init(model: "gpt-5.6-terra", effort: "medium", speed: "standard")),
         .reviewer: .init(selection: .init(model: "gpt-6-luna", effort: "medium", speed: "standard")),
     ]
+
+    /// The defaults a new draft gets today, i.e. resolved against the revision
+    /// a new draft is pinned to.
+    public static var defaultRoles: [FactoriumV2Role: FactoriumV2RoleSetting] {
+        defaultRoles(for: catalogRevision)
+    }
 
     public var isValidProject: Bool { ThreadOSSettingsDraft.isToken(project) }
     public var isLocallyValid: Bool { (try? canonicalRequest()) != nil }

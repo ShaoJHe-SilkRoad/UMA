@@ -46,6 +46,11 @@ public struct ThreadOSCapabilities: Sendable {
         return Self(models: models, observedAt: date, client: "Codex CLI " + (root["client_version"] as? String ?? "unknown"), now: now)
     }
     public static func catalogAllows(model: String, effort: String) -> Bool {
+        // The ultra catalog on purpose: `ultra` exists only there, so this is
+        // what makes that effort selectable at all. The draft and the
+        // retirement rules read the current catalog instead, which is not a
+        // divergence to unify — the two catalogs answer different questions,
+        // and moving either one breaks the other's tests.
         guard let catalog = try? ThreadOSSettingsCodec.loadCatalog(revision: ThreadOSSettingsCodec.ultraCatalogRevision) else { return false }
         return catalog.models[model]?.reasoningEfforts.contains(effort) == true
     }

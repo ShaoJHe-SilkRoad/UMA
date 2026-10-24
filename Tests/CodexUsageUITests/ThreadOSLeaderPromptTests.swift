@@ -7,7 +7,9 @@ struct ThreadOSLeaderPromptTests {
         .leader: .init(model: "gpt-6.1-sol", effort: "medium"),
         .coderCluster: .init(model: "gpt-5.6-terra", effort: "medium"),
         .reviewerCluster: .init(model: "gpt-5.6-terra", effort: "medium"),
-        .qa: .init(model: "gpt-5.6-sol", effort: "high")
+        // Was gpt-5.6-sol, which the current catalog does not carry, so every
+        // case built on this fixture was refused before it asserted anything.
+        .qa: .init(model: "gpt-6-luna", effort: "high")
     ]
     private let variedSelections: [ThreadOSPromptRole: ThreadOSPromptSelection] = [
         .leader: .init(model: "gpt-5.6-terra", effort: "xhigh"),
@@ -16,11 +18,25 @@ struct ThreadOSLeaderPromptTests {
         .qa: .init(model: "gpt-6-luna", effort: "medium")
     ]
 
-    @Test func exposesExactlySixModelsAndFourEfforts() {
+    /// Renamed from `exposesExactlySixModelsAndFourEfforts`: `ultra` arrived, so
+    /// there are five efforts. What the lists advertise and what a selection is
+    /// allowed to be are no longer the same question — the catalog decides the
+    /// second, per model — which is why the tests below ask the catalog.
+    @Test func exposesSixModelsAndFiveEfforts() {
         #expect(ThreadOSLeaderPrompt.supportedModels == [
             "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra"
         ])
-        #expect(ThreadOSLeaderPrompt.supportedEfforts == ["low", "medium", "high", "xhigh"])
+        #expect(ThreadOSLeaderPrompt.supportedEfforts == ["low", "medium", "high", "xhigh", "ultra"])
+    }
+
+    /// Pairs the current catalog accepts, so a test iterates what is usable
+    /// rather than the raw cross-product of the two advertised lists.
+    private var catalogAllowedPairs: [(model: String, effort: String)] {
+        ThreadOSLeaderPrompt.supportedModels.flatMap { model in
+            ThreadOSLeaderPrompt.supportedEfforts
+                .filter { ThreadOSCapabilities.catalogAllows(model: model, effort: $0) }
+                .map { (model, $0) }
+        }
     }
 
     @Test func generatesChinesePromptMappingAllFourIndependentSelections() throws {
@@ -33,34 +49,50 @@ struct ThreadOSLeaderPromptTests {
         try assertCommand(prompt, selections: selections)
     }
 
-    @Test func everySupportedModelAndEffortCanAppearInSelection() throws {
+    /// Was a raw cross-product of the two lists. That held while every model
+    /// offered the same efforts; `ultra` ended it, and a model the current
+    /// catalog does not carry at all refuses every effort. The pairs the
+    /// catalog allows must work, and a pair it refuses must be refused.
+    @Test func everyCatalogAllowedModelAndEffortCanAppearInSelection() throws {
+        let allowed = catalogAllowedPairs
+        #expect(!allowed.isEmpty)
+        for pair in allowed {
+            var values = selections
+            values[.leader] = .init(model: pair.model, effort: pair.effort)
+            let prompt = try ThreadOSLeaderPrompt.make(selections: values, language: .english)
+            try assertCommand(prompt, selections: values)
+        }
         for model in ThreadOSLeaderPrompt.supportedModels {
-            for effort in ThreadOSLeaderPrompt.supportedEfforts {
+            for effort in ThreadOSLeaderPrompt.supportedEfforts
+            where !ThreadOSCapabilities.catalogAllows(model: model, effort: effort) {
                 var values = selections
                 values[.leader] = .init(model: model, effort: effort)
-                let prompt = try ThreadOSLeaderPrompt.make(selections: values, language: .english)
-                try assertCommand(prompt, selections: values)
+                #expect(throws: ThreadOSLeaderPromptError.unsupportedSelection) {
+                    try ThreadOSLeaderPrompt.make(selections: values, language: .english)
+                }
             }
         }
     }
 
-    @Test func mapsEverySupportedModelAndEffortToItsOwnRoleInBothLanguages() throws {
+    /// The baseline's QA role used `gpt-5.6-sol`, which the current catalog does
+    /// not carry, so every case built on it was refused. It now uses a model
+    /// that catalog has, and the loop walks catalog-allowed pairs for the same
+    /// reason as the test above.
+    @Test func mapsEveryCatalogAllowedModelAndEffortToItsOwnRoleInBothLanguages() throws {
         let distinctBaseline: [ThreadOSPromptRole: ThreadOSPromptSelection] = [
             .leader: .init(model: "gpt-6.1-sol", effort: "low"),
             .coderCluster: .init(model: "gpt-5.6-terra", effort: "medium"),
             .reviewerCluster: .init(model: "gpt-6-luna", effort: "high"),
-            .qa: .init(model: "gpt-5.6-sol", effort: "xhigh")
+            .qa: .init(model: "gpt-6-astra", effort: "xhigh")
         ]
         for targetRole in ThreadOSPromptRole.allCases {
-            for model in ThreadOSLeaderPrompt.supportedModels {
-                for effort in ThreadOSLeaderPrompt.supportedEfforts {
-                    var current = distinctBaseline
-                    current[targetRole] = .init(model: model, effort: effort)
+            for pair in catalogAllowedPairs {
+                var current = distinctBaseline
+                current[targetRole] = .init(model: pair.model, effort: pair.effort)
 
-                    for language in [AppLanguage.simplifiedChinese, .english] {
-                        let prompt = try ThreadOSLeaderPrompt.make(selections: current, language: language)
-                        try assertCommand(prompt, selections: current)
-                    }
+                for language in [AppLanguage.simplifiedChinese, .english] {
+                    let prompt = try ThreadOSLeaderPrompt.make(selections: current, language: language)
+                    try assertCommand(prompt, selections: current)
                 }
             }
         }

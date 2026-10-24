@@ -35,7 +35,12 @@ struct FactoriumV2GoldenParityTests {
     }
 
     @Test func persistedDraftWithoutCatalogRevisionRemainsPinnedToTheLegacyCatalog() throws {
-        var legacyRoles = FactoriumV2SettingsDraft.defaultRoles
+        // Built from the legacy catalog's own defaults. Using the current
+        // ones left `.leader` and `.repair` on models that catalog never had,
+        // so the draft was invalid before the test asserted anything.
+        var legacyRoles = FactoriumV2SettingsDraft.defaultRoles(
+            for: ThreadOSSettingsCodec.legacyCatalogRevision
+        )
         legacyRoles[.qa] = .init(selection: .init(model: "gpt-6-astra", effort: "medium", speed: "standard"))
         legacyRoles[.coder] = .init(selection: .init(model: "gpt-5.6-terra", effort: "medium", speed: "standard"))
         legacyRoles[.reviewer] = .init(selection: .init(model: "gpt-5.6-terra", effort: "low", speed: "standard"))
@@ -60,16 +65,22 @@ struct FactoriumV2GoldenParityTests {
         let form = FactoriumV2FormState(preferences: preferences)
         form.select(project: draft.project)
 
-        form.selectRoleModel("gpt-6-sol", role: .qa)
+        // Was gpt-6-sol, which the current catalog retires, so the edit was
+        // correctly refused and the role never moved. The point here is what a
+        // model switch does to an explicit effort, not which model it is.
+        form.selectRoleModel("gpt-6-luna", role: .qa)
         form.selectSlotModel("gpt-6-luna", at: 0, for: .coder)
-        #expect(form.draft.roles[.qa]?.selection == .init(model: "gpt-6-sol", effort: "", speed: "standard"))
+        #expect(form.draft.roles[.qa]?.selection == .init(model: "gpt-6-luna", effort: "", speed: "standard"))
         #expect(form.draft.coderWorkers[0].selection == .init(model: "gpt-6-luna", effort: "", speed: "standard"))
         #expect(throws: (any Error).self) { try form.generatedRequest() }
 
         form.edit(allowIncompleteEffort: true) { $0.roles[.qa]?.selection.effort = "high" }
         form.edit(allowIncompleteEffort: true) { $0.coderWorkers[0].selection.effort = "xhigh" }
         #expect(form.draft.isLocallyValid)
-        #expect(try form.generatedRequest().settingsLine.contains("sol-luna-20260922.1"))
+        // A default-constructed draft pins to the current catalog, which has
+        // moved on from sol-luna-20260922.1 since this was written.
+        #expect(try form.generatedRequest().settingsLine
+            .contains(ThreadOSSettingsCodec.latestCatalogRevision))
     }
 
     @Test func swiftCanonicalizesEveryApplicableFrozenRequestAndValidatesEveryFrozenAck() throws {

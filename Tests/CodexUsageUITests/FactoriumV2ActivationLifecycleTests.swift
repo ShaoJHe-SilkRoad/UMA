@@ -45,7 +45,11 @@ struct FactoriumV2ActivationLifecycleTests {
         let generated = try form.generatedRequestForTransfer()
         #expect(form.draft.revision == 3)
         #expect(!form.requiresStandardConversion)
-        #expect(generated.text == generated.settingsLine)
+        // A transfer's text is the settings line plus the standing
+        // authorization, which is what the Copy control says it produces.
+        // Asserting equality predates that line being appended.
+        #expect(generated.text == generated.settingsLine + "\n"
+            + FactoriumV2FormState.leaderTransferAuthorization)
         #expect(try form.draft.canonicalRequest().contains("\"fast\"") == false)
         #expect(try ThreadOSSettingsPreferences.loadFactoriumV2LegacySnapshot(project: standardDraft.project, from: preferences)?.canonicalRequest() == fast)
     }
@@ -103,7 +107,9 @@ struct FactoriumV2ActivationLifecycleTests {
         #expect(form.draft == current && form.draft.revision == previewRevision)
 
         let first = try form.generatedRequestForTransfer()
-        #expect(first.text == first.settingsLine && form.draft.revision == previewRevision + 1)
+        #expect(first.text == first.settingsLine + "\n"
+            + FactoriumV2FormState.leaderTransferAuthorization)
+        #expect(form.draft.revision == previewRevision + 1)
         #expect(ThreadOSSettingsPreferences.loadFactoriumV2LegacySnapshots(project: "ARCHIVE_ALPHA", from: preferences) == [historical, current])
 
         let persistedHistory = preferences.value(for: v2Key)

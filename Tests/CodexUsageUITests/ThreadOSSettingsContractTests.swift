@@ -29,7 +29,10 @@ struct ThreadOSSettingsContractTests {
         #expect(FactoriumV2SettingsDraft.defaultRoles[.qa]?.selection == .init(model: "gpt-6.1-sol", effort: "high", speed: "standard"))
         #expect(FactoriumV2SettingsDraft.defaultRoles[.coder]?.selection == .init(model: "gpt-6-luna", effort: "medium", speed: "standard"))
         #expect(FactoriumV2SettingsDraft.defaultRoles[.reviewer]?.selection == .init(model: "gpt-6-luna", effort: "medium", speed: "standard"))
-        #expect(FactoriumV2SettingsDraft.defaultRoles[.repair]?.selection.model == "gpt-5.6-terra")
+        // Defaults now come from the catalog's own astra-balanced preset.
+        // `repair` has no preset role of its own, so it takes the worker tier
+        // it belongs to, which this catalog fills with gpt-6-luna.
+        #expect(FactoriumV2SettingsDraft.defaultRoles[.repair]?.selection.model == "gpt-6-luna")
     }
     @Test func frozenTU1FixtureHasAllCasesAndCanonicalBytes() throws {
         let fixture = try fixture()
