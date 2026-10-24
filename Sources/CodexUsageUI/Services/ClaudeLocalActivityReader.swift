@@ -706,7 +706,11 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
         else { return .refused }
         afterOpen?()
 
-        var lineBuffer = Data()
+        var lineBuffer: [UInt8] = []
+        // Bytes of `lineBuffer` already known to hold no newline. A line that
+        // spans many read chunks is searched once, not once per chunk; the
+        // longest real lines run to about a megabyte.
+        var scannedBytes = 0
         var recordCount = 0
         var actualBytesRead = 0
         var consumeRecords = true
@@ -723,44 +727,53 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
             }
             actualBytesRead += count
             lineBuffer.append(contentsOf: buffer.prefix(count))
-            while let newline = lineBuffer.firstIndex(of: 0x0A) {
-                var line = Data(lineBuffer[..<newline])
-                lineBuffer.removeSubrange(...newline)
+            // Lines are consumed by advancing `lineStart`; the consumed bytes
+            // are dropped once per chunk rather than once per line.
+            var lineStart = 0
+            while let newline = Self.newlineIndex(in: lineBuffer, from: scannedBytes) {
+                let start = lineStart
+                lineStart = newline + 1
+                scannedBytes = lineStart
                 // This newline closes the line we already gave up on, so it
                 // ends the drop rather than delimiting a record.
                 if droppingOverlongLine {
                     droppingOverlongLine = false
                     continue
                 }
-                if line.last == 0x0D { line.removeLast() }
+                var end = newline
+                if end > start, lineBuffer[end - 1] == 0x0D { end -= 1 }
                 // One line over the cap costs that line, not the file. The cap
                 // bounds memory, and legitimate activity approaches it: the
                 // longest line measured in real local activity was 954,251
                 // bytes, 91% of the cap. Failing the whole file there threw
                 // away every valid record beside it.
-                guard line.count <= Bounds.maximumBytesPerLine else {
+                guard end - start <= Bounds.maximumBytesPerLine else {
                     skippedLines += 1
                     continue
                 }
-                if consumeRecords, let record = record(fromData: line) {
+                if consumeRecords, let record = record(fromData: Data(lineBuffer[start..<end])) {
                     recordCount += 1
                     guard recordCount <= Bounds.maximumRecordCount else { return .refused }
                     if !consume(record) { consumeRecords = false }
                 }
             }
+            lineBuffer.removeFirst(lineStart)
+            scannedBytes = lineBuffer.count
             // No newline yet. Hold at most one cap's worth of a line in
             // memory: past that, drop bytes until the line ends.
             if droppingOverlongLine {
                 lineBuffer.removeAll(keepingCapacity: true)
+                scannedBytes = 0
             } else if lineBuffer.count > Bounds.maximumBytesPerLine {
                 skippedLines += 1
                 droppingOverlongLine = true
                 lineBuffer.removeAll(keepingCapacity: true)
+                scannedBytes = 0
             }
         }
         // The file ended inside a line we had given up on; it is already counted.
         if droppingOverlongLine { lineBuffer.removeAll() }
-        if !lineBuffer.isEmpty, consumeRecords, let record = record(fromData: lineBuffer) {
+        if !lineBuffer.isEmpty, consumeRecords, let record = record(fromData: Data(lineBuffer)) {
             recordCount += 1
             guard recordCount <= Bounds.maximumRecordCount else { return .refused }
             _ = consume(record)
@@ -839,7 +852,27 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
     }
 
     private static func nonReversibleDigest(_ value: String) -> String {
-        SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
+        // Lowercase hex, as `String(format: "%02x")` produced, without a
+        // format parse and a string allocation for every byte of every record.
+        var hex: [UInt8] = []
+        hex.reserveCapacity(SHA256.byteCount * 2)
+        for byte in SHA256.hash(data: Data(value.utf8)) {
+            hex.append(hexDigits[Int(byte >> 4)])
+            hex.append(hexDigits[Int(byte & 0x0F)])
+        }
+        return String(decoding: hex, as: UTF8.self)
+    }
+
+    private static let hexDigits = Array("0123456789abcdef".utf8)
+
+    private static func newlineIndex(in bytes: [UInt8], from offset: Int) -> Int? {
+        guard offset < bytes.count else { return nil }
+        return bytes.withUnsafeBufferPointer { buffer in
+            guard let base = buffer.baseAddress,
+                  let hit = memchr(base + offset, 0x0A, buffer.count - offset)
+            else { return nil }
+            return base.distance(to: hit.assumingMemoryBound(to: UInt8.self))
+        }
     }
 
     private static func isCurrentUserOwned(
