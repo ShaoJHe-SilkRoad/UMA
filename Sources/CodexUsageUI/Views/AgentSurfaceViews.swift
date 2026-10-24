@@ -279,7 +279,7 @@ public struct AgentGlanceRow: View {
         if let quota = provider.primaryQuota {
             components.append(quota.compactLabel)
         } else {
-            components.append(localized("No current usage", "暂无当前用量"))
+            components.append(localized("No quota reading", "无额度读数"))
         }
         return components.joined(separator: " · ")
     }
@@ -1086,7 +1086,7 @@ public struct AgentWorkspaceSurface: View {
                     Text(provider?.primaryDisplayText ?? "—")
                         .font(.system(size: 28, weight: .semibold, design: .rounded))
                         .monospacedDigit()
-                    Text(provider?.primaryQuota?.compactLabel ?? localized("No current usage", "暂无当前用量"))
+                    Text(provider?.primaryQuota?.compactLabel ?? localized("No quota reading", "无额度读数"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1110,7 +1110,7 @@ public struct AgentWorkspaceSurface: View {
                 }
             } else {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(localized("No current usage", "暂无当前用量")).font(.callout.weight(.medium))
+                    Text(localized("No quota reading", "无额度读数")).font(.callout.weight(.medium))
                     // Claude earns its own explanation: "connect or refresh"
                     // cannot produce a percentage here, so saying it misleads.
                     Text(providerID == .claude
