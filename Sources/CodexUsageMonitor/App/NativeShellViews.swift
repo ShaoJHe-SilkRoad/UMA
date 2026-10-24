@@ -24,7 +24,7 @@ private struct MainToolbarNavigationControl: NSViewRepresentable {
         control.controlSize = .regular
         for (index, label) in labels.enumerated() {
             control.setLabel(label, forSegment: index)
-            control.setWidth(118, forSegment: index)
+            control.setWidth(Self.segmentWidth(for: label, in: control), forSegment: index)
         }
         control.target = context.coordinator
         control.action = #selector(Coordinator.selectionChanged(_:))
@@ -37,9 +37,21 @@ private struct MainToolbarNavigationControl: NSViewRepresentable {
         context.coordinator.selection = $selection
         for (index, label) in labels.enumerated() {
             control.setLabel(label, forSegment: index)
+            control.setWidth(Self.segmentWidth(for: label, in: control), forSegment: index)
         }
+        control.invalidateIntrinsicContentSize()
         control.selectedSegment = MainSurfaceDestination.allCases.firstIndex(of: selection) ?? 0
         control.setAccessibilityLabel(accessibilityLabel)
+    }
+
+    /// Each segment fits its own label. A fixed 118 points cut the Chinese
+    /// labels, which carry their translation ("ThreadOS（线程工）"), while the
+    /// English ones did not need it and pushed the toolbar past the window's
+    /// minimum width.
+    static func segmentWidth(for label: String, in control: NSSegmentedControl) -> CGFloat {
+        let font = control.font ?? .systemFont(ofSize: NSFont.systemFontSize)
+        let text = (label as NSString).size(withAttributes: [.font: font]).width
+        return max(84, ceil(text) + 24)
     }
 
     @MainActor
@@ -301,8 +313,11 @@ struct MainWindowRootView: View {
                 labels: MainSurfaceDestination.allCases.map(destinationTitle),
                 accessibilityLabel: localized("AUV navigation", "AUV 导航")
             )
-            .frame(width: 360)
-            Spacer()
+            .fixedSize()
+            // No minimum: the toolbar's fixed parts already fill the narrowest
+            // window, and an eight-point spacer pushed them past it, shifting
+            // the whole row sideways on the Agents tab.
+            Spacer(minLength: 0)
             if navigation.destination == .agents {
                 MainToolbarActionButton(
                     label: localized("Scan for Agents", "扫描智能体"),
