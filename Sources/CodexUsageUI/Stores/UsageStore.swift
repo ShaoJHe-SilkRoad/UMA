@@ -357,22 +357,76 @@ public final class UsageStore: ObservableObject {
     /// nothing to report hands the menu bar down the list rather than blanking
     /// it.
     public var menuProvider: ProviderProductID? {
+        Self.menuProvider(inventory: productInventory, order: agentOrder)
+    }
+
+    public var menuPercent: Int? {
+        Self.menuPercent(inventory: productInventory, order: agentOrder)
+            ?? previewMenuPercent
+    }
+
+    /// What the menu bar shows: whose reading it is, and how much remains.
+    public struct MenuReading: Equatable, Sendable {
+        public let provider: ProviderProductID?
+        public let percent: Int?
+        public let language: AppLanguage
+    }
+
+    /// The menu bar reading, recomputed whenever the inventory, the user's
+    /// arrangement or the language is published, and only delivered when it
+    /// changes.
+    ///
+    /// It is computed from the values each publisher delivers, not by reading
+    /// the store back: `@Published` emits before the property is assigned, so
+    /// a reading taken from the store at that moment is the previous one. The
+    /// arrangement is part of it, so a rearranged list moves the menu bar at
+    /// once rather than when the next usage update happens to arrive.
+    public var menuReadingPublisher: AnyPublisher<MenuReading, Never> {
+        let previewPercent = previewMenuPercent
+        return Publishers.CombineLatest3($productInventory, $agentOrder, $language)
+            .map { inventory, order, language in
+                let provider = Self.menuProvider(inventory: inventory, order: order)
+                return MenuReading(
+                    provider: provider,
+                    percent: Self.menuPercent(inventory: inventory, order: order)
+                        ?? previewPercent,
+                    language: language
+                )
+            }
+            .removeDuplicates()
+            .eraseToAnyPublisher()
+    }
+
+    private static func menuProvider(
+        inventory: ProviderProductInventory,
+        order: [String]
+    ) -> ProviderProductID? {
         AgentDisplayOrder.menuReading(
-            amongEligible: orderedQuickPanelProviders
+            amongEligible: AgentDisplayOrder.apply(
+                inventory.quickPanelProviders,
+                order: order,
+                id: { $0.id.rawValue }
+            )
                 .filter { $0.primaryQuota?.value.remainingPercent != nil }
                 .map(\.id),
-            isArranged: !agentOrder.isEmpty,
+            isArranged: !order.isEmpty,
             preferred: .codex
         )
     }
 
-    public var menuPercent: Int? {
-        if let provider = menuProvider,
-           let remaining = productInventory.provider(provider)?
-            .primaryQuota?.value.remainingPercent {
-            return Int(remaining.rounded())
-        }
-        return previewOnly
+    private static func menuPercent(
+        inventory: ProviderProductInventory,
+        order: [String]
+    ) -> Int? {
+        guard let provider = menuProvider(inventory: inventory, order: order),
+              let remaining = inventory.provider(provider)?
+                .primaryQuota?.value.remainingPercent
+        else { return nil }
+        return Int(remaining.rounded())
+    }
+
+    private var previewMenuPercent: Int? {
+        previewOnly
             ? snapshot.periods.first(where: { !$0.isUnlimited })?.remainingPercent
             : nil
     }

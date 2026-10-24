@@ -202,8 +202,15 @@ struct STABG1StabilityContractTests {
             "Sources/CodexUsageMonitor/App/DesktopAssistantPanelController.swift"
         )
 
-        #expect(status.contains("store.$productInventory"))
-        #expect(status.contains("store.$language"))
+        // The status item no longer subscribes to the inventory and language
+        // itself: it read the store back inside those sinks, which run before
+        // the store holds the new values. It renders the store's reading
+        // publisher, which is built from the values being published, adds the
+        // user's arrangement, and delivers a reading only when it changes.
+        let store = try source("Sources/CodexUsageUI/Stores/UsageStore.swift")
+        #expect(status.contains("store.menuReadingPublisher"))
+        #expect(store.contains("Publishers.CombineLatest3($productInventory, $agentOrder, $language)"))
+        #expect(store.contains(".removeDuplicates()"))
         #expect(status.contains("self?.updateStatusButton()"))
         #expect(!status.contains("store.objectWillChange"))
         #expect(assistant.contains("let cardsChanged = cards != self.cards"))
