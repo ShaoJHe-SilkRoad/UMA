@@ -1284,9 +1284,16 @@ public struct AgentWorkspaceSurface: View {
                             .disabled(true)
                             .accessibilityIdentifier("uma.agent.claude.accuracy-unavailable")
                     case .onlineVerificationUnavailable:
-                        Button(localized("Online verification unavailable", "在线验证不可用")) {}
-                            .disabled(true)
-                            .accessibilityIdentifier("uma.agent.claude.accuracy-unavailable")
+                        // A state, not an action: there is nothing to press
+                        // and nothing will make it pressable here, so it reads
+                        // as status rather than as a greyed-out button.
+                        Label(
+                            localized("Online verification unavailable", "在线验证不可用"),
+                            systemImage: "minus.circle"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("uma.agent.claude.accuracy-unavailable")
                     }
                 }
                 Spacer()
