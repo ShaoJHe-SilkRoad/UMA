@@ -196,11 +196,17 @@ struct M6G2AntigravityCLIClientTests {
                 )
             )
         }
+        // The child has to outlive the timer by more than the scheduler can
+        // delay it. Both timeouts are cooperative-pool sleeps, and a full
+        // parallel run starved that pool long enough for a 5s child to exit on
+        // its own first; the runner then rightly returned its result. The
+        // timeout is still 0.05s; a runner that ignored it would wait out the
+        // 30s and then fail the same assertion.
         await #expect(throws: AntigravityCLIClientError.timedOut) {
             try await runner.run(
                 invocation(
                     executable: "/bin/sleep",
-                    arguments: ["5"],
+                    arguments: ["30"],
                     cwd: cwd,
                     timeout: 0.05
                 )
