@@ -248,7 +248,8 @@ struct UMA014M4RRuntimePreferenceTests {
         ])
         let data = try SettingsDiagnosticsExporter.data(
             activeProviderCount: 2,
-            preferences: preferences
+            preferences: preferences,
+            grokBotPresence: .notInstalled
         )
         let object = try #require(
             JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -262,7 +263,10 @@ struct UMA014M4RRuntimePreferenceTests {
             "automaticBackgroundRefresh",
             "refreshOnWake",
             "keepMonitoringWhenWindowsClose",
+            "grokBotPresence",
         ])
+        #expect(object["schemaVersion"] as? Int == 2)
+        #expect(object["grokBotPresence"] as? String == "notInstalled")
         #expect(object["activeProviderCount"] as? Int == 2)
         #expect(object["automaticBackgroundRefresh"] as? Bool == true)
         #expect(object["refreshOnWake"] as? Bool == true)
