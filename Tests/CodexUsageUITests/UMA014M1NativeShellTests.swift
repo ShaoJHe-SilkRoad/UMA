@@ -314,7 +314,13 @@ struct UMA014M1NativeShellTests {
         let views = try source("Sources/CodexUsageMonitor/App/NativeShellViews.swift")
         let surfaces = try source("Sources/CodexUsageUI/Views/AgentSurfaceViews.swift")
         let presentation = views + surfaces
-        #expect(presentation.contains("store.productInventory.agentWorkspaceProviders"))
+        // The agent list is the shared inventory in the user's arranged
+        // order (0.17.6). It must still be that inventory, not a list of the
+        // shell's own: the store derives the ordered one from it.
+        let store = try source("Sources/CodexUsageUI/Stores/UsageStore.swift")
+        #expect(presentation.contains("store.orderedWorkspaceProviders"))
+        #expect(store.filter { !$0.isWhitespace }
+            .contains("AgentDisplayOrder.apply(productInventory.agentWorkspaceProviders,"))
         #expect(presentation.contains("primaryDisplayText"))
         #expect(presentation.contains("quota.displayText"))
         #expect(presentation.contains("No active agents"))
@@ -329,7 +335,11 @@ struct UMA014M1NativeShellTests {
             "Sources/CodexUsageMonitor/App/NativeWindowControllers.swift",
             "Sources/CodexUsageMonitor/App/NativeShellViews.swift",
         ] {
-            let text = try source(file)
+            // The shell threads the Claude settings model through to the
+            // settings sheet that owns it (since 0.15 R16). That is a type it
+            // passes along, not Claude logic it runs, so only that one name is
+            // exempt; every other Claude browser type stays out.
+            let text = try source(file).replacingOccurrences(of: "ClaudeBrowserSettingsModel", with: "")
             for forbidden in [
                 "ClaudeCodeUsageConnector", "ClaudeBrowser", "SafariServices",
                 "PlugInKit", "WorkBuddyConnector", "AntigravityConnector", "ThreadOSRuntime",
@@ -358,7 +368,7 @@ struct UMA014M1NativeShellTests {
         #expect(script.contains("Development.ApplicationName"))
         #expect(script.contains("Development.BundleIdentifier"))
         #expect(
-            development["ApplicationName"] as? String == "UMA 0.15 Dev"
+            development["ApplicationName"] as? String == "UMA 0.17 Dev"
         )
         #expect(
             development["BundleIdentifier"] as? String

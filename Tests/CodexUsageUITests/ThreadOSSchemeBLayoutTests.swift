@@ -482,7 +482,7 @@ import HESectoriumRuntime
         #expect(!threadOSIdentifiers.contains("uma.main.refresh"))
         #expect(settingsButton.nextKeyView === boundary)
         #expect(boundary.previousKeyView === settingsButton)
-        #expect(threadOSRoute.contains { accessibilityLabel(in: $0) == "UMA navigation" })
+        #expect(threadOSRoute.contains { accessibilityLabel(in: $0) == "AUV navigation" })
 
         controller.showDestination(.agents)
         guard let agentsContentView = window.contentView else {
@@ -497,7 +497,7 @@ import HESectoriumRuntime
         for identifier in ["uma.main.scan", "uma.main.refresh", "uma.main.settings"] {
             #expect(agentsIdentifiers.contains(identifier))
         }
-        #expect(agentsRoute.contains { accessibilityLabel(in: $0) == "UMA navigation" })
+        #expect(agentsRoute.contains { accessibilityLabel(in: $0) == "AUV navigation" })
         #expect(!agentsIdentifiers.contains { $0.hasPrefix("uma.threados.prompt.role.") })
         #expect(!agentsIdentifiers.contains("uma.threados.prompt.generate-copy"))
     }
