@@ -103,6 +103,11 @@ let package = Package(
             dependencies: ["CodexUsageUI"],
             path: "Sources/PreviewRendererTool"
         ),
+        .target(
+            name: "TestHostEventLoop",
+            path: "Tests/TestSupport/TestHostEventLoop",
+            linkerSettings: [.linkedFramework("AppKit")]
+        ),
         .testTarget(
             name: "CodexUsageUITests",
             dependencies: [
@@ -111,6 +116,7 @@ let package = Package(
                 "ClaudeBrowserNativeHostCore",
                 "CodexUsageUI",
                 "CodexUsageMonitor",
+                "TestHostEventLoop",
             ],
             path: "Tests/CodexUsageUITests",
             resources: [.process("Fixtures/ThreadOS")]
