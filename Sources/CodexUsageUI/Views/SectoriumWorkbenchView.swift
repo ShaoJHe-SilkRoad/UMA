@@ -381,8 +381,13 @@ public struct SectoriumWorkbenchView: View {
                     if pending.hasPrefix("eject:") {
                         pendingEjectActions
                     } else {
-                        Button(text("Continue operation", "继续操作")) { model.resumePendingOperation() }
-                            .disabled(model.isBusy)
+                        // Recovery is a keyboard action like Load and Unload, so it
+                        // is native too: a SwiftUI button is outside the Tab route
+                        // unless Full Keyboard Access is on, and it is off by default.
+                        SectoriumWorkbenchButton(title: text("Continue operation", "继续操作"),
+                            identifier: "uma.sectorium.resume", isEnabled: !model.isBusy,
+                            action: { model.resumePendingOperation() })
+                            .frame(height: 30).fixedSize(horizontal: true, vertical: false)
                     }
                 }
                 if model.workbench.safeToUnplug {
@@ -463,22 +468,26 @@ public struct SectoriumWorkbenchView: View {
                 .font(.caption).foregroundStyle(.secondary)
                 .accessibilityIdentifier("uma.sectorium.pending-eject-target")
         }
+        // Native for the same reason as Continue operation: these are the only
+        // routes out of an interrupted disconnect, and Tab has to reach them.
         HStack {
             if model.canContinueWholeDeviceEject {
-                Button(text("Continue Disconnect", "继续安全断开")) {
-                    model.prepareContinueWholeDeviceEjectConfirmation()
-                }
-                .disabled(model.isBusy)
-                .accessibilityIdentifier("uma.sectorium.continue-eject")
+                SectoriumWorkbenchButton(title: text("Continue Disconnect", "继续安全断开"),
+                    identifier: "uma.sectorium.continue-eject", isEnabled: !model.isBusy,
+                    action: { model.prepareContinueWholeDeviceEjectConfirmation() })
+                    .frame(height: 30).fixedSize(horizontal: true, vertical: false)
             }
             if model.canReturnFromWholeDeviceEject {
-                Button(text("Cancel Disconnect · Return to development", "取消断开，返回开发环境")) { model.returnToDevelopment() }
-                    .disabled(model.isBusy)
-                    .accessibilityIdentifier("uma.sectorium.return-to-development")
+                SectoriumWorkbenchButton(title: text("Cancel Disconnect · Return to development", "取消断开，返回开发环境"),
+                    identifier: "uma.sectorium.return-to-development", isEnabled: !model.isBusy,
+                    action: { model.returnToDevelopment() })
+                    .frame(height: 30).fixedSize(horizontal: true, vertical: false)
             }
             if !model.canContinueWholeDeviceEject && !model.canReturnFromWholeDeviceEject {
-                Button(text("Recheck", "重新检查")) { model.refresh() }
-                    .disabled(model.isBusy)
+                SectoriumWorkbenchButton(title: text("Recheck", "重新检查"),
+                    identifier: "uma.sectorium.pending-recheck", isEnabled: !model.isBusy,
+                    action: { model.refresh() })
+                    .frame(height: 30).fixedSize(horizontal: true, vertical: false)
             }
         }
     }
