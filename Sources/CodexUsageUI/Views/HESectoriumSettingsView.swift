@@ -307,6 +307,20 @@ public struct HESectoriumStatusControl: View {
 
 private final class HESectoriumKeyboardButton: NSButton {
     var onEscape: (() -> Void)?
+    /// SwiftUI re-applies its own enabled environment to a hosted control after
+    /// `updateNSView`, which turned an explicit `false` back into `true`: the
+    /// eject button stayed active, and focusable, without a verified target.
+    /// The view's own answer is latched here, as the workbench button does,
+    /// so the environment can narrow it but never widen it.
+    private var settingsEnabled = true
+    override var isEnabled: Bool {
+        get { settingsEnabled && super.isEnabled }
+        set { super.isEnabled = settingsEnabled && newValue }
+    }
+    func setSettingsEnabled(_ enabled: Bool) {
+        settingsEnabled = enabled
+        super.isEnabled = enabled
+    }
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53, let onEscape { onEscape(); return }
         super.keyDown(with: event)
@@ -352,7 +366,7 @@ private struct HESectoriumSettingsNativeButton: NSViewRepresentable {
     func updateNSView(_ button: NSButton, context: Context) {
         context.coordinator.action = { _ in action() }
         button.title = title
-        button.isEnabled = isEnabled
+        (button as? HESectoriumKeyboardButton)?.setSettingsEnabled(isEnabled)
         button.setAccessibilityLabel(title)
         button.setAccessibilityIdentifier(identifier)
         (button as? HESectoriumKeyboardButton)?.onEscape = onEscape
@@ -383,7 +397,7 @@ private struct HESectoriumSettingsNativeToggle: NSViewRepresentable {
         context.coordinator.action = { sender in action(sender.state == .on) }
         button.title = title
         button.state = isOn ? .on : .off
-        button.isEnabled = isEnabled
+        (button as? HESectoriumKeyboardButton)?.setSettingsEnabled(isEnabled)
         button.setAccessibilityLabel(title)
         button.setAccessibilityIdentifier(identifier)
         (button as? HESectoriumKeyboardButton)?.onEscape = onEscape
