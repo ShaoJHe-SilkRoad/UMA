@@ -208,6 +208,16 @@ public struct AgentGlanceRow: View {
         .padding(.vertical, verticalPadding)
         .background { rowBackground }
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay {
+            // The remaining-use fill tints the whole row once usage is high,
+            // which a 7.5% selection tint cannot show through. An outline in
+            // the accent colour marks the selected row at any fill.
+            if selected {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(Color(nsColor: .controlAccentColor), lineWidth: 2)
+                    .allowsHitTesting(false)
+            }
+        }
         .contentShape(Rectangle())
         .help(displayName)
         .accessibilityElement(children: .ignore)
@@ -269,7 +279,7 @@ public struct AgentGlanceRow: View {
         if let quota = provider.primaryQuota {
             components.append(quota.compactLabel)
         } else {
-            components.append(localized("No current usage", "暂无当前用量"))
+            components.append(localized("No quota reading", "无额度读数"))
         }
         return components.joined(separator: " · ")
     }
@@ -502,7 +512,7 @@ public struct QuickPanelSurface: View {
             headerButton(localized("Scan All", "全部扫描"), "sparkle.magnifyingglass", scanAll)
             headerButton(localized("Refresh All", "全部刷新"), "arrow.clockwise", refreshAll)
                 .disabled(!store.allowsManualRefresh)
-            headerButton(localized("Desktop Wizard", "桌面向导"), "wand.and.stars", toggleWizard)
+            headerButton(localized("Desktop Assistant", "桌面助手"), "macwindow", toggleWizard)
             headerButton(localized("Settings", "设置"), "gearshape", openSettings)
         }
         .padding(.horizontal, 11)
@@ -1076,7 +1086,7 @@ public struct AgentWorkspaceSurface: View {
                     Text(provider?.primaryDisplayText ?? "—")
                         .font(.system(size: 28, weight: .semibold, design: .rounded))
                         .monospacedDigit()
-                    Text(provider?.primaryQuota?.compactLabel ?? localized("No current usage", "暂无当前用量"))
+                    Text(provider?.primaryQuota?.compactLabel ?? localized("No quota reading", "无额度读数"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1100,7 +1110,7 @@ public struct AgentWorkspaceSurface: View {
                 }
             } else {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(localized("No current usage", "暂无当前用量")).font(.callout.weight(.medium))
+                    Text(localized("No quota reading", "无额度读数")).font(.callout.weight(.medium))
                     // Claude earns its own explanation: "connect or refresh"
                     // cannot produce a percentage here, so saying it misleads.
                     Text(providerID == .claude
@@ -1274,9 +1284,16 @@ public struct AgentWorkspaceSurface: View {
                             .disabled(true)
                             .accessibilityIdentifier("uma.agent.claude.accuracy-unavailable")
                     case .onlineVerificationUnavailable:
-                        Button(localized("Online verification unavailable", "在线验证不可用")) {}
-                            .disabled(true)
-                            .accessibilityIdentifier("uma.agent.claude.accuracy-unavailable")
+                        // A state, not an action: there is nothing to press
+                        // and nothing will make it pressable here, so it reads
+                        // as status rather than as a greyed-out button.
+                        Label(
+                            localized("Online verification unavailable", "在线验证不可用"),
+                            systemImage: "minus.circle"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("uma.agent.claude.accuracy-unavailable")
                     }
                 }
                 Spacer()
@@ -1686,8 +1703,8 @@ final class GlobalSettingsViewModel: ObservableObject {
     func resetAssistantPosition() {
         preferences.remove(UMAApplicationPreferenceKeys.assistantPosition)
         dataActionStatus = language == .simplifiedChinese
-            ? "桌面向导位置已重置。"
-            : "Desktop Wizard position reset."
+            ? "桌面助手位置已重置。"
+            : "Desktop Assistant position reset."
     }
 
     func clearRetainedUsageData() {
@@ -2037,11 +2054,11 @@ public struct GlobalSettingsSurface: View {
                 }
             case .desktopWizard:
                 settingsSection(
-                    title: localized("Desktop Wizard", "桌面向导"),
+                    title: localized("Desktop Assistant", "桌面助手"),
                     subtitle: localized("A compact usage surface that stays available on the desktop", "常驻桌面的紧凑用量视图")
                 ) {
                     Toggle(
-                        localized("Show Desktop Wizard", "显示桌面向导"),
+                        localized("Show Desktop Assistant", "显示桌面助手"),
                         isOn: Binding(
                             get: { model.assistantEnabled },
                             set: model.setAssistantEnabled
@@ -2175,7 +2192,7 @@ public struct GlobalSettingsSurface: View {
         switch pane {
         case .general: "gearshape"
         case .appearance: "paintbrush"
-        case .desktopWizard: "wand.and.stars"
+        case .desktopWizard: "macwindow"
         case .privacy: "hand.raised"
         case .hesectorium: "externaldrive"
         }
@@ -2185,9 +2202,9 @@ public struct GlobalSettingsSurface: View {
         switch pane {
         case .general: localized("General", "通用")
         case .appearance: localized("Appearance", "外观")
-        case .desktopWizard: localized("Desktop Wizard", "桌面向导")
+        case .desktopWizard: localized("Desktop Assistant", "桌面助手")
         case .privacy: localized("Privacy & Data", "隐私与数据")
-        case .hesectorium: "HESectorium"
+        case .hesectorium: localized("Sectorium", "分区工")
         }
     }
 

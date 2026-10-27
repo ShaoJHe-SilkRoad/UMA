@@ -12,6 +12,7 @@ final class StatusBarController: NSObject {
     private var quickPanelActions: QuickPanelActions?
     private weak var assistantController: DesktopAssistantPanelController?
     private var storeObserver: AnyCancellable?
+    private var menuReading: UsageStore.MenuReading?
     private var preferenceObservation: ApplicationPreferences.Observation?
     private var showsRemainingValue = true
     private var isTornDown = false
@@ -321,30 +322,33 @@ final class StatusBarController: NSObject {
         button.toolTip = "AUV"
     }
 
+    /// The reading is taken from what the store publishes, not read back from
+    /// the store, which still holds the previous values while it publishes.
     private func observeUsageChanges() {
         guard let store else { return }
-        storeObserver = Publishers.CombineLatest(
-            store.$productInventory,
-            store.$language
-        ).sink { [weak self] _, _ in self?.updateStatusButton() }
+        storeObserver = store.menuReadingPublisher.sink { [weak self] reading in
+            self?.menuReading = reading
+            self?.updateStatusButton()
+        }
     }
 
     private func updateStatusButton() {
         repairStatusButtonContractIfNeeded()
         statusItem.button?.title = showsRemainingValue
-            ? (store?.menuPercent.map { " " + String($0) + "%" } ?? " —")
+            ? (menuReading?.percent.map { " " + String($0) + "%" } ?? " —")
             : ""
-        let providerName = store?.menuProvider?.displayName
+        let language = menuReading?.language
+        let providerName = menuReading?.provider?.displayName
         statusItem.button?.toolTip = providerName.map {
-            "\($0) · " + (store?.language.appTitle ?? "AUV")
-        } ?? store?.language.appTitle ?? "AUV"
+            "\($0) · " + (language?.appTitle ?? "AUV")
+        } ?? language?.appTitle ?? "AUV"
         statusItem.button?.setAccessibilityLabel(
-            store?.menuPercent.map { percent in
-                store?.language.remainingAccessibilityLabel(
+            menuReading?.percent.map { percent in
+                language?.remainingAccessibilityLabel(
                     provider: providerName ?? "AUV",
                     percent: percent
                 ) ?? "AUV"
-            } ?? store?.language.appTitle ?? "AUV"
+            } ?? language?.appTitle ?? "AUV"
         )
     }
 
@@ -479,7 +483,7 @@ final class StatusBarController: NSObject {
     private func desktopAssistantMenuItem() -> NSMenuItem {
         guard let assistantController else { return NSMenuItem() }
         let root = NSMenuItem(
-            title: assistantText(english: "Desktop Wizard", chinese: "桌面向导"),
+            title: assistantText(english: "Desktop Assistant", chinese: "桌面助手"),
             action: nil,
             keyEquivalent: ""
         )

@@ -101,7 +101,7 @@ struct UMA014M3RDesktopWizardTests {
         #expect(menu.items.map(\.title).contains("Always on Top"))
         #expect(menu.items.map(\.title).contains("Density"))
         #expect(
-            ["Show Desktop Wizard", "Hide Desktop Wizard"]
+            ["Show Desktop Assistant", "Hide Desktop Assistant"]
                 .contains(menu.items.first?.title ?? "")
         )
         let densityMenu = try #require(menu.item(withTitle: "Density")?.submenu)
@@ -165,7 +165,7 @@ struct UMA014M3RDesktopWizardTests {
         controller.update(cards: [card])
 
         let menu = try #require(controller.assistantPanelForTesting.contentView?.menu)
-        #expect(["显示桌面向导", "隐藏桌面向导"].contains(menu.items.first?.title ?? ""))
+        #expect(["显示桌面助手", "隐藏桌面助手"].contains(menu.items.first?.title ?? ""))
         #expect(menu.item(withTitle: "已启用") != nil)
         #expect(menu.item(withTitle: "始终置顶") != nil)
         let densityMenu = try #require(menu.item(withTitle: "密度")?.submenu)

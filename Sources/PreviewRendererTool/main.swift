@@ -1614,7 +1614,7 @@ private struct M3RWizardContextMenuReview: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            menuItem(localized("Hide Desktop Wizard", "隐藏桌面向导"))
+            menuItem(localized("Hide Desktop Assistant", "隐藏桌面助手"))
             menuItem(localized("Enabled", "已启用"), checked: true)
             menuItem(localized("Always on Top", "始终置顶"), checked: true)
             Divider().padding(.vertical, 4)

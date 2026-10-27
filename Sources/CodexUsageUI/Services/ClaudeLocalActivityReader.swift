@@ -344,6 +344,9 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
     private let sources: [Source]
     private let calendar: Calendar
     private let afterFileReadForTesting: (@Sendable (URL) -> Void)?
+    /// Shared by copies of this reader, so the one the runtime keeps reads
+    /// each transcript's new lines rather than the whole file every time.
+    let parseCache = ClaudeLocalActivityParseCache()
 
     init(rootDirectory: URL? = nil, calendar: Calendar = .current) {
         if let rootDirectory {
@@ -393,6 +396,9 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
 
     func read(now: Date = Date()) -> ClaudeLocalActivitySnapshot {
         let discovered = sessionFiles()
+        // A file that is gone, or no longer discovered, starts over if it
+        // comes back.
+        parseCache.retainStates(forPaths: Set(discovered.map(\.url.path)))
         guard !discovered.isEmpty else { return .unavailable(capturedAt: now) }
 
         var seenRequestDigests = Set<String>()
@@ -423,33 +429,38 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
             // Keep every per-file projection isolated until descriptor and
             // path integrity has passed. A failed file must not poison global
             // dedupe, surface, activity, token, model, or cost state.
-            var pendingRecords: [ClaudeLocalUsageRecord] = []
-            var streamResult = Self.StreamOutcome.refused
+            var fileRead = FileRead.refused
             for _ in 0..<Bounds.maximumReadAttempts {
-                // Each attempt starts from nothing, so a retry can never
-                // append to the records an abandoned attempt had collected.
-                pendingRecords.removeAll(keepingCapacity: true)
-                streamResult = Self.streamRecordsBounded(
-                    inFileAt: file,
+                // Each attempt starts from the last state that was kept, so a
+                // retry can never append to what an abandoned attempt parsed.
+                fileRead = Self.readFile(
+                    at: file,
                     maximumBytes: min(Bounds.maximumBytesPerFile, remainingBudget),
+                    resumingFrom: parseCache.state(forPath: file.path),
                     afterRead: { afterFileReadForTesting?(file) }
-                ) { record in
-                    guard pendingRecords.count < Bounds.maximumRecordCount else { return false }
-                    pendingRecords.append(record)
-                    return true
-                }
+                )
                 // Only a file that moved under us is worth another attempt. A
                 // refusal is a property of the file, not of the timing.
-                guard !streamResult.succeeded, streamResult.changedDuringRead else { break }
+                guard case .changed = fileRead else { break }
             }
-            guard let bytesRead = streamResult.bytesRead else {
-                if streamResult.changedDuringRead {
-                    changedDuringReadFileCount += 1
-                } else {
-                    excludedFileCount += 1
-                }
-                pendingRecords.removeAll()
+            let pendingRecords: [ClaudeLocalUsageRecord]
+            let bytesRead: Int
+            let skippedLines: Int
+            switch fileRead {
+            case .refused:
+                parseCache.removeState(forPath: file.path)
+                excludedFileCount += 1
                 continue
+            case .changed:
+                // Nothing from this file is published this time. Its kept
+                // state still describes bytes that have not changed.
+                changedDuringReadFileCount += 1
+                continue
+            case .read(let result):
+                parseCache.store(result.state, forPath: file.path, resumed: result.resumed)
+                pendingRecords = result.state.records + result.provisionalRecords
+                bytesRead = result.fileSize
+                skippedLines = result.state.skippedLines
             }
 
             var fileTokens: Int64 = 0
@@ -483,7 +494,7 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
                 modelTokenTotals[rate.displayName, default: 0] += tokens
             }
             totalBytes += bytesRead
-            if streamResult.skippedLines > 0 {
+            if skippedLines > 0 {
                 partiallyReadFileCount += 1
             } else {
                 readableFileCount += 1
@@ -687,6 +698,83 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
         afterRead: (() -> Void)? = nil,
         consume: (ClaudeLocalUsageRecord) -> Bool
     ) -> StreamOutcome {
+        var consumeRecords = true
+        let read = readFile(
+            at: url,
+            maximumBytes: maximumBytes,
+            resumingFrom: nil,
+            afterOpen: afterOpen,
+            afterRead: afterRead
+        ) { record, _ in
+            guard consumeRecords else { return }
+            if !consume(record) { consumeRecords = false }
+        }
+        switch read {
+        case .refused: return .refused
+        case .changed: return .changed
+        case .read(let result):
+            return StreamOutcome(
+                bytesRead: result.fileSize,
+                skippedLines: result.state.skippedLines,
+                changedDuringRead: false
+            )
+        }
+    }
+
+    /// What a file's lines have yielded so far, up to the end of its last
+    /// complete line. Only that part is kept: an unterminated last line may
+    /// still be being written, so it is read again next time.
+    struct FileState: Sendable {
+        let device: dev_t
+        let inode: ino_t
+        /// Bytes up to and including the last newline consumed, or the last
+        /// byte of an over-long line already dropped. Past this point only
+        /// an unterminated line can remain.
+        var committedOffset: Int
+        /// Up to `anchorLength` bytes ending at `committedOffset`. A file
+        /// rewritten in place keeps its inode; it does not keep these bytes.
+        var anchor: [UInt8]
+        var records: [ClaudeLocalUsageRecord]
+        var skippedLines: Int
+        /// The committed bytes ended inside an over-long line, already counted
+        /// in `skippedLines`, whose bytes are still being dropped.
+        var droppingOverlongLine: Bool
+
+        static let anchorLength = 4 * 1_024
+    }
+
+    enum FileRead {
+        case refused
+        case changed
+        case read(FileReadResult)
+    }
+
+    struct FileReadResult {
+        let state: FileState
+        /// Parsed from an unterminated last line. Counted in this read, as the
+        /// whole-file read always did, but not kept.
+        let provisionalRecords: [ClaudeLocalUsageRecord]
+        let fileSize: Int
+        /// True when `state` was carried over rather than rebuilt from byte 0.
+        let resumed: Bool
+    }
+
+    /// Opens, validates and reads one record file, from where `prior` stopped
+    /// when that is still sound, else from the start. `emit` sees each record
+    /// as it is parsed, flagged committed or provisional; it is used only
+    /// for the whole-file read, where nothing is carried over.
+    ///
+    /// The read stays transactional. A file that moved while open yields
+    /// `.changed` and nothing else, so the caller keeps its previous state and
+    /// may retry.
+    static func readFile(
+        at url: URL,
+        maximumBytes: Int,
+        resumingFrom prior: FileState?,
+        afterOpen: (() -> Void)? = nil,
+        afterRead: (() -> Void)? = nil,
+        emit: (ClaudeLocalUsageRecord, Bool) -> Void = { _, _ in }
+    ) -> FileRead {
         let standardizedURL = url.standardizedFileURL
         guard standardizedURL.resolvingSymlinksInPath().path == standardizedURL.path,
               maximumBytes >= 0
@@ -706,64 +794,107 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
         else { return .refused }
         afterOpen?()
 
-        var lineBuffer = Data()
-        var recordCount = 0
+        let fileSize = Int(before.st_size)
+        // Carry the earlier state over only for the same file, grown or
+        // unchanged, whose bytes before the resume point are still the ones
+        // read. Anything else, a shrink, a replacement or an in-place rewrite,
+        // is read again from the start, so no record is lost or counted twice.
+        let resumable = prior.flatMap { prior in
+            prior.device == before.st_dev
+                && prior.inode == before.st_ino
+                && prior.committedOffset <= fileSize
+                && anchorMatches(prior, descriptor: descriptor)
+                ? prior : nil
+        }
+        var state = resumable ?? FileState(
+            device: before.st_dev,
+            inode: before.st_ino,
+            committedOffset: 0,
+            anchor: [],
+            records: [],
+            skippedLines: 0,
+            droppingOverlongLine: false
+        )
+        let start = state.committedOffset
+        guard lseek(descriptor, off_t(start), SEEK_SET) == off_t(start) else { return .refused }
+
+        var provisional: [ClaudeLocalUsageRecord] = []
+        var lineBuffer: [UInt8] = []
+        // Bytes of `lineBuffer` already known to hold no newline. A line that
+        // spans many read chunks is searched once, not once per chunk; the
+        // longest real lines run to about a megabyte.
+        var scannedBytes = 0
+        // File offset of `lineBuffer[0]`.
+        var bufferOffset = start
         var actualBytesRead = 0
-        var consumeRecords = true
-        var skippedLines = 0
-        var droppingOverlongLine = false
         var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
         while true {
             let count = Darwin.read(descriptor, &buffer, buffer.count)
             if count < 0, errno == EINTR { continue }
             guard count >= 0 else { return .refused }
             if count == 0 { break }
-            guard actualBytesRead + count <= maximumBytes else {
+            guard start + actualBytesRead + count <= maximumBytes else {
                 return .refused
             }
             actualBytesRead += count
             lineBuffer.append(contentsOf: buffer.prefix(count))
-            while let newline = lineBuffer.firstIndex(of: 0x0A) {
-                var line = Data(lineBuffer[..<newline])
-                lineBuffer.removeSubrange(...newline)
+            // Lines are consumed by advancing `lineStart`; the consumed bytes
+            // are dropped once per chunk rather than once per line.
+            var lineStart = 0
+            while let newline = Self.newlineIndex(in: lineBuffer, from: scannedBytes) {
+                let lineBegin = lineStart
+                lineStart = newline + 1
+                scannedBytes = lineStart
+                state.committedOffset = bufferOffset + lineStart
                 // This newline closes the line we already gave up on, so it
                 // ends the drop rather than delimiting a record.
-                if droppingOverlongLine {
-                    droppingOverlongLine = false
+                if state.droppingOverlongLine {
+                    state.droppingOverlongLine = false
                     continue
                 }
-                if line.last == 0x0D { line.removeLast() }
+                var end = newline
+                if end > lineBegin, lineBuffer[end - 1] == 0x0D { end -= 1 }
                 // One line over the cap costs that line, not the file. The cap
                 // bounds memory, and legitimate activity approaches it: the
                 // longest line measured in real local activity was 954,251
                 // bytes, 91% of the cap. Failing the whole file there threw
                 // away every valid record beside it.
-                guard line.count <= Bounds.maximumBytesPerLine else {
-                    skippedLines += 1
+                guard end - lineBegin <= Bounds.maximumBytesPerLine else {
+                    state.skippedLines += 1
                     continue
                 }
-                if consumeRecords, let record = record(fromData: line) {
-                    recordCount += 1
-                    guard recordCount <= Bounds.maximumRecordCount else { return .refused }
-                    if !consume(record) { consumeRecords = false }
+                if let record = record(fromData: Data(lineBuffer[lineBegin..<end])) {
+                    state.records.append(record)
+                    guard state.records.count <= Bounds.maximumRecordCount else { return .refused }
+                    emit(record, true)
                 }
             }
+            lineBuffer.removeFirst(lineStart)
+            bufferOffset += lineStart
+            scannedBytes = lineBuffer.count
             // No newline yet. Hold at most one cap's worth of a line in
-            // memory: past that, drop bytes until the line ends.
-            if droppingOverlongLine {
+            // memory: past that, drop bytes until the line ends. Dropped bytes
+            // are settled, so they are committed with the skip.
+            if state.droppingOverlongLine {
+                bufferOffset += lineBuffer.count
+                state.committedOffset = bufferOffset
                 lineBuffer.removeAll(keepingCapacity: true)
+                scannedBytes = 0
             } else if lineBuffer.count > Bounds.maximumBytesPerLine {
-                skippedLines += 1
-                droppingOverlongLine = true
+                state.skippedLines += 1
+                state.droppingOverlongLine = true
+                bufferOffset += lineBuffer.count
+                state.committedOffset = bufferOffset
                 lineBuffer.removeAll(keepingCapacity: true)
+                scannedBytes = 0
             }
         }
-        // The file ended inside a line we had given up on; it is already counted.
-        if droppingOverlongLine { lineBuffer.removeAll() }
-        if !lineBuffer.isEmpty, consumeRecords, let record = record(fromData: lineBuffer) {
-            recordCount += 1
-            guard recordCount <= Bounds.maximumRecordCount else { return .refused }
-            _ = consume(record)
+        // An unterminated last line counts now, as a whole-file read always
+        // counted it, but stays uncommitted until its newline arrives.
+        if !lineBuffer.isEmpty, let record = record(fromData: Data(lineBuffer)) {
+            guard state.records.count + 1 <= Bounds.maximumRecordCount else { return .refused }
+            provisional.append(record)
+            emit(record, false)
         }
         afterRead?()
         var after = stat()
@@ -776,15 +907,32 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
         // nothing, which is what the close-security tests pin. Reporting it
         // apart from a refusal is what lets the caller retry.
         guard stableLocalRecordFile(before, after),
-              Int64(actualBytesRead) == after.st_size
+              Int64(start + actualBytesRead) == after.st_size
         else { return .changed }
-        return StreamOutcome(
-            bytesRead: actualBytesRead,
-            skippedLines: skippedLines,
-            changedDuringRead: false
-        )
+        state.anchor = anchorBytes(endingAt: state.committedOffset, descriptor: descriptor) ?? []
+        return .read(FileReadResult(
+            state: state,
+            provisionalRecords: provisional,
+            fileSize: fileSize,
+            resumed: resumable != nil && start > 0
+        ))
     }
 
+    private static func anchorBytes(endingAt offset: Int, descriptor: Int32) -> [UInt8]? {
+        let length = min(offset, FileState.anchorLength)
+        guard length > 0 else { return [] }
+        var bytes = [UInt8](repeating: 0, count: length)
+        let count = bytes.withUnsafeMutableBytes {
+            pread(descriptor, $0.baseAddress, length, off_t(offset - length))
+        }
+        return count == length ? bytes : nil
+    }
+
+    private static func anchorMatches(_ state: FileState, descriptor: Int32) -> Bool {
+        guard state.committedOffset > 0 else { return true }
+        guard !state.anchor.isEmpty else { return false }
+        return anchorBytes(endingAt: state.committedOffset, descriptor: descriptor) == state.anchor
+    }
 
     /// Parses one bounded record locally, projects only allowlisted numeric and
     /// identifier fields, and immediately discards the transient JSON object.
@@ -839,7 +987,27 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
     }
 
     private static func nonReversibleDigest(_ value: String) -> String {
-        SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
+        // Lowercase hex, as `String(format: "%02x")` produced, without a
+        // format parse and a string allocation for every byte of every record.
+        var hex: [UInt8] = []
+        hex.reserveCapacity(SHA256.byteCount * 2)
+        for byte in SHA256.hash(data: Data(value.utf8)) {
+            hex.append(hexDigits[Int(byte >> 4)])
+            hex.append(hexDigits[Int(byte & 0x0F)])
+        }
+        return String(decoding: hex, as: UTF8.self)
+    }
+
+    private static let hexDigits = Array("0123456789abcdef".utf8)
+
+    private static func newlineIndex(in bytes: [UInt8], from offset: Int) -> Int? {
+        guard offset < bytes.count else { return nil }
+        return bytes.withUnsafeBufferPointer { buffer in
+            guard let base = buffer.baseAddress,
+                  let hit = memchr(base + offset, 0x0A, buffer.count - offset)
+            else { return nil }
+            return base.distance(to: hit.assumingMemoryBound(to: UInt8.self))
+        }
     }
 
     private static func isCurrentUserOwned(
@@ -912,5 +1080,39 @@ struct ClaudeLocalActivityReader: ClaudeLocalActivityObservationProviding {
     static func parseTimestamp(_ value: String) -> Date? {
         (try? Date(value, strategy: fractionalTimestamp))
             ?? (try? Date(value, strategy: plainTimestamp))
+    }
+}
+
+/// What `ClaudeLocalActivityReader` has parsed from each record file, keyed by
+/// path. Holds allowlisted projections only, the same values a read publishes,
+/// never file content. Lives as long as the reader that owns it.
+final class ClaudeLocalActivityParseCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var states: [String: ClaudeLocalActivityReader.FileState] = [:]
+    private var resumed = 0
+    private var rebuilt = 0
+
+    func state(forPath path: String) -> ClaudeLocalActivityReader.FileState? {
+        lock.withLock { states[path] }
+    }
+
+    func store(_ state: ClaudeLocalActivityReader.FileState, forPath path: String, resumed wasResumed: Bool) {
+        lock.withLock {
+            states[path] = state
+            if wasResumed { resumed += 1 } else { rebuilt += 1 }
+        }
+    }
+
+    func removeState(forPath path: String) {
+        lock.withLock { _ = states.removeValue(forKey: path) }
+    }
+
+    func retainStates(forPaths paths: Set<String>) {
+        lock.withLock { states = states.filter { paths.contains($0.key) } }
+    }
+
+    /// Reads that continued from kept state, and reads that started from byte 0.
+    var readCountsForTesting: (resumed: Int, rebuilt: Int) {
+        lock.withLock { (resumed, rebuilt) }
     }
 }

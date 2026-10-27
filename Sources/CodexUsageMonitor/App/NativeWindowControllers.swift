@@ -356,7 +356,7 @@ final class MainWindowController: NSWindowController {
 
 @MainActor
 final class SettingsWindowController: NSWindowController {
-    private enum Layout {
+    enum Layout {
         static let defaultFrame = NSRect(x: 0, y: 0, width: 640, height: 460)
         static let minimumSize = NSSize(width: 560, height: 400)
         static let autosaveName = "UMA014.SettingsWindow"
@@ -366,7 +366,7 @@ final class SettingsWindowController: NSWindowController {
     private var preferences: ApplicationPreferences?
     private let navigation = GlobalSettingsNavigationState()
 
-    init() {
+    init(autosaveName: String = Layout.autosaveName) {
         let window = NSWindow(
             contentRect: Layout.defaultFrame,
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -377,12 +377,56 @@ final class SettingsWindowController: NSWindowController {
         window.minSize = Layout.minimumSize
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
-        window.setFrameUsingName(Layout.autosaveName)
-        window.setFrameAutosaveName(Layout.autosaveName)
-        window.contentViewController = NSHostingController(
+        window.setFrameUsingName(autosaveName)
+        window.setFrameAutosaveName(autosaveName)
+        // Installing a hosting controller sizes the window to its content,
+        // and the autosave name then records that size: the starting view
+        // collapsed the window to its minimum, or below it before the window
+        // was shown (released builds saved 32 x 76). Keep the frame across
+        // it, as the main window does.
+        let frameBeforeStartingHost = window.frame
+        window.contentViewController = Self.hostingController(
             rootView: NativeShellStartingView(title: "Settings")
         )
+        window.setFrame(frameBeforeStartingHost, display: false)
         super.init(window: window)
+        // The window controller applies the saved frame once more, without
+        // the minimum that `setFrameUsingName` enforces, so this is where an
+        // undersized saved frame is corrected; the correction is then saved.
+        window.setFrame(
+            Self.restorableFrame(
+                window.frame,
+                minimum: Layout.minimumSize,
+                fallback: window.frameRect(forContentRect: Layout.defaultFrame)
+            ),
+            display: false
+        )
+    }
+
+    /// A restored frame smaller than the minimum is one the window was
+    /// forced into, never one a user chose, since `minSize` stops a user
+    /// going smaller. `NSWindowController` restores it as saved, so the
+    /// installed 0.17.7 brought back its 32 x 76 frame on every launch. Such a frame is
+    /// replaced by the default size, kept at the saved position.
+    static func restorableFrame(_ frame: NSRect, minimum: NSSize, fallback: NSRect) -> NSRect {
+        guard frame.width < minimum.width || frame.height < minimum.height else { return frame }
+        return NSRect(
+            x: frame.minX,
+            y: frame.maxY - fallback.height,
+            width: fallback.width,
+            height: fallback.height
+        )
+    }
+
+    /// The window's size belongs to the user. Without this the hosting
+    /// controller resized it to each pane's ideal size, so opening Privacy &
+    /// Data grew the window from 640 x 460 to 1055 x 576, and it stayed.
+    private static func hostingController<Content: View>(
+        rootView: Content
+    ) -> NSHostingController<Content> {
+        let controller = NSHostingController(rootView: rootView)
+        controller.sizingOptions = []
+        return controller
     }
 
     @available(*, unavailable)
@@ -396,7 +440,8 @@ final class SettingsWindowController: NSWindowController {
         guard attachedStore == nil else { return }
         attachedStore = store
         self.preferences = preferences
-        window?.contentViewController = NSHostingController(
+        let frameBeforeHosting = window?.frame
+        window?.contentViewController = Self.hostingController(
             rootView: SettingsWindowRootView(
                 preferences: preferences,
                 store: store,
@@ -404,6 +449,9 @@ final class SettingsWindowController: NSWindowController {
                 dataPaths: dataPaths
             )
         )
+        if let frameBeforeHosting {
+            window?.setFrame(frameBeforeHosting, display: false)
+        }
     }
 
     func showCanonicalWindow() {

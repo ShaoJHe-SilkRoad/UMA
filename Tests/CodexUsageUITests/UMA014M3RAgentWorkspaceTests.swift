@@ -153,7 +153,7 @@ struct UMA014M3RAgentWorkspaceTests {
     func glanceRowAccessibilityIsContentComplete() throws {
         let source = try read("Sources/CodexUsageUI/Views/AgentSurfaceViews.swift")
 
-        #expect(source.contains("No current usage"))
+        #expect(source.contains("No quota reading"))
         #expect(source.contains("accessibilityLabel"))
         #expect(source.contains("Connected"))
         #expect(source.contains("Reconnecting"))

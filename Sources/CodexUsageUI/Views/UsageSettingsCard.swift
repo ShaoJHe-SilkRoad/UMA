@@ -1960,6 +1960,7 @@ private struct AssistantDensitySettingRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Label(language.desktopAssistantDensity, systemImage: "rectangle.3.group")
+                .labelStyle(SettingsRowLabelStyle())
                 .font(AppTypography.font(12.5, weight: .medium, language: language))
 
             HStack(spacing: 4) {
@@ -1989,6 +1990,20 @@ private struct AssistantDensitySettingRow: View {
     }
 }
 
+/// Settings rows put their symbol in a fixed-width column, so the titles
+/// start at one edge whatever each symbol's own width. A plain `Label` sizes
+/// the icon to the glyph: "globe", "power" and "pin" left the titles at three
+/// different offsets.
+private struct SettingsRowLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 8) {
+            configuration.icon
+                .frame(width: 18, alignment: .center)
+            configuration.title
+        }
+    }
+}
+
 private struct SettingsToggleRow: View {
     let title: String
     let systemImage: String
@@ -2001,6 +2016,7 @@ private struct SettingsToggleRow: View {
         } label: {
             HStack(spacing: 8) {
                 Label(title, systemImage: systemImage)
+                    .labelStyle(SettingsRowLabelStyle())
                     .font(AppTypography.font(12.5, weight: .medium, language: language))
                 Spacer()
                 ZStack {
@@ -2039,6 +2055,7 @@ private struct LanguageSettingRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Label(language.languageSetting, systemImage: "globe")
+                .labelStyle(SettingsRowLabelStyle())
                 .font(AppTypography.font(12.5, weight: .medium, language: language))
             Spacer(minLength: 6)
             HStack(spacing: 3) {

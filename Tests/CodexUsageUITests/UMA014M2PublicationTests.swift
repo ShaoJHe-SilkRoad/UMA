@@ -39,7 +39,10 @@ struct UMA014M2PublicationTests {
         #expect(store.contains("productInventory.quickPanelProviders"))
         #expect(quick.contains("AgentGlanceRow"))
         #expect(shell.contains("store.$productInventory"))
-        #expect(status.contains("store.$productInventory"))
+        // The status item reaches the inventory through the store's reading
+        // publisher, which subscribes to `$productInventory` itself.
+        #expect(status.contains("store.menuReadingPublisher"))
+        #expect(store.contains("$productInventory"))
         #expect(!shell.contains("store.objectWillChange"))
         #expect(!status.contains("store?.objectWillChange"))
         #expect(store.contains("let subscription = await registry.subscribe()"))
