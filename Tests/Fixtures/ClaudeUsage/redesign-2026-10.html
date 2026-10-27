@@ -1,0 +1,47 @@
+<!doctype html>
+<!-- claude.ai Usage page as of 2026-10-27, structure taken from the live page
+     with every value replaced: both quota rows share one section, the weekly
+     label is the text of a toggle button beside an icon-font glyph, meters carry
+     aria-valuenow, resets are plain text, and other sections show shares and
+     credits that are not quota. Values are synthetic. -->
+<html><body><main>
+  <section>
+    <div>
+      <div><h3>On track. You should reach Saturday's reset with room to spare.</h3></div>
+      <div><div>
+        <div>
+          <div>
+            <span><span>Current session</span></span>
+            <span>Resets at 6:40 PM</span>
+          </div>
+          <div>
+            <div><div><div role="meter" aria-labelledby="m1" aria-valuenow="8" aria-valuemin="0" aria-valuemax="100"><div></div></div></div></div>
+            <span id="m1">8% used</span>
+          </div>
+        </div>
+        <div data-testid="pace-week" data-state="closed">
+          <div>
+            <div>
+              <span><span><button type="button" aria-expanded="false" data-testid="pace-week-toggle">This week<span data-cds="Icon" aria-hidden="true">&#xE027;</span></button></span></span>
+              <span>Resets Saturday 9:00 AM</span>
+            </div>
+          </div>
+          <div>
+            <div><div><div><div role="meter" aria-labelledby="m2" aria-valuenow="14" aria-valuemin="0" aria-valuemax="100"><div></div></div></div></div></div>
+            <span id="m2">14% used</span>
+          </div>
+        </div>
+      </div></div>
+    </div>
+  </section>
+  <section><h3>Limit resets</h3><p>No resets right now</p><p>When you get one, it shows up here with its expiry date.</p></section>
+  <section><h3>Usage credits</h3><p>Available for any task. Promotional credits are used before purchased credits.</p><span>$5</span><a>Buy usage credits</a></section>
+  <section>
+    <h3>This week’s usage by product</h3>
+    <div><span>Claude Code</span><div role="meter" aria-labelledby="p1" aria-valuenow="90" aria-valuemin="0" aria-valuemax="100"></div><span id="p1">90%</span></div>
+    <div><span>Chats</span><div role="meter" aria-labelledby="p2" aria-valuenow="6" aria-valuemin="0" aria-valuemax="100"></div><span id="p2">6%</span></div>
+    <div><span>Cowork</span><div role="meter" aria-labelledby="p3" aria-valuenow="3" aria-valuemin="0" aria-valuemax="100"></div><span id="p3">3%</span></div>
+    <div><span>Other</span><div role="meter" aria-labelledby="p4" aria-valuenow="1" aria-valuemin="0" aria-valuemax="100"></div><span id="p4">1%</span></div>
+  </section>
+  <section><p>Last updated: less than a minute ago</p></section>
+</main></body></html>

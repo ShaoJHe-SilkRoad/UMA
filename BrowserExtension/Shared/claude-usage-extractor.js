@@ -46,8 +46,17 @@
 
   const HEADING_PATTERNS = Object.freeze({
     fiveHour: [/^current session$/i, /^5[- ]hour limit$/i, /^five[- ]hour limit$/i],
-    weeklyAllModels: [/^all models$/i, /^weekly limit(?:s)?$/i, /^7[- ]day limit$/i],
+    weeklyAllModels: [/^all models$/i, /^weekly limit(?:s)?$/i, /^7[- ]day limit$/i, /^this week$/i],
   });
+
+  // Labels that mark a different quota row. They are never read as quota; they
+  // only bound a row so a neighbouring row's percentage cannot be claimed.
+  const BOUNDARY_PATTERNS = Object.freeze({
+    modelSpecific: [/^(?:sonnet|opus|haiku)(?: only)?$/i],
+    extraUsage: [/^extra usage$/i],
+  });
+
+  const MAXIMUM_ROW_DEPTH = 8;
 
   function exactUsageURL(locationLike) {
     if (!locationLike || locationLike.protocol !== "https:" || locationLike.origin !== CONTRACT.origin) {
@@ -93,9 +102,77 @@
     return heading.closest('article, section, [data-testid*="usage"], [data-testid*="limit"], [role="group"]');
   }
 
-  function matchingLabelCards(documentLike, patterns) {
+  // Claude renders "This week" as the text of a toggle button that also holds
+  // an icon-font glyph in an aria-hidden span. Such a control counts as a
+  // label only when every child element is hidden from assistive technology,
+  // and only its own text nodes are read, so neither the glyph nor a
+  // container of visible text ever becomes part of a label.
+  function iconLabelText(element) {
+    for (const child of Array.from(element.children || [])) {
+      if (child.getAttribute("aria-hidden") !== "true") return null;
+    }
+    let own = "";
+    for (const node of Array.from(element.childNodes || [])) {
+      if (node.nodeType === 3) own += node.nodeValue;
+    }
+    const value = own.replace(/\s+/g, " ").trim();
+    return value && value.length <= 80 ? value : null;
+  }
+
+  function labelText(element) {
+    if (!element) return null;
+    return element.childElementCount > 0 ? iconLabelText(element) : boundedOwnText(element, 80);
+  }
+
+  function labelKind(element) {
+    const text = labelText(element);
+    if (!text) return null;
+    for (const [kind, patterns] of Object.entries(HEADING_PATTERNS)) {
+      if (patterns.some((pattern) => pattern.test(text))) return kind;
+    }
+    for (const [kind, patterns] of Object.entries(BOUNDARY_PATTERNS)) {
+      if (patterns.some((pattern) => pattern.test(text))) return kind;
+    }
+    return null;
+  }
+
+  function labelKindsWithin(scope) {
+    const kinds = [];
+    const leaves = Array.from(scope.querySelectorAll('h1, h2, h3, h4, h5, h6, [role="heading"], div, p, span, button'))
+      .slice(0, CONTRACT.maximumLabelElementCount);
+    for (const leaf of leaves) {
+      const kind = labelKind(leaf);
+      if (kind) kinds.push(kind);
+    }
+    return kinds;
+  }
+
+  // The usage page may put several quota rows inside one section. Walk up from
+  // the label and keep the widest ancestor that still holds exactly one
+  // percentage and no other quota label. Two percentages, or a second label,
+  // before any single-value ancestor means the row cannot be isolated: fail
+  // closed rather than pick one.
+  function rowForLabel(label, kind) {
+    const card = cardForHeading(label);
+    if (card && percentageValues(card).length === 1
+        && labelKindsWithin(card).every((other) => other === kind)) {
+      return card;
+    }
+    let row = null;
+    let node = label.parentElement;
+    for (let depth = 0; node && depth < MAXIMUM_ROW_DEPTH; depth += 1) {
+      if (labelKindsWithin(node).length > 1) break;
+      const values = percentageValues(node);
+      if (values.length > 1) break;
+      if (values.length === 1) row = node;
+      node = node.parentElement;
+    }
+    return row;
+  }
+
+  function matchingLabelCards(documentLike, patterns, kind) {
     const labels = documentLike.querySelectorAll(
-      'h1, h2, h3, h4, h5, h6, [role="heading"], div, p, span'
+      'h1, h2, h3, h4, h5, h6, [role="heading"], div, p, span, button'
     );
     const cards = [];
     // The settings SPA contains many structural div/span nodes before its
@@ -104,13 +181,15 @@
     const upperBound = Math.min(labels.length, CONTRACT.maximumLabelElementCount);
     for (let index = 0; index < upperBound; index += 1) {
       const label = labels[index];
-      // Claude currently renders "Current session" as a leaf label rather
-      // than a semantic heading. Match only exact allowlisted leaf text; no
-      // unrelated page copy is retained or allowed across the boundary.
-      if (label.childElementCount > 0) continue;
-      const text = boundedOwnText(label, 80);
+      // Claude renders "Current session" as a leaf label and "This week" as a
+      // toggle's own text, not as semantic headings. Match only exact
+      // allowlisted text; no unrelated page copy is retained or allowed
+      // across the boundary.
+      const text = label.childElementCount > 0 ? iconLabelText(label) : boundedOwnText(label, 80);
       if (!text || !patterns.some((pattern) => pattern.test(text))) continue;
-      const card = cardForHeading(label);
+      // A label whose row cannot be isolated, such as a section heading above
+      // several rows, has no percentage of its own and is not a candidate.
+      const card = rowForLabel(label, kind);
       if (card && !cards.includes(card)) cards.push(card);
       if (cards.length > 1) return cards;
     }
@@ -121,7 +200,7 @@
     const explicit = matchingExplicitCards(documentLike, CARD_SELECTORS[kind]);
     if (explicit.length === 1) return explicit[0];
     if (explicit.length > 1) return null;
-    const labelled = matchingLabelCards(documentLike, HEADING_PATTERNS[kind]);
+    const labelled = matchingLabelCards(documentLike, HEADING_PATTERNS[kind], kind);
     return labelled.length === 1 ? labelled[0] : null;
   }
 
@@ -130,13 +209,20 @@
       return Number.isFinite(raw) && raw >= 0 && raw <= 100 ? raw : null;
     }
     if (typeof raw !== "string" || raw.length > 16) return null;
-    const match = raw.trim().match(/^(100(?:\.0+)?|\d{1,2}(?:\.\d+)?)\s*%?$/);
+    // "8%" and "8% used" are the used share. Anything else, including
+    // "8% left", is not read, so a remaining share is never taken as used.
+    const match = raw.trim().match(/^(100(?:\.0+)?|\d{1,2}(?:\.\d+)?)\s*(?:%(?:\s+used)?)?$/i);
     if (!match) return null;
     const parsed = Number(match[1]);
     return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? parsed : null;
   }
 
   function readPercentage(card) {
+    const unique = percentageValues(card);
+    return unique.length === 1 ? unique[0] : null;
+  }
+
+  function percentageValues(card) {
     const values = [];
     const candidates = Array.from(card.querySelectorAll(
       '[aria-valuenow], [data-used-percentage], [data-testid="usage-percentage"], ' +
@@ -159,8 +245,7 @@
         if (parsed !== null) values.push(parsed);
       }
     }
-    const unique = Array.from(new Set(values));
-    return unique.length === 1 ? unique[0] : null;
+    return Array.from(new Set(values));
   }
 
   function normalizedTimestamp(raw) {
