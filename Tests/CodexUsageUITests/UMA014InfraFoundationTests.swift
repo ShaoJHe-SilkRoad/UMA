@@ -242,14 +242,14 @@ struct UMA014InfraFoundationTests {
         let development = try #require(plist["Development"] as? [String: Any])
         let frozen = try #require(plist["FrozenProduction"] as? [String: Any])
         let safari = try #require(plist["SafariCompatibility"] as? [String: Any])
-        #expect(development["MarketingVersion"] as? String == "0.17.7")
+        #expect(development["MarketingVersion"] as? String == "0.17.8")
         #expect(development["BundleIdentifier"] as? String == "com.silkrd.uma.dev.uma014")
-        #expect(frozen["MarketingVersion"] as? String == "0.13.0")
+        #expect(frozen["MarketingVersion"] as? String == "0.14.0")
         #expect(
             frozen["SourceCommit"] as? String
-                == "f6dd617bb736d49b444dda4945d55e5b4606c915"
+                == "db93a7419e1533e68595d449afde5545c41051f2"
         )
-        #expect(safari["HostMarketingVersion"] as? String == "0.13.0")
+        #expect(safari["HostMarketingVersion"] as? String == "0.14.0")
         #expect(safari["CompanionMarketingVersion"] as? String == "1.4.0")
         #expect(safari["ProtocolVersion"] as? String == "2")
         #expect(
@@ -296,13 +296,17 @@ struct UMA014InfraFoundationTests {
         #expect(reviewPackager.contains("com.silkrd.uma.dev.uma014.surface-rebuild"))
         #expect(reviewPackager.contains("package_uma014_m1_dev.sh"))
 
-        let frozenPackager = try String(
+        // The host is now built on its own, with its version passed in, so the
+        // pins above are what tie a given AUV build to one host build.
+        let hostPackager = try String(
             contentsOf: root.appendingPathComponent(
-                "script/package_uma_0_13_production_split.sh"
+                "script/package_uma_safari_host_production.sh"
             ),
             encoding: .utf8
         )
-        #expect(frozenPackager.contains("readonly VERSION=\"0.13.0\""))
+        #expect(hostPackager.contains("--version) version="))
+        #expect(!hostPackager.contains("readonly VERSION="))
+        #expect(!hostPackager.contains("CodexUsageMonitor"))
     }
 
     @Test
@@ -310,7 +314,7 @@ struct UMA014InfraFoundationTests {
         let script = Self.repositoryRoot.appendingPathComponent(
             "script/read_uma_product_version.sh"
         )
-        #expect(try Self.run(script, "Development.MarketingVersion") == "0.17.7")
+        #expect(try Self.run(script, "Development.MarketingVersion") == "0.17.8")
         #expect(try Self.run(script, "SafariCompatibility.ProtocolVersion") == "2")
         #expect(throws: VersionReaderFailure.self) {
             _ = try Self.run(script, "Development.Unknown")
