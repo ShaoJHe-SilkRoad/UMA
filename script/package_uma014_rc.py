@@ -664,7 +664,7 @@ def main():
     (app / 'Contents/Resources/AppIcon.icns').chmod(0o644)
     logos = app / 'Contents/Resources/AgentLogos'
     logos.mkdir()
-    for name in ('codex', 'claude-code', 'workbuddy'):
+    for name in ('codex', 'claude-code', 'workbuddy', 'antigravity'):
         target = logos / f'{name}.svg'
         shutil.copyfile(source / 'Assets/AgentLogos' / target.name, target)
         target.chmod(0o644)

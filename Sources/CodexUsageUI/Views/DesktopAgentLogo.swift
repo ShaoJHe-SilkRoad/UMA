@@ -12,12 +12,14 @@ enum DesktopAgentLogoAsset: String, CaseIterable {
     case codex
     case claudeCode = "claude-code"
     case workbuddy
+    case antigravity
 
     static func resolve(providerID: String) -> Self? {
         switch providerID.lowercased().split(separator: ".").first {
         case "codex": .codex
         case "claude": .claudeCode
         case "workbuddy": .workbuddy
+        case "antigravity": .antigravity
         default: nil
         }
     }

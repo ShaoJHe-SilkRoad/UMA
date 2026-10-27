@@ -108,7 +108,7 @@ PACKAGED_RESOURCE_BUNDLE="$RESOURCES/${SWIFTPM_RESOURCE_BUNDLE##*/}"
   fail_package UMA014_PACKAGED_RESOURCE_BUNDLE_SYMLINK_REJECTED
 
 mkdir -p "$RESOURCES/AgentLogos"
-for logo in codex claude-code workbuddy; do
+for logo in codex claude-code workbuddy antigravity; do
   /usr/bin/install -m 644 "$ROOT_DIR/Assets/AgentLogos/$logo.svg" "$RESOURCES/AgentLogos/$logo.svg"
 done
 if [[ -f "$ROOT_DIR/Assets/AppIcon.icns" ]]; then

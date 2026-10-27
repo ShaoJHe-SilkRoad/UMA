@@ -22,5 +22,7 @@ struct DesktopAgentLogoResourceTests {
         }
         #expect(DesktopAgentLogoAsset.resolve(providerID: "workBuddy") == .workbuddy)
         #expect(DesktopAgentLogoAsset.resolve(providerID: "claude.browserSync") == .claudeCode)
+        #expect(DesktopAgentLogoAsset.resolve(providerID: "antigravity") == .antigravity)
+        #expect(DesktopAgentLogoAsset.resolve(providerID: "antigravity.cli") == .antigravity)
     }
 }
