@@ -90,6 +90,20 @@ extension AppLanguage {
         }
     }
 
+    var claudeSettingsSectionTitle: String {
+        switch self {
+        case .simplifiedChinese: "设置"
+        case .english: "Settings"
+        }
+    }
+
+    var claudeHowItWorks: String {
+        switch self {
+        case .simplifiedChinese: "工作原理与来源透明度"
+        case .english: "How it works and source transparency"
+        }
+    }
+
     var claudeSourceTransparency: String {
         switch self {
         case .simplifiedChinese: "来源透明度"

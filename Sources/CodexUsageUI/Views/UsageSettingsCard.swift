@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum UsageSettingsDestination: Equatable {
@@ -403,7 +404,8 @@ private struct ClaudePlanSelectionRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Label(title, systemImage: "person.badge.shield.checkmark")
-                    .font(AppTypography.font(11, weight: .medium, language: language))
+                    .labelStyle(SettingsRowLabelStyle())
+                    .font(AppTypography.systemFont(12.5))
                 Spacer()
                 Picker(title, selection: $declaredPlan) {
                     Text(notStated).tag("")
@@ -415,9 +417,10 @@ private struct ClaudePlanSelectionRow: View {
                 .frame(maxWidth: 140)
             }
             Text(guidance)
-                .font(AppTypography.font(9, language: language))
+                .font(AppTypography.systemFont(11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 26)
         }
         .accessibilityIdentifier("uma.agent.settings.claude.plan")
     }
@@ -449,6 +452,14 @@ private struct AgentSpecificSettingsContent: View {
     }
 
     var body: some View {
+        if providerID == AgentPreferenceRecord.claudeProviderID {
+            claudeBody
+        } else {
+            standardBody
+        }
+    }
+
+    private var standardBody: some View {
         VStack(alignment: .leading, spacing: 9) {
             Text(displayName)
                 .font(AppTypography.font(13, weight: .semibold, language: language))
@@ -460,69 +471,15 @@ private struct AgentSpecificSettingsContent: View {
                 )
             }
 
-            if entry?.requiresSetup == true {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(language.agentSetupRequired)
-                        .font(
-                            AppTypography.font(
-                                10,
-                                weight: .semibold,
-                                language: language
-                            )
-                        )
-                    Text(language.agentSetupRequiredGuidance)
-                        .font(AppTypography.font(9, language: language))
-                }
-                .foregroundStyle(.secondary)
-                .accessibilityElement(children: .combine)
-            } else if entry?.isActive == false,
-                      entry?.hasBeenDetected == true {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(language.notCurrentlyRunning)
-                        .font(
-                            AppTypography.font(
-                                10,
-                                weight: .semibold,
-                                language: language
-                            )
-                        )
-                    Text(language.savedSettingsApplyWhenDetected)
-                        .font(AppTypography.font(9, language: language))
-                }
-                .foregroundStyle(.secondary)
-                .accessibilityElement(children: .combine)
-            }
+            availabilityNotice()
 
             SettingsToggleRow(
                 title: language.monitoringEnabled,
                 systemImage: "waveform.path.ecg",
                 language: language,
-                isOn: Binding(
-                    get: {
-                        coordinator.isMonitoringEnabled(for: providerID)
-                    },
-                    set: {
-                        if providerID
-                            == AgentPreferenceRecord.antigravityProviderID,
-                           let antigravitySettings {
-                            if $0 {
-                                coordinator.setMonitoringEnabled(true, for: providerID)
-                                antigravitySettings.checkAntigravity()
-                            } else {
-                                antigravitySettings.disable()
-                            }
-                        } else {
-                            coordinator.setMonitoringEnabled($0, for: providerID)
-                        }
-                    }
-                )
+                isOn: monitoringBinding
             )
             .accessibilityIdentifier("uma.agent.settings.monitoring.\(providerID.rawValue)")
-
-            if providerID == AgentPreferenceRecord.claudeProviderID {
-                Divider().opacity(0.35)
-                ClaudePlanSelectionRow(language: language)
-            }
 
             if providerID == AgentPreferenceRecord.codexProviderID {
                 Divider().opacity(0.35)
@@ -555,31 +512,6 @@ private struct AgentSpecificSettingsContent: View {
                 )
             }
 
-            if providerID == AgentPreferenceRecord.claudeProviderID {
-                Divider().opacity(0.35)
-                SettingsToggleRow(
-                    title: language.recentTasks,
-                    systemImage: "list.bullet.rectangle",
-                    language: language,
-                    isOn: $showRecentTasks
-                )
-                SettingsToggleRow(
-                    title: language.costCard,
-                    systemImage: "dollarsign.circle",
-                    language: language,
-                    isOn: $showAPICost
-                )
-            }
-
-            if providerID == AgentPreferenceRecord.claudeProviderID,
-               let claudeSettings {
-                Divider().opacity(0.35)
-                ClaudeBrowserSettingsSection(
-                    model: claudeSettings,
-                    language: language
-                )
-            }
-
             if providerID == AgentPreferenceRecord.antigravityProviderID,
                let antigravitySettings {
                 Divider().opacity(0.35)
@@ -604,6 +536,124 @@ private struct AgentSpecificSettingsContent: View {
                 )
             }
         }
+    }
+
+    /// Claude reads top to bottom as what it reports now, what you can do,
+    /// its settings, then how it works on demand. Every control and statement
+    /// of the earlier single column is still here; only order and type moved.
+    private var claudeBody: some View {
+        VStack(alignment: .leading, spacing: ClaudeSettingsMetrics.sectionSpacing) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(displayName)
+                    .font(AppTypography.systemFont(15, weight: .semibold))
+                availabilityNotice(refined: true)
+            }
+
+            if let claudeSettings {
+                ClaudeBrowserSettingsSection(
+                    model: claudeSettings,
+                    language: language,
+                    presentation: presentation
+                ) {
+                    claudeSettingsGroup
+                }
+            } else {
+                if let presentation {
+                    ResolvedProviderUsageSummary(
+                        presentation: presentation,
+                        language: language,
+                        style: .quotaBar
+                    )
+                    .modifier(ClaudeSettingsCardSurface())
+                }
+                claudeSettingsGroup
+            }
+        }
+    }
+
+    private var claudeSettingsGroup: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(language.claudeSettingsSectionTitle)
+                .font(AppTypography.systemFont(11, weight: .semibold))
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 9) {
+                SettingsToggleRow(
+                    title: language.monitoringEnabled,
+                    systemImage: "waveform.path.ecg",
+                    language: language,
+                    isOn: monitoringBinding,
+                    refined: true
+                )
+                .accessibilityIdentifier("uma.agent.settings.monitoring.\(providerID.rawValue)")
+                SettingsToggleRow(
+                    title: language.recentTasks,
+                    systemImage: "list.bullet.rectangle",
+                    language: language,
+                    isOn: $showRecentTasks,
+                    refined: true
+                )
+                SettingsToggleRow(
+                    title: language.costCard,
+                    systemImage: "dollarsign.circle",
+                    language: language,
+                    isOn: $showAPICost,
+                    refined: true
+                )
+                Divider().opacity(0.5)
+                ClaudePlanSelectionRow(language: language)
+            }
+            .modifier(ClaudeSettingsCardSurface())
+        }
+    }
+
+    /// Claude's refined layout sets these in system type; the other agents
+    /// keep the type they had.
+    @ViewBuilder
+    private func availabilityNotice(refined: Bool = false) -> some View {
+        let title = refined
+            ? AppTypography.systemFont(11, weight: .semibold)
+            : AppTypography.font(10, weight: .semibold, language: language)
+        let detail = refined
+            ? AppTypography.systemFont(11)
+            : AppTypography.font(9, language: language)
+        if entry?.requiresSetup == true {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(language.agentSetupRequired).font(title)
+                Text(language.agentSetupRequiredGuidance).font(detail)
+            }
+            .foregroundStyle(.secondary)
+            .accessibilityElement(children: .combine)
+        } else if entry?.isActive == false,
+                  entry?.hasBeenDetected == true {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(language.notCurrentlyRunning).font(title)
+                Text(language.savedSettingsApplyWhenDetected).font(detail)
+            }
+            .foregroundStyle(.secondary)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private var monitoringBinding: Binding<Bool> {
+        Binding(
+            get: {
+                coordinator.isMonitoringEnabled(for: providerID)
+            },
+            set: {
+                if providerID
+                    == AgentPreferenceRecord.antigravityProviderID,
+                   let antigravitySettings {
+                    if $0 {
+                        coordinator.setMonitoringEnabled(true, for: providerID)
+                        antigravitySettings.checkAntigravity()
+                    } else {
+                        antigravitySettings.disable()
+                    }
+                } else {
+                    coordinator.setMonitoringEnabled($0, for: providerID)
+                }
+            }
+        )
     }
 
     private func codexDetailBinding(
@@ -631,10 +681,28 @@ private struct AgentSpecificSettingsContent: View {
 /// the Main Panel and Desktop Assistant. It must never reinterpret quota or
 /// provenance independently.
 private struct ResolvedProviderUsageSummary: View {
+    enum Style {
+        case standard
+        /// Direction D: system type and the quota bar, inside a card the
+        /// caller supplies.
+        case quotaBar
+    }
+
     let presentation: SharedUsageCardPresentation
     let language: AppLanguage
+    var style: Style = .standard
+    @AppStorage("claude.declaredPlan") private var declaredClaudePlan = ""
 
     var body: some View {
+        switch style {
+        case .standard:
+            standardBody
+        case .quotaBar:
+            quotaBarBody
+        }
+    }
+
+    private var standardBody: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Text(language.remaining)
@@ -666,9 +734,104 @@ private struct ResolvedProviderUsageSummary: View {
         .accessibilityIdentifier("settings.provider.resolved-usage")
     }
 
+    private var quotaBarBody: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(language.remaining)
+                    .font(AppTypography.systemFont(11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                if let window = presentation.selectedWindow {
+                    Text(window.compactLabel)
+                        .font(AppTypography.systemFont(11))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(primaryValue)
+                    .font(AppTypography.numericFont(20, weight: .semibold))
+                    .foregroundStyle(
+                        presentation.remaining.finitePercent == nil ? .secondary : .primary
+                    )
+            }
+            SettingsQuotaBar(
+                remainingPercent: presentation.remaining.finitePercent,
+                tone: LowRemainingUsagePolicy.color(for: assessment),
+                lowThresholdPercent: LowRemainingUsagePolicy.lowThresholdPercent(
+                    providerID: presentation.id, admittedPlan: admittedPlan
+                )
+            )
+            if let source = presentation.sourceDescription {
+                Text(source)
+                    .font(AppTypography.systemFont(11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(presentation.accessibilityLabel)
+        .accessibilityIdentifier("settings.provider.resolved-usage")
+    }
+
+    /// The same allowlisted plan the main window grades with: the reported
+    /// label first, then the plan the user declared for Claude.
+    private var admittedPlan: String? {
+        let isClaude = ProviderProductStatePolicy.productID(
+            forRawConnectorID: presentation.id
+        ) == .claude
+        return presentation.planLabel
+            ?? (isClaude && !declaredClaudePlan.isEmpty ? declaredClaudePlan : nil)
+    }
+
+    private var assessment: LowRemainingAssessment {
+        LowRemainingUsagePolicy.assessment(
+            providerID: presentation.id,
+            admittedPlan: admittedPlan,
+            remainingPercent: presentation.remaining.finitePercent
+        )
+    }
+
     private var primaryValue: String {
         presentation.availability?.compactText
             ?? presentation.remainingDisplayText
+    }
+}
+
+/// Direction D's quota bar: the remaining share in the policy's tone, a notch
+/// at the plan's low line when the plan is known, and a dashed empty track
+/// when there is no reading. It never draws a fill it was not given.
+private struct SettingsQuotaBar: View {
+    let remainingPercent: Double?
+    let tone: Color
+    let lowThresholdPercent: Double?
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.primary.opacity(0.09))
+                if let fraction = CompactUsageFillPolicy.fraction(for: remainingPercent) {
+                    Capsule()
+                        .fill(tone)
+                        .frame(width: proxy.size.width * RemainingUsageVisualPolicy.visibleFraction(
+                            for: fraction * 100, width: proxy.size.width
+                        ))
+                } else {
+                    Capsule()
+                        .strokeBorder(
+                            Color.secondary.opacity(0.55),
+                            style: StrokeStyle(lineWidth: 1, dash: [3, 3])
+                        )
+                }
+                if let lowThresholdPercent, remainingPercent != nil {
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.5))
+                        .frame(width: 1, height: proxy.size.height + 4)
+                        .offset(x: proxy.size.width * lowThresholdPercent / 100)
+                }
+            }
+        }
+        .frame(height: 6)
+        .accessibilityHidden(true)
+        .allowsHitTesting(false)
     }
 }
 
@@ -799,52 +962,158 @@ private struct AntigravitySettingsSection: View {
     }
 }
 
-private struct ClaudeBrowserSettingsSection: View {
+private enum ClaudeSettingsMetrics {
+    static let sectionSpacing: CGFloat = 14
+    static let cardPadding: CGFloat = 12
+    static let cardRadius: CGFloat = 10
+}
+
+/// The main window's module surface (radius 10, one hairline), shared by the
+/// Claude settings cards so the sheet reads as part of today's app.
+private struct ClaudeSettingsCardSurface: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(ClaudeSettingsMetrics.cardPadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(UMAVisualStyle.surface)
+            .clipShape(RoundedRectangle(cornerRadius: ClaudeSettingsMetrics.cardRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: ClaudeSettingsMetrics.cardRadius, style: .continuous)
+                    .strokeBorder(UMAVisualStyle.separator.opacity(0.65), lineWidth: 0.5)
+            }
+    }
+}
+
+private struct ClaudeBrowserSettingsSection<Settings: View>: View {
     @ObservedObject var model: ClaudeBrowserSettingsModel
     let language: AppLanguage
+    let presentation: SharedUsageCardPresentation?
+    @ViewBuilder let settings: () -> Settings
     @State private var showingConsent = false
+    @State private var showsDetails = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(language == .simplifiedChinese ? "Claude 本地智能模式" : "Claude Local Smart Mode")
-                .font(
-                    AppTypography.font(
-                        10.5,
-                        weight: .semibold,
-                        language: language
-                    )
-                )
-            Text(
-                language == .simplifiedChinese
-                    ? "Claude Code 正常使用时由官方状态栏字段自动更新；Claude Desktop 的版本锁定计划缓存仅提供以 ≈ 标记、无重置时间的估算值。Safari 仅在您点击“精确同步”时临时使用。"
-                    : "Updates from Claude Code's official status-line fields during normal use. Claude Desktop's version-pinned plan cache provides only ≈-labeled estimates without reset times. Safari is temporary and on demand through Accuracy Sync."
-            )
-            .font(AppTypography.font(9, language: language))
-            .foregroundStyle(.secondary)
-            stateSummary
+        VStack(alignment: .leading, spacing: ClaudeSettingsMetrics.sectionSpacing) {
+            statusCard
+            actions
+            settings()
+            details
+        }
+    }
 
+    // MARK: What Claude reports now
+
+    private var statusCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let presentation {
+                ResolvedProviderUsageSummary(
+                    presentation: presentation,
+                    language: language,
+                    style: .quotaBar
+                )
+                Divider().opacity(0.5)
+            }
+            stateSummary
+            Text(language.claudeLastExact(model.lastExactAt))
+                .font(AppTypography.systemFont(11))
+                .foregroundStyle(.secondary)
+        }
+        .modifier(ClaudeSettingsCardSurface())
+    }
+
+    @ViewBuilder
+    private var stateSummary: some View {
+        if let action = model.activeAction {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(language.claudeBrowserActionStatus(action))
+                    .font(AppTypography.systemFont(12))
+            }
+            .accessibilityElement(children: .combine)
+        } else {
+            stateSummaryContent
+        }
+    }
+
+    @ViewBuilder
+    private var stateSummaryContent: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            statusRow(
+                language == .simplifiedChinese ? "本地智能" : "Local Smart",
+                language.claudeLocalSmartStatus(
+                    model.localSmartState,
+                    stage: model.localSmartStage
+                )
+            )
+            statusRow(
+                language == .simplifiedChinese ? "浏览器伴侣" : "Companion",
+                language.claudeCompanionRuntimeStatus(
+                    runtime: model.productState.companionRuntime,
+                    accuracyState: model.browserAccuracyState
+                )
+            )
+            statusRow(
+                language == .simplifiedChinese ? "浏览器精确同步" : "Browser Accuracy",
+                language.claudeBrowserAccuracyStatus(
+                    model.browserAccuracyState,
+                    stage: model.browserAccuracyStage
+                )
+            )
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("claude.source-state-summary")
+    }
+
+    private func statusRow(_ title: String, _ status: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title)
+                .font(AppTypography.systemFont(11, weight: .semibold))
+            Text(status)
+                .font(AppTypography.systemFont(11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: Actions
+
+    /// Accuracy Sync leads whenever it is offered; otherwise the state's own
+    /// action does. The conditions for showing each button are unchanged.
+    private var actions: some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                primaryAction
                 if model.consentGranted, showsSecondaryOpenUsage {
-                    Button(language == .simplifiedChinese ? "精确同步" : "Accuracy Sync") {
-                        model.accuracySync()
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier(
-                        "claude.browser.open-usage"
+                    ClaudeSettingsActionButton(
+                        title: language == .simplifiedChinese ? "精确同步" : "Accuracy Sync",
+                        identifier: "claude.browser.open-usage",
+                        role: .primary,
+                        isEnabled: !model.actionInProgress,
+                        action: model.accuracySync
                     )
                 }
-                if model.consentGranted {
-                    Button(language.claudeDisableIntegration) {
-                        model.disconnect()
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier(
-                        "claude.browser.disconnect"
-                    )
-                }
+                primaryAction
             }
             .disabled(model.actionInProgress)
+
+            // Disconnect and Retry take their own lines, so the first row fits
+            // the 278-point Quick Panel settings column in both languages.
+            if model.consentGranted {
+                ClaudeSettingsActionButton(
+                    title: language.claudeDisableIntegration,
+                    identifier: "claude.browser.disconnect",
+                    isEnabled: !model.actionInProgress,
+                    action: model.disconnect
+                )
+                .disabled(model.actionInProgress)
+                ClaudeSettingsActionButton(
+                    title: language == .simplifiedChinese
+                        ? "重试 Safari 网站访问权限"
+                        : "Retry Safari Site Access",
+                    identifier: "claude.browser.retry-site-access",
+                    role: .link,
+                    action: model.retrySafariSiteAccess
+                )
+            }
 
             if showingConsent, !model.consentGranted {
                 consentConfirmation
@@ -852,60 +1121,10 @@ private struct ClaudeBrowserSettingsSection: View {
 
             if let safeError = model.safeError {
                 Text(language.claudeBrowserError(safeError))
-                    .font(AppTypography.font(9, language: language))
+                    .font(AppTypography.systemFont(11))
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
-
-            Text(
-                language == .simplifiedChinese
-                    ? "精确同步会创建一个绑定请求的临时非活动标签页，验证精确使用量路由，读取一次净化后的配额并关闭该标签页。不会保留浏览器定时器或长期标签页。"
-                    : "Accuracy Sync creates one request-bound temporary inactive tab, verifies the exact Usage route, returns one sanitized quota snapshot, and closes that tab. No browser scheduler or long-lived tab remains."
-            )
-            .font(AppTypography.font(9, language: language))
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-
-            if model.consentGranted {
-                Button(
-                    language == .simplifiedChinese
-                        ? "重试 Safari 网站访问权限"
-                        : "Retry Safari Site Access",
-                    action: model.retrySafariSiteAccess
-                )
-                .buttonStyle(.plain)
-                .foregroundStyle(UsageDesign.blue)
-                .accessibilityIdentifier("claude.browser.retry-site-access")
-            }
-
-            Divider().opacity(0.35)
-            Text(language.claudeSourceTransparency)
-                .font(
-                    AppTypography.font(
-                        10,
-                        weight: .semibold,
-                        language: language
-                    )
-                )
-            VStack(alignment: .leading, spacing: 3) {
-                Text(language == .simplifiedChinese ? "来源：Claude 官方本地状态栏；版本锁定的桌面端计划缓存估算；按需 Safari 精确同步" : "Sources: Claude official local status line; version-pinned Desktop plan-cache estimate; on-demand Safari Accuracy Sync")
-                Text(language == .simplifiedChinese ? "估算：仅保留当前 5 小时/7 天剩余量与时间戳，以 ≈ 标记且不推测重置时间" : "Desktop estimate: Current five-hour/seven-day remaining values and timestamp only, labeled ≈ with no inferred reset")
-                Text(language == .simplifiedChinese ? "本地活动估算：一次处理一条有界 JSONL 记录；立即丢弃提示、回复与会话内容，仅保留允许的用量计数、模型系列和活动时间戳；结果以 ≈ 标记，不是官方精确配额" : "Local-activity estimate: One bounded JSONL record is processed at a time; prompts, responses, and session content are discarded immediately; only allowlisted usage counts, model family, and activity timestamp are retained; ≈ is not official exact quota")
-                Text(language.claudeEstimateConfidence(model.estimateConfidence))
-                Text(language.claudeLastExact(model.lastExactAt))
-                Text(language == .simplifiedChinese ? "Google / Claude 密码：未访问" : "Google / Claude password: Not accessed")
-                Text(language == .simplifiedChinese ? "API 密钥：不需要" : "API key: Not required")
-                Text(language == .simplifiedChinese ? "钥匙串：未访问" : "Keychain: Not accessed")
-                Text(language == .simplifiedChinese ? "Cookie：保留在浏览器中；AUV 不读取或导出" : "Cookies: Remain inside the browser; not read or exported by AUV")
-                Text(language == .simplifiedChinese ? "状态栏/页面/缓存数据：仅净化后的配额字段；缓存组织信息与历史立即丢弃" : "Status-line/page/cache data: Sanitized quota fields only; cache organization and history are discarded")
-                Text(language == .simplifiedChinese ? "提示、回复、项目内容、身份与账单：不保留" : "Prompts, responses, project content, identity, and billing: Not retained")
-            }
-            .font(AppTypography.font(9, language: language))
-            .foregroundStyle(.secondary)
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier(
-                "claude.browser.source-transparency"
-            )
         }
     }
 
@@ -925,147 +1144,163 @@ private struct ClaudeBrowserSettingsSection: View {
                     ? "启用 Claude 本地智能模式？"
                     : "Enable Claude Local Smart Mode?"
             )
-            .font(AppTypography.font(10.5, weight: .semibold, language: language))
+            .font(AppTypography.systemFont(12, weight: .semibold))
 
             Text(language.claudeConsentDisclosure)
-                .font(AppTypography.font(9, language: language))
+                .font(AppTypography.systemFont(11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 8) {
-                Button(language == .simplifiedChinese ? "取消" : "Cancel") {
-                    showingConsent = false
-                }
-                .buttonStyle(.bordered)
-                .accessibilityIdentifier("claude.browser.consent.cancel")
+                ClaudeSettingsActionButton(
+                    title: language == .simplifiedChinese ? "取消" : "Cancel",
+                    identifier: "claude.browser.consent.cancel",
+                    action: { showingConsent = false }
+                )
 
-                Button(language == .simplifiedChinese ? "继续" : "Continue") {
-                    showingConsent = false
-                    model.connectWithConsent()
-                }
-                .buttonStyle(.borderedProminent)
-                .accessibilityIdentifier("claude.browser.consent.continue")
+                ClaudeSettingsActionButton(
+                    title: language == .simplifiedChinese ? "继续" : "Continue",
+                    identifier: "claude.browser.consent.continue",
+                    role: .primary,
+                    action: {
+                        showingConsent = false
+                        model.connectWithConsent()
+                    }
+                )
             }
         }
-        .padding(9)
-        .background(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(.quaternary.opacity(0.7))
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .stroke(
-                    Color(nsColor: .separatorColor).opacity(0.45),
-                    lineWidth: 0.5
-                )
-        }
+        .modifier(ClaudeSettingsCardSurface())
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("claude.browser.consent")
-    }
-
-    @ViewBuilder
-    private var stateSummary: some View {
-        if let action = model.activeAction {
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.small)
-                Text(language.claudeBrowserActionStatus(action))
-            }
-            .accessibilityElement(children: .combine)
-        } else {
-            stateSummaryContent
-        }
-    }
-
-    @ViewBuilder
-    private var stateSummaryContent: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(language == .simplifiedChinese ? "本地智能" : "Local Smart")
-                    .font(AppTypography.font(9, weight: .semibold, language: language))
-                Text(language.claudeLocalSmartStatus(
-                    model.localSmartState,
-                    stage: model.localSmartStage
-                ))
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(language == .simplifiedChinese ? "浏览器伴侣" : "Companion")
-                    .font(AppTypography.font(9, weight: .semibold, language: language))
-                Text(language.claudeCompanionRuntimeStatus(
-                    runtime: model.productState.companionRuntime,
-                    accuracyState: model.browserAccuracyState
-                ))
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(language == .simplifiedChinese ? "浏览器精确同步" : "Browser Accuracy")
-                    .font(AppTypography.font(9, weight: .semibold, language: language))
-                Text(language.claudeBrowserAccuracyStatus(
-                    model.browserAccuracyState,
-                    stage: model.browserAccuracyStage
-                ))
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("claude.source-state-summary")
     }
 
     @ViewBuilder
     private var primaryAction: some View {
         switch model.state {
         case .disconnected:
-            Button(
-                language.claudeEnableIntegration,
+            ClaudeSettingsActionButton(
+                title: language.claudeEnableIntegration,
+                identifier: "claude.browser.connect",
+                role: .primary,
+                isEnabled: !model.actionInProgress,
                 action: { showingConsent = true }
             )
-            .buttonStyle(.borderedProminent)
-            .accessibilityIdentifier("claude.browser.connect")
         case .fresh, .cached, .stale:
-            Button(
-                language == .simplifiedChinese ? "刷新本地数据" : "Refresh Local",
+            ClaudeSettingsActionButton(
+                title: language == .simplifiedChinese ? "刷新本地数据" : "Refresh Local",
+                identifier: "claude.browser.sync-now",
+                isEnabled: !model.actionInProgress,
                 action: model.syncNow
             )
-            .buttonStyle(.bordered)
-            .accessibilityIdentifier("claude.browser.sync-now")
         case .waitingForUsagePage:
-            Button(
-                language == .simplifiedChinese ? "刷新本地数据" : "Refresh Local",
+            ClaudeSettingsActionButton(
+                title: language == .simplifiedChinese ? "刷新本地数据" : "Refresh Local",
+                identifier: "claude.browser.sync-now",
+                isEnabled: !model.actionInProgress,
                 action: model.syncNow
             )
-            .buttonStyle(.bordered)
-            .accessibilityIdentifier("claude.browser.sync-now")
         case .websiteAccessRequired:
-            Button(
-                language == .simplifiedChinese ? "请求 Safari 网站访问权限" : "Request Safari Site Access",
+            ClaudeSettingsActionButton(
+                title: language == .simplifiedChinese ? "请求 Safari 网站访问权限" : "Request Safari Site Access",
+                identifier: "claude.browser.request-site-access",
+                role: .primary,
+                isEnabled: !model.actionInProgress,
                 action: model.requestSafariSiteAccess
             )
-            .buttonStyle(.borderedProminent)
-            .accessibilityIdentifier("claude.browser.request-site-access")
         case .signInRequired, .waitingForSafari:
-            Button(
-                language == .simplifiedChinese ? "检查浏览器伴侣" : "Check Browser Companion",
+            ClaudeSettingsActionButton(
+                title: language == .simplifiedChinese ? "检查浏览器伴侣" : "Check Browser Companion",
+                identifier: "claude.browser.check-companion",
+                isEnabled: !model.actionInProgress,
                 action: model.verifyCompanion
             )
-            .buttonStyle(.bordered)
-            .accessibilityIdentifier("claude.browser.check-companion")
         case .companionDisabled, .companionOutdated,
              .nativeHostMissing, .nativeHostMismatched:
-            Button(
-                language == .simplifiedChinese ? "修复伴侣" : "Repair Companion",
+            ClaudeSettingsActionButton(
+                title: language == .simplifiedChinese ? "修复伴侣" : "Repair Companion",
+                identifier: "claude.browser.repair",
+                isEnabled: !model.actionInProgress,
                 action: model.repairCompanion
             )
-            .buttonStyle(.bordered)
-            .accessibilityIdentifier("claude.browser.repair")
         case .extensionNotInstalled, .inventoryRestartRequired, .inventoryLoading,
              .companionStarting, .protocolMismatch, .companionUnavailable,
              .unsupportedBrowser, .browserUnavailable, .routeChanged, .failed:
-            Button(
-                language == .simplifiedChinese ? "重新检查" : "Check Again",
+            ClaudeSettingsActionButton(
+                title: language == .simplifiedChinese ? "重新检查" : "Check Again",
+                identifier: "claude.browser.check-again",
+                isEnabled: !model.actionInProgress,
                 action: model.checkCompanion
             )
-            .buttonStyle(.bordered)
-            .accessibilityIdentifier("claude.browser.check-again")
         case .checking:
             ProgressView().controlSize(.small)
         }
+    }
+
+    // MARK: How it works, on demand
+
+    /// The two explanations and the full Source Transparency list, word for
+    /// word, behind one native disclosure button on the Tab route.
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ClaudeSettingsActionButton(
+                title: language.claudeHowItWorks,
+                identifier: "claude.settings.details",
+                role: .disclosure(expanded: showsDetails),
+                action: { showsDetails.toggle() }
+            )
+
+            if showsDetails {
+                VStack(alignment: .leading, spacing: 10) {
+                    detailHeading(language == .simplifiedChinese ? "Claude 本地智能模式" : "Claude Local Smart Mode")
+                    detailText(
+                        language == .simplifiedChinese
+                            ? "Claude Code 正常使用时由官方状态栏字段自动更新；Claude Desktop 的版本锁定计划缓存仅提供以 ≈ 标记、无重置时间的估算值。Safari 仅在您点击“精确同步”时临时使用。"
+                            : "Updates from Claude Code's official status-line fields during normal use. Claude Desktop's version-pinned plan cache provides only ≈-labeled estimates without reset times. Safari is temporary and on demand through Accuracy Sync."
+                    )
+                    detailText(
+                        language == .simplifiedChinese
+                            ? "精确同步会创建一个绑定请求的临时非活动标签页，验证精确使用量路由，读取一次净化后的配额并关闭该标签页。不会保留浏览器定时器或长期标签页。"
+                            : "Accuracy Sync creates one request-bound temporary inactive tab, verifies the exact Usage route, returns one sanitized quota snapshot, and closes that tab. No browser scheduler or long-lived tab remains."
+                    )
+
+                    Divider().opacity(0.5)
+                    detailHeading(language.claudeSourceTransparency)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(language == .simplifiedChinese ? "来源：Claude 官方本地状态栏；版本锁定的桌面端计划缓存估算；按需 Safari 精确同步" : "Sources: Claude official local status line; version-pinned Desktop plan-cache estimate; on-demand Safari Accuracy Sync")
+                        Text(language == .simplifiedChinese ? "估算：仅保留当前 5 小时/7 天剩余量与时间戳，以 ≈ 标记且不推测重置时间" : "Desktop estimate: Current five-hour/seven-day remaining values and timestamp only, labeled ≈ with no inferred reset")
+                        Text(language == .simplifiedChinese ? "本地活动估算：一次处理一条有界 JSONL 记录；立即丢弃提示、回复与会话内容，仅保留允许的用量计数、模型系列和活动时间戳；结果以 ≈ 标记，不是官方精确配额" : "Local-activity estimate: One bounded JSONL record is processed at a time; prompts, responses, and session content are discarded immediately; only allowlisted usage counts, model family, and activity timestamp are retained; ≈ is not official exact quota")
+                        Text(language.claudeEstimateConfidence(model.estimateConfidence))
+                        Text(language.claudeLastExact(model.lastExactAt))
+                        Text(language == .simplifiedChinese ? "Google / Claude 密码：未访问" : "Google / Claude password: Not accessed")
+                        Text(language == .simplifiedChinese ? "API 密钥：不需要" : "API key: Not required")
+                        Text(language == .simplifiedChinese ? "钥匙串：未访问" : "Keychain: Not accessed")
+                        Text(language == .simplifiedChinese ? "Cookie：保留在浏览器中；AUV 不读取或导出" : "Cookies: Remain inside the browser; not read or exported by AUV")
+                        Text(language == .simplifiedChinese ? "状态栏/页面/缓存数据：仅净化后的配额字段；缓存组织信息与历史立即丢弃" : "Status-line/page/cache data: Sanitized quota fields only; cache organization and history are discarded")
+                        Text(language == .simplifiedChinese ? "提示、回复、项目内容、身份与账单：不保留" : "Prompts, responses, project content, identity, and billing: Not retained")
+                    }
+                    .font(AppTypography.systemFont(11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier(
+                        "claude.browser.source-transparency"
+                    )
+                }
+                .modifier(ClaudeSettingsCardSurface())
+            }
+        }
+    }
+
+    private func detailHeading(_ text: String) -> some View {
+        Text(text)
+            .font(AppTypography.systemFont(12, weight: .semibold))
+    }
+
+    private func detailText(_ text: String) -> some View {
+        Text(text)
+            .font(AppTypography.systemFont(11))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -2009,6 +2244,8 @@ private struct SettingsToggleRow: View {
     let systemImage: String
     let language: AppLanguage
     @Binding var isOn: Bool
+    /// Direction D, used by Claude: system type and the system accent.
+    var refined = false
 
     var body: some View {
         Button {
@@ -2017,11 +2254,15 @@ private struct SettingsToggleRow: View {
             HStack(spacing: 8) {
                 Label(title, systemImage: systemImage)
                     .labelStyle(SettingsRowLabelStyle())
-                    .font(AppTypography.font(12.5, weight: .medium, language: language))
+                    .font(
+                        refined
+                            ? AppTypography.systemFont(12.5)
+                            : AppTypography.font(12.5, weight: .medium, language: language)
+                    )
                 Spacer()
                 ZStack {
                     Capsule()
-                        .fill(isOn ? UsageDesign.blue : Color.secondary.opacity(0.24))
+                        .fill(isOn ? onColor : Color.secondary.opacity(0.24))
                         .frame(width: 34, height: 19)
                     Circle()
                         .fill(Color.white)
@@ -2038,6 +2279,123 @@ private struct SettingsToggleRow: View {
             isOn ? language.enabledAccessibilityValue : language.disabledAccessibilityValue
         )
         .animation(.easeInOut(duration: 0.16), value: isOn)
+    }
+
+    private var onColor: Color {
+        refined ? Color.accentColor : UsageDesign.blue
+    }
+}
+
+/// Claude's actions are native buttons, like Sectorium's and Settings', so
+/// they sit on the Tab route even with Full Keyboard Access off. The enabled
+/// state is set here every update: SwiftUI's `.disabled` does not reach an
+/// AppKit control on its own.
+private struct ClaudeSettingsActionButton: NSViewRepresentable {
+    enum Role: Equatable {
+        case primary
+        case secondary
+        case link
+        case disclosure(expanded: Bool)
+    }
+
+    let title: String
+    let identifier: String
+    var role: Role = .secondary
+    var isEnabled = true
+    let action: @MainActor () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+
+    func makeNSView(context: Context) -> NSButton {
+        let button = ClaudeSettingsFocusableButton(
+            title: title,
+            target: context.coordinator,
+            action: #selector(Coordinator.activate(_:))
+        )
+        button.refusesFirstResponder = false
+        button.focusRingType = .exterior
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        configure(button)
+        return button
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) {
+        context.coordinator.action = action
+        configure(button)
+    }
+
+    private func configure(_ button: NSButton) {
+        switch role {
+        case .primary, .secondary:
+            button.isBordered = true
+            button.bezelStyle = .push
+            button.controlSize = .regular
+            button.bezelColor = role == .primary ? .controlAccentColor : nil
+            button.keyEquivalent = ""
+            button.image = nil
+            button.title = title
+        case .link, .disclosure:
+            button.isBordered = false
+            button.bezelStyle = .inline
+            button.controlSize = .regular
+            button.bezelColor = nil
+            let color: NSColor = role == .link ? .controlAccentColor : .labelColor
+            let font = role == .link
+                ? NSFont.systemFont(ofSize: 12)
+                : NSFont.systemFont(ofSize: 12, weight: .semibold)
+            button.attributedTitle = NSAttributedString(
+                string: title,
+                attributes: [.foregroundColor: color, .font: font]
+            )
+            if case let .disclosure(expanded) = role {
+                button.image = NSImage(
+                    systemSymbolName: expanded ? "chevron.down" : "chevron.right",
+                    accessibilityDescription: nil
+                )?.withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
+                button.imagePosition = .imageLeading
+                button.contentTintColor = .secondaryLabelColor
+                button.setAccessibilityValue(expanded ? "expanded" : "collapsed")
+            } else {
+                button.image = nil
+            }
+        }
+        (button as? ClaudeSettingsFocusableButton)?.setSettingsEnabled(isEnabled)
+        button.setAccessibilityLabel(title)
+        button.setAccessibilityIdentifier(identifier)
+        button.invalidateIntrinsicContentSize()
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var action: @MainActor () -> Void
+        init(action: @escaping @MainActor () -> Void) { self.action = action }
+        @objc func activate(_ sender: NSButton) {
+            guard sender.isEnabled else { return }
+            action()
+        }
+    }
+}
+
+private final class ClaudeSettingsFocusableButton: NSButton {
+    private var settingsEnabled = true
+
+    override var isEnabled: Bool {
+        get { settingsEnabled && super.isEnabled }
+        set { super.isEnabled = settingsEnabled && newValue }
+    }
+
+    func setSettingsEnabled(_ enabled: Bool) {
+        settingsEnabled = enabled
+        super.isEnabled = enabled
+    }
+
+    override var acceptsFirstResponder: Bool { isEnabled }
+    override var canBecomeKeyView: Bool { isEnabled && !isHidden && alphaValue > 0 }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { scrollToVisible(bounds.insetBy(dx: -6, dy: -6)) }
+        return accepted
     }
 }
 

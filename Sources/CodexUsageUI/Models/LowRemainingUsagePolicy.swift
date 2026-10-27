@@ -40,18 +40,22 @@ public enum LowRemainingUsagePolicy {
         }
         guard let remainingPercent, remainingPercent.isFinite,
               (0...100).contains(remainingPercent) else { return .unavailable }
-        let plan = admittedPlanIdentifier(providerID: providerID, label: admittedPlan)
-        let threshold: Double
-        switch (provider, plan) {
-        case ("codex", "pro"), ("claude", "max"):
-            threshold = 10
-        case ("codex", "plus"), ("claude", "pro"):
-            threshold = 20
-        default:
+        guard let threshold = lowThresholdPercent(providerID: providerID, admittedPlan: admittedPlan) else {
             // Unknown plan/provider is intentionally neutral, never guessed as Pro/Plus/Max.
             return .unknownPlan
         }
         return remainingPercent < threshold ? .low : .normal
+    }
+
+    /// The remaining percentage below which an admitted plan reads as low, or
+    /// nil when the plan is unknown. Views may mark it; they must not guess one.
+    public static func lowThresholdPercent(providerID: String, admittedPlan: String?) -> Double? {
+        let provider = providerID.lowercased().split(separator: ".").first.map(String.init)
+        switch (provider, admittedPlanIdentifier(providerID: providerID, label: admittedPlan)) {
+        case ("codex", "pro"), ("claude", "max"): return 10
+        case ("codex", "plus"), ("claude", "pro"): return 20
+        default: return nil
+        }
     }
 
     public static func color(for assessment: LowRemainingAssessment) -> Color {

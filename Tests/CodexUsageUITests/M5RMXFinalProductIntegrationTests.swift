@@ -40,12 +40,17 @@ struct M5RMXFinalProductIntegrationTests {
     @Test
     func localDetailControlsAreAvailableFromClaudeSettings() throws {
         let settings = try source("Sources/CodexUsageUI/Views/UsageSettingsCard.swift")
+        // Claude's settings are their own group now; both detail toggles
+        // must still be in it, bound to Claude's own preferences.
         let clause = try #require(settings.range(
-            of: "if providerID == AgentPreferenceRecord.claudeProviderID {"
+            of: "private var claudeSettingsGroup: some View {"
         ))
-        let tail = String(settings[clause.lowerBound...].prefix(1_200))
+        let tail = String(settings[clause.lowerBound...].prefix(1_400))
         #expect(tail.contains("title: language.recentTasks"))
+        #expect(tail.contains("isOn: $showRecentTasks"))
         #expect(tail.contains("title: language.costCard"))
+        #expect(tail.contains("isOn: $showAPICost"))
+        #expect(settings.contains("claudeSettingsGroup\n"))
     }
 
     @Test
