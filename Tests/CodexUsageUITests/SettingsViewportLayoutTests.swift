@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Testing
+import Vision
 import HESectoriumCore
 import HESectoriumRuntime
 @testable import CodexUsageUI
@@ -62,6 +63,38 @@ struct SettingsViewportLayoutTests {
         #expect(fixture.runner.mutatingCalls == 0)
     }
 
+    // Side by side, the two Privacy & Data actions are wider than the default
+    // window gives their English titles, and at the minimum both were cut off
+    // ("Clear Retained Loca…", "Export Sanitized Di…"). What reaches the
+    // screen is the check, so the rendered titles are read back. Offscreen,
+    // the Form's background is transparent and recognition reads it as
+    // black, so the dark appearance's light text is what stays legible.
+    @Test("Privacy actions keep their full titles at the default and minimum Settings sizes",
+          arguments: [AppLanguage.english, .simplifiedChinese],
+          [NSSize(width: 640, height: 460), NSSize(width: 560, height: 400)])
+    func privacyActionsAreNotTruncated(language: AppLanguage, size: NSSize) throws {
+        let fixture = try Fixture(language: language, pane: .privacy, size: size)
+        defer { fixture.close() }
+        fixture.window.appearance = NSAppearance(named: .darkAqua)
+        settle(fixture.host)
+        for scroll in descendants(fixture.host).compactMap({ $0 as? NSScrollView }) {
+            guard let document = scroll.documentView else { continue }
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, document.frame.height - scroll.contentView.bounds.height)))
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
+        settle(fixture.host)
+        let rendered = try recognizedText(in: fixture.host, language: language)
+        // Chinese is matched on the words a truncation would drop first;
+        // recognition reads the full titles reliably but not every particle.
+        let titles = language == .english
+            ? ["Clear Retained Local Data", "Export Sanitized Diagnostics"]
+            : ["本地数据", "诊断信息"]
+        for title in titles {
+            #expect(rendered.contains { $0.contains(title) },
+                    "\(title) must render in full at \(Int(size.width))x\(Int(size.height)): \(rendered)")
+        }
+    }
+
     @Test("Every settings pane retains a contained sidebar", arguments: GlobalSettingsPane.allCases)
     func allPanesFit(pane: GlobalSettingsPane) throws {
         let fixture = try Fixture(language: .english, pane: pane, size: NSSize(width: 560, height: 378))
@@ -83,6 +116,17 @@ struct SettingsViewportLayoutTests {
             host.layoutSubtreeIfNeeded()
             RunLoop.main.run(until: Date().addingTimeInterval(0.02))
         }
+    }
+
+    private func recognizedText(in host: NSView, language: AppLanguage) throws -> [String] {
+        let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let image = try #require(rep.cgImage)
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.recognitionLanguages = language == .english ? ["en-US"] : ["zh-Hans", "en-US"]
+        try VNImageRequestHandler(cgImage: image).perform([request])
+        return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
     }
 
     private func descendants(_ root: NSView) -> [NSView] {

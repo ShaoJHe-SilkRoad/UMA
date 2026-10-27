@@ -2132,17 +2132,12 @@ public struct GlobalSettingsSurface: View {
                         localized("Credentials", "凭据"),
                         localized("Passwords, tokens, cookies, and conversation content are not retained.", "不会保留密码、令牌、Cookie 或对话内容。")
                     )
-                    HStack {
-                        Button(
-                            localized("Clear Retained Local Data", "清除保留的本地数据"),
-                            action: model.clearRetainedUsageData
-                        )
-                        .accessibilityIdentifier("uma.settings.privacy.clear-retained-data")
-                        Button(
-                            localized("Export Sanitized Diagnostics…", "导出已净化诊断信息…"),
-                            action: model.exportSanitizedDiagnostics
-                        )
-                        .accessibilityIdentifier("uma.settings.privacy.export-diagnostics")
+                    // Side by side these two need more width than the default
+                    // Settings window gives English titles, so they stack when
+                    // they would not fit at full length instead of truncating.
+                    ViewThatFits(in: .horizontal) {
+                        HStack { privacyDataActions }
+                        VStack(alignment: .leading, spacing: 8) { privacyDataActions }
                     }
                     if let status = model.dataActionStatus {
                         Text(status)
@@ -2156,6 +2151,19 @@ public struct GlobalSettingsSurface: View {
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .padding(14)
+    }
+
+    @ViewBuilder private var privacyDataActions: some View {
+        Button(
+            localized("Clear Retained Local Data", "清除保留的本地数据"),
+            action: model.clearRetainedUsageData
+        )
+        .accessibilityIdentifier("uma.settings.privacy.clear-retained-data")
+        Button(
+            localized("Export Sanitized Diagnostics…", "导出已净化诊断信息…"),
+            action: model.exportSanitizedDiagnostics
+        )
+        .accessibilityIdentifier("uma.settings.privacy.export-diagnostics")
     }
 
     private func settingsSection<Content: View>(
