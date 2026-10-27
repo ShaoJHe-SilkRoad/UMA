@@ -17,6 +17,8 @@ public final class UsageStore: ObservableObject {
     /// The arrangement the user dragged the agent list into, as raw provider
     /// identifiers. Empty until they arrange it.
     @Published public private(set) var agentOrder: [String] = []
+    /// The agent the user chose for the menu bar; empty is Automatic.
+    @Published public private(set) var menuBarAgent: String = ""
     /// Frozen read-only presentation projection. Reading it does not trigger collection or refresh.
     public var basicUsagePresentation: BasicSharedUsagePresentation {
         .make(snapshot: snapshot, provider: productInventory.provider(.codex))
@@ -254,6 +256,8 @@ public final class UsageStore: ObservableObject {
         self.preferences = effectivePreferences
         self.agentOrder = effectivePreferences?
             .value(for: UMAApplicationPreferenceKeys.agentOrder) ?? []
+        self.menuBarAgent = effectivePreferences?
+            .value(for: UMAApplicationPreferenceKeys.menuBarAgent) ?? ""
         self.agentSettings = previewOnly
             ? agentSettings
             : (
@@ -347,6 +351,34 @@ public final class UsageStore: ObservableObject {
         preferences?.set(updated, for: UMAApplicationPreferenceKeys.agentOrder)
     }
 
+    /// Moves an agent one or more places up (negative) or down (positive),
+    /// for the Settings buttons that do what a drag does.
+    public func moveAgent(_ moved: ProviderProductID, by offset: Int) {
+        let displayed = orderedWorkspaceProviders.map(\.id.rawValue)
+        guard let from = displayed.firstIndex(of: moved.rawValue) else { return }
+        let to = min(max(0, from + offset), displayed.count - 1)
+        guard to != from else { return }
+        moveAgent(moved, onto: orderedWorkspaceProviders[to].id)
+    }
+
+    /// Forgets the arrangement, so every list goes back to the built-in order
+    /// and the menu bar to its Codex-first default.
+    public func resetAgentOrder() {
+        agentOrder = []
+        preferences?.set([], for: UMAApplicationPreferenceKeys.agentOrder)
+    }
+
+    /// Pins the menu bar to one agent, or returns it to Automatic with nil.
+    public func setMenuBarAgent(_ provider: ProviderProductID?) {
+        let value = provider?.rawValue ?? ""
+        menuBarAgent = value
+        preferences?.set(value, for: UMAApplicationPreferenceKeys.menuBarAgent)
+    }
+
+    /// The agents the menu bar can be pinned to, in the user's order: every
+    /// agent the main window lists, including one with no reading right now.
+    public var menuBarCandidates: [ProviderProductState] { orderedWorkspaceProviders }
+
     /// Which provider the menu bar reading belongs to.
     ///
     /// Until the list has been arranged, Codex keeps priority and any other
@@ -357,11 +389,11 @@ public final class UsageStore: ObservableObject {
     /// nothing to report hands the menu bar down the list rather than blanking
     /// it.
     public var menuProvider: ProviderProductID? {
-        Self.menuProvider(inventory: productInventory, order: agentOrder)
+        Self.menuProvider(inventory: productInventory, order: agentOrder, pinned: menuBarAgent)
     }
 
     public var menuPercent: Int? {
-        Self.menuPercent(inventory: productInventory, order: agentOrder)
+        Self.menuPercent(inventory: productInventory, order: agentOrder, pinned: menuBarAgent)
             ?? previewMenuPercent
     }
 
@@ -383,12 +415,12 @@ public final class UsageStore: ObservableObject {
     /// once rather than when the next usage update happens to arrive.
     public var menuReadingPublisher: AnyPublisher<MenuReading, Never> {
         let previewPercent = previewMenuPercent
-        return Publishers.CombineLatest3($productInventory, $agentOrder, $language)
-            .map { inventory, order, language in
-                let provider = Self.menuProvider(inventory: inventory, order: order)
+        return Publishers.CombineLatest4($productInventory, $agentOrder, $menuBarAgent, $language)
+            .map { inventory, order, pinned, language in
+                let provider = Self.menuProvider(inventory: inventory, order: order, pinned: pinned)
                 return MenuReading(
                     provider: provider,
-                    percent: Self.menuPercent(inventory: inventory, order: order)
+                    percent: Self.menuPercent(inventory: inventory, order: order, pinned: pinned)
                         ?? previewPercent,
                     language: language
                 )
@@ -397,11 +429,20 @@ public final class UsageStore: ObservableObject {
             .eraseToAnyPublisher()
     }
 
+    /// A pinned agent keeps the menu bar even while it has no reading, which
+    /// then shows a dash: handing it to another agent would put that agent's
+    /// number where the user asked for this one's. A pin to an agent that is
+    /// no longer available falls back to Automatic.
     private static func menuProvider(
         inventory: ProviderProductInventory,
-        order: [String]
+        order: [String],
+        pinned: String = ""
     ) -> ProviderProductID? {
-        AgentDisplayOrder.menuReading(
+        if let pinnedID = ProviderProductID(rawValue: pinned),
+           inventory.agentWorkspaceProviders.contains(where: { $0.id == pinnedID }) {
+            return pinnedID
+        }
+        return AgentDisplayOrder.menuReading(
             amongEligible: AgentDisplayOrder.apply(
                 inventory.quickPanelProviders,
                 order: order,
@@ -416,9 +457,10 @@ public final class UsageStore: ObservableObject {
 
     private static func menuPercent(
         inventory: ProviderProductInventory,
-        order: [String]
+        order: [String],
+        pinned: String = ""
     ) -> Int? {
-        guard let provider = menuProvider(inventory: inventory, order: order),
+        guard let provider = menuProvider(inventory: inventory, order: order, pinned: pinned),
               let remaining = inventory.provider(provider)?
                 .primaryQuota?.value.remainingPercent
         else { return nil }
@@ -431,21 +473,49 @@ public final class UsageStore: ObservableObject {
             : nil
     }
 
+    /// The Desktop Assistant's cards, in the order the user arranged the
+    /// agents, so it stacks them the way every other list does.
     public var assistantPresentationCards: [SharedUsageCardPresentation] {
+        assistantPresentationCards(arrangedBy: agentOrder)
+    }
+
+    /// The same cards arranged by `order`. An observer of `$agentOrder` passes
+    /// the order it was delivered, because the store still holds the previous
+    /// one while it publishes.
+    public func assistantPresentationCards(
+        arrangedBy order: [String]
+    ) -> [SharedUsageCardPresentation] {
         let assistantIDs = Set(productInventory.assistantProviders.map(\.id))
-        return presentationCards.filter {
-            ProviderProductStatePolicy.productID(
-                forRawConnectorID: $0.id
-            ).map(assistantIDs.contains) == true
-        }
+        return Self.arranged(
+            presentationCards.filter {
+                ProviderProductStatePolicy.productID(
+                    forRawConnectorID: $0.id
+                ).map(assistantIDs.contains) == true
+            },
+            by: order
+        )
     }
 
     public var overviewPresentationCards: [SharedUsageCardPresentation] {
         let overviewIDs = Set(productInventory.overviewProviders.map(\.id))
-        return presentationCards.filter {
-            ProviderProductStatePolicy.productID(
-                forRawConnectorID: $0.id
-            ).map(overviewIDs.contains) == true
+        return Self.arranged(
+            presentationCards.filter {
+                ProviderProductStatePolicy.productID(
+                    forRawConnectorID: $0.id
+                ).map(overviewIDs.contains) == true
+            },
+            by: agentOrder
+        )
+    }
+
+    /// Cards carry connector identifiers; the arrangement holds product ones.
+    private static func arranged(
+        _ cards: [SharedUsageCardPresentation],
+        by order: [String]
+    ) -> [SharedUsageCardPresentation] {
+        AgentDisplayOrder.apply(cards, order: order) { card in
+            ProviderProductStatePolicy.productID(forRawConnectorID: card.id)?.rawValue
+                ?? card.id
         }
     }
 
@@ -700,6 +770,11 @@ public final class UsageStore: ObservableObject {
             if change.key == UMAApplicationPreferenceKeys.agentOrder.name {
                 self?.agentOrder = self?.preferences?
                     .value(for: UMAApplicationPreferenceKeys.agentOrder) ?? []
+                return
+            }
+            if change.key == UMAApplicationPreferenceKeys.menuBarAgent.name {
+                self?.menuBarAgent = self?.preferences?
+                    .value(for: UMAApplicationPreferenceKeys.menuBarAgent) ?? ""
                 return
             }
             guard change.key == UMAApplicationPreferenceKeys.automaticBackgroundRefresh.name

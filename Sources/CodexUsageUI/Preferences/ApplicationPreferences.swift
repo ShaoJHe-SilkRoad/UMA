@@ -314,6 +314,12 @@ public enum UMAApplicationPreferenceKeys {
     public static let agentOrder = ApplicationPreferenceKey<[String]>(
         "app.agentOrder"
     )
+    /// The agent the menu bar reads, as a raw provider identifier. Empty is
+    /// Automatic: the topmost agent in the arrangement that has a reading.
+    public static let menuBarAgent = ApplicationPreferenceKey<String>(
+        "app.menuBarAgent",
+        default: ""
+    )
 
     public static let menuBarShowsRemaining = ApplicationPreferenceKey<Bool>(
         "app.menuBarShowsRemaining",

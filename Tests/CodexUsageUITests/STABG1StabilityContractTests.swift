@@ -206,10 +206,11 @@ struct STABG1StabilityContractTests {
         // itself: it read the store back inside those sinks, which run before
         // the store holds the new values. It renders the store's reading
         // publisher, which is built from the values being published, adds the
-        // user's arrangement, and delivers a reading only when it changes.
+        // user's arrangement and menu bar choice, and delivers a reading only
+        // when it changes.
         let store = try source("Sources/CodexUsageUI/Stores/UsageStore.swift")
         #expect(status.contains("store.menuReadingPublisher"))
-        #expect(store.contains("Publishers.CombineLatest3($productInventory, $agentOrder, $language)"))
+        #expect(store.contains("Publishers.CombineLatest4($productInventory, $agentOrder, $menuBarAgent, $language)"))
         #expect(store.contains(".removeDuplicates()"))
         #expect(status.contains("self?.updateStatusButton()"))
         #expect(!status.contains("store.objectWillChange"))

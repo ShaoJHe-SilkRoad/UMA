@@ -1632,7 +1632,16 @@ struct M5RMXClaudeSmartModeTests {
             ),
             encoding: .utf8
         )
-        #expect(settings.contains("case .waitingForUsagePage, .fresh, .cached, .stale:"))
+        // The states that offer Accuracy Sync live on the model, which the
+        // button and the ten-minute timer both read.
+        let model = try String(
+            contentsOf: repositoryRoot().appendingPathComponent(
+                "Sources/CodexUsageUI/Stores/ClaudeBrowserSettingsModel.swift"
+            ),
+            encoding: .utf8
+        )
+        #expect(model.contains("case .waitingForUsagePage, .fresh, .cached, .stale:"))
+        #expect(settings.contains("model.consentGranted, model.offersAccuracySync"))
         #expect(settings.contains("claudeEstimateConfidence(model.estimateConfidence)"))
         #expect(settings.contains("claudeLastExact(model.lastExactAt)"))
         #expect(settings.contains("model.localSmartState"))

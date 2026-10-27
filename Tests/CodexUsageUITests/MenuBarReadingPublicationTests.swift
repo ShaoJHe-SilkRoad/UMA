@@ -121,6 +121,62 @@ struct MenuBarReadingPublicationTests {
         await tearDown(harness)
     }
 
+    @Test("A chosen agent keeps the menu bar, with a dash while it has no reading")
+    func pinnedAgentKeepsTheMenuBar() async throws {
+        let harness = try await harness()
+        var received: [UsageStore.MenuReading] = []
+        let subscription = harness.store.menuReadingPublisher.sink { received.append($0) }
+        defer { subscription.cancel() }
+        #expect(received.last?.provider == .codex)
+
+        harness.store.setMenuBarAgent(.claude)
+        #expect(received.last?.provider == .claude)
+        #expect(received.last?.percent == 40)
+        let saved = ApplicationPreferences(userDefaults: try #require(UserDefaults(suiteName: harness.defaultsSuite)))
+        #expect(saved.value(for: UMAApplicationPreferenceKeys.menuBarAgent) == "claude")
+
+        await harness.claude.setRemaining(nil)
+        try await waitUntil {
+            harness.store.productInventory.provider(.claude)?.primaryQuota?.value.remainingPercent == nil
+        }
+        #expect(received.last?.provider == .claude)
+        #expect(received.last?.percent == nil)
+
+        harness.store.setMenuBarAgent(nil)
+        #expect(received.last?.provider == .codex)
+        #expect(received.last?.percent == 70)
+        await tearDown(harness)
+    }
+
+    @Test("The Desktop Assistant and overview cards follow the arrangement")
+    func cardsFollowTheArrangement() async throws {
+        let harness = try await harness()
+        let store = harness.store
+        let claudeID = ClaudeCodeUsageConnector.connectorID.rawValue
+        let codexID = CodexUsageConnector.connectorID.rawValue
+        try await waitUntil { store.assistantPresentationCards.count == 2 }
+
+        store.moveAgent(.claude, onto: .codex)
+        #expect(store.assistantPresentationCards.map(\.id) == [claudeID, codexID])
+        #expect(store.overviewPresentationCards.first?.id == claudeID)
+        #expect(store.assistantPresentationCards(arrangedBy: ["codex", "claude"]).map(\.id)
+            == [codexID, claudeID])
+
+        store.moveAgent(.claude, by: 1)
+        #expect(store.orderedWorkspaceProviders.map(\.id) == [.codex, .claude])
+        store.moveAgent(.claude, by: 1)
+        #expect(store.orderedWorkspaceProviders.map(\.id) == [.codex, .claude])
+        store.moveAgent(.claude, by: -1)
+        #expect(store.orderedWorkspaceProviders.map(\.id) == [.claude, .codex])
+
+        store.resetAgentOrder()
+        #expect(store.agentOrder.isEmpty)
+        let saved = ApplicationPreferences(userDefaults: try #require(UserDefaults(suiteName: harness.defaultsSuite)))
+        #expect(saved.value(for: UMAApplicationPreferenceKeys.agentOrder) == [])
+        #expect(store.orderedWorkspaceProviders.map(\.id) == [.codex, .claude])
+        await tearDown(harness)
+    }
+
     private func waitUntil(
         timeout: TimeInterval = 10,
         _ condition: @MainActor () -> Bool

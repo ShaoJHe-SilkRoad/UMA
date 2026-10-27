@@ -104,6 +104,13 @@ extension AppLanguage {
         }
     }
 
+    var claudePeriodicAccuracySync: String {
+        switch self {
+        case .simplifiedChinese: "每 10 分钟自动精确同步"
+        case .english: "Accuracy Sync every 10 minutes"
+        }
+    }
+
     var claudeSourceTransparency: String {
         switch self {
         case .simplifiedChinese: "来源透明度"

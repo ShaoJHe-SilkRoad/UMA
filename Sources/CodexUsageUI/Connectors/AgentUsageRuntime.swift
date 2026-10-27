@@ -168,6 +168,10 @@ public struct UsageMonitorRuntime {
                 )
             }
         )
+        if startProviders {
+            // Off unless the user turned on the ten-minute Accuracy Sync.
+            claudeSettings.startPeriodicAccuracySyncIfEnabled()
+        }
         let usageStore = UsageStore(
             autoRefresh: startProviders,
             registry: startProviders ? registry : nil,

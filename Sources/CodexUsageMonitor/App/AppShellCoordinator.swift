@@ -526,13 +526,14 @@ final class AppShellCoordinator {
     var assistantIsEnabled: Bool { assistantController.isEnabled }
 
     private func observeAssistantCards(in store: UsageStore) {
-        assistantStoreObserver = Publishers.CombineLatest(
+        assistantStoreObserver = Publishers.CombineLatest3(
             store.$productInventory,
-            store.$language
-        ).sink { [weak self, weak store] _, language in
+            store.$language,
+            store.$agentOrder
+        ).sink { [weak self, weak store] _, language, order in
             guard let self, let store else { return }
             self.assistantController.update(
-                cards: store.assistantPresentationCards.map {
+                cards: store.assistantPresentationCards(arrangedBy: order).map {
                     DesktopAssistantCard(shared: $0, language: language)
                 }
             )

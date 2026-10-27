@@ -1082,7 +1082,7 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
     private var actions: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                if model.consentGranted, showsSecondaryOpenUsage {
+                if model.consentGranted, model.offersAccuracySync {
                     ClaudeSettingsActionButton(
                         title: language == .simplifiedChinese ? "精确同步" : "Accuracy Sync",
                         identifier: "claude.browser.open-usage",
@@ -1094,6 +1094,20 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
                 primaryAction
             }
             .disabled(model.actionInProgress)
+
+            if model.consentGranted {
+                SettingsToggleRow(
+                    title: language.claudePeriodicAccuracySync,
+                    systemImage: "arrow.triangle.2.circlepath",
+                    language: language,
+                    isOn: Binding(
+                        get: { model.periodicAccuracySyncEnabled },
+                        set: model.setPeriodicAccuracySyncEnabled
+                    ),
+                    refined: true
+                )
+                .accessibilityIdentifier("claude.browser.periodic-sync")
+            }
 
             // Disconnect and Retry take their own lines, so the first row fits
             // the 278-point Quick Panel settings column in both languages.
@@ -1125,15 +1139,6 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        }
-    }
-
-    private var showsSecondaryOpenUsage: Bool {
-        switch model.state {
-        case .waitingForUsagePage, .fresh, .cached, .stale:
-            true
-        default:
-            false
         }
     }
 

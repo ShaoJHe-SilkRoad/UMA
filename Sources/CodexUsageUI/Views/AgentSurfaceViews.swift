@@ -1819,9 +1819,121 @@ final class GlobalSettingsViewModel: ObservableObject {
     }
 }
 
+/// The agent arrangement as Settings shows it. Rows drag onto each other the
+/// way the main window's list does, and the arrows do the same one step at a
+/// time. Every change is saved at once and kept until the next one.
+private struct AgentOrderSettingsRows: View {
+    @ObservedObject var store: UsageStore
+    let language: AppLanguage
+
+    private var providers: [ProviderProductState] { store.orderedWorkspaceProviders }
+
+    var body: some View {
+        if providers.isEmpty {
+            Text(localized("No agents are available yet.", "暂无可用的智能体。"))
+                .foregroundStyle(.secondary)
+        }
+        ForEach(Array(providers.enumerated()), id: \.element.id) { index, provider in
+            HStack(spacing: 8) {
+                Image(systemName: "line.3.horizontal")
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+                DesktopAgentLogo(
+                    providerID: provider.id.rawValue,
+                    tint: .secondary,
+                    diameter: 18
+                )
+                .accessibilityHidden(true)
+                Text(provider.id.displayName)
+                Spacer()
+                Button {
+                    store.moveAgent(provider.id, by: -1)
+                } label: {
+                    Image(systemName: "chevron.up")
+                }
+                .buttonStyle(.borderless)
+                .disabled(index == 0)
+                .help(localized("Move up", "上移"))
+                .accessibilityLabel(localized("Move \(provider.id.displayName) up", "上移 \(provider.id.displayName)"))
+                Button {
+                    store.moveAgent(provider.id, by: 1)
+                } label: {
+                    Image(systemName: "chevron.down")
+                }
+                .buttonStyle(.borderless)
+                .disabled(index == providers.count - 1)
+                .help(localized("Move down", "下移"))
+                .accessibilityLabel(localized("Move \(provider.id.displayName) down", "下移 \(provider.id.displayName)"))
+            }
+            .contentShape(Rectangle())
+            .onDrag {
+                NSItemProvider(object: provider.id.rawValue as NSString)
+            }
+            .dropDestination(for: String.self) { items, _ in
+                guard let dropped = items.first,
+                      let moved = ProviderProductID(rawValue: dropped)
+                else { return false }
+                store.moveAgent(moved, onto: provider.id)
+                return true
+            }
+            .accessibilityIdentifier("uma.settings.agents.order.\(provider.id.rawValue)")
+        }
+        HStack {
+            Spacer()
+            Button(localized("Restore Default Order", "恢复默认顺序"), action: store.resetAgentOrder)
+                .disabled(store.agentOrder.isEmpty)
+                .accessibilityIdentifier("uma.settings.agents.order.reset")
+        }
+    }
+
+    private func localized(_ english: String, _ chinese: String) -> String {
+        language == .simplifiedChinese ? chinese : english
+    }
+}
+
+/// Which agent the menu bar reads. Automatic follows the arrangement; a
+/// chosen agent stays there, showing a dash while it has no reading.
+private struct MenuBarAgentSettingsPicker: View {
+    @ObservedObject var store: UsageStore
+    let language: AppLanguage
+
+    var body: some View {
+        Picker(
+            localized("Agent shown in the menu bar", "菜单栏显示的智能体"),
+            selection: Binding(
+                get: { ProviderProductID(rawValue: store.menuBarAgent) },
+                set: store.setMenuBarAgent
+            )
+        ) {
+            Text(localized("Automatic: first agent in the order with a reading", "自动：顺序中第一个有读数的智能体"))
+                .tag(ProviderProductID?.none)
+            ForEach(store.menuBarCandidates) { provider in
+                Text(provider.id.displayName).tag(Optional(provider.id))
+            }
+        }
+        .pickerStyle(.radioGroup)
+        .accessibilityIdentifier("uma.settings.menu-bar.agent")
+        if let pinned = ProviderProductID(rawValue: store.menuBarAgent),
+           !store.menuBarCandidates.contains(where: { $0.id == pinned }) {
+            Text(localized(
+                "\(pinned.displayName) is not available, so the menu bar is following the order for now.",
+                "\(pinned.displayName) 当前不可用，菜单栏暂时按顺序显示。"
+            ))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private func localized(_ english: String, _ chinese: String) -> String {
+        language == .simplifiedChinese ? chinese : english
+    }
+}
+
 public enum GlobalSettingsPane: String, CaseIterable, Identifiable, Sendable {
     case general = "General"
     case appearance = "Appearance"
+    case agents = "Agents"
+    case menuBar = "Menu Bar"
     case desktopWizard = "Desktop Wizard"
     case privacy = "Privacy & Data"
     case hesectorium = "HESectorium"
@@ -1840,6 +1952,7 @@ public final class GlobalSettingsNavigationState: ObservableObject {
 public struct GlobalSettingsSurface: View {
     @ObservedObject private var navigation: GlobalSettingsNavigationState
     @StateObject private var model: GlobalSettingsViewModel
+    private let store: UsageStore
     private let hesectoriumStore: HESectoriumStore?
 
     public init(
@@ -1850,6 +1963,7 @@ public struct GlobalSettingsSurface: View {
         hesectoriumStore: HESectoriumStore? = nil
     ) {
         self.navigation = navigation
+        self.store = store
         self.hesectoriumStore = hesectoriumStore
         _model = StateObject(
             wrappedValue: GlobalSettingsViewModel(
@@ -2024,14 +2138,6 @@ public struct GlobalSettingsSurface: View {
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("uma.settings.appearance.theme")
                     Toggle(
-                        localized("Show remaining percentage in menu bar", "在菜单栏显示剩余百分比"),
-                        isOn: Binding(
-                            get: { model.menuBarShowsRemaining },
-                            set: model.setMenuBarShowsRemaining
-                        )
-                    )
-                    .accessibilityIdentifier("uma.settings.appearance.menu-value")
-                    Toggle(
                         localized("Show connectivity indicators", "显示连接状态指示器"),
                         isOn: Binding(
                             get: { model.quickPanelShowsConnectivity },
@@ -2051,6 +2157,32 @@ public struct GlobalSettingsSurface: View {
                         localized("Accessibility", "辅助功能"),
                         localized("Reduce Transparency, Increase Contrast, and Reduce Motion are respected automatically.", "自动遵循降低透明度、提高对比度和减弱动态效果设置。")
                     )
+                }
+            case .agents:
+                settingsSection(
+                    title: localized("Agents", "智能体"),
+                    subtitle: localized(
+                        "Drag to set the order every list uses: the main window, Quick Panel, Desktop Assistant and menu bar",
+                        "拖动以设定所有列表的顺序：主窗口、快速面板、桌面助手和菜单栏"
+                    )
+                ) {
+                    AgentOrderSettingsRows(store: store, language: model.language)
+                }
+            case .menuBar:
+                settingsSection(
+                    title: localized("Menu Bar", "菜单栏"),
+                    subtitle: localized("What the menu bar shows", "菜单栏显示的内容")
+                ) {
+                    Toggle(
+                        localized("Show remaining percentage in menu bar", "在菜单栏显示剩余百分比"),
+                        isOn: Binding(
+                            get: { model.menuBarShowsRemaining },
+                            set: model.setMenuBarShowsRemaining
+                        )
+                    )
+                    .accessibilityIdentifier("uma.settings.appearance.menu-value")
+                    MenuBarAgentSettingsPicker(store: store, language: model.language)
+                        .disabled(!model.menuBarShowsRemaining)
                 }
             case .desktopWizard:
                 settingsSection(
@@ -2200,6 +2332,8 @@ public struct GlobalSettingsSurface: View {
         switch pane {
         case .general: "gearshape"
         case .appearance: "paintbrush"
+        case .agents: "list.bullet"
+        case .menuBar: "menubar.rectangle"
         case .desktopWizard: "macwindow"
         case .privacy: "hand.raised"
         case .hesectorium: "externaldrive"
@@ -2210,6 +2344,8 @@ public struct GlobalSettingsSurface: View {
         switch pane {
         case .general: localized("General", "通用")
         case .appearance: localized("Appearance", "外观")
+        case .agents: localized("Agents", "智能体")
+        case .menuBar: localized("Menu Bar", "菜单栏")
         case .desktopWizard: localized("Desktop Assistant", "桌面助手")
         case .privacy: localized("Privacy & Data", "隐私与数据")
         case .hesectorium: localized("Sectorium", "分区工")

@@ -110,7 +110,7 @@ struct M5RMXProductShellIsolationTests {
         let observation = try #require(
             settings.slice(
                 from: "observationTask = Task",
-                through: "deinit { observationTask?.cancel() }"
+                through: "deinit {"
             )
         )
 

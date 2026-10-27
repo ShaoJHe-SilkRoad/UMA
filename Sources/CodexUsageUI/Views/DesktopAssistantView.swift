@@ -236,6 +236,24 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
 
     public var toolTip: String { accessibilityLabel }
 
+    /// Claude's percentage is an exact account reading, from Accuracy Sync or
+    /// the official status line, rather than a local estimate, and it is still
+    /// current. The assistant colours it green so a synced value can be told
+    /// from an estimate at a glance. A low reading is never shown green.
+    public var showsVerifiedReading: Bool {
+        guard id.lowercased().split(separator: ".").first == "claude",
+              sourceMark == .connection,
+              case .finite = usageValue,
+              freshnessState == .fresh,
+              !isStale
+        else { return false }
+        return LowRemainingUsagePolicy.assessment(
+            providerID: id,
+            admittedPlan: planLabel,
+            remainingPercent: remainingPercent
+        ) != .low
+    }
+
     public func usageText(for density: DesktopAssistantResolvedDensity) -> String {
         if density == .regular, let regularUsageText {
             return regularUsageText
@@ -958,6 +976,12 @@ private struct DesktopAssistantCardView: View {
                 providerID: card.id, admittedPlan: card.planLabel,
                 remainingPercent: nil, availableCredits: card.availableCredits
             ))
+        }
+        if card.showsVerifiedReading {
+            return AgentConnectionIndicatorPalette.connected(
+                isDark: colorScheme == .dark,
+                increasedLightContrast: true
+            )
         }
         return .primary
     }
