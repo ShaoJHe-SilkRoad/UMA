@@ -972,20 +972,17 @@ public enum SharedUsagePresentationPolicy {
             return previousID
         }
 
+        // Most-changeable rule. A spent window leads, because nothing runs
+        // until it resets. Otherwise the window that fell furthest since the
+        // last reading of the same epoch leads; with nothing to compare, the
+        // shortest window does, since it moves most for the same use: five
+        // hours before seven days. A low but still window no longer jumps
+        // ahead of one that is moving.
         if let depleted = finite
             .filter({ $0.1 == 0 })
             .sorted(by: deterministicWindowOrder)
             .first {
             return depleted.0.id
-        }
-
-        if let critical = finite
-            .filter({ $0.1 > 0 && $0.1 <= 10 })
-            .sorted(by: { lhs, rhs in
-                lhs.1 == rhs.1 ? deterministicWindowOrder(lhs, rhs) : lhs.1 < rhs.1
-            })
-            .first {
-            return critical.0.id
         }
 
         if let previous {
@@ -999,16 +996,13 @@ public enum SharedUsagePresentationPolicy {
             let positiveDecrements = finite.compactMap {
                 current -> (window: SharedUsageWindowPresentation, decrement: Double, remaining: Double)? in
                 guard let old = previousValues[current.0.id] else { return nil }
-                guard old.1 == current.0.resetsAt else { return nil }
+                guard sameEpoch(old.1, current.0.resetsAt) else { return nil }
                 let decrement = max(0, old.0 - current.1)
                 return decrement > 0 ? (current.0, decrement, current.1) : nil
             }
             if let winner = positiveDecrements.sorted(by: { lhs, rhs in
                 if lhs.decrement != rhs.decrement {
                     return lhs.decrement > rhs.decrement
-                }
-                if lhs.remaining != rhs.remaining {
-                    return lhs.remaining < rhs.remaining
                 }
                 return deterministicWindowOrder((lhs.window, 0), (rhs.window, 0))
             }).first {
@@ -1024,10 +1018,14 @@ public enum SharedUsagePresentationPolicy {
             }
         }
 
-        if let coldStart = finite.sorted(by: { lhs, rhs in
-            lhs.1 == rhs.1 ? deterministicWindowOrder(lhs, rhs) : lhs.1 < rhs.1
+        // Windows of one length (provider buckets that are not time windows)
+        // have no rate to compare, so the lowest of them leads.
+        if let shortest = finite.sorted(by: { lhs, rhs in
+            let lhsRank = windowLengthRank(lhs.0), rhsRank = windowLengthRank(rhs.0)
+            if lhsRank != rhsRank { return lhsRank < rhsRank }
+            return lhs.1 == rhs.1 ? deterministicWindowOrder(lhs, rhs) : lhs.1 < rhs.1
         }).first {
-            return coldStart.0.id
+            return shortest.0.id
         }
         if let unlimited = eligibleWindows.first(where: { $0.remaining == .unlimited }) {
             return unlimited.id
@@ -1035,25 +1033,35 @@ public enum SharedUsagePresentationPolicy {
         return eligibleWindows.first?.id
     }
 
+    /// Two readings belong to one quota epoch when their resets agree to
+    /// within ten minutes, so the same reset restated with other rounding, or
+    /// by Claude's other source, still compares as one epoch. A real reset
+    /// moves the time by hours.
+    private static func sameEpoch(_ lhs: Date?, _ rhs: Date?) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil): true
+        case let (lhs?, rhs?): abs(lhs.timeIntervalSince(rhs)) <= 10 * 60
+        default: false
+        }
+    }
+
+    /// Shortest window first: it is the one that changes most for the same
+    /// use, so it wins every otherwise-equal comparison.
     private static func deterministicWindowOrder(
         _ lhs: (SharedUsageWindowPresentation, Double),
         _ rhs: (SharedUsageWindowPresentation, Double)
     ) -> Bool {
-        let rank: (SharedUsageWindowPresentation) -> Int = {
-            switch $0.kind {
-            // The seven-day account window is the stable deterministic
-            // preference when otherwise-equal finite windows compete. A
-            // five-hour window still wins when it is the only finite value,
-            // depleted/critical with a stronger value, or has the strictly
-            // greatest decrement.
-            case .sevenDay: 0
-            case .fiveHour: 1
-            default: 2
-            }
-        }
-        let lhsRank = rank(lhs.0)
-        let rhsRank = rank(rhs.0)
+        let lhsRank = windowLengthRank(lhs.0)
+        let rhsRank = windowLengthRank(rhs.0)
         return lhsRank == rhsRank ? lhs.0.id < rhs.0.id : lhsRank < rhsRank
+    }
+
+    private static func windowLengthRank(_ window: SharedUsageWindowPresentation) -> Int {
+        switch window.kind {
+        case .fiveHour: 0
+        case .sevenDay: 1
+        default: 2
+        }
     }
 
     private static func connectionStatus(_ state: AgentConnectorState) -> SharedConnectionStatus {

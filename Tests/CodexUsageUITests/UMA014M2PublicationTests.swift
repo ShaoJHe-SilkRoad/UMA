@@ -38,7 +38,9 @@ struct UMA014M2PublicationTests {
         #expect(store.contains("productInventory.agentWorkspaceProviders"))
         #expect(store.contains("productInventory.quickPanelProviders"))
         #expect(quick.contains("AgentGlanceRow"))
-        #expect(shell.contains("store.$productInventory"))
+        // The Desktop Assistant reaches the inventory through the store's
+        // card publisher, which takes `$productInventory` as delivered.
+        #expect(shell.contains("store.assistantCardsPublisher"))
         // The status item reaches the inventory through the store's reading
         // publisher, which subscribes to `$productInventory` itself.
         #expect(status.contains("store.menuReadingPublisher"))

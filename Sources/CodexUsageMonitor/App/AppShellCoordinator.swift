@@ -532,18 +532,15 @@ final class AppShellCoordinator {
     var assistantIsEnabled: Bool { assistantController.isEnabled }
 
     private func observeAssistantCards(in store: UsageStore) {
-        assistantStoreObserver = Publishers.CombineLatest3(
-            store.$productInventory,
-            store.$language,
-            store.$agentOrder
-        ).sink { [weak self, weak store] _, language, order in
-            guard let self, let store else { return }
-            self.assistantController.update(
-                cards: store.assistantPresentationCards(arrangedBy: order).map {
-                    DesktopAssistantCard(shared: $0, language: language)
-                }
-            )
-        }
+        // The cards come with the publication, not from the store, which
+        // still holds the previous inventory while it publishes.
+        assistantStoreObserver = store.assistantCardsPublisher
+            .combineLatest(store.$language)
+            .sink { [weak self] cards, language in
+                self?.assistantController.update(
+                    cards: cards.map { DesktopAssistantCard(shared: $0, language: language) }
+                )
+            }
     }
 
     private func updateAssistant(using store: UsageStore) {

@@ -86,16 +86,28 @@ struct UMA014M4RQuotaContractTests {
         #expect(product.primaryQuota?.value != .unlimited)
     }
 
-    @Test("The 7D window leads when it is the only limiting finite window")
-    func sevenDayLimiting() throws {
+    // Most-changeable rule: a low seven days no longer leads a five-hour
+    // window on a first reading; the detail list still puts the lower first.
+    @Test("The 5H window leads a first reading even when 7D is lower")
+    func fiveHourLeadsFirstReading() throws {
         let product = try codex([
             window(id: "provider-5h", kind: .fiveHour, remaining: 91),
             window(id: "provider-7d", kind: .sevenDay, remaining: 13),
         ])
 
         #expect(product.quotas.map(\.kind) == [.sevenDay, .fiveHour])
+        #expect(product.primaryQuota?.kind == .fiveHour)
+        #expect(product.primaryDisplayText == "91%")
+    }
+
+    @Test("A spent 7D window leads")
+    func spentSevenDayLeads() throws {
+        let product = try codex([
+            window(id: "provider-5h", kind: .fiveHour, remaining: 91),
+            window(id: "provider-7d", kind: .sevenDay, remaining: 0),
+        ])
         #expect(product.primaryQuota?.kind == .sevenDay)
-        #expect(product.primaryDisplayText == "13%")
+        #expect(product.primaryDisplayText == "0%")
     }
 
     @Test("Plan labels cannot change quota classification or order")
@@ -115,7 +127,7 @@ struct UMA014M4RQuotaContractTests {
         #expect(first.primaryQuotaID == renamed.primaryQuotaID)
     }
 
-    @Test("Equal finite windows use stable weekly-first ordering")
+    @Test("Equal finite windows: weekly-first detail order, five-hour reading")
     func deterministicFiniteTieOrder() throws {
         let product = try codex([
             window(id: "provider-5h", kind: .fiveHour, remaining: 50),
@@ -123,7 +135,7 @@ struct UMA014M4RQuotaContractTests {
         ])
 
         #expect(product.quotas.map(\.kind) == [.sevenDay, .fiveHour])
-        #expect(product.primaryQuota?.kind == .sevenDay)
+        #expect(product.primaryQuota?.kind == .fiveHour)
     }
 
     private func codex(

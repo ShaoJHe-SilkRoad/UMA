@@ -40,11 +40,57 @@ struct SharedUsagePresentationPolicyTests {
         #expect(SharedUsagePresentationPolicy.severity(for: .unavailable) == .neutral)
     }
 
+    // Most-changeable rule: with nothing to compare yet, the shortest window
+    // leads, because it moves most for the same use. It used to be the lowest
+    // value, which put Claude on seven days after every launch.
     @Test
-    func coldStartSelectsLowestFiniteRemaining() {
+    func coldStartSelectsTheShortestWindow() {
         let result = card(snapshot(fiveHourRemaining: 71, sevenDayRemaining: 44))
+        #expect(result.selectedWindowID == "five-hour")
+        #expect(result.remaining == .finite(71))
+        let noFiveHour = card(snapshot(fiveHourRemaining: nil, sevenDayRemaining: 44))
+        #expect(noFiveHour.selectedWindowID == "seven-day")
+    }
+
+    // Claude's own readings, one Accuracy Sync apart: both windows fell by one
+    // point. The old tie-break chose the lower value, seven days.
+    @Test
+    func equalDropsShowTheShortestWindow() {
+        let first = card(snapshot(fiveHourRemaining: 88, sevenDayRemaining: 83))
+        let next = card(
+            snapshot(fiveHourRemaining: 87, sevenDayRemaining: 82, capturedAt: epoch.addingTimeInterval(600)),
+            previous: first
+        )
+        #expect(next.selectedWindowID == "five-hour")
+        #expect(next.remaining == .finite(87))
+    }
+
+    @Test
+    func aResetRestatedWithinTenMinutesIsTheSameEpoch() {
+        let first = card(snapshot(fiveHourRemaining: 60, sevenDayRemaining: 50))
+        let previous = SharedUsageCardPresentation(
+            id: first.id, providerName: first.providerName,
+            connectionStatus: first.connectionStatus, freshness: first.freshness,
+            windows: first.windows, selectedWindowID: "seven-day",
+            remaining: .finite(50), severity: .normal, capturedAt: first.capturedAt
+        )
+        let drifted = card(
+            snapshot(
+                fiveHourRemaining: 52,
+                sevenDayRemaining: 48,
+                fiveHourReset: epoch.addingTimeInterval(3_600 + 90),
+                capturedAt: epoch.addingTimeInterval(600)
+            ),
+            previous: previous
+        )
+        #expect(drifted.selectedWindowID == "five-hour")
+    }
+
+    @Test
+    func aSpentWeekLeadsAFullFiveHours() {
+        let result = card(snapshot(fiveHourRemaining: 100, sevenDayRemaining: 0))
         #expect(result.selectedWindowID == "seven-day")
-        #expect(result.remaining == .finite(44))
+        #expect(result.remaining == .finite(0))
     }
 
     @Test
@@ -201,7 +247,7 @@ struct SharedUsagePresentationPolicyTests {
     }
 
     @Test
-    func equalDecrementsUseSevenDayAsStableTieBreak() {
+    func equalDecrementsUseFiveHourAsStableTieBreak() {
         let previous = card(snapshot(fiveHourRemaining: 70, sevenDayRemaining: 70))
         let result = card(
             snapshot(
@@ -211,7 +257,7 @@ struct SharedUsagePresentationPolicyTests {
             ),
             previous: previous
         )
-        #expect(result.selectedWindowID == "seven-day")
+        #expect(result.selectedWindowID == "five-hour")
     }
 
     @Test
@@ -250,7 +296,7 @@ struct SharedUsagePresentationPolicyTests {
             ),
             previous: fresh
         )
-        #expect(stale.remaining == .finite(44))
+        #expect(stale.remaining == .finite(71))
         #expect(stale.selectedWindowID == fresh.selectedWindowID)
         #expect(stale.isRetainingLastValidValue)
 
@@ -264,7 +310,7 @@ struct SharedUsagePresentationPolicyTests {
             ),
             previous: fresh
         )
-        #expect(failed.remaining == .finite(44))
+        #expect(failed.remaining == .finite(71))
         #expect(failed.connectionStatus == .failed)
         #expect(failed.isRetainingLastValidValue)
 
@@ -286,7 +332,7 @@ struct SharedUsagePresentationPolicyTests {
             ),
             previous: failed
         )
-        #expect(recovered.remaining == .finite(77))
+        #expect(recovered.remaining == .finite(88))
         #expect(recovered.freshness == .fresh)
         #expect(!recovered.isRetainingLastValidValue)
     }
@@ -380,7 +426,7 @@ struct SharedUsagePresentationPolicyTests {
             now: epoch
         )
         #expect(cards.map(\.id) == ["codex.local", "future.provider"])
-        #expect(cards[0].remaining == .finite(44))
+        #expect(cards[0].remaining == .finite(71))
         #expect(cards[1].remaining == .finite(9))
         #expect(cards[0].severity == .normal)
         #expect(cards[1].severity == .critical)

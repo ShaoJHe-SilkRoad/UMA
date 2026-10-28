@@ -485,9 +485,31 @@ public final class UsageStore: ObservableObject {
     public func assistantPresentationCards(
         arrangedBy order: [String]
     ) -> [SharedUsageCardPresentation] {
-        let assistantIDs = Set(productInventory.assistantProviders.map(\.id))
-        return Self.arranged(
-            presentationCards.filter {
+        Self.assistantCards(presentationCards, inventory: productInventory, order: order)
+    }
+
+    /// The Desktop Assistant's cards, built from the values each publication
+    /// delivers. Read back from the store inside a sink, the inventory is the
+    /// previous one, because a @Published sink runs before the property is
+    /// set; an agent that had just become eligible, as Claude does after an
+    /// Accuracy Sync, was left off until some later publication.
+    public var assistantCardsPublisher: AnyPublisher<[SharedUsageCardPresentation], Never> {
+        Publishers.CombineLatest3($presentationCards, $productInventory, $agentOrder)
+            .map { cards, inventory, order in
+                Self.assistantCards(cards, inventory: inventory, order: order)
+            }
+            .removeDuplicates()
+            .eraseToAnyPublisher()
+    }
+
+    private static func assistantCards(
+        _ cards: [SharedUsageCardPresentation],
+        inventory: ProviderProductInventory,
+        order: [String]
+    ) -> [SharedUsageCardPresentation] {
+        let assistantIDs = Set(inventory.assistantProviders.map(\.id))
+        return arranged(
+            cards.filter {
                 ProviderProductStatePolicy.productID(
                     forRawConnectorID: $0.id
                 ).map(assistantIDs.contains) == true

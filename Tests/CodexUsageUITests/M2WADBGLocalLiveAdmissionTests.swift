@@ -270,18 +270,20 @@ struct M2WADBGLocalLiveAdmissionTests {
         )
 
         await store.refresh()
-        #expect(store.presentationCards.first?.selectedWindowID == "seven-day")
+        // A first reading shows the shortest window; the window that then
+        // falls furthest takes over.
+        #expect(store.presentationCards.first?.selectedWindowID == "five-hour")
 
         await connector.configure(
             probe: .init(state: .ready, safeFailure: nil),
             snapshot: multiWindowSnapshot(
-                fiveHourUsed: 20,
-                sevenDayUsed: 31,
+                fiveHourUsed: 6,
+                sevenDayUsed: 45,
                 capturedAt: now.addingTimeInterval(1)
             )
         )
         await store.refresh()
-        #expect(store.presentationCards.first?.selectedWindowID == "five-hour")
+        #expect(store.presentationCards.first?.selectedWindowID == "seven-day")
 
         await connector.configure(
             probe: .init(state: .ready, safeFailure: nil),

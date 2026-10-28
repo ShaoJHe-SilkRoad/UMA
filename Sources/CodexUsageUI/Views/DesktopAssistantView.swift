@@ -254,54 +254,6 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         ) != .low
     }
 
-    /// Most-changeable rule, for Claude: the assistant shows the five-hour
-    /// window, because once it runs out Claude Code stops whatever the weekly
-    /// figure says, and it is the one that moves within a session. Without a
-    /// five-hour limit it shows seven days. A spent seven-day window still
-    /// wins, since nothing can run then however much of the five hours is
-    /// left. Other agents keep the shared choice.
-    static func mostChangeableWindow(
-        of card: SharedUsageCardPresentation,
-        now: Date
-    ) -> SharedUsageCardPresentation {
-        guard card.id.lowercased().split(separator: ".").first == "claude" else { return card }
-        let current = card.windows.filter {
-            $0.remaining != .unavailable && ($0.resetsAt.map { $0 > now } ?? true)
-        }
-        let fiveHour = current.first { $0.kind == .fiveHour }
-        let sevenDay = current.first { $0.kind == .sevenDay }
-        let chosen: SharedUsageWindowPresentation? = if let sevenDay,
-            case let .finite(remaining) = sevenDay.remaining, remaining <= 0 {
-            sevenDay
-        } else {
-            fiveHour ?? sevenDay
-        }
-        guard let chosen, chosen.id != card.selectedWindowID else { return card }
-        return SharedUsageCardPresentation(
-            id: card.id,
-            providerName: card.providerName,
-            planLabel: card.planLabel,
-            connectionStatus: card.connectionStatus,
-            freshness: card.freshness,
-            windows: card.windows,
-            selectedWindowID: chosen.id,
-            remaining: chosen.remaining,
-            isEstimated: chosen.isEstimated == true,
-            availability: card.availability,
-            accountCreditBreakdown: card.accountCreditBreakdown,
-            availabilityLifecycle: card.availabilityLifecycle,
-            sourceDescription: card.sourceDescription,
-            isVisibleInDesktopAssistant: card.isVisibleInDesktopAssistant,
-            // A finite value shown neutral is a retained one, and stays
-            // neutral whichever window it is.
-            severity: card.severity == .neutral && card.remaining.finitePercent != nil
-                ? .neutral
-                : SharedUsagePresentationPolicy.severity(for: chosen.remaining),
-            isRetainingLastValidValue: card.isRetainingLastValidValue,
-            capturedAt: card.capturedAt
-        )
-    }
-
     public func usageText(for density: DesktopAssistantResolvedDensity) -> String {
         if density == .regular, let regularUsageText {
             return regularUsageText
@@ -310,11 +262,10 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
     }
 
     public init(
-        shared sharedCard: SharedUsageCardPresentation,
+        shared card: SharedUsageCardPresentation,
         language: AppLanguage = .english,
         now: Date = Date()
     ) {
-        let card = Self.mostChangeableWindow(of: sharedCard, now: now)
         let connectionState: DesktopAssistantConnectionState = if card.freshness == .stale {
             .stale
         } else {

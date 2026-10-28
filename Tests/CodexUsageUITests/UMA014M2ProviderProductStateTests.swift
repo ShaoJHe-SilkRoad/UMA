@@ -373,7 +373,7 @@ struct UMA014M2ProviderProductStateTests {
         #expect(claude?.health == .healthy)
         #expect(claude?.requiredAction == nil)
         #expect(claude?.sourceSummary == .localSmartEstimate)
-        #expect(claude?.primaryDisplayText == "≈41%")
+        #expect(claude?.primaryDisplayText == "≈68%")
         #expect(claude?.precision == .estimated)
         #expect(claude?.diagnosticReason == nil)
         #expect(claude?.inventory.agentWorkspace == true)

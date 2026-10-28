@@ -148,6 +148,47 @@ struct MenuBarReadingPublicationTests {
         await tearDown(harness)
     }
 
+    /// The Desktop Assistant read its cards back from the store inside an
+    /// inventory sink, which runs before the inventory is set, so an agent
+    /// that had just become eligible stayed off it until a later publication.
+    /// Here Claude leaves, then returns through the admission scan that
+    /// follows a sync, and the delivered list must already hold it.
+    @Test("The Desktop Assistant receives an agent the moment it becomes eligible")
+    func assistantCardsArriveWithTheirPublication() async throws {
+        let codex = ReadingConnector(id: CodexUsageConnector.connectorID, name: "Codex", remaining: 70)
+        let claude = ReadingConnector(id: ClaudeCodeUsageConnector.connectorID, name: "Claude Code", remaining: 40)
+        let registry = try AgentConnectorRegistry(connectors: [codex, claude])
+        let suite = "auv-assistant-cards-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        CodexMonitorConsentDecision.granted.persist(to: defaults)
+        let store = UsageStore(
+            autoRefresh: false,
+            previewOnly: false,
+            language: .english,
+            registry: registry,
+            primaryConnectorID: codex.id,
+            consentDefaults: defaults,
+            preferences: ApplicationPreferences(userDefaults: defaults)
+        )
+        store.grantMonitorConsent()
+        await store.searchForAgents()
+        try await waitUntil { store.assistantPresentationCards.count == 2 }
+        await claude.setRemaining(nil, state: .inactive)
+        try await waitUntil { store.assistantPresentationCards.count == 1 }
+
+        var delivered: [[String]] = []
+        let subscription = store.assistantCardsPublisher.sink { delivered.append($0.map(\.id)) }
+        defer { subscription.cancel() }
+        // As after an Accuracy Sync: a good reading, then the admission scan
+        // the Claude model runs, which brings Claude back in one publication.
+        await claude.setRemaining(40)
+        _ = await registry.scanSurfaceAdmissions(trigger: .manualRefresh, excludedProviderIDs: [])
+        try await waitUntil { store.assistantPresentationCards.count == 2 }
+        #expect(delivered.last == store.assistantPresentationCards.map(\.id))
+        await store.stopAllConnectors()
+    }
+
     @Test("The Desktop Assistant and overview cards follow the arrangement")
     func cardsFollowTheArrangement() async throws {
         let harness = try await harness()
@@ -196,6 +237,7 @@ private actor ReadingConnector: AgentUsageConnector {
     nonisolated let descriptor: AgentConnectorDescriptor
     private let name: String
     private var remaining: Double?
+    private var state: AgentConnectorState = .ready
     private var revision = 0
     private var continuations: [AsyncStream<AgentUsageSnapshot>.Continuation] = []
 
@@ -222,8 +264,9 @@ private actor ReadingConnector: AgentUsageConnector {
         )!
     }
 
-    func setRemaining(_ value: Double?) {
+    func setRemaining(_ value: Double?, state: AgentConnectorState = .ready) {
         remaining = value
+        self.state = state
         revision += 1
         let current = snapshot()
         continuations.forEach { $0.yield(current) }
@@ -245,7 +288,7 @@ private actor ReadingConnector: AgentUsageConnector {
         return AgentUsageSnapshot(
             id: id,
             providerName: name,
-            state: .ready,
+            state: state,
             capturedAt: now,
             lastSuccessfulAt: now,
             freshness: .fresh,
