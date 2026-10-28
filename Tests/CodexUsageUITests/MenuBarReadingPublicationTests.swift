@@ -189,6 +189,45 @@ struct MenuBarReadingPublicationTests {
         await store.stopAllConnectors()
     }
 
+    /// Claude reports no plan; the one chosen in its settings lives on the
+    /// provider state. Without it on the assistant card, the bar fell back to
+    /// the neutral colour of an unknown plan and Claude never showed green.
+    @Test("The Desktop Assistant card carries the plan chosen in Claude's settings")
+    func assistantCardsCarryTheDeclaredPlan() async throws {
+        let codex = ReadingConnector(id: CodexUsageConnector.connectorID, name: "Codex", remaining: 70)
+        let claude = ReadingConnector(id: ClaudeCodeUsageConnector.connectorID, name: "Claude Code", remaining: 40)
+        let registry = try AgentConnectorRegistry(connectors: [codex, claude])
+        let suite = "auv-assistant-plan-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        CodexMonitorConsentDecision.granted.persist(to: defaults)
+        let preferences = ApplicationPreferences(userDefaults: defaults)
+        preferences.set("max", for: UMAApplicationPreferenceKeys.claudeDeclaredPlan)
+        let store = UsageStore(
+            autoRefresh: false,
+            previewOnly: false,
+            language: .english,
+            registry: registry,
+            primaryConnectorID: codex.id,
+            consentDefaults: defaults,
+            preferences: preferences
+        )
+        store.grantMonitorConsent()
+        await store.searchForAgents()
+        try await waitUntil { store.assistantPresentationCards.count == 2 }
+        let claudeCard = try #require(store.assistantPresentationCards.first {
+            $0.id == ClaudeCodeUsageConnector.connectorID.rawValue
+        })
+        #expect(claudeCard.planLabel == "max")
+        let assistantCard = DesktopAssistantCard(shared: claudeCard)
+        #expect(LowRemainingUsagePolicy.assessment(
+            providerID: assistantCard.id,
+            admittedPlan: assistantCard.planLabel,
+            remainingPercent: assistantCard.remainingPercent
+        ) == .normal)
+        await store.stopAllConnectors()
+    }
+
     @Test("The Desktop Assistant and overview cards follow the arrangement")
     func cardsFollowTheArrangement() async throws {
         let harness = try await harness()

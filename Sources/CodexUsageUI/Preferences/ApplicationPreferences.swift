@@ -268,6 +268,7 @@ public enum UMAApplicationAppearance: String, CaseIterable, Identifiable, Sendab
 /// typed product contract everywhere else.
 public enum UMABackgroundRefreshInterval: String, CaseIterable, Identifiable, Sendable {
     case fiveMinutes
+    case tenMinutes
     case fifteenMinutes
     case thirtyMinutes
     case sixtyMinutes
@@ -277,6 +278,7 @@ public enum UMABackgroundRefreshInterval: String, CaseIterable, Identifiable, Se
     public var duration: Duration {
         switch self {
         case .fiveMinutes: .seconds(5 * 60)
+        case .tenMinutes: .seconds(10 * 60)
         case .fifteenMinutes: .seconds(15 * 60)
         case .thirtyMinutes: .seconds(30 * 60)
         case .sixtyMinutes: .seconds(60 * 60)

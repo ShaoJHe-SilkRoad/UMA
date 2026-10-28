@@ -507,12 +507,18 @@ public final class UsageStore: ObservableObject {
         inventory: ProviderProductInventory,
         order: [String]
     ) -> [SharedUsageCardPresentation] {
-        let assistantIDs = Set(inventory.assistantProviders.map(\.id))
+        // The plan travels with the provider state: Claude's comes from its
+        // settings, not its readings, and without it the bar cannot be coloured.
+        let plans = Dictionary(
+            inventory.assistantProviders.map { ($0.id, $0.planLabel) },
+            uniquingKeysWith: { first, _ in first }
+        )
         return arranged(
-            cards.filter {
-                ProviderProductStatePolicy.productID(
-                    forRawConnectorID: $0.id
-                ).map(assistantIDs.contains) == true
+            cards.compactMap { card in
+                guard let productID = ProviderProductStatePolicy.productID(
+                    forRawConnectorID: card.id
+                ), let plan = plans[productID] else { return nil }
+                return card.fillingPlanLabel(plan)
             },
             by: order
         )

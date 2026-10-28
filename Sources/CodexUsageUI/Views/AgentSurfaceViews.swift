@@ -24,12 +24,17 @@ struct CompactUsageFill: View {
     let increaseContrast: Bool
     var providerID: String = "unknown"
     var admittedPlan: String? = nil
+    /// A reading that is no longer current is drawn grey, whatever its level.
+    var isOutdated = false
 
     var body: some View {
         if let fraction = CompactUsageFillPolicy.fraction(for: remainingPercent) {
             GeometryReader { proxy in
-                LowRemainingUsagePolicy.color(for: LowRemainingUsagePolicy.assessment(
-                    providerID: providerID, admittedPlan: admittedPlan, remainingPercent: remainingPercent
+                (isOutdated ? Color.secondary : LowRemainingUsagePolicy.color(
+                    for: LowRemainingUsagePolicy.assessment(
+                        providerID: providerID, admittedPlan: admittedPlan,
+                        remainingPercent: remainingPercent
+                    )
                 ))
                     .opacity(DesktopAssistantTintOpacity.value(
                         isDark: colorScheme == .dark,
@@ -2413,6 +2418,7 @@ public struct GlobalSettingsSurface: View {
     private func intervalTitle(_ interval: UMABackgroundRefreshInterval) -> String {
         switch interval {
         case .fiveMinutes: localized("5 minutes", "5 分钟")
+        case .tenMinutes: localized("10 minutes", "10 分钟")
         case .fifteenMinutes: localized("15 minutes", "15 分钟")
         case .thirtyMinutes: localized("30 minutes", "30 分钟")
         case .sixtyMinutes: localized("60 minutes", "60 分钟")

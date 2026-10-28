@@ -2,10 +2,11 @@ import Foundation
 import Testing
 @testable import CodexUsageUI
 
-/// Claude's Desktop Assistant percentage turns green only for an exact,
-/// current reading, so a synced value can be told from an estimate.
-@Suite("Desktop Assistant verified reading")
-struct DesktopAssistantVerifiedReadingTests {
+/// Claude's Desktop Assistant bar shows how current its reading is: its
+/// usual colour while an exact reading is current, grey once it is not. The
+/// percentage itself is never recoloured.
+@Suite("Desktop Assistant outdated reading")
+struct DesktopAssistantOutdatedReadingTests {
     private func card(
         id: String = "claude.browserSync",
         plan: String? = nil,
@@ -26,20 +27,24 @@ struct DesktopAssistantVerifiedReadingTests {
         )
     }
 
-    @Test("An exact, current Claude reading is shown as verified")
-    func exactClaudeReadingIsVerified() {
-        #expect(card().showsVerifiedReading)
-        #expect(card(plan: "Max", value: .finite(40)).showsVerifiedReading)
+    @Test("A current exact Claude reading keeps its colour, low ones included")
+    func currentExactReadingIsNotOutdated() {
+        #expect(!card().showsOutdatedReading)
+        #expect(!card(plan: "max", value: .finite(40)).showsOutdatedReading)
+        #expect(!card(plan: "max", value: .finite(5)).showsOutdatedReading)
     }
 
-    @Test("Estimates, stale values, low readings and other agents are not")
-    func everythingElseIsNot() {
-        #expect(!card(value: .estimated(60)).showsVerifiedReading)
-        #expect(!card(isStale: true).showsVerifiedReading)
-        #expect(!card(connection: .stale).showsVerifiedReading)
-        #expect(!card(value: .unavailable).showsVerifiedReading)
-        #expect(!card(plan: "Max", value: .finite(5)).showsVerifiedReading)
-        #expect(!card(id: "codex.appServer").showsVerifiedReading)
+    @Test("Estimates and stale or retained readings are drawn grey")
+    func olderReadingsAreOutdated() {
+        #expect(card(value: .estimated(60)).showsOutdatedReading)
+        #expect(card(isStale: true).showsOutdatedReading)
+        #expect(card(connection: .stale).showsOutdatedReading)
+    }
+
+    @Test("No reading, and other agents, are left alone")
+    func everythingElseIsUnchanged() {
+        #expect(!card(value: .unavailable).showsOutdatedReading)
+        #expect(!card(id: "codex.appServer", isStale: true).showsOutdatedReading)
     }
 }
 
@@ -68,6 +73,16 @@ struct PeriodicAccuracySyncTests {
         #expect(UMABackgroundRefreshInterval.allCases.first == .fiveMinutes)
         #expect(UMABackgroundRefreshInterval.fiveMinutes.seconds == 300)
         #expect(UMABackgroundRefreshInterval.fiveMinutes.duration == .seconds(300))
+    }
+
+    @Test("Ten minutes sits between five and fifteen, and Claude follows it")
+    func tenMinuteChoice() {
+        #expect(UMABackgroundRefreshInterval.allCases.map(\.seconds) == [300, 600, 900, 1800, 3600])
+        let preferences = ApplicationPreferences.inMemory()
+        preferences.set(true, for: UMAApplicationPreferenceKeys.automaticBackgroundRefresh)
+        preferences.set(UMABackgroundRefreshInterval.tenMinutes.rawValue,
+                        for: UMAApplicationPreferenceKeys.backgroundRefreshInterval)
+        #expect(UsageMonitorRuntime.claudeAutomaticSyncInterval(preferences: preferences) == TimeInterval(600))
     }
 
     @Test("A retired ten-minute choice that was on turns automatic refresh on, once")

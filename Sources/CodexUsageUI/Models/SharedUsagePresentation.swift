@@ -415,6 +415,26 @@ public struct SharedUsageCardPresentation: Codable, Equatable, Identifiable, Sen
         self.capturedAt = capturedAt
     }
 
+    /// The same card with a plan filled in where the provider reported none,
+    /// such as the plan chosen in Claude's settings.
+    func fillingPlanLabel(_ fallback: String?) -> Self {
+        guard planLabel == nil, let fallback else { return self }
+        return Self(
+            id: id, providerName: providerName, planLabel: fallback,
+            connectionStatus: connectionStatus, freshness: freshness,
+            windows: windows, selectedWindowID: selectedWindowID,
+            remaining: remaining, isEstimated: isEstimated ?? false,
+            availability: availability,
+            accountCreditBreakdown: accountCreditBreakdown,
+            availabilityLifecycle: availabilityLifecycle,
+            sourceDescription: sourceDescription,
+            isVisibleInDesktopAssistant: isVisibleInDesktopAssistant,
+            severity: severity,
+            isRetainingLastValidValue: isRetainingLastValidValue,
+            capturedAt: capturedAt
+        )
+    }
+
     public var selectedWindow: SharedUsageWindowPresentation? {
         guard let selectedWindowID else { return nil }
         return windows.first(where: { $0.id == selectedWindowID })

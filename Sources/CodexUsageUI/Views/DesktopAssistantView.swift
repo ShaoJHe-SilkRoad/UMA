@@ -236,22 +236,21 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
 
     public var toolTip: String { accessibilityLabel }
 
-    /// Claude's percentage is an exact account reading, from Accuracy Sync or
-    /// the official status line, rather than a local estimate, and it is still
-    /// current. The assistant colours it green so a synced value can be told
-    /// from an estimate at a glance. A low reading is never shown green.
-    public var showsVerifiedReading: Bool {
+    /// Claude's bar carries how current its reading is. While the reading is
+    /// an exact account figure, from Accuracy Sync or the official status
+    /// line, and still current, the bar takes its usual colour: green, or red
+    /// when low. Once that reading is outdated, retained or only an estimate,
+    /// the bar turns grey. The percentage stays in the normal text colour.
+    public var showsOutdatedReading: Bool {
         guard id.lowercased().split(separator: ".").first == "claude",
-              sourceMark == .connection,
+              remainingPercent != nil
+        else { return false }
+        guard sourceMark == .connection,
               case .finite = usageValue,
               freshnessState == .fresh,
               !isStale
-        else { return false }
-        return LowRemainingUsagePolicy.assessment(
-            providerID: id,
-            admittedPlan: planLabel,
-            remainingPercent: remainingPercent
-        ) != .low
+        else { return true }
+        return false
     }
 
     public func usageText(for density: DesktopAssistantResolvedDensity) -> String {
@@ -818,7 +817,8 @@ private struct DesktopAssistantCardView: View {
                             reduceTransparency: usesReduceTransparency,
                             increaseContrast: hasIncreasedContrast,
                             providerID: card.id,
-                            admittedPlan: card.planLabel
+                            admittedPlan: card.planLabel,
+                            isOutdated: card.showsOutdatedReading
                         )
                     }
                 }
@@ -976,12 +976,6 @@ private struct DesktopAssistantCardView: View {
                 providerID: card.id, admittedPlan: card.planLabel,
                 remainingPercent: nil, availableCredits: card.availableCredits
             ))
-        }
-        if card.showsVerifiedReading {
-            return AgentConnectionIndicatorPalette.connected(
-                isDark: colorScheme == .dark,
-                increasedLightContrast: true
-            )
         }
         return .primary
     }
