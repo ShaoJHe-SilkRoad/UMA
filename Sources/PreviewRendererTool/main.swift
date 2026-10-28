@@ -625,7 +625,7 @@ struct PreviewRendererTool {
             )
             let pane: GlobalSettingsPane = switch scenario {
             case .settingsGeneral: .general
-            case .settingsAppearance: .appearance
+            case .settingsAppearance: .general  // Appearance lives under General now.
             case .settingsWizard: .desktopWizard
             case .settingsPrivacy: .privacy
             default: .general

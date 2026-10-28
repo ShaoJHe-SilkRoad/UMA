@@ -95,10 +95,10 @@ struct UMA014M3RAgentWorkspaceTests {
             "primaryDisplayText",
             "provider?.sourceSummary",
             "provider?.freshness",
-            "SharedBasicUsageSummaryView(",
+            "activityDashboardCard",
             "BasicSharedUsagePresentation",
             "Accuracy Sync",
-            "Advanced Diagnostics",
+            "Source health",
         ] {
             #expect(source.contains(required) || required == "BasicSharedUsagePresentation")
         }
@@ -129,12 +129,12 @@ struct UMA014M3RAgentWorkspaceTests {
         #expect(!source.contains("Hero"))
     }
 
-    @Test("Global Settings has only four global panes and no provider controls")
+    @Test("Global Settings has only global panes and no provider controls")
     func settingsScopeIsGlobalOnly() throws {
         let source = try read("Sources/CodexUsageUI/Views/AgentSurfaceViews.swift")
         let settings = try #require(source.split(separator: "public struct GlobalSettingsSurface").last)
 
-        for pane in ["general", "appearance", "desktopWizard", "privacy"] {
+        for pane in ["general", "refresh", "agents", "menuBar", "desktopWizard", "privacy"] {
             #expect(source.contains("case \(pane)"))
         }
         #expect(!settings.contains("case providers"))

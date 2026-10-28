@@ -49,6 +49,7 @@ public struct UsageMonitorRuntime {
     public let claudeSettings: ClaudeBrowserSettingsModel
     private let startupTask: Task<Void, Never>?
     private let threadOSAttributionPreferenceObservation: ApplicationPreferences.Observation?
+    private let claudeAutomaticSyncObservation: ApplicationPreferences.Observation?
 
     init(
         preferences: ApplicationPreferences,
@@ -56,6 +57,7 @@ public struct UsageMonitorRuntime {
         claudeSettings: ClaudeBrowserSettingsModel,
         startupTask: Task<Void, Never>? = nil,
         threadOSAttributionPreferenceObservation: ApplicationPreferences.Observation? = nil,
+        claudeAutomaticSyncObservation: ApplicationPreferences.Observation? = nil,
         dataPaths: ApplicationDataPaths = .current()
     ) {
         self.preferences = preferences
@@ -64,6 +66,34 @@ public struct UsageMonitorRuntime {
         self.claudeSettings = claudeSettings
         self.startupTask = startupTask
         self.threadOSAttributionPreferenceObservation = threadOSAttributionPreferenceObservation
+        self.claudeAutomaticSyncObservation = claudeAutomaticSyncObservation
+    }
+
+    /// The Accuracy Sync interval automatic refresh asks of Claude, or `nil`
+    /// while automatic refresh is off.
+    static func claudeAutomaticSyncInterval(
+        preferences: ApplicationPreferences
+    ) -> TimeInterval? {
+        guard preferences.value(
+            for: UMAApplicationPreferenceKeys.automaticBackgroundRefresh
+        ) else { return nil }
+        let interval = UMABackgroundRefreshInterval(
+            rawValue: preferences.value(
+                for: UMAApplicationPreferenceKeys.backgroundRefreshInterval
+            )
+        ) ?? .fifteenMinutes
+        return interval.seconds
+    }
+
+    /// Someone who had turned on Claude's own "every 10 minutes" keeps a
+    /// repeating sync: that choice now lives in automatic refresh.
+    static func migrateLegacyClaudePeriodicSync(
+        consent: ClaudeBrowserConsentStore,
+        preferences: ApplicationPreferences
+    ) {
+        guard consent.legacyPeriodicAccuracySyncEnabled else { return }
+        preferences.set(true, for: UMAApplicationPreferenceKeys.automaticBackgroundRefresh)
+        consent.clearLegacyPeriodicAccuracySync()
     }
 
     /// Drain application-owned startup before stopping connectors. A late
@@ -168,9 +198,22 @@ public struct UsageMonitorRuntime {
                 )
             }
         )
+        // Claude's Accuracy Sync repeats with the app's automatic refresh,
+        // at its interval, and never while it is off.
+        var claudeAutomaticSyncObservation: ApplicationPreferences.Observation?
         if startProviders {
-            // Off unless the user turned on the ten-minute Accuracy Sync.
-            claudeSettings.startPeriodicAccuracySyncIfEnabled()
+            migrateLegacyClaudePeriodicSync(consent: claudeConsent, preferences: preferences)
+            claudeSettings.setAutomaticAccuracySync(
+                every: claudeAutomaticSyncInterval(preferences: preferences)
+            )
+            claudeAutomaticSyncObservation = preferences.observe { [weak claudeSettings] change in
+                guard change.key == UMAApplicationPreferenceKeys.automaticBackgroundRefresh.name
+                        || change.key == UMAApplicationPreferenceKeys.backgroundRefreshInterval.name
+                else { return }
+                claudeSettings?.setAutomaticAccuracySync(
+                    every: claudeAutomaticSyncInterval(preferences: preferences)
+                )
+            }
         }
         let usageStore = UsageStore(
             autoRefresh: startProviders,
@@ -219,6 +262,7 @@ public struct UsageMonitorRuntime {
             claudeSettings: claudeSettings,
             startupTask: startupTask,
             threadOSAttributionPreferenceObservation: threadOSAttributionPreferenceObservation,
+            claudeAutomaticSyncObservation: claudeAutomaticSyncObservation,
             dataPaths: dataPaths
         )
     }

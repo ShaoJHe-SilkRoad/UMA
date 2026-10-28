@@ -339,7 +339,7 @@ final class AppShellCoordinator {
         let mainWindowStatePreserved = mainWindowController.selectedAgentForTesting == expectedMainAgent
             && mainWindowController.destinationForTesting == expectedMainDestination
 
-        settingsWindowController.selectPaneForTesting(.appearance)
+        settingsWindowController.selectPaneForTesting(.refresh)
         showSettingsWindow()
         let settingsWindowIdentity = settingsWindowController.windowIdentityForTesting
         let requiresAttachedSettingsContent = runtime != nil
@@ -478,10 +478,10 @@ final class AppShellCoordinator {
         guard let runtime, runtime.store.allowsManualRefresh else { return }
         await runtime.store.refresh()
         // The store refresh reads local sources only. With Claude in the list,
-        // one Refresh All also asks Claude's model for its exact reading,
-        // under that model's own rules, instead of needing a second click.
+        // Refresh All also asks Claude's model for its exact reading: it is
+        // the one way to ask for it, so there is no second button.
         if runtime.store.orderedWorkspaceProviders.contains(where: { $0.id == .claude }) {
-            runtime.claudeSettings.accuracySyncAfterRefreshAll()
+            runtime.claudeSettings.accuracySyncForRefreshAll()
         }
     }
 

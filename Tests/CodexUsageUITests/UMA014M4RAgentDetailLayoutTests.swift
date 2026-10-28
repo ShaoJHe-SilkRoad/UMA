@@ -41,10 +41,13 @@ struct UMA014M4RAgentDetailLayoutTests {
         #expect(source.contains("LazyVGrid("))
         #expect(source.contains("usageModule"))
         #expect(source.contains("connectionModule"))
-        #expect(source.contains("controlsModule"))
-        #expect(source.contains("SharedBasicUsageSummaryView("))
-        #expect(source.contains("module(localized(\"Local Smart & Accuracy\""))
-        #expect(source.contains("module(localized(\"Privacy & Advanced Diagnostics\""))
+        // Claude's actions show above the cards only when there is one to
+        // take; source health and the privacy line sit in Connection & Source.
+        #expect(source.contains("claudeActionCallout"))
+        #expect(source.contains("activityDashboardCard"))
+        #expect(source.contains("factRow(localized(\"Source health\""))
+        #expect(source.contains("uma.agent.claude.sync-route"))
+        #expect(!source.contains("DisclosureGroup(localized(\"Connection & Source\""))
     }
 
     @Test("Detailed quota surface shows admitted windows and reports an absent Codex 5H limit honestly")

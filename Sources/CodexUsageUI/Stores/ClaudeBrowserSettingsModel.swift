@@ -145,11 +145,16 @@ final class ClaudeBrowserConsentStore {
         set { defaults.set(false, forKey: Key.allowSafariLaunch) }
     }
 
-    /// The user's own choice to repeat Accuracy Sync on a timer. A key of its
-    /// own, so retiring the old persistent automation never clears it.
-    var periodicAccuracySyncEnabled: Bool {
+    /// The retired "Accuracy Sync every 10 minutes" choice. Claude now follows
+    /// the app's automatic refresh, so the key is only read once, to carry a
+    /// user's "on" over to that setting, and is then removed.
+    var legacyPeriodicAccuracySyncEnabled: Bool {
         get { defaults.bool(forKey: Key.periodicAccuracySync) }
         set { defaults.set(newValue, forKey: Key.periodicAccuracySync) }
+    }
+
+    func clearLegacyPeriodicAccuracySync() {
+        defaults.removeObject(forKey: Key.periodicAccuracySync)
     }
 
     func retirePersistentBrowserAutomation() {
@@ -167,7 +172,9 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     @Published private(set) var consentGranted: Bool
     @Published private(set) var autoRefreshEnabled: Bool
     @Published private(set) var allowSafariLaunch: Bool
-    @Published private(set) var periodicAccuracySyncEnabled: Bool
+    /// How often Accuracy Sync repeats, taken from the app's automatic
+    /// refresh. `nil` while automatic refresh is off.
+    @Published private(set) var automaticAccuracySyncInterval: TimeInterval?
     @Published private(set) var estimateConfidence: String?
     @Published private(set) var lastExactAt: Date?
     @Published private(set) var liveLinkStage: ClaudeLiveLinkStageReason?
@@ -227,10 +234,8 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     private let safariIsRunning: @MainActor () -> Bool
     private var configurationRestoreFailure: ClaudeSettingsPresentationState?
 
-    /// How often Accuracy Sync repeats once the user turns it on.
-    static let periodicAccuracySyncInterval: TimeInterval = 10 * 60
-    /// The first run comes shortly after launch rather than ten minutes in,
-    /// so Claude is not left without a reading after every start.
+    /// The first run comes shortly after launch rather than a whole refresh
+    /// interval in, so Claude is not left without a reading after every start.
     static let periodicAccuracySyncFirstDelay: TimeInterval = 15
 
     init(
@@ -260,7 +265,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         consentGranted = consentStore.consentGranted
         autoRefreshEnabled = false
         allowSafariLaunch = false
-        periodicAccuracySyncEnabled = consentStore.periodicAccuracySyncEnabled
+        automaticAccuracySyncInterval = nil
         estimateConfidence = nil
         lastExactAt = nil
         liveLinkStage = nil
@@ -372,40 +377,40 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         }
     }
 
-    /// Repeats Accuracy Sync every ten minutes while on. Each run is the same
-    /// one-shot sync as the button, and it is skipped, not queued, when Safari
-    /// is not running: a timer never opens Safari.
-    public func setPeriodicAccuracySyncEnabled(_ enabled: Bool) {
-        consentStore.periodicAccuracySyncEnabled = enabled
-        periodicAccuracySyncEnabled = enabled
-        schedulePeriodicAccuracySync()
-    }
-
-    /// Starts the timer if the saved choice is on. The runtime calls this once
-    /// at launch; a model made for a test or a preview never runs one.
-    public func startPeriodicAccuracySyncIfEnabled() {
+    /// Claude follows the app's automatic refresh: Accuracy Sync repeats at
+    /// its interval while it is on, and stops when it is off (`nil`). Each run
+    /// is the same one-shot sync as Refresh All, and it is skipped, not
+    /// queued, when Safari is not running: automatic refresh never opens
+    /// Safari. The runtime calls this at launch and on every change; a model
+    /// made for a test or a preview never runs a timer.
+    public func setAutomaticAccuracySync(every interval: TimeInterval?) {
+        // An unrelated preference change must not push the next run back.
+        guard interval != automaticAccuracySyncInterval else { return }
+        automaticAccuracySyncInterval = interval
         schedulePeriodicAccuracySync()
     }
 
     var periodicAccuracySyncIsDue: Bool {
-        periodicAccuracySyncEnabled && accuracySyncCanRunUnprompted
-    }
-
-    /// A sync nobody asked for by name, from the timer or from Refresh All,
-    /// runs only where the button would be offered, and only when Safari is
-    /// already open: neither ever opens Safari.
-    private var accuracySyncCanRunUnprompted: Bool {
-        consentGranted
-            && !actionInProgress
-            && offersAccuracySync
+        automaticAccuracySyncInterval != nil
+            && accuracySyncCanRun
             && safariIsRunning()
     }
 
-    /// Refresh All finishes with Accuracy Sync when Claude is in the list, so
-    /// one refresh also brings the exact figures. Returns whether it started.
+    /// Where Accuracy Sync may run at all: consent, nothing else in flight,
+    /// and a state that offers it.
+    private var accuracySyncCanRun: Bool {
+        consentGranted
+            && !actionInProgress
+            && offersAccuracySync
+    }
+
+    /// Refresh All includes Accuracy Sync when Claude is in the list, so one
+    /// refresh also brings the exact figures. It is the user's own action, so,
+    /// like the Accuracy Sync button it replaced, it may start Safari in the
+    /// background for the one temporary tab. Returns whether it started.
     @discardableResult
-    public func accuracySyncAfterRefreshAll() -> Bool {
-        guard accuracySyncCanRunUnprompted else { return false }
+    public func accuracySyncForRefreshAll() -> Bool {
+        guard accuracySyncCanRun else { return false }
         accuracySync()
         return true
     }
@@ -418,7 +423,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     private func schedulePeriodicAccuracySync() {
         periodicAccuracySyncTask?.cancel()
         periodicAccuracySyncTask = nil
-        guard periodicAccuracySyncEnabled else { return }
+        guard let interval = automaticAccuracySyncInterval else { return }
         let sleep = periodicSleep
         periodicAccuracySyncTask = Task { [weak self] in
             var delay = Self.periodicAccuracySyncFirstDelay
@@ -428,7 +433,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
                 } catch {
                     return
                 }
-                delay = Self.periodicAccuracySyncInterval
+                delay = interval
                 guard !Task.isCancelled, let self else { return }
                 self.runPeriodicAccuracySyncIfDue()
             }

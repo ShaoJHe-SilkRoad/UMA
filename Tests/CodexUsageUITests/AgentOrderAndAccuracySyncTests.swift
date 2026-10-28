@@ -45,19 +45,45 @@ struct DesktopAssistantVerifiedReadingTests {
 
 /// The ten-minute Accuracy Sync is the user's choice, runs the same one-shot
 /// sync as the button, and never runs without Safari or consent.
-@Suite("Periodic Accuracy Sync", .timeLimit(.minutes(1)))
+/// Claude's Accuracy Sync no longer has a timer switch of its own: it follows
+/// the app's automatic refresh, on and off and at its interval.
+@Suite("Automatic refresh includes Claude", .timeLimit(.minutes(1)))
 @MainActor
 struct PeriodicAccuracySyncTests {
-    @Test("The choice is off by default, persists, and survives retiring the old automation")
-    func choicePersists() throws {
+    @Test("Automatic refresh off means no Claude timer; on means its interval")
+    func intervalFollowsAutomaticRefresh() {
+        let preferences = ApplicationPreferences.inMemory()
+        #expect(UsageMonitorRuntime.claudeAutomaticSyncInterval(preferences: preferences) == nil)
+        preferences.set(true, for: UMAApplicationPreferenceKeys.automaticBackgroundRefresh)
+        #expect(UsageMonitorRuntime.claudeAutomaticSyncInterval(preferences: preferences) == TimeInterval(900))
+        preferences.set(UMABackgroundRefreshInterval.fiveMinutes.rawValue,
+                        for: UMAApplicationPreferenceKeys.backgroundRefreshInterval)
+        #expect(UsageMonitorRuntime.claudeAutomaticSyncInterval(preferences: preferences) == TimeInterval(300))
+        preferences.set(false, for: UMAApplicationPreferenceKeys.automaticBackgroundRefresh)
+        #expect(UsageMonitorRuntime.claudeAutomaticSyncInterval(preferences: preferences) == nil)
+    }
+
+    @Test("Automatic refresh can run every five minutes")
+    func fiveMinuteChoice() {
+        #expect(UMABackgroundRefreshInterval.allCases.first == .fiveMinutes)
+        #expect(UMABackgroundRefreshInterval.fiveMinutes.seconds == 300)
+        #expect(UMABackgroundRefreshInterval.fiveMinutes.duration == .seconds(300))
+    }
+
+    @Test("A retired ten-minute choice that was on turns automatic refresh on, once")
+    func legacyChoiceCarriesOver() throws {
         let suite = "auv-periodic-sync-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let store = ClaudeBrowserConsentStore(defaults: defaults)
-        #expect(!store.periodicAccuracySyncEnabled)
-        store.periodicAccuracySyncEnabled = true
-        store.retirePersistentBrowserAutomation()
-        #expect(ClaudeBrowserConsentStore(defaults: defaults).periodicAccuracySyncEnabled)
+        let consent = ClaudeBrowserConsentStore(defaults: defaults)
+        let preferences = ApplicationPreferences.inMemory()
+        UsageMonitorRuntime.migrateLegacyClaudePeriodicSync(consent: consent, preferences: preferences)
+        #expect(!preferences.value(for: UMAApplicationPreferenceKeys.automaticBackgroundRefresh))
+
+        consent.legacyPeriodicAccuracySyncEnabled = true
+        UsageMonitorRuntime.migrateLegacyClaudePeriodicSync(consent: consent, preferences: preferences)
+        #expect(preferences.value(for: UMAApplicationPreferenceKeys.automaticBackgroundRefresh))
+        #expect(!ClaudeBrowserConsentStore(defaults: defaults).legacyPeriodicAccuracySyncEnabled)
     }
 
     @Test("A tick runs one one-shot Accuracy Sync, and only while Safari is running")
@@ -81,7 +107,7 @@ struct PeriodicAccuracySyncTests {
         try await waitForClaudeValue(model.$state, matching: { _ in model.offersAccuracySync })
         #expect(await fixture.bridge.automaticRequests.isEmpty)
 
-        model.setPeriodicAccuracySyncEnabled(true)
+        model.setAutomaticAccuracySync(every: 300)
         #expect(!model.periodicAccuracySyncIsDue)
         try await ticker.waitForSleeper()
         await ticker.tick()
@@ -96,18 +122,19 @@ struct PeriodicAccuracySyncTests {
         #expect(requests.count == 1)
         #expect(requests.first?.allowSafariLaunch == true)
 
-        model.setPeriodicAccuracySyncEnabled(false)
+        model.setAutomaticAccuracySync(every: nil)
         #expect(!model.periodicAccuracySyncIsDue)
         await ticker.tick()
     }
 }
 
-/// Refresh All goes on to Accuracy Sync when Claude is in the list, under the
-/// same rules as the timer: consent, an offered sync and Safari already open.
+/// Refresh All includes Accuracy Sync when Claude is in the list. It is the
+/// user's own action and replaced the Accuracy Sync button, so, unlike
+/// automatic refresh, it does not wait for Safari to be open.
 @Suite("Refresh All Accuracy Sync", .timeLimit(.minutes(1)))
 @MainActor
 struct RefreshAllAccuracySyncTests {
-    @Test("Refresh All starts one sync only with consent and Safari open")
+    @Test("Refresh All starts one sync with consent, whether or not Safari is open")
     func refreshAllStartsSync() async throws {
         let suite = "auv-refresh-sync-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -120,20 +147,19 @@ struct RefreshAllAccuracySyncTests {
             consentStore: consent,
             safariIsRunning: { safariRunning }
         )
-        #expect(!model.accuracySyncAfterRefreshAll())
+        #expect(!model.accuracySyncForRefreshAll())
+        #expect(await fixture.bridge.automaticRequests.isEmpty)
 
         model.connectWithConsent()
         try await waitForClaudeValue(model.$actionInProgress, matching: { !$0 })
         try await waitForClaudeValue(model.$state, matching: { _ in model.offersAccuracySync })
 
         safariRunning = false
-        #expect(!model.accuracySyncAfterRefreshAll())
-        #expect(await fixture.bridge.automaticRequests.isEmpty)
-
-        safariRunning = true
-        #expect(model.accuracySyncAfterRefreshAll())
+        #expect(!model.periodicAccuracySyncIsDue)
+        #expect(model.accuracySyncForRefreshAll())
         try await fixture.bridge.waitForAutomaticRequest()
         #expect(await fixture.bridge.automaticRequests.count == 1)
+        #expect(await fixture.bridge.automaticRequests.first?.allowSafariLaunch == true)
     }
 
     @Test("The coordinator runs it after the store refresh, only for a listed Claude")
@@ -148,7 +174,7 @@ struct RefreshAllAccuracySyncTests {
             .flatMap { start in source.range(of: "func refreshAllProviders()", range: start.upperBound..<source.endIndex)
                 .map { source[start.lowerBound..<$0.lowerBound] } })
         let refresh = try #require(body.range(of: "await runtime.store.refresh()"))
-        let sync = try #require(body.range(of: "runtime.claudeSettings.accuracySyncAfterRefreshAll()"))
+        let sync = try #require(body.range(of: "runtime.claudeSettings.accuracySyncForRefreshAll()"))
         #expect(refresh.upperBound <= sync.lowerBound)
         #expect(body.contains("$0.id == .claude"))
     }
@@ -224,7 +250,7 @@ struct SettingsEntryPointTests {
     func globalSettingsGrouping() throws {
         #expect(!GlobalSettingsPane.allCases.map(\.rawValue).contains("HESectorium"))
         let page = try source("Sources/CodexUsageUI/Views/AgentSurfaceViews.swift")
-        let menuBar = try #require(page.range(of: "case .menuBar:\n                settingsSection("))
+        let menuBar = try #require(page.range(of: "case .menuBar:\n                settingsSection(localized(\"Menu Bar Item\""))
         let wizard = try #require(page.range(of: "case .desktopWizard:", range: menuBar.upperBound..<page.endIndex))
         #expect(page[menuBar.upperBound..<wizard.lowerBound].contains("uma.settings.appearance.quick-rails"))
         #expect(!page.contains("live in each Agent workspace"))
@@ -233,12 +259,28 @@ struct SettingsEntryPointTests {
     @Test("The consent names every way a sync can use Safari")
     func consentNamesEverySyncRoute() {
         let english = AppLanguage.english.claudeConsentDisclosure
-        #expect(english.contains("Refresh All while Safari is already open"))
-        #expect(english.contains("every 10 minutes"))
-        #expect(!english.contains("no browser timer"))
+        #expect(english.contains("when you choose Refresh All"))
+        #expect(english.contains("if you turn on automatic refresh in Settings, at the interval you choose"))
+        #expect(english.contains("Refresh All may start Safari in the background"))
+        #expect(english.contains("automatic refresh runs only while Safari is already open and never starts it"))
+        #expect(!english.contains("every 10 minutes"))
+        #expect(!english.contains("when you choose Accuracy Sync"))
         let chinese = AppLanguage.simplifiedChinese.claudeConsentDisclosure
-        #expect(chinese.contains("全部刷新"))
-        #expect(chinese.contains("每 10 分钟自动精确同步"))
+        #expect(chinese.contains("您点按“全部刷新”时"))
+        #expect(chinese.contains("开启“自动刷新”后，按所选间隔运行"))
+        #expect(chinese.contains("“全部刷新”可能为此在后台启动 Safari"))
+        #expect(chinese.contains("自动刷新只在 Safari 已打开时运行，绝不会启动 Safari"))
+        #expect(!chinese.contains("每 10 分钟"))
+    }
+
+    @Test("Claude's page has no Accuracy Sync button of its own, and no timer switch")
+    func noSeparateSyncButton() throws {
+        let page = try source("Sources/CodexUsageUI/Views/AgentSurfaceViews.swift")
+        #expect(!page.contains("uma.agent.claude.accuracy-sync\""))
+        #expect(!page.contains("action: claudeAccuracySync"))
+        let sheet = try source("Sources/CodexUsageUI/Views/UsageSettingsCard.swift")
+        #expect(!sheet.contains("claude.browser.periodic-sync"))
+        #expect(sheet.contains("language.claudeAccuracySyncRoute"))
     }
 }
 
@@ -334,13 +376,12 @@ struct AccuracySyncAfterLaunchTests {
         #expect(model.contains("return control.offeringSync(when: consentGranted && offersAccuracySync)"))
     }
 
-    @Test("The timer's first run comes 15 seconds in, then every ten minutes")
+    @Test("The timer's first run comes 15 seconds in, then at the refresh interval")
     func firstRunIsSoon() async throws {
         let suite = "auv-launch-sync-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let consent = ClaudeBrowserConsentStore(defaults: defaults)
-        consent.periodicAccuracySyncEnabled = true
         let ticker = PeriodicTicker()
         let recorder = IntervalRecorder()
         let model = ClaudeBrowserSettingsModel(
@@ -352,12 +393,16 @@ struct AccuracySyncAfterLaunchTests {
             },
             safariIsRunning: { false }
         )
-        model.startPeriodicAccuracySyncIfEnabled()
+        model.setAutomaticAccuracySync(every: 300)
         try await ticker.waitForSleeper()
         await ticker.tick()
         try await ticker.waitForSleeper()
-        #expect(await recorder.intervals == [15, 600])
-        model.setPeriodicAccuracySyncEnabled(false)
+        #expect(await recorder.intervals == [15, 300])
+        // An unrelated preference change repeats the same interval: the
+        // schedule is kept, not restarted.
+        model.setAutomaticAccuracySync(every: 300)
+        #expect(await recorder.intervals == [15, 300])
+        model.setAutomaticAccuracySync(every: nil)
     }
 }
 

@@ -394,8 +394,8 @@ private struct ClaudePlanSelectionRow: View {
 
     private var guidance: String {
         language == .simplifiedChinese
-            ? "Claude 不报告订阅方案。说明后，额度偏低时才会显示颜色提醒；未说明时保持中性灰色。"
-            : "Claude does not report your plan. State it to get low-remaining colour warnings; until then quota bars stay neutral grey."
+            ? "Claude 不报告方案。选择后，额度偏低时以颜色提醒。"
+            : "Claude does not report its plan. Choose one to get low-remaining colour warnings."
     }
 
     var body: some View {
@@ -403,7 +403,7 @@ private struct ClaudePlanSelectionRow: View {
             HStack {
                 Label(title, systemImage: "person.badge.shield.checkmark")
                     .labelStyle(SettingsRowLabelStyle())
-                    .font(AppTypography.systemFont(12.5))
+                    .font(AppTypography.systemFont(13))
                 Spacer()
                 Picker(title, selection: $declaredPlan) {
                     Text(notStated).tag("")
@@ -415,7 +415,7 @@ private struct ClaudePlanSelectionRow: View {
                 .frame(maxWidth: 140)
             }
             Text(guidance)
-                .font(AppTypography.systemFont(11))
+                .font(AUVType.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.leading, 26)
@@ -509,11 +509,8 @@ private struct AgentSpecificSettingsContent: View {
     /// of the earlier single column is still here; only order and type moved.
     private var claudeBody: some View {
         VStack(alignment: .leading, spacing: ClaudeSettingsMetrics.sectionSpacing) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(displayName)
-                    .font(AppTypography.systemFont(15, weight: .semibold))
-                availabilityNotice(refined: true)
-            }
+            // The sheet's own title already names Claude.
+            availabilityNotice(refined: true)
 
             if let claudeSettings {
                 ClaudeBrowserSettingsSection(
@@ -539,10 +536,8 @@ private struct AgentSpecificSettingsContent: View {
 
     private var claudeSettingsGroup: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(language.claudeSettingsSectionTitle)
-                .font(AppTypography.systemFont(11, weight: .semibold))
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 9) {
+            ClaudeSettingsGroupTitle(text: language.claudeSettingsSectionTitle)
+            VStack(alignment: .leading, spacing: 10) {
                 SettingsToggleRow(
                     title: language.monitoringEnabled,
                     systemImage: "waveform.path.ecg",
@@ -570,10 +565,10 @@ private struct AgentSpecificSettingsContent: View {
     @ViewBuilder
     private func availabilityNotice(refined: Bool = false) -> some View {
         let title = refined
-            ? AppTypography.systemFont(11, weight: .semibold)
+            ? AppTypography.systemFont(12, weight: .semibold)
             : AppTypography.font(10, weight: .semibold, language: language)
         let detail = refined
-            ? AppTypography.systemFont(11)
+            ? AppTypography.systemFont(12)
             : AppTypography.font(9, language: language)
         if entry?.requiresSetup == true {
             VStack(alignment: .leading, spacing: 2) {
@@ -902,9 +897,23 @@ private struct AntigravitySettingsSection: View {
 }
 
 private enum ClaudeSettingsMetrics {
-    static let sectionSpacing: CGFloat = 14
-    static let cardPadding: CGFloat = 12
-    static let cardRadius: CGFloat = 10
+    static let sectionSpacing: CGFloat = 18
+    static let cardPadding: CGFloat = 14
+    static let cardRadius: CGFloat = AUVShape.cardRadius
+}
+
+/// The small label above each group of the Claude sheet, set like the
+/// section headers in Global Settings.
+private struct ClaudeSettingsGroupTitle: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(AUVType.label)
+            .foregroundStyle(.secondary)
+            .padding(.leading, 2)
+            .accessibilityAddTraits(.isHeader)
+    }
 }
 
 /// The main window's module surface (radius 10, one hairline), shared by the
@@ -933,8 +942,8 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: ClaudeSettingsMetrics.sectionSpacing) {
             statusCard
-            actions
             settings()
+            actions
             details
         }
     }
@@ -952,9 +961,13 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
                 Divider().opacity(0.5)
             }
             stateSummary
-            Text(language.claudeLastExact(model.lastExactAt))
-                .font(AppTypography.systemFont(11))
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(language.claudeLastExact(model.lastExactAt))
+                Text(language.claudeAccuracySyncRoute)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(AUVType.caption)
+            .foregroundStyle(.secondary)
         }
         .modifier(ClaudeSettingsCardSurface())
     }
@@ -965,7 +978,7 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
                 Text(language.claudeBrowserActionStatus(action))
-                    .font(AppTypography.systemFont(12))
+                    .font(AUVType.secondary)
             }
             .accessibilityElement(children: .combine)
         } else {
@@ -1005,9 +1018,9 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
     private func statusRow(_ title: String, _ status: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(title)
-                .font(AppTypography.systemFont(11, weight: .semibold))
+                .font(AUVType.headline)
             Text(status)
-                .font(AppTypography.systemFont(11))
+                .font(AUVType.secondary)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -1015,27 +1028,24 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
 
     // MARK: Actions
 
-    /// Enabling Local Smart and Accuracy Sync are on Claude's page, which
-    /// opens this sheet; here are only the repair step for the current state
-    /// and the choices that shape how syncing runs.
+    /// Enabling Local Smart is on Claude's page, and Accuracy Sync runs with
+    /// Refresh All and automatic refresh; here are only the repair step for
+    /// the current state and the connection itself.
+    @ViewBuilder
     private var actions: some View {
+        if model.consentGranted || model.safeError != nil || model.state != .disconnected {
+            VStack(alignment: .leading, spacing: 8) {
+                ClaudeSettingsGroupTitle(text: language == .simplifiedChinese ? "连接" : "Connection")
+                connectionActions
+                    .modifier(ClaudeSettingsCardSurface())
+            }
+        }
+    }
+
+    private var connectionActions: some View {
         VStack(alignment: .leading, spacing: 8) {
             primaryAction
                 .disabled(model.actionInProgress)
-
-            if model.consentGranted {
-                SettingsToggleRow(
-                    title: language.claudePeriodicAccuracySync,
-                    systemImage: "arrow.triangle.2.circlepath",
-                    language: language,
-                    isOn: Binding(
-                        get: { model.periodicAccuracySyncEnabled },
-                        set: model.setPeriodicAccuracySyncEnabled
-                    ),
-                    refined: true
-                )
-                .accessibilityIdentifier("claude.browser.periodic-sync")
-            }
 
             // Disconnect and Retry take their own lines, so the first row fits
             // the 278-point Quick Panel settings column in both languages.
@@ -1059,7 +1069,7 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
 
             if let safeError = model.safeError {
                 Text(language.claudeBrowserError(safeError))
-                    .font(AppTypography.systemFont(11))
+                    .font(AUVType.caption)
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1141,13 +1151,13 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
                     detailHeading(language == .simplifiedChinese ? "Claude 本地智能模式" : "Claude Local Smart Mode")
                     detailText(
                         language == .simplifiedChinese
-                            ? "Claude Code 正常使用时由官方状态栏字段自动更新；Claude Desktop 的版本锁定计划缓存仅提供以 ≈ 标记、无重置时间的估算值。Safari 仅在您点击“精确同步”时临时使用。"
-                            : "Updates from Claude Code's official status-line fields during normal use. Claude Desktop's version-pinned plan cache provides only ≈-labeled estimates without reset times. Safari is temporary and on demand through Accuracy Sync."
+                            ? "Claude Code 正常使用时由官方状态栏字段自动更新；Claude Desktop 的版本锁定计划缓存仅提供以 ≈ 标记、无重置时间的估算值。Safari 仅由精确同步临时使用，精确同步随“全部刷新”及自动刷新运行。"
+                            : "Updates from Claude Code's official status-line fields during normal use. Claude Desktop's version-pinned plan cache provides only ≈-labeled estimates without reset times. Safari is used only, and only briefly, by Accuracy Sync, which runs with Refresh All and automatic refresh."
                     )
                     detailText(
                         language == .simplifiedChinese
-                            ? "精确同步会创建一个绑定请求的临时非活动标签页，验证精确使用量路由，读取一次净化后的配额并关闭该标签页。不会保留浏览器定时器或长期标签页。"
-                            : "Accuracy Sync creates one request-bound temporary inactive tab, verifies the exact Usage route, returns one sanitized quota snapshot, and closes that tab. No browser scheduler or long-lived tab remains."
+                            ? "每次精确同步创建一个绑定请求的临时非活动标签页，验证精确使用量路由，读取一次净化后的配额并关闭该标签页。浏览器中不会留下定时器或长期标签页。"
+                            : "Each Accuracy Sync creates one request-bound temporary inactive tab, verifies the exact Usage route, returns one sanitized quota snapshot, and closes that tab. No scheduler or long-lived tab remains in the browser."
                     )
 
                     Divider().opacity(0.5)
@@ -1165,7 +1175,7 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
                         Text(language == .simplifiedChinese ? "状态栏/页面/缓存数据：仅净化后的配额字段；缓存组织信息与历史立即丢弃" : "Status-line/page/cache data: Sanitized quota fields only; cache organization and history are discarded")
                         Text(language == .simplifiedChinese ? "提示、回复、项目内容、身份与账单：不保留" : "Prompts, responses, project content, identity, and billing: Not retained")
                     }
-                    .font(AppTypography.systemFont(11))
+                    .font(AUVType.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityElement(children: .combine)
@@ -1180,12 +1190,12 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
 
     private func detailHeading(_ text: String) -> some View {
         Text(text)
-            .font(AppTypography.systemFont(12, weight: .semibold))
+            .font(AUVType.headline)
     }
 
     private func detailText(_ text: String) -> some View {
         Text(text)
-            .font(AppTypography.systemFont(11))
+            .font(AUVType.secondary)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -2143,7 +2153,7 @@ private struct SettingsToggleRow: View {
                     .labelStyle(SettingsRowLabelStyle())
                     .font(
                         refined
-                            ? AppTypography.systemFont(12.5)
+                            ? AppTypography.systemFont(13)
                             : AppTypography.font(12.5, weight: .medium, language: language)
                     )
                 Spacer()
@@ -2360,9 +2370,9 @@ public struct AgentSpecificSettingsSheet: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(title).font(.headline)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title).font(.system(size: 17, weight: .semibold))
                 Spacer()
                 Button(store.language == .simplifiedChinese ? "完成" : "Done", action: close)
                     .keyboardShortcut(.cancelAction)
@@ -2394,8 +2404,8 @@ public struct AgentSpecificSettingsSheet: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(18)
-        .frame(minWidth: 340, idealWidth: 420, minHeight: 300, idealHeight: 480)
+        .padding(20)
+        .frame(minWidth: 340, idealWidth: 420, minHeight: 300, idealHeight: 520)
         .accessibilityIdentifier("uma.agent.settings-sheet")
     }
 

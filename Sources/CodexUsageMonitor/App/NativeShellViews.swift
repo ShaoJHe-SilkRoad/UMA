@@ -76,15 +76,26 @@ private struct MainToolbarActionButton: NSViewRepresentable {
     let label: String
     let identifier: String
     let isEnabled: Bool
+    var symbol: String? = nil
+    /// An icon-only button, named by its tooltip and accessibility label.
+    var iconOnly = false
     let action: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(action: action) }
 
     func makeNSView(context: Context) -> NSButton {
-        let button = MainToolbarFocusableButton(title: label, target: context.coordinator, action: #selector(Coordinator.activate(_:)))
-        button.bezelStyle = .rounded
-        button.controlSize = .regular
-        button.imagePosition = .noImage
+        let button = MainToolbarFocusableButton(title: iconOnly ? "" : label, target: context.coordinator, action: #selector(Coordinator.activate(_:)))
+        button.bezelStyle = iconOnly ? .accessoryBarAction : .rounded
+        button.controlSize = iconOnly ? .small : .regular
+        if let symbol {
+            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: iconOnly ? 12 : 12, weight: .medium))
+            button.imagePosition = iconOnly ? .imageOnly : .imageLeading
+            button.imageHugsTitle = true
+        } else {
+            button.imagePosition = .noImage
+        }
+        if iconOnly { button.isBordered = false; button.contentTintColor = .secondaryLabelColor }
         button.font = .systemFont(ofSize: 13)
         button.focusRingType = .exterior
         button.refusesFirstResponder = false
@@ -96,7 +107,7 @@ private struct MainToolbarActionButton: NSViewRepresentable {
 
     func updateNSView(_ button: NSButton, context: Context) {
         context.coordinator.action = action
-        button.title = label
+        button.title = iconOnly ? "" : label
         button.isEnabled = isEnabled
         button.setAccessibilityLabel(label)
         button.setAccessibilityIdentifier(identifier)
@@ -296,15 +307,15 @@ struct MainWindowRootView: View {
         HStack {
             if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
                 Text("AUV \(version)")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .font(AUVType.caption)
+                    .foregroundStyle(.tertiary)
                     .accessibilityIdentifier("auv.main.version")
                     .help("Build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—")")
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 5)
         .background(UMAVisualStyle.canvas)
     }
 
@@ -320,58 +331,75 @@ struct MainWindowRootView: View {
             // window, and an eight-point spacer pushed them past it, shifting
             // the whole row sideways on the Agents tab.
             Spacer(minLength: 0)
+            // Scan for Agents is beside the Agents list it fills; the
+            // toolbar keeps the two actions used every day.
             if navigation.destination == .agents {
-                MainToolbarActionButton(
-                    label: localized("Scan for Agents", "扫描智能体"),
-                    identifier: "uma.main.scan",
-                    isEnabled: true,
-                    action: scanAll
-                )
-                .frame(width: store.language == .simplifiedChinese ? 92 : 112, height: 30)
                 MainToolbarActionButton(
                     label: localized("Refresh All", "全部刷新"),
                     identifier: "uma.main.refresh",
                     isEnabled: store.allowsManualRefresh,
+                    symbol: "arrow.clockwise",
                     action: refreshAll
                 )
-                .frame(width: store.language == .simplifiedChinese ? 76 : 94, height: 30)
+                .frame(width: store.language == .simplifiedChinese ? 96 : 112, height: 30)
+                .help(localized(
+                    "Refresh every agent, including Claude's exact figures",
+                    "刷新所有智能体，包括 Claude 的精确读数"
+                ))
             }
             MainToolbarActionButton(
                 label: localized("Global Settings", "全局设置"),
                 identifier: "uma.main.settings",
                 isEnabled: true,
+                symbol: "gearshape",
                 action: openSettings
             )
-            .frame(width: store.language == .simplifiedChinese ? 76 : 110, height: 30)
+            .frame(width: store.language == .simplifiedChinese ? 96 : 130, height: 30)
             .help(localized("Global Settings", "全局设置"))
             ThreadOSPromptKeyViewLoopBoundary()
                 .frame(width: 0, height: 0)
                 .accessibilityHidden(true)
         }
-        .padding(.horizontal, 14)
-        .frame(height: 48)
+        .padding(.horizontal, 16)
+        .frame(height: 50)
         .background(UMAVisualStyle.toolbar)
     }
 
     private var agentsWorkspace: some View {
         HSplitView {
             VStack(alignment: .leading, spacing: 8) {
-                Text(localized("Agents", "智能体")).font(.headline)
-                .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
-                .padding(.horizontal, 10)
+                HStack(spacing: 4) {
+                    Text(localized("Agents", "智能体"))
+                        .font(AUVType.label)
+                        .foregroundStyle(.secondary)
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer(minLength: 0)
+                    MainToolbarActionButton(
+                        label: localized("Scan for Agents", "扫描智能体"),
+                        identifier: "uma.main.scan",
+                        isEnabled: true,
+                        symbol: "plus.magnifyingglass",
+                        iconOnly: true,
+                        action: scanAll
+                    )
+                    .frame(width: 24, height: 22)
+                }
+                .frame(maxWidth: .infinity, minHeight: 22, alignment: .leading)
+                .padding(.leading, 12)
+                .padding(.trailing, 6)
                 .padding(.top, 12)
                 if workspaceProviders.isEmpty {
                     VStack(spacing: 8) {
                         Text(localized("No active agents", "没有活跃的智能体"))
                         Button(localized("Scan for Agents", "扫描智能体"), action: scanAll)
                     }
-                    .font(.callout)
+                    .font(AUVType.secondary)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     GeometryReader { available in
                         ScrollView {
-                            VStack(spacing: 3) {
+                            VStack(spacing: 6) {
                                 ForEach(workspaceProviders) { provider in
                                     // Deliberately not a Button. A Button's own
                                     // gesture swallows the drag, so the row
@@ -415,13 +443,16 @@ struct MainWindowRootView: View {
                                     }
                                 }
                             }
-                            .padding(.horizontal, 6)
+                            .padding(.horizontal, 8)
+                            .padding(.bottom, 8)
                         }
                         .frame(height: available.size.height)
                     }
                 }
             }
-            .frame(minWidth: 224, idealWidth: 240, maxWidth: 248)
+            // 15% narrower than the 224–248 rail it replaces: the rows are
+            // gauges, and a shorter bar reads its level at a glance.
+            .frame(minWidth: 190, idealWidth: 204, maxWidth: 211)
             .background(UMAVisualStyle.canvas)
 
             AgentWorkspaceSurface(

@@ -44,6 +44,61 @@ struct CompactUsageFill: View {
     }
 }
 
+/// The main window's agent rail: the row itself is the gauge, as before, and
+/// the fill now reads as a level. Its body deepens toward the level, and a
+/// crisp edge marks exactly where the remaining share ends. The Desktop
+/// Assistant keeps `CompactUsageFill` unchanged.
+struct AgentRailLevelFill: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let remainingPercent: Double?
+    let reduceTransparency: Bool
+    let increaseContrast: Bool
+    var providerID: String = "unknown"
+    var admittedPlan: String? = nil
+
+    var body: some View {
+        if let fraction = CompactUsageFillPolicy.fraction(for: remainingPercent) {
+            GeometryReader { proxy in
+                let tint = LowRemainingUsagePolicy.color(for: LowRemainingUsagePolicy.assessment(
+                    providerID: providerID, admittedPlan: admittedPlan, remainingPercent: remainingPercent
+                ))
+                let strength = DesktopAssistantTintOpacity.value(
+                    isDark: colorScheme == .dark,
+                    reduceTransparency: reduceTransparency,
+                    increaseContrast: increaseContrast
+                )
+                let width = proxy.size.width * fraction
+                ZStack(alignment: .trailing) {
+                    LinearGradient(
+                        colors: [tint.opacity(strength * 0.62), tint.opacity(strength * 1.12)],
+                        startPoint: .leading, endPoint: .trailing
+                    )
+                    // The level edge: a tick at the top and bottom, fading out
+                    // through the middle so it never cuts through the name or
+                    // the value. At 0% and 100% it would sit on the row's own
+                    // border, where it only reads as a stray line.
+                    if fraction > 0.01, fraction < 0.99 {
+                        let edge = tint.opacity(min(1, strength * 3.2))
+                        Rectangle()
+                            .fill(LinearGradient(stops: [
+                                .init(color: edge, location: 0),
+                                .init(color: edge, location: 0.2),
+                                .init(color: edge.opacity(0), location: 0.36),
+                                .init(color: edge.opacity(0), location: 0.64),
+                                .init(color: edge, location: 0.8),
+                                .init(color: edge, location: 1)
+                            ], startPoint: .top, endPoint: .bottom))
+                            .frame(width: 2)
+                    }
+                }
+                .frame(width: width, height: proxy.size.height)
+            }
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
+        }
+    }
+}
+
 /// The same truthful remaining-use visual for the selected agent and other
 /// providers. A missing limit has a visible outline, never a fabricated fill.
 private struct AgentRemainingQuotaBar: View {
@@ -68,7 +123,7 @@ private struct AgentRemainingQuotaBar: View {
                     }
                 }
         }
-        .frame(height: 11)
+        .frame(height: 8)
         .accessibilityHidden(true)
         .allowsHitTesting(false)
     }
@@ -117,8 +172,8 @@ public enum AgentGlanceRowStyle: Sendable {
 }
 
 enum AgentWorkspaceLayoutPolicy {
-    static let horizontalPadding: CGFloat = 22
-    static let moduleSpacing: CGFloat = 12
+    static let horizontalPadding: CGFloat = 24
+    static let moduleSpacing: CGFloat = AUVShape.cardSpacing
     static let minimumTwoColumnWidth: CGFloat = 660
 
     static func columnCount(for availableWidth: CGFloat) -> Int {
@@ -129,12 +184,12 @@ enum AgentWorkspaceLayoutPolicy {
 private struct AgentWorkspaceModuleSurface: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .padding(14)
+            .padding(AUVShape.cardPadding)
             .background(UMAVisualStyle.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AUVShape.cardRadius, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(UMAVisualStyle.separator.opacity(0.65), lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: AUVShape.cardRadius, style: .continuous)
+                    .strokeBorder(UMAVisualStyle.separator.opacity(0.55), lineWidth: 0.5)
             }
     }
 }
@@ -207,14 +262,18 @@ public struct AgentGlanceRow: View {
         .padding(.horizontal, horizontalPadding)
         .padding(.vertical, verticalPadding)
         .background { rowBackground }
-        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: rowRadius, style: .continuous))
         .overlay {
             // The remaining-use fill tints the whole row once usage is high,
             // which a 7.5% selection tint cannot show through. An outline in
             // the accent colour marks the selected row at any fill.
             if selected {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                RoundedRectangle(cornerRadius: rowRadius, style: .continuous)
                     .strokeBorder(Color(nsColor: .controlAccentColor), lineWidth: 2)
+                    .allowsHitTesting(false)
+            } else if style == .mainList {
+                RoundedRectangle(cornerRadius: rowRadius, style: .continuous)
+                    .strokeBorder(UMAVisualStyle.separator.opacity(0.45), lineWidth: 0.5)
                     .allowsHitTesting(false)
             }
         }
@@ -227,11 +286,11 @@ public struct AgentGlanceRow: View {
 
     private var standardContent: some View {
         VStack(alignment: .leading, spacing: verticalContentSpacing) {
-            HStack(alignment: .top, spacing: 9) {
+            HStack(alignment: style == .mainList ? .center : .top, spacing: 9) {
                 if showsConnectivity { providerMark }
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: style == .mainList ? 2 : 1) {
                     Text(displayName)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(AUVType.headline)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(secondaryLine)
                         .font(.system(size: secondaryFontSize))
@@ -247,14 +306,14 @@ public struct AgentGlanceRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if !usesFullWidthName {
                     Text(primaryDisplayText)
-                        .font(.system(size: valueSize, weight: .semibold, design: .rounded))
+                        .font(valueFont)
                         .monospacedDigit()
                         .foregroundStyle(valueColor)
                 }
             }
             if usesFullWidthName {
                 Text(primaryDisplayText)
-                    .font(.system(size: valueSize, weight: .semibold, design: .rounded))
+                    .font(valueFont)
                     .monospacedDigit()
                     .foregroundStyle(valueColor)
             }
@@ -265,14 +324,23 @@ public struct AgentGlanceRow: View {
     // names get the full text width while the remaining value stays visible.
     private var usesFullWidthName: Bool { displayName.count > 32 }
 
-    private var horizontalPadding: CGFloat { style == .quickPanel ? 10 : 9 }
+    private var horizontalPadding: CGFloat { 10 }
     private var verticalContentSpacing: CGFloat { 7 }
-    private var secondaryFontSize: CGFloat { 12 }
-    private var verticalPadding: CGFloat { style == .quickPanel ? 8 : 7 }
-    private var valueSize: CGFloat { 16 }
+    private var secondaryFontSize: CGFloat { style == .quickPanel ? 12 : 11 }
+    private var verticalPadding: CGFloat { style == .quickPanel ? 8 : 10 }
+    private var rowRadius: CGFloat { style == .quickPanel ? 9 : AUVShape.rowRadius }
+    private var valueFont: Font {
+        style == .quickPanel
+            ? .system(size: 16, weight: .semibold, design: .rounded)
+            : AUVType.railValue
+    }
 
     private var secondaryLine: String {
-        var components = [statusLabel]
+        // In the rail the status dot already says "connected"; the word is
+        // kept for every other state, where it is news.
+        var components: [String] = style == .mainList
+            && AgentGlancePresentationPolicy.status(for: provider) == .connected
+            ? [] : [statusLabel]
         if let plan = provider.planLabel, !plan.isEmpty {
             components.append(plan)
         }
@@ -369,7 +437,8 @@ public struct AgentGlanceRow: View {
     }
 
     private var providerMark: some View {
-        DesktopAgentLogo(providerID: provider.id.rawValue, tint: statusColor, diameter: 24)
+        DesktopAgentLogo(providerID: provider.id.rawValue, tint: statusColor,
+                         diameter: style == .mainList ? 22 : 24)
         .overlay(alignment: .bottomTrailing) {
             Circle()
                 .fill(statusColor)
@@ -394,7 +463,15 @@ public struct AgentGlanceRow: View {
             if selected {
                 Color(nsColor: .controlAccentColor).opacity(0.075)
             }
-            if showsRemainingRail {
+            if showsRemainingRail, style == .mainList {
+                AgentRailLevelFill(
+                    remainingPercent: remainingPercent,
+                    reduceTransparency: reduceTransparency,
+                    increaseContrast: colorSchemeContrast == .increased,
+                    providerID: provider.id.rawValue,
+                    admittedPlan: provider.planLabel
+                )
+            } else if showsRemainingRail {
                 CompactUsageFill(
                     remainingPercent: remainingPercent,
                     reduceTransparency: reduceTransparency,
@@ -695,6 +772,8 @@ public struct AgentWorkspaceSurface: View {
     private let disconnectCodex: () -> Void
     private let claudeControlState: () -> ClaudeAgentControlState
     private let connectClaude: () -> Void
+    /// Unused by the page since Refresh All took over Accuracy Sync; kept in
+    /// the initializer so the window and its tests wire the same actions.
     private let claudeAccuracySync: () -> Void
     private let referenceDate: Date?
     @State private var showingClaudeConsent = false
@@ -724,8 +803,9 @@ public struct AgentWorkspaceSurface: View {
     public var body: some View {
         GeometryReader { geometry in
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 14) {
                     header
+                    if providerID != .codex { claudeActionCallout }
                     if providerID == .codex {
                         codexDashboard(for: geometry.size.width)
                     } else {
@@ -733,7 +813,7 @@ public struct AgentWorkspaceSurface: View {
                     }
                 }
                 .padding(.horizontal, AgentWorkspaceLayoutPolicy.horizontalPadding)
-                .padding(.vertical, 12)
+                .padding(.vertical, 18)
             }
         }
         .background(UMAVisualStyle.canvas)
@@ -764,11 +844,8 @@ public struct AgentWorkspaceSurface: View {
             spacing: AgentWorkspaceLayoutPolicy.moduleSpacing
         ) {
             usageModule
-            if showsAPICostCard, localCostEstimate != nil { localCostModule }
             connectionModule
-            controlsModule
-            if providerID == .claude { claudeSmartModule }
-            diagnosticsModule
+            if showsAPICostCard, localCostEstimate != nil { localCostModule }
         }
     }
 
@@ -835,10 +912,10 @@ public struct AgentWorkspaceSurface: View {
         return VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text("\(label) \(localized("remaining", "剩余"))")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(AUVType.headline)
                 Spacer(minLength: 4)
                 Text(quotaText)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
                     .monospacedDigit()
             }
             AgentRemainingQuotaBar(remainingPercent: percent, tint: tint)
@@ -857,22 +934,22 @@ public struct AgentWorkspaceSurface: View {
                     accountDailyBars(buckets)
                 } else {
                     Text(historyHeading)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(AUVType.headline)
                     Text(historyDetail)
-                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                        .font(AUVType.secondary).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Text(historySourceLine)
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .font(AUVType.secondary).foregroundStyle(.secondary)
                 DisclosureGroup(
                     localized("Period and data caveats", "周期与数据说明"),
                     isExpanded: $showsHistoryCaveat
                 ) {
                     Text(historyFootnote)
-                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                        .font(AUVType.secondary).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .font(.system(size: 12))
+                .font(AUVType.secondary)
                 .accessibilityIdentifier("uma.agent.codex.history-details")
             }
         }
@@ -915,13 +992,13 @@ public struct AgentWorkspaceSurface: View {
             ForEach(shown) { bucket in
                 VStack(spacing: 4) {
                     Text(bucket.tokens.map { $0.formatted(.number.notation(.compactName)) } ?? "—")
-                        .font(.system(size: 12)).monospacedDigit()
+                        .font(AUVType.secondary).monospacedDigit()
                         .foregroundStyle(.secondary)
                     RoundedRectangle(cornerRadius: 3, style: .continuous)
                         .fill(bucket.tokens == nil ? Color.secondary.opacity(0.22) : Color.accentColor.opacity(0.78))
                         .frame(height: bucket.tokens == 0 ? 0 : max(4, 128 * CGFloat(Double(bucket.tokens ?? 0) / Double(maximum))))
                     Text(String(bucket.day.suffix(5)))
-                        .font(.system(size: 12)).monospacedDigit().foregroundStyle(.secondary)
+                        .font(AUVType.secondary).monospacedDigit().foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .bottom)
                 .accessibilityElement(children: .ignore)
@@ -975,13 +1052,13 @@ public struct AgentWorkspaceSurface: View {
         }()
         return VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                .font(AUVType.secondary).foregroundStyle(.secondary)
                 .lineLimit(isLocalEstimate ? 2 : 1)
                 .fixedSize(horizontal: false, vertical: isLocalEstimate)
                 .help(title)
                 .accessibilityIdentifier("\(anchor)-title")
             Text(CodexDashboardPresentation.metricValue(metric, state: sourceState))
-                .font(.system(size: 18, weight: .semibold)).monospacedDigit()
+                .font(.system(size: 20, weight: .semibold, design: .rounded)).monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
                 .background(AgentWorkspaceGeometryAnchor(identifier: "\(anchor)-value"))
@@ -992,26 +1069,26 @@ public struct AgentWorkspaceSurface: View {
                         "Local ledger API-equivalent estimate, 7D; lifetime priced-token coverage \(coverage)%. The 7D period may include a partial current day.",
                         "本地账本 API 等效估算，7天；累计已定价令牌覆盖率 \(coverage)%。7天周期可能包含当天的部分数据。"
                     ))
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .font(AUVType.secondary).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 }
-                .font(.system(size: 12))
+                .font(AUVType.secondary)
                 .lineLimit(1)
                 .help(localized("Lifetime priced-token coverage \(coverage)%; 7D may include a partial current day", "累计已定价令牌覆盖 \(coverage)%；7天可能含未完结的今天"))
             } else {
                 Text(status)
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .font(AUVType.secondary).foregroundStyle(.secondary)
                     .lineLimit(1)
                     .help(status)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(8)
+        .padding(12)
         .background(UMAVisualStyle.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AUVShape.cardRadius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(UMAVisualStyle.separator.opacity(0.65), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: AUVShape.cardRadius, style: .continuous)
+                .strokeBorder(UMAVisualStyle.separator.opacity(0.55), lineWidth: 0.5)
         }
         .background(AgentWorkspaceGeometryAnchor(identifier: anchor))
     }
@@ -1022,14 +1099,14 @@ public struct AgentWorkspaceSurface: View {
             switch CodexDashboardPresentation.activityState(snapshot: store.snapshot) {
             case .unavailable:
                 Text(localized("Local activity source unavailable.", "本地活动来源不可用。"))
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(AUVType.secondary).foregroundStyle(.secondary)
             case .empty:
                 Text(localized("No recent allowlisted local activity metadata.", "暂无允许范围内的本地活动元数据。"))
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(AUVType.secondary).foregroundStyle(.secondary)
             case .stale, .current:
                 if CodexDashboardPresentation.activityState(snapshot: store.snapshot) == .stale {
                     Text(localized("Retained local activity is stale.", "保留的本地活动已过期。"))
-                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                        .font(AUVType.secondary).foregroundStyle(.secondary)
                 }
                 ForEach(activity.prefix(4)) { item in
                     HStack {
@@ -1038,7 +1115,7 @@ public struct AgentWorkspaceSurface: View {
                                 .lineLimit(3)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .help(item.title)
-                            Text(item.time).font(.caption).foregroundStyle(.secondary)
+                            Text(item.time).font(AUVType.caption).foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 12)
                         Text(item.tokenText).monospacedDigit().foregroundStyle(.secondary)
@@ -1068,31 +1145,42 @@ public struct AgentWorkspaceSurface: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             DesktopAgentLogo(providerID: providerID.rawValue,
-                             tint: workspaceLogoColor, diameter: 32)
+                             tint: workspaceLogoColor, diameter: 34)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(providerID.displayName)
-                    .font(.title2.weight(.semibold))
-                Text(connectionLabel)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if providerID == .codex { codexHeaderActions }
-            if providerID != .codex {
-                VStack(alignment: .trailing, spacing: 1) {
-                    Text(provider?.primaryDisplayText ?? "—")
-                        .font(.system(size: 28, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                    Text(provider?.primaryQuota?.compactLabel ?? localized("No quota reading", "无额度读数"))
-                        .font(.caption)
+                    .font(AUVType.title)
+                HStack(spacing: 6) {
+                    Circle().fill(workspaceLogoColor).frame(width: 6, height: 6)
+                        .accessibilityHidden(true)
+                    Text(headerSubtitle)
+                        .font(AUVType.secondary)
                         .foregroundStyle(.secondary)
                 }
             }
+            Spacer(minLength: 12)
+            if providerID == .codex { codexHeaderActions }
+            if providerID != .codex {
+                if let settingsButton { settingsButton }
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text(provider?.primaryDisplayText ?? "—")
+                        .font(AUVType.display)
+                        .monospacedDigit()
+                    Text(provider?.primaryQuota?.compactLabel ?? localized("No quota reading", "无额度读数"))
+                        .font(AUVType.label)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.leading, 10)
+            }
         }
-        .padding(.bottom, 3)
+        .padding(.bottom, 2)
+    }
+
+    /// Status and plan on one line under the name, so neither needs a card.
+    private var headerSubtitle: String {
+        [connectionLabel, planLabel].compactMap { $0 }.joined(separator: " · ")
     }
 
     @ViewBuilder private var usageModule: some View {
@@ -1110,7 +1198,7 @@ public struct AgentWorkspaceSurface: View {
                 }
             } else {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(localized("No quota reading", "无额度读数")).font(.callout.weight(.medium))
+                    Text(localized("No quota reading", "无额度读数")).font(AUVType.headline)
                     // Claude earns its own explanation: "connect or refresh"
                     // cannot produce a percentage here, so saying it misleads.
                     Text(providerID == .claude
@@ -1119,7 +1207,7 @@ public struct AgentWorkspaceSurface: View {
                             "Connect or refresh this agent to retrieve qualified usage data.",
                             "连接或刷新此智能体以获取合格的用量数据。"
                         ))
-                        .font(.callout)
+                        .font(AUVType.secondary)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -1131,10 +1219,10 @@ public struct AgentWorkspaceSurface: View {
     private var missingFiveHourMessage: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text("5H")
-                .font(.callout.weight(.semibold))
+                .font(AUVType.headline)
             Spacer(minLength: 12)
             Text(localized("Limit not reported", "未报告限额"))
-                .font(.callout)
+                .font(AUVType.secondary)
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 8)
@@ -1142,19 +1230,20 @@ public struct AgentWorkspaceSurface: View {
     }
 
     private func quotaRow(_ quota: ProviderProductQuotaState) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(quota.compactLabel).font(.headline)
-                        Text(quotaDetailLabel(quota))
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.secondary)
-                    }
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(quota.compactLabel).font(AUVType.headline)
+                    Text(quotaDetailLabel(quota))
+                        .font(AUVType.label)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(.primary.opacity(0.07)))
                 }
                 Spacer()
                 Text(quota.displayText)
-                    .font(.system(size: 23, weight: .semibold, design: .rounded))
+                    .font(AUVType.metric)
                     .monospacedDigit()
             }
             AgentRemainingQuotaBar(
@@ -1163,7 +1252,7 @@ public struct AgentWorkspaceSurface: View {
                     providerID: providerID.rawValue, admittedPlan: provider?.planLabel,
                     remainingPercent: quota.value.remainingPercent)))
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .accessibilityElement(children: .combine)
     }
 
@@ -1197,21 +1286,22 @@ public struct AgentWorkspaceSurface: View {
                     )
                 }
                 Text(localized(
-                    "An API-equivalent estimate from local token totals and public list prices. It is not a subscription bill, and no billing or payment information is read.",
-                    "根据本地令牌总量和公开价目表得出的 API 等效估算，不是订阅账单，也不会读取任何账单或支付信息。"
+                    "API-equivalent, from local token totals and public list prices. Not a bill; no billing data is read.",
+                    "按本地令牌总量与公开价目表折算的 API 等效金额。并非账单，不读取任何账单信息。"
                 ))
-                .font(.caption2)
+                .font(AUVType.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 2)
             }
-            .font(.callout)
+            .font(AUVType.secondary)
         }
     }
 
     private var connectionModule: some View {
         module(localized("Connection & Source", "连接与来源"), systemImage: "link") {
-            VStack(spacing: 7) {
+            VStack(spacing: 8) {
                 HStack(spacing: 6) {
                     Circle().fill(workspaceLogoColor).frame(width: 7, height: 7)
                         .accessibilityHidden(true)
@@ -1222,118 +1312,119 @@ public struct AgentWorkspaceSurface: View {
                 if let planLabel { factRow(localized("Plan", "方案"), planLabel) }
                 if let capturedAt = provider?.capturedAt {
                     HStack {
-                        Text(localized("Last successful update", "上次成功更新")).foregroundStyle(.secondary)
+                        Text(localized("Updated", "更新于")).foregroundStyle(.secondary)
                         Spacer()
                         Text(relativeUpdateDescription(since: capturedAt)).monospacedDigit()
                     }
                 }
+                // Source health only when there is something to act on.
+                if provider?.diagnosticReason != nil {
+                    factRow(localized("Source health", "来源健康状态"), diagnosticLabel)
+                }
+                if providerID == .claude {
+                    Divider().padding(.vertical, 2).accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(store.language.claudeAccuracySyncRoute)
+                        Text(localized(
+                            "Only usage figures are kept. Prompts, responses and credentials never enter AUV.",
+                            "仅保留用量数据；提示、回复和凭据不会进入 AUV。"
+                        ))
+                    }
+                    .font(AUVType.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("uma.agent.claude.sync-route")
+                }
             }
-            .font(.callout)
+            .font(AUVType.secondary)
         }
         .background(AgentWorkspaceGeometryAnchor(identifier: "uma015.codex.source-bounds"))
     }
 
-    private var controlsModule: some View {
-        module(localized("Agent Controls", "智能体控制"), systemImage: "slider.horizontal.3") {
-            HStack(spacing: 8) {
-                if let settingsButton { settingsButton }
-                if providerID == .claude {
-                    switch claudeControlState() {
-                    case .consentRequired:
-                        Button(localized("Enable Local Smart", "启用本地智能")) {
-                            showingClaudeConsent = true
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .accessibilityIdentifier("uma.agent.claude.enable-local-smart")
-                    case .localSmartRepairRequired:
-                        Button(localized("Repair Local Smart", "修复本地智能"), action: connectClaude)
-                            .buttonStyle(.borderedProminent)
-                            .accessibilityIdentifier("uma.agent.claude.repair-local-smart")
-                    case .statusLineConfigurationUnavailable(let issue):
-                        VStack(alignment: .leading, spacing: 4) {
-                            Button(localized("Connect Claude Code", "连接 Claude Code")) {}
-                                .disabled(true)
-                            Text(issue == .developmentIsolation
-                                ? localized("Claude Code setup is unavailable in this development build.", "此开发版本不配置 Claude Code。")
-                                : localized("Install AUV in Applications or Desktop to connect Claude Code.", "请将 AUV 安装到 Applications 或桌面后连接 Claude Code。"))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    case .accuracyReady:
-                        Button(localized("Accuracy Sync", "精确同步"), action: claudeAccuracySync)
-                            .buttonStyle(.borderedProminent)
-                            .accessibilityIdentifier("uma.agent.claude.accuracy-sync")
-                    case .accuracyInProgress:
-                        Button(localized("Accuracy Syncing…", "正在精确同步…")) {}
-                            .disabled(true)
-                            .accessibilityIdentifier("uma.agent.claude.accuracy-in-progress")
-                    case .companionStarting:
-                        Button(localized("Companion starting…", "浏览器伴侣正在启动…")) {}
-                            .disabled(true)
-                            .accessibilityIdentifier("uma.agent.claude.accuracy-unavailable")
-                    case .companionUpdateRequired:
-                        Button(localized("Companion update required", "需要更新浏览器伴侣")) {}
-                            .disabled(true)
-                            .accessibilityIdentifier("uma.agent.claude.accuracy-unavailable")
-                    case .onlineVerificationUnavailable:
-                        // A state, not an action: there is nothing to press
-                        // and nothing will make it pressable here, so it reads
-                        // as status rather than as a greyed-out button.
-                        Label(
-                            localized("Online verification unavailable", "在线验证不可用"),
-                            systemImage: "minus.circle"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("uma.agent.claude.accuracy-unavailable")
+    /// What Claude needs from you, or what it is doing, above its cards.
+    /// Nothing shows while all is well: its exact figures come with Refresh
+    /// All, so Accuracy Sync has no button of its own.
+    @ViewBuilder private var claudeActionCallout: some View {
+        if providerID == .claude {
+            switch claudeControlState() {
+            case .consentRequired:
+                callout(systemImage: "sparkles", tint: .accentColor, message: localized(
+                    "Turn on Local Smart to read Claude's usage.", "启用本地智能以读取 Claude 用量。")) {
+                    Button(localized("Enable Local Smart", "启用本地智能")) {
+                        showingClaudeConsent = true
                     }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("uma.agent.claude.enable-local-smart")
                 }
-                Spacer()
-            }
-        }
-    }
-
-    private var codexActivityModule: some View {
-        module(localized("Recent Local Activity", "最近本地活动"), systemImage: "clock.arrow.circlepath") {
-            SharedBasicUsageSummaryView(
-                presentation: .make(snapshot: store.snapshot, provider: provider),
-                language: store.language,
-                showsQuotaWindows: false
-            )
-        }
-    }
-
-    private var claudeSmartModule: some View {
-        module(localized("Local Smart & Accuracy", "本地智能与精确同步"), systemImage: "lock.shield") {
-            VStack(alignment: .leading, spacing: 7) {
-                Label(claudeSmartLabel, systemImage: "lock.shield")
-                    .font(.callout.weight(.medium))
-                Text(localized(
-                    "Local Smart and one-shot Accuracy Sync retain only approved usage metadata: usage percentages, aggregate token totals, and an API-equivalent cost estimate derived from them. Prompts, responses, credentials, and raw page content do not enter AUV.",
-                    "本地智能和一次性精确同步仅保留已批准的用量元数据：用量百分比、令牌总量，以及据此得出的 API 等效费用估算；提示、回复、凭据和原始页面内容不会进入 AUV。"
-                ))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    private var diagnosticsModule: some View {
-        module(localized("Privacy & Advanced Diagnostics", "隐私与高级诊断"), systemImage: "checkmark.shield") {
-            VStack(alignment: .leading, spacing: 6) {
-                factRow(localized("Connection", "连接"), connectionLabel)
-                factRow(localized("Source health", "来源健康状态"), diagnosticLabel)
-                if providerID == .codex, let error = store.lastError {
-                    Text(error)
-                        .font(.callout)
-                        .fixedSize(horizontal: false, vertical: true)
+            case .localSmartRepairRequired:
+                callout(systemImage: "wrench.and.screwdriver", tint: .orange, message: localized(
+                    "Local Smart stopped working and needs a repair.", "本地智能已停止工作，需要修复。")) {
+                    Button(localized("Repair Local Smart", "修复本地智能"), action: connectClaude)
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("uma.agent.claude.repair-local-smart")
                 }
-                Text(localized("Diagnostics use bounded status classifications only.", "诊断仅使用有界状态分类。"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            case .statusLineConfigurationUnavailable(let issue):
+                callout(systemImage: "exclamationmark.triangle", tint: .orange, message: issue == .developmentIsolation
+                    ? localized("Claude Code setup is unavailable in this development build.", "此开发版本不配置 Claude Code。")
+                    : localized("Install AUV in Applications or Desktop to connect Claude Code.", "请将 AUV 安装到 Applications 或桌面后连接 Claude Code。")) {
+                    EmptyView()
+                }
+            case .accuracyReady:
+                EmptyView()
+            case .accuracyInProgress:
+                callout(progress: true, tint: .accentColor, message: localized(
+                    "Syncing exact figures…", "正在同步精确读数…")) { EmptyView() }
+                    .accessibilityIdentifier("uma.agent.claude.accuracy-in-progress")
+            case .companionStarting:
+                callout(progress: true, tint: .secondary, message: localized(
+                    "Browser Companion is starting…", "浏览器伴侣正在启动…")) { EmptyView() }
+                    .accessibilityIdentifier("uma.agent.claude.accuracy-unavailable")
+            case .companionUpdateRequired:
+                callout(systemImage: "arrow.down.circle", tint: .orange, message: localized(
+                    "Browser Companion needs an update. Open Claude Settings to repair it.",
+                    "浏览器伴侣需要更新，请在 Claude 设置中修复。")) { EmptyView() }
+                    .accessibilityIdentifier("uma.agent.claude.accuracy-unavailable")
+            case .onlineVerificationUnavailable:
+                // A state, not an action: there is nothing to press and
+                // nothing will make it pressable here.
+                callout(systemImage: "minus.circle", tint: .secondary, message: localized(
+                    "Online verification unavailable", "在线验证不可用")) { EmptyView() }
+                    .accessibilityIdentifier("uma.agent.claude.accuracy-unavailable")
             }
         }
+    }
+
+    private func callout<Action: View>(
+        systemImage: String? = nil,
+        progress: Bool = false,
+        tint: Color,
+        message: String,
+        @ViewBuilder action: () -> Action
+    ) -> some View {
+        HStack(spacing: 10) {
+            if progress {
+                ProgressView().controlSize(.small)
+            } else if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .accessibilityHidden(true)
+            }
+            Text(message)
+                .font(AUVType.body)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            action().controlSize(.regular)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: AUVShape.cardRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: AUVShape.cardRadius, style: .continuous)
+                .strokeBorder(tint.opacity(0.22), lineWidth: 0.5)
+        }
+        .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder
@@ -1342,9 +1433,14 @@ public struct AgentWorkspaceSurface: View {
         systemImage: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Label(title, systemImage: systemImage)
-                .font(.headline)
+        VStack(alignment: .leading, spacing: 10) {
+            Label {
+                Text(title).font(AUVType.headline)
+            } icon: {
+                Image(systemName: systemImage)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
             content().frame(maxWidth: .infinity, alignment: .leading)
         }
         .moduleSurface()
@@ -1434,20 +1530,6 @@ public struct AgentWorkspaceSurface: View {
         case .processUnavailable: localized("Local process unavailable", "本地进程不可用")
         case .staleData: localized("Last value is stale", "最近数据已过期")
         case .unknown: localized("Unknown status", "未知状态")
-        }
-    }
-
-    private var claudeSmartLabel: String {
-        switch provider?.sourceSummary {
-        case .localSmartEstimate:
-            localized("Estimated local usage is available", "已有本地用量估算")
-        case .localSmartExact, .accuracySync, .combinedSanitized:
-            localized("Exact usage anchor is available", "已有精确用量锚点")
-        default:
-            localized(
-                "Accuracy Sync is available when the Companion is ready",
-                "浏览器伴侣就绪后可使用精确同步"
-            )
         }
     }
 
@@ -1923,13 +2005,16 @@ private struct MenuBarAgentSettingsPicker: View {
 
 public enum GlobalSettingsPane: String, CaseIterable, Identifiable, Sendable {
     case general = "General"
-    case appearance = "Appearance"
+    // Refreshing gets a pane of its own: it is the setting people come back
+    // to, and since Claude's exact sync follows it, it says what it covers.
+    case refresh = "Refresh"
     case agents = "Agents"
     case menuBar = "Menu Bar"
     case desktopWizard = "Desktop Wizard"
     case privacy = "Privacy & Data"
     // Sectorium's settings are on the Sectorium tab, beside the drive they act
     // on; a second copy here ran on its own store and never saw that drive.
+    // Appearance, a single control, sits under General with the language.
     public var id: String { rawValue }
 }
 
@@ -1966,14 +2051,12 @@ public struct GlobalSettingsSurface: View {
         GeometryReader { viewport in
             HStack(spacing: 0) {
                 List(GlobalSettingsPane.allCases, selection: $navigation.pane) { item in
-                    HStack(spacing: 7) {
-                        Image(systemName: symbol(item))
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 14)
+                    HStack(spacing: 8) {
+                        GlobalSettingsPaneIcon(symbol: symbol(item), tint: tint(item))
                         Text(paneTitle(item))
-                            .font(.system(size: 13))
+                            .font(AUVType.body)
                     }
+                    .padding(.vertical, 1)
                     .tag(item)
                 }
                 .listStyle(.sidebar)
@@ -1984,7 +2067,7 @@ public struct GlobalSettingsSurface: View {
 
                 // Bound the detail to the actual window viewport. Intrinsic
                 // form widths must never push the sidebar out of the window.
-                settingsForm
+                settingsDetail
                     .frame(width: max(0, viewport.size.width - 181), height: viewport.size.height)
                     .accessibilityIdentifier("uma.settings.detail.\(navigation.pane.id)")
             }
@@ -2002,14 +2085,25 @@ public struct GlobalSettingsSurface: View {
         .accessibilityIdentifier("uma.settings.surface")
     }
 
+    /// The pane's name once, at the top, then its groups: no subtitle that
+    /// only repeats the sidebar.
+    private var settingsDetail: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(paneTitle(navigation.pane))
+                .font(AUVType.title)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.horizontal, 30)
+                .padding(.top, 20)
+                .padding(.bottom, 2)
+            settingsForm
+        }
+    }
+
     private var settingsForm: some View {
         Form {
             switch navigation.pane {
             case .general:
-                settingsSection(
-                    title: localized("General", "通用"),
-                    subtitle: localized("Application behavior", "应用行为")
-                ) {
+                settingsSection(localized("Startup", "启动")) {
                     Toggle(
                         localized("Launch AUV at login", "登录时启动 AUV"),
                         isOn: Binding(
@@ -2024,7 +2118,7 @@ public struct GlobalSettingsSurface: View {
                                 "macOS approval is required before AUV can open at login.",
                                 "需要 macOS 批准后，AUV 才能在登录时启动。"
                             ))
-                            .font(.caption)
+                            .font(AUVType.caption)
                             .foregroundStyle(.secondary)
                             Spacer()
                             Button(
@@ -2035,7 +2129,7 @@ public struct GlobalSettingsSurface: View {
                     }
                     if let error = model.launchAtLoginError {
                         Text(error)
-                            .font(.caption)
+                            .font(AUVType.caption)
                             .foregroundStyle(.red)
                             .accessibilityLabel(localized("Launch at login error", "登录启动错误"))
                     }
@@ -2047,38 +2141,14 @@ public struct GlobalSettingsSurface: View {
                         )
                     )
                     .accessibilityIdentifier("uma.settings.general.keep-monitoring")
-                    Toggle(
-                        localized("Automatic background refresh", "自动后台刷新"),
-                        isOn: Binding(
-                            get: { model.automaticBackgroundRefresh },
-                            set: model.setAutomaticBackgroundRefresh
-                        )
+                }
+                settingsSection(
+                    localized("Language & Appearance", "语言与外观"),
+                    footer: localized(
+                        "Reduce Transparency and Increase Contrast are followed automatically.",
+                        "自动遵循“降低透明度”和“增强对比度”。"
                     )
-                    .accessibilityIdentifier("uma.settings.general.background-refresh")
-                    Picker(
-                        localized("Refresh interval", "刷新间隔"),
-                        selection: Binding(
-                            get: { model.backgroundRefreshInterval },
-                            set: model.setBackgroundRefreshInterval
-                        )
-                    ) {
-                        Text(localized("15 minutes", "15 分钟"))
-                            .tag(UMABackgroundRefreshInterval.fifteenMinutes)
-                        Text(localized("30 minutes", "30 分钟"))
-                            .tag(UMABackgroundRefreshInterval.thirtyMinutes)
-                        Text(localized("60 minutes", "60 分钟"))
-                            .tag(UMABackgroundRefreshInterval.sixtyMinutes)
-                    }
-                    .disabled(!model.automaticBackgroundRefresh)
-                    .accessibilityIdentifier("uma.settings.general.refresh-interval")
-                    Toggle(
-                        localized("Refresh after Mac wakes", "Mac 唤醒后刷新"),
-                        isOn: Binding(
-                            get: { model.refreshOnWake },
-                            set: model.setRefreshOnWake
-                        )
-                    )
-                    .accessibilityIdentifier("uma.settings.general.refresh-on-wake")
+                ) {
                     Picker(
                         localized("Language", "语言"),
                         selection: Binding(
@@ -2091,19 +2161,6 @@ public struct GlobalSettingsSurface: View {
                         }
                     }
                     .accessibilityIdentifier("uma.settings.general.language")
-                    settingFact(
-                        localized("Agent settings", "智能体设置"),
-                        localized(
-                            "Each agent's own settings open from its page in the main window.",
-                            "各智能体自己的设置，从主窗口中该智能体的页面打开。"
-                        )
-                    )
-                }
-            case .appearance:
-                settingsSection(
-                    title: localized("Appearance", "外观"),
-                    subtitle: localized("System appearance", "系统外观")
-                ) {
                     Picker(
                         localized("Appearance", "外观"),
                         selection: Binding(
@@ -2120,28 +2177,67 @@ public struct GlobalSettingsSurface: View {
                     }
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("uma.settings.appearance.theme")
-                    settingFact(
-                        localized("Accessibility", "辅助功能"),
-                        localized("Reduce Transparency, Increase Contrast, and Reduce Motion are respected automatically.", "自动遵循降低透明度、提高对比度和减弱动态效果设置。")
+                }
+            case .refresh:
+                settingsSection(
+                    localized("Schedule", "定时"),
+                    footer: localized(
+                        "Covers every agent, Claude Code included: its exact figures sync at the same interval while Safari is open. Automatic refresh never opens Safari.",
+                        "涵盖所有智能体，包括 Claude Code：Safari 已打开时，其精确读数按同一间隔同步。自动刷新不会打开 Safari。"
                     )
+                ) {
+                    Toggle(
+                        localized("Refresh automatically", "自动刷新"),
+                        isOn: Binding(
+                            get: { model.automaticBackgroundRefresh },
+                            set: model.setAutomaticBackgroundRefresh
+                        )
+                    )
+                    .accessibilityIdentifier("uma.settings.general.background-refresh")
+                    Picker(
+                        localized("Every", "间隔"),
+                        selection: Binding(
+                            get: { model.backgroundRefreshInterval },
+                            set: model.setBackgroundRefreshInterval
+                        )
+                    ) {
+                        ForEach(UMABackgroundRefreshInterval.allCases) { interval in
+                            Text(intervalTitle(interval)).tag(interval)
+                        }
+                    }
+                    .disabled(!model.automaticBackgroundRefresh)
+                    .accessibilityIdentifier("uma.settings.general.refresh-interval")
+                }
+                settingsSection(
+                    localized("Also Refresh", "其他时机"),
+                    footer: localized(
+                        "Refresh All in the main window refreshes every agent at once, Claude's exact figures included.",
+                        "主窗口的“全部刷新”会立即刷新所有智能体，包括 Claude 的精确读数。"
+                    )
+                ) {
+                    Toggle(
+                        localized("After the Mac wakes", "Mac 唤醒后"),
+                        isOn: Binding(
+                            get: { model.refreshOnWake },
+                            set: model.setRefreshOnWake
+                        )
+                    )
+                    .accessibilityIdentifier("uma.settings.general.refresh-on-wake")
                 }
             case .agents:
                 settingsSection(
-                    title: localized("Agents", "智能体"),
-                    subtitle: localized(
-                        "Drag to set the order every list uses: the main window, Quick Panel, Desktop Assistant and menu bar",
-                        "拖动以设定所有列表的顺序：主窗口、快速面板、桌面助手和菜单栏"
+                    localized("Order", "顺序"),
+                    footer: localized(
+                        "Drag to arrange. The order applies to the main window, Quick Panel, Desktop Assistant and menu bar. Each agent's own settings open from its page.",
+                        "拖动以排列。顺序用于主窗口、快速面板、桌面助手和菜单栏。各智能体自己的设置在其页面中打开。"
                     )
                 ) {
                     AgentOrderSettingsRows(store: store, language: model.language)
                 }
             case .menuBar:
-                settingsSection(
-                    title: localized("Menu Bar", "菜单栏"),
-                    subtitle: localized("What the menu bar shows", "菜单栏显示的内容")
-                ) {
+                settingsSection(localized("Menu Bar Item", "菜单栏项目")) {
                     Toggle(
-                        localized("Show remaining percentage in menu bar", "在菜单栏显示剩余百分比"),
+                        localized("Show remaining percentage", "显示剩余百分比"),
                         isOn: Binding(
                             get: { model.menuBarShowsRemaining },
                             set: model.setMenuBarShowsRemaining
@@ -2155,8 +2251,8 @@ public struct GlobalSettingsSurface: View {
                 // the menu bar item, so they sit with it rather than under a
                 // general Appearance heading.
                 settingsSection(
-                    title: localized("Quick Panel", "快速面板"),
-                    subtitle: localized("The panel that opens from the menu bar", "点按菜单栏图标打开的面板")
+                    localized("Quick Panel", "快速面板"),
+                    footer: localized("Opens when you click AUV in the menu bar.", "点按菜单栏中的 AUV 时打开。")
                 ) {
                     Toggle(
                         localized("Show connectivity indicators", "显示连接状态指示器"),
@@ -2176,10 +2272,7 @@ public struct GlobalSettingsSurface: View {
                     .accessibilityIdentifier("uma.settings.appearance.quick-rails")
                 }
             case .desktopWizard:
-                settingsSection(
-                    title: localized("Desktop Assistant", "桌面助手"),
-                    subtitle: localized("A compact usage surface that stays available on the desktop", "常驻桌面的紧凑用量视图")
-                ) {
+                settingsSection(localized("Display", "显示")) {
                     Toggle(
                         localized("Show Desktop Assistant", "显示桌面助手"),
                         isOn: Binding(
@@ -2194,6 +2287,9 @@ public struct GlobalSettingsSurface: View {
                             set: model.setAssistantAlwaysOnTop
                         )
                     )
+                    .disabled(!model.assistantEnabled)
+                }
+                settingsSection(localized("Content", "内容")) {
                     Picker(
                         localized("Density", "密度"),
                         selection: Binding(
@@ -2222,39 +2318,32 @@ public struct GlobalSettingsSurface: View {
                         )
                     )
                     .accessibilityIdentifier("uma.settings.wizard.percentage-rail")
-                    Button(
-                        localized("Reset Position", "重置位置"),
-                        action: model.resetAssistantPosition
-                    )
-                    .accessibilityIdentifier("uma.settings.wizard.reset-position")
+                }
+                settingsSection(localized("Position", "位置")) {
+                    LabeledContent(localized("Moved off screen or lost?", "移出屏幕或找不到了？")) {
+                        Button(
+                            localized("Reset Position", "重置位置"),
+                            action: model.resetAssistantPosition
+                        )
+                        .accessibilityIdentifier("uma.settings.wizard.reset-position")
+                    }
                 }
             case .privacy:
-                settingsSection(
-                    title: localized("Privacy & Data", "隐私与数据"),
-                    subtitle: localized("Usage data stays bounded to each approved source", "用量数据仅限于已批准的来源")
-                ) {
+                settingsSection(localized("What AUV Keeps", "AUV 保留的内容")) {
                     settingFact(
                         localized("Usage data", "用量数据"),
-                        localized("AUV retains only allowlisted usage metadata.", "AUV 仅保留允许范围内的用量元数据。")
-                    )
-                    settingFact(
-                        localized("Retained state", "保留状态"),
-                        localized(
-                            "Only admitted bounded usage state is retained; stale and unsupported values remain explicitly labeled.",
-                            "仅保留已批准的有限用量状态；过期和不支持的值会明确标注。"
-                        )
-                    )
-                    settingFact(
-                        localized("Agent access", "智能体访问"),
-                        localized(
-                            "Connecting and repairing an agent happen only on its page and in its own settings.",
-                            "智能体的连接与修复只在该智能体的页面及其设置中进行。"
-                        )
+                        localized("Allowlisted usage figures only", "仅限允许范围内的用量数据")
                     )
                     settingFact(
                         localized("Credentials", "凭据"),
-                        localized("Passwords, tokens, cookies, and conversation content are not retained.", "不会保留密码、令牌、Cookie 或对话内容。")
+                        localized("Passwords, tokens, cookies and conversations are never kept", "从不保留密码、令牌、Cookie 或对话")
                     )
+                    settingFact(
+                        localized("Old values", "旧数据"),
+                        localized("Stale and unsupported values stay labelled", "过期和不支持的值会明确标注")
+                    )
+                }
+                settingsSection(localized("Data", "数据")) {
                     // Side by side these two need more width than the default
                     // Settings window gives English titles, so they stack when
                     // they would not fit at full length instead of truncating.
@@ -2264,7 +2353,7 @@ public struct GlobalSettingsSurface: View {
                     }
                     if let status = model.dataActionStatus {
                         Text(status)
-                            .font(.caption)
+                            .font(AUVType.caption)
                             .foregroundStyle(.secondary)
                             .accessibilityIdentifier("uma.settings.privacy.action-status")
                     }
@@ -2273,7 +2362,8 @@ public struct GlobalSettingsSurface: View {
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
-        .padding(14)
+        .padding(.horizontal, 10)
+        .padding(.bottom, 6)
     }
 
     @ViewBuilder private var privacyDataActions: some View {
@@ -2290,23 +2380,24 @@ public struct GlobalSettingsSurface: View {
     }
 
     private func settingsSection<Content: View>(
-        title: String,
-        subtitle: String,
+        _ title: String,
+        footer: String? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
         Section {
             content()
         } header: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.primary)
-                Text(subtitle)
-                    .font(.callout)
+            Text(title)
+                .font(AUVType.label)
+                .foregroundStyle(.secondary)
+                .textCase(nil)
+        } footer: {
+            if let footer {
+                Text(footer)
+                    .font(AUVType.caption)
                     .foregroundStyle(.secondary)
-                    .textCase(nil)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.bottom, 6)
         }
     }
 
@@ -2319,21 +2410,41 @@ public struct GlobalSettingsSurface: View {
         .accessibilityElement(children: .combine)
     }
 
+    private func intervalTitle(_ interval: UMABackgroundRefreshInterval) -> String {
+        switch interval {
+        case .fiveMinutes: localized("5 minutes", "5 分钟")
+        case .fifteenMinutes: localized("15 minutes", "15 分钟")
+        case .thirtyMinutes: localized("30 minutes", "30 分钟")
+        case .sixtyMinutes: localized("60 minutes", "60 分钟")
+        }
+    }
+
     private func symbol(_ pane: GlobalSettingsPane) -> String {
         switch pane {
-        case .general: "gearshape"
-        case .appearance: "paintbrush"
-        case .agents: "list.bullet"
+        case .general: "gearshape.fill"
+        case .refresh: "arrow.clockwise"
+        case .agents: "square.stack.3d.up.fill"
         case .menuBar: "menubar.rectangle"
-        case .desktopWizard: "macwindow"
-        case .privacy: "hand.raised"
+        case .desktopWizard: "capsule.fill"
+        case .privacy: "hand.raised.fill"
+        }
+    }
+
+    private func tint(_ pane: GlobalSettingsPane) -> Color {
+        switch pane {
+        case .general: Color(nsColor: .systemGray)
+        case .refresh: Color(nsColor: .systemBlue)
+        case .agents: Color(nsColor: .systemPurple)
+        case .menuBar: Color(nsColor: .systemTeal)
+        case .desktopWizard: Color(nsColor: .systemOrange)
+        case .privacy: Color(nsColor: .systemIndigo)
         }
     }
 
     private func paneTitle(_ pane: GlobalSettingsPane) -> String {
         switch pane {
         case .general: localized("General", "通用")
-        case .appearance: localized("Appearance", "外观")
+        case .refresh: localized("Refresh", "刷新")
         case .agents: localized("Agents", "智能体")
         case .menuBar: localized("Menu Bar", "菜单栏")
         case .desktopWizard: localized("Desktop Assistant", "桌面助手")
@@ -2343,5 +2454,23 @@ public struct GlobalSettingsSurface: View {
 
     private func localized(_ english: String, _ chinese: String) -> String {
         model.language == .simplifiedChinese ? chinese : english
+    }
+}
+
+/// A pane's symbol on a small coloured tile, as System Settings sets them.
+private struct GlobalSettingsPaneIcon: View {
+    let symbol: String
+    let tint: Color
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(tint.gradient)
+            .frame(width: 20, height: 20)
+            .overlay {
+                Image(systemName: symbol)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .accessibilityHidden(true)
     }
 }
