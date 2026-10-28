@@ -302,3 +302,66 @@ struct DesktopAssistantKeepsClaudeTests {
         #expect(model[offers.upperBound...].prefix(160).contains(".stale, .failed:"))
     }
 }
+
+/// After a launch, Claude's page had no Accuracy Sync button (the companion
+/// reads as not configured until something talks to it), and the timer's
+/// first run was ten minutes away, so Claude sat without a reading.
+@Suite("Accuracy Sync after launch", .timeLimit(.minutes(1)))
+@MainActor
+struct AccuracySyncAfterLaunchTests {
+    @Test("The page offers Accuracy Sync wherever an unprompted sync would run")
+    func pageOffersSync() throws {
+        let unknownCompanion = ClaudeAgentControlState.classify(
+            consentGranted: true,
+            localSmartState: .estimated(Date()),
+            companionRuntime: .notConfigured,
+            browserAccuracyState: .companionUnavailable
+        )
+        #expect(unknownCompanion == .onlineVerificationUnavailable)
+        #expect(unknownCompanion.offeringSync(when: true) == .accuracyReady)
+        #expect(unknownCompanion.offeringSync(when: false) == .onlineVerificationUnavailable)
+        // Every other state keeps its own control.
+        for other in [ClaudeAgentControlState.consentRequired, .localSmartRepairRequired,
+                      .companionStarting, .companionUpdateRequired, .accuracyInProgress] {
+            #expect(other.offeringSync(when: true) == other)
+        }
+        let model = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Sources/CodexUsageUI/Stores/ClaudeBrowserSettingsModel.swift"),
+            encoding: .utf8
+        )
+        #expect(model.contains("return control.offeringSync(when: consentGranted && offersAccuracySync)"))
+    }
+
+    @Test("The timer's first run comes 15 seconds in, then every ten minutes")
+    func firstRunIsSoon() async throws {
+        let suite = "auv-launch-sync-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let consent = ClaudeBrowserConsentStore(defaults: defaults)
+        consent.periodicAccuracySyncEnabled = true
+        let ticker = PeriodicTicker()
+        let recorder = IntervalRecorder()
+        let model = ClaudeBrowserSettingsModel(
+            connector: BrowserConnectorFixture(consent: true).connector(),
+            consentStore: consent,
+            periodicSleep: { interval in
+                await recorder.record(interval)
+                await ticker.sleep()
+            },
+            safariIsRunning: { false }
+        )
+        model.startPeriodicAccuracySyncIfEnabled()
+        try await ticker.waitForSleeper()
+        await ticker.tick()
+        try await ticker.waitForSleeper()
+        #expect(await recorder.intervals == [15, 600])
+        model.setPeriodicAccuracySyncEnabled(false)
+    }
+}
+
+private actor IntervalRecorder {
+    private(set) var intervals: [TimeInterval] = []
+    func record(_ interval: TimeInterval) { intervals.append(interval) }
+}

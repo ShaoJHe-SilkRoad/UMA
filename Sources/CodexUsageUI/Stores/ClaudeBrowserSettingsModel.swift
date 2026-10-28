@@ -98,6 +98,16 @@ public enum ClaudeAgentControlState: Equatable, Sendable {
     }
 }
 
+extension ClaudeAgentControlState {
+    /// The companion's state is learned only by talking to it, which nothing
+    /// does at launch, so until a sync it reads as not configured and the page
+    /// had no Accuracy Sync button at all. Wherever the timer or Refresh All
+    /// would sync, the button is offered too.
+    func offeringSync(when syncWouldRun: Bool) -> Self {
+        self == .onlineVerificationUnavailable && syncWouldRun ? .accuracyReady : self
+    }
+}
+
 /// A statusLine installation limitation does not withdraw Desktop estimates or
 /// independently authorized one-shot Accuracy Sync.
 public enum ClaudeStatusLineConfigurationIssue: Equatable, Sendable {
@@ -194,7 +204,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
            control == .consentRequired || control == .localSmartRepairRequired {
             return .statusLineConfigurationUnavailable(statusLineConfigurationIssue)
         }
-        return control
+        return control.offeringSync(when: consentGranted && offersAccuracySync)
     }
 
     var productState: ClaudeProductStateMatrix {
@@ -219,6 +229,9 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
 
     /// How often Accuracy Sync repeats once the user turns it on.
     static let periodicAccuracySyncInterval: TimeInterval = 10 * 60
+    /// The first run comes shortly after launch rather than ten minutes in,
+    /// so Claude is not left without a reading after every start.
+    static let periodicAccuracySyncFirstDelay: TimeInterval = 15
 
     init(
         connector: ClaudeCodeUsageConnector,
@@ -408,12 +421,14 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         guard periodicAccuracySyncEnabled else { return }
         let sleep = periodicSleep
         periodicAccuracySyncTask = Task { [weak self] in
+            var delay = Self.periodicAccuracySyncFirstDelay
             while !Task.isCancelled {
                 do {
-                    try await sleep(Self.periodicAccuracySyncInterval)
+                    try await sleep(delay)
                 } catch {
                     return
                 }
+                delay = Self.periodicAccuracySyncInterval
                 guard !Task.isCancelled, let self else { return }
                 self.runPeriodicAccuracySyncIfDue()
             }
