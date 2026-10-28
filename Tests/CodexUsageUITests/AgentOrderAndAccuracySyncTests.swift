@@ -241,3 +241,135 @@ struct SettingsEntryPointTests {
         #expect(chinese.contains("每 10 分钟自动精确同步"))
     }
 }
+
+/// Claude used to drop off the Desktop Assistant once its exact reading was
+/// 30 minutes old, and, being in a failed state then, no later sync ran.
+@Suite("Desktop Assistant keeps Claude")
+struct DesktopAssistantKeepsClaudeTests {
+    private let epoch = Date(timeIntervalSince1970: 1_788_134_400)
+
+    @Test("A detected Claude whose reading lapsed stays on the assistant, not the Quick Panel")
+    func lapsedClaudeStays() {
+        let lapsed = AgentUsageSnapshot(
+            id: ClaudeCodeUsageConnector.connectorID,
+            providerName: "Claude Code",
+            state: .failed,
+            capturedAt: epoch,
+            lastSuccessfulAt: nil,
+            freshness: .unavailable,
+            channels: [],
+            capabilities: [.refresh],
+            safeFailure: .unavailable
+        )
+        let reduction = ProviderProductStatePolicy.reduce(
+            snapshots: [lapsed],
+            admissions: [],
+            monitoringEnabledIDs: [ClaudeCodeUsageConnector.connectorID],
+            configuredOrDetectedIDs: [ClaudeCodeUsageConnector.connectorID],
+            previousCards: [],
+            language: .english,
+            now: epoch
+        )
+        let claude = reduction.inventory.provider(.claude)
+        #expect(claude?.primaryDisplayText == "—")
+        #expect(claude?.inventory.assistant == true)
+        #expect(claude?.inventory.quickPanel == false)
+    }
+
+    @Test("A monitored agent that was never found does not appear")
+    func undetectedAgentStaysOff() {
+        let reduction = ProviderProductStatePolicy.reduce(
+            snapshots: [],
+            admissions: [],
+            monitoringEnabledIDs: [GoogleAntigravityUsageConnector.connectorID],
+            configuredOrDetectedIDs: [],
+            previousCards: [],
+            language: .english,
+            now: epoch
+        )
+        #expect(reduction.inventory.assistantProviders.isEmpty)
+    }
+
+    @Test("Unprompted syncs may run from the state a lapsed reading lands in")
+    func failedStateStillOffersSync() throws {
+        let model = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Sources/CodexUsageUI/Stores/ClaudeBrowserSettingsModel.swift"),
+            encoding: .utf8
+        )
+        let offers = try #require(model.range(of: "var offersAccuracySync: Bool {"))
+        #expect(model[offers.upperBound...].prefix(160).contains(".stale, .failed:"))
+    }
+}
+
+/// Most-changeable rule: Claude's assistant value is the five-hour window,
+/// seven days when there is no five-hour limit, and a spent seven-day window.
+@Suite("Claude most-changeable window")
+struct ClaudeMostChangeableWindowTests {
+    private let now = Date(timeIntervalSince1970: 1_788_134_400)
+
+    private func window(_ kind: SharedUsageWindowKind, _ remaining: Double, resetsIn: TimeInterval = 3_600) -> SharedUsageWindowPresentation {
+        SharedUsageWindowPresentation(
+            id: kind == .fiveHour ? "five-hour" : "seven-day",
+            kind: kind,
+            compactLabel: kind == .fiveHour ? "5H" : "7D",
+            accessibilityLabel: kind == .fiveHour ? "five-hour window" : "seven-day window",
+            remaining: .finite(remaining),
+            resetsAt: now.addingTimeInterval(resetsIn),
+            resetText: ""
+        )
+    }
+
+    private func card(id: String = "claude.browserSync", _ windows: [SharedUsageWindowPresentation], selected: String) -> SharedUsageCardPresentation {
+        let chosen = windows.first { $0.id == selected }
+        return SharedUsageCardPresentation(
+            id: id,
+            providerName: "Claude",
+            planLabel: "max",
+            connectionStatus: .connected,
+            freshness: .fresh,
+            windows: windows,
+            selectedWindowID: selected,
+            remaining: chosen?.remaining ?? .unavailable,
+            severity: .normal,
+            capturedAt: now
+        )
+    }
+
+    @Test("Five hours is shown even when seven days is lower")
+    func fiveHourWins() {
+        let shown = DesktopAssistantCard(
+            shared: card([window(.sevenDay, 82), window(.fiveHour, 90)], selected: "seven-day"),
+            now: now
+        )
+        #expect(shown.usageValue == .finite(90))
+        #expect(shown.selectedWindowShortLabel == "5H")
+        #expect(shown.usageText(for: .minimalist) == "90%")
+    }
+
+    @Test("Without a current five-hour limit, seven days is shown")
+    func sevenDayFallback() {
+        let noFive = DesktopAssistantCard(shared: card([window(.sevenDay, 82)], selected: "seven-day"), now: now)
+        #expect(noFive.usageValue == .finite(82))
+        let ended = DesktopAssistantCard(
+            shared: card([window(.sevenDay, 82), window(.fiveHour, 90, resetsIn: -60)], selected: "seven-day"),
+            now: now
+        )
+        #expect(ended.usageValue == .finite(82))
+    }
+
+    @Test("A spent seven-day window wins, and other agents keep their choice")
+    func spentWeekAndOtherAgents() {
+        let spent = DesktopAssistantCard(
+            shared: card([window(.sevenDay, 0), window(.fiveHour, 100)], selected: "five-hour"),
+            now: now
+        )
+        #expect(spent.usageValue == .finite(0))
+        let codex = DesktopAssistantCard(
+            shared: card(id: "codex.appServer", [window(.sevenDay, 82), window(.fiveHour, 90)], selected: "seven-day"),
+            now: now
+        )
+        #expect(codex.usageValue == .finite(82))
+    }
+}

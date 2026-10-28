@@ -655,7 +655,12 @@ enum ProviderProductStatePolicy {
             inventory: ProviderProductInventoryDisposition(
                 overview: overview,
                 providers: agentWorkspace,
-                assistant: quickPanel,
+                // The Desktop Assistant stays on screen, so an agent must not
+                // vanish from it when its reading lapses: Claude's exact value
+                // is dropped after 30 minutes without a sync, and the card
+                // went with it. It keeps the overview's agents and shows "—"
+                // with its status until a reading returns.
+                assistant: overview,
                 quickPanel: quickPanel,
                 agentWorkspace: agentWorkspace
             ),

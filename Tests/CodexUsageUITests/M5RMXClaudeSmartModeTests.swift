@@ -1640,7 +1640,7 @@ struct M5RMXClaudeSmartModeTests {
             ),
             encoding: .utf8
         )
-        #expect(model.contains("case .waitingForUsagePage, .fresh, .cached, .stale:"))
+        #expect(model.contains("case .waitingForUsagePage, .fresh, .cached, .stale, .failed:"))
         // Accuracy Sync is pressed on Claude's page; the sheet keeps only
         // the ten-minute choice, which reads the same model rule.
         #expect(!settings.contains("action: model.accuracySync"))

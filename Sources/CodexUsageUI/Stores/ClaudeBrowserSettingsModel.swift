@@ -345,12 +345,14 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         run(.refreshing) { connector in await connector.accuracySync() }
     }
 
-    /// Whether the state on screen offers Accuracy Sync at all. The settings
-    /// button and the timer share it, so the timer only ever runs a sync the
-    /// user could have started by hand.
+    /// Whether a sync nobody pressed for, from the timer or Refresh All, may
+    /// run in this state. `.failed` is included because it is where a reading
+    /// lands once it is 30 minutes old: leaving it out meant one missed sync
+    /// (Safari closed, the Mac asleep) stopped every later one, and Claude
+    /// stayed without a reading until Accuracy Sync was pressed by hand.
     var offersAccuracySync: Bool {
         switch state {
-        case .waitingForUsagePage, .fresh, .cached, .stale:
+        case .waitingForUsagePage, .fresh, .cached, .stale, .failed:
             true
         default:
             false

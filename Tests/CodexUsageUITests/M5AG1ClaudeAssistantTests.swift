@@ -226,14 +226,16 @@ struct M5AG1ClaudeAssistantTests {
             remaining: 42,
             reset: now.addingTimeInterval(86_400)
         )
-        let cases: [([SharedUsageWindowPresentation], String?, DesktopAssistantUsageValue)] = [
-            ([fiveHour], fiveHour.id, .finite(73)),
-            ([sevenDay], sevenDay.id, .finite(42)),
-            ([fiveHour, sevenDay], sevenDay.id, .finite(42)),
-            ([sevenDay], sevenDay.id, .finite(42)),
-            ([], nil, .unavailable),
+        // With both windows the assistant shows five hours whichever the
+        // shared card selected: Claude's most-changeable rule.
+        let cases: [([SharedUsageWindowPresentation], String?, DesktopAssistantUsageValue, Date?)] = [
+            ([fiveHour], fiveHour.id, .finite(73), fiveHour.resetsAt),
+            ([sevenDay], sevenDay.id, .finite(42), sevenDay.resetsAt),
+            ([fiveHour, sevenDay], sevenDay.id, .finite(73), fiveHour.resetsAt),
+            ([sevenDay], sevenDay.id, .finite(42), sevenDay.resetsAt),
+            ([], nil, .unavailable, nil),
         ]
-        for (windows, selectedID, expected) in cases {
+        for (windows, selectedID, expected, expectedReset) in cases {
             let shared = SharedUsageCardPresentation(
                 id: "claude.browserSync",
                 providerName: "Claude Code",
@@ -253,7 +255,7 @@ struct M5AG1ClaudeAssistantTests {
                 now: now
             )
             #expect(assistant.usageValue == expected)
-            #expect(assistant.selectedWindowResetAt == shared.selectedWindow?.resetsAt)
+            #expect(assistant.selectedWindowResetAt == expectedReset)
         }
     }
 
