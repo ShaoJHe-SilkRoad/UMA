@@ -25,7 +25,7 @@ Quit the old app through its menu before replacing it; closing its window may le
 
 1. Install the official Codex desktop app and sign in with your ChatGPT account.
 2. In AUV, allow the local Codex connection and choose **Scan for Agents**.
-3. Select Codex and **Refresh** to read the allowance available for that account.
+3. Choose **Refresh All** to read the allowance available for that account.
 
 Codex is a separate download. AUV reads the allowance supplied by Codex; it does not count ChatGPT website messages. An API-key-only login may not provide a ChatGPT plan allowance. If you are signed in but no usage appears, use the [connection troubleshooting guide](FIRST_INSTALL_TROUBLESHOOTING.md).
 
@@ -109,7 +109,7 @@ Expected SHA-256: **bc1577aae1d3ffdc3e3b104de15c6649ab4fb83f452a04865d548002f432
 
 1. 安装官方 Codex 桌面应用，并使用 ChatGPT 账户登录。
 2. 在 AUV 中允许连接本机 Codex，然后点击**“扫描智能体”**。
-3. 选择 Codex 并点击**“刷新”**，读取该账户能够提供的额度。
+3. 点击**“全部刷新”**，读取该账户能够提供的额度。
 
 Codex 需单独安装。AUV 显示 Codex 返回的额度，不统计 ChatGPT 网页消息数。仅使用 API Key 登录时，可能没有 ChatGPT 套餐额度。已登录但没有用量时，请查看[连接排错指南](FIRST_INSTALL_TROUBLESHOOTING.md#中文)。
 
