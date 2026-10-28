@@ -409,12 +409,16 @@ struct HESectoriumUIContractTests {
         #expect(workbench.contains("settingsButtonRef.button = $0"))
     }
 
-    @Test("Global Settings exposes bounded management and explicit storage actions")
+    @Test("Sectorium settings expose bounded management, from the Sectorium tab only")
     func settingsSurface() throws {
         let settings = try source("Sources/CodexUsageUI/Views/HESectoriumSettingsView.swift")
         let navigation = try source("Sources/CodexUsageUI/Views/AgentSurfaceViews.swift")
-        #expect(navigation.contains("case hesectorium = \"HESectorium\""))
-        #expect(navigation.contains("case .hesectorium:\n                HESectoriumSettingsView"))
+        // A Global Settings copy ran on its own store and never saw the drive
+        // chosen on the Sectorium tab, so the tab's sheet is the one entry.
+        #expect(!navigation.contains("case hesectorium"))
+        #expect(!navigation.contains("HESectoriumSettingsView("))
+        let workbench = try source("Sources/CodexUsageUI/Views/SectoriumWorkbenchView.swift")
+        #expect(workbench.contains("HESectoriumSettingsView(isChinese: isChinese, store: model)"))
         for action in ["Review safe eject", "Install HESectorium", "Repair HESectorium",
                        "Background loading while AUV is closed", "Refresh Status", "Diagnostics"] {
             #expect(settings.contains(action))
@@ -435,7 +439,7 @@ struct HESectoriumUIContractTests {
         #expect(toolbar.contains("case .sectorium:"))
         #expect(!toolbar.contains("HESectoriumStatusControl("))
         #expect(!panel.contains("HESectoriumStatusControl(isChinese:"))
-        for label in ["Scan All", "Refresh All", "Desktop Assistant", "Settings"] {
+        for label in ["Scan for Agents", "Refresh All", "Desktop Assistant", "Global Settings"] {
             #expect(panel.contains("headerButton(localized(\"" + label + "\""))
         }
         let workbench = try source("Sources/CodexUsageUI/Views/SectoriumWorkbenchView.swift")

@@ -11,13 +11,14 @@ import HESectoriumRuntime
 @Suite("Settings viewport layout", .serialized)
 @MainActor
 struct SettingsViewportLayoutTests {
-    @Test("Sidebar and storage actions fit the viewport and remain scrollable",
-          arguments: [AppLanguage.english, .simplifiedChinese], [NSSize(width: 560, height: 378), NSSize(width: 640, height: 460), NSSize(width: 760, height: 552)])
+    // Sectorium's settings left Global Settings for the Sectorium tab's own
+    // sheet; the same reach checks now run on that sheet's content.
+    @Test("Sectorium settings actions fit the sheet and remain scrollable",
+          arguments: [AppLanguage.english, .simplifiedChinese], [NSSize(width: 560, height: 460), NSSize(width: 560, height: 620), NSSize(width: 760, height: 552)])
     func storagePaneFits(language: AppLanguage, size: NSSize) throws {
-        let fixture = try Fixture(language: language, pane: .hesectorium, size: size)
+        let fixture = try Fixture(language: language, pane: nil, size: size)
         defer { fixture.close() }
         settle(fixture.host)
-        try assertSidebarFits(fixture.host)
         let actions = descendants(fixture.host).compactMap { $0 as? NSButton }.filter {
             $0.accessibilityIdentifier().hasPrefix("uma.settings.hesectorium.")
         }
@@ -30,8 +31,8 @@ struct SettingsViewportLayoutTests {
         var pinned: Set<String> = []
         for action in actions {
             let rect = action.convert(action.bounds, to: fixture.host)
-            #expect(rect.minX >= 180 && rect.maxX <= size.width + 1,
-                    "Action must stay inside detail column: \(action.title), \(rect)")
+            #expect(rect.minX >= -1 && rect.maxX <= size.width + 1,
+                    "Action must stay inside the sheet: \(action.title), \(rect)")
             var scrolls: [NSScrollView] = []
             var ancestor = action.superview
             while let view = ancestor, view !== fixture.host {
@@ -138,7 +139,8 @@ struct SettingsViewportLayoutTests {
         let window: NSWindow
         let host: NSView
         let runner = NoCommands()
-        init(language: AppLanguage, pane: GlobalSettingsPane, size: NSSize) throws {
+        /// `pane: nil` hosts the Sectorium settings sheet's content instead.
+        init(language: AppLanguage, pane: GlobalSettingsPane?, size: NSSize) throws {
             _ = NSApplication.shared
             root = FileManager.default.temporaryDirectory.appendingPathComponent("uma-settings-layout-\(UUID().uuidString)")
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -149,10 +151,14 @@ struct SettingsViewportLayoutTests {
                 sectoriumDeviceObserver: NoDevices())
             let preferences = ApplicationPreferences.inMemory()
             preferences.set(language.rawValue, for: UMAApplicationPreferenceKeys.language)
-            let surface = GlobalSettingsSurface(preferences: preferences,
-                store: UsageStore.preview(language: language), navigation: GlobalSettingsNavigationState(pane: pane),
-                dataPaths: .current(bundleIdentifier: "com.example.layout-fixture", applicationSupportDirectory: root, homeDirectory: root),
-                hesectoriumStore: HESectoriumStore(service: service))
+            let surface: AnyView = if let pane {
+                AnyView(GlobalSettingsSurface(preferences: preferences,
+                    store: UsageStore.preview(language: language), navigation: GlobalSettingsNavigationState(pane: pane),
+                    dataPaths: .current(bundleIdentifier: "com.example.layout-fixture", applicationSupportDirectory: root, homeDirectory: root)))
+            } else {
+                AnyView(HESectoriumSettingsView(isChinese: language == .simplifiedChinese,
+                    store: HESectoriumStore(service: service), onClose: {}))
+            }
             let controller = NSHostingController(rootView: surface)
             window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
                               styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)

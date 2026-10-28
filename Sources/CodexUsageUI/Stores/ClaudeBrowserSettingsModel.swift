@@ -373,11 +373,26 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     }
 
     var periodicAccuracySyncIsDue: Bool {
-        periodicAccuracySyncEnabled
-            && consentGranted
+        periodicAccuracySyncEnabled && accuracySyncCanRunUnprompted
+    }
+
+    /// A sync nobody asked for by name, from the timer or from Refresh All,
+    /// runs only where the button would be offered, and only when Safari is
+    /// already open: neither ever opens Safari.
+    private var accuracySyncCanRunUnprompted: Bool {
+        consentGranted
             && !actionInProgress
             && offersAccuracySync
             && safariIsRunning()
+    }
+
+    /// Refresh All finishes with Accuracy Sync when Claude is in the list, so
+    /// one refresh also brings the exact figures. Returns whether it started.
+    @discardableResult
+    public func accuracySyncAfterRefreshAll() -> Bool {
+        guard accuracySyncCanRunUnprompted else { return false }
+        accuracySync()
+        return true
     }
 
     func runPeriodicAccuracySyncIfDue() {

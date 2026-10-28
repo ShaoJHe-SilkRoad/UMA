@@ -34,13 +34,6 @@ extension AppLanguage {
         }
     }
 
-    var claudeEnableIntegration: String {
-        switch self {
-        case .simplifiedChinese: "连接 Claude"
-        case .english: "Connect Claude"
-        }
-    }
-
     var claudeNotConfigured: String {
         switch self {
         case .simplifiedChinese: "未连接"
@@ -121,9 +114,9 @@ extension AppLanguage {
     var claudeConsentDisclosure: String {
         switch self {
         case .simplifiedChinese:
-            "在受支持的 Claude Code 终端或 IDE 环境中，AUV 可以安装一个可恢复的状态栏中继，仅保留官方 5 小时/7 天用量与重置字段。经您同意，AUV 还可在内存中一次处理一条有界的本地 Claude Code JSONL 记录，立即丢弃提示、回复和会话内容，仅保留允许的用量计数、模型系列分类与活动时间戳，用于生成与官方精确配额不同、以 ≈ 标记的本地活动估算。Claude Desktop 未提供稳定的逐回复本地活动信号；它只能从版本锁定的本地计划缓存提供以 ≈ 标记的估算剩余量；组织信息与历史会被丢弃，也不会推测重置时间。路径、身份与凭据不会持久化。按需“精确同步”才会临时打开 Safari，创建并关闭一个任务自有标签页；不会启用浏览器定时器或永久标签页。"
+            "在受支持的 Claude Code 终端或 IDE 环境中，AUV 可以安装一个可恢复的状态栏中继，仅保留官方 5 小时/7 天用量与重置字段。经您同意，AUV 还可在内存中一次处理一条有界的本地 Claude Code JSONL 记录，立即丢弃提示、回复和会话内容，仅保留允许的用量计数、模型系列分类与活动时间戳，用于生成与官方精确配额不同、以 ≈ 标记的本地活动估算。Claude Desktop 未提供稳定的逐回复本地活动信号；它只能从版本锁定的本地计划缓存提供以 ≈ 标记的估算剩余量；组织信息与历史会被丢弃，也不会推测重置时间。路径、身份与凭据不会持久化。Safari 仅用于“精确同步”：您点按“精确同步”时；Safari 已打开时您点按“全部刷新”；或您开启“每 10 分钟自动精确同步”后。每次同步创建并关闭一个任务自有的临时标签页。只有您亲自点按“精确同步”时，同步才会打开 Safari；不会保留永久标签页。"
         case .english:
-            "On supported Claude Code terminal or IDE surfaces, AUV can install a reversible status-line relay that retains only official five-hour/seven-day usage and reset fields. With your consent, AUV may also process one bounded local Claude Code JSONL record at a time in memory, immediately discard prompts, responses, and session content, and retain only allowlisted usage counts, model-family classification, and an activity timestamp to produce an ≈ local-activity estimate distinct from official exact quota. Claude Desktop does not expose a stable local activity signal, including a per-response signal; it may provide only ≈-labeled remaining estimates from a version-pinned local plan cache; organization and history are discarded, and no reset time is inferred. Paths, identity, and credentials are not persisted. Safari opens only for an explicit Accuracy Sync, which creates and closes one task-owned temporary tab; no browser timer or permanent tab is enabled."
+            "On supported Claude Code terminal or IDE surfaces, AUV can install a reversible status-line relay that retains only official five-hour/seven-day usage and reset fields. With your consent, AUV may also process one bounded local Claude Code JSONL record at a time in memory, immediately discard prompts, responses, and session content, and retain only allowlisted usage counts, model-family classification, and an activity timestamp to produce an ≈ local-activity estimate distinct from official exact quota. Claude Desktop does not expose a stable local activity signal, including a per-response signal; it may provide only ≈-labeled remaining estimates from a version-pinned local plan cache; organization and history are discarded, and no reset time is inferred. Paths, identity, and credentials are not persisted. Safari is used only for Accuracy Sync: when you choose Accuracy Sync, when you choose Refresh All while Safari is already open, or every 10 minutes if you turn that on. Each sync creates and closes one task-owned temporary tab. A sync opens Safari only when you choose Accuracy Sync itself, and no permanent tab is kept."
         }
     }
 

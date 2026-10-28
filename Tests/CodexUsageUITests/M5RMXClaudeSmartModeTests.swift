@@ -1641,7 +1641,10 @@ struct M5RMXClaudeSmartModeTests {
             encoding: .utf8
         )
         #expect(model.contains("case .waitingForUsagePage, .fresh, .cached, .stale:"))
-        #expect(settings.contains("model.consentGranted, model.offersAccuracySync"))
+        // Accuracy Sync is pressed on Claude's page; the sheet keeps only
+        // the ten-minute choice, which reads the same model rule.
+        #expect(!settings.contains("action: model.accuracySync"))
+        #expect(model.contains("&& offersAccuracySync"))
         #expect(settings.contains("claudeEstimateConfidence(model.estimateConfidence)"))
         #expect(settings.contains("claudeLastExact(model.lastExactAt)"))
         #expect(settings.contains("model.localSmartState"))

@@ -1713,7 +1713,6 @@ private struct M3RAgentWorkspaceReview: View {
         AgentWorkspaceSurface(
             store: store,
             providerID: providerID,
-            refresh: {},
             connectCodex: {},
             disconnectCodex: {},
             claudeControlState: { .onlineVerificationUnavailable },

@@ -457,8 +457,9 @@ final class StatusBarController: NSObject {
     private func showContextMenu() {
         guard let store, assistantController != nil else { return }
         let menu = NSMenu()
+        // Named as everywhere else: it is the same Refresh All.
         let refresh = NSMenuItem(
-            title: store.language.refreshUsage,
+            title: store.language == .simplifiedChinese ? "全部刷新" : "Refresh All",
             action: #selector(refreshUsage),
             keyEquivalent: "r"
         )

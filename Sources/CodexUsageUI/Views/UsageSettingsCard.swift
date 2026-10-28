@@ -100,8 +100,6 @@ struct UsageSettingsCard: View {
                     coordinator: agentSettings,
                     providerID: providerID,
                     language: language,
-                    showUsageSummary: $showUsageSummary,
-                    showRecentTasks: $showRecentTasks,
                     showAPICost: $showAPICost,
                     claudeSettings: claudeSettings,
                     antigravitySettings: antigravitySettings,
@@ -430,8 +428,7 @@ private struct AgentSpecificSettingsContent: View {
     @ObservedObject var coordinator: AgentSettingsCoordinator
     let providerID: AgentConnectorID
     let language: AppLanguage
-    @Binding var showUsageSummary: Bool
-    @Binding var showRecentTasks: Bool
+    /// Shows Claude's Local Cost Estimate module on its page.
     @Binding var showAPICost: Bool
     let claudeSettings: ClaudeBrowserSettingsModel?
     let antigravitySettings: AntigravitySettingsModel?
@@ -480,37 +477,6 @@ private struct AgentSpecificSettingsContent: View {
                 isOn: monitoringBinding
             )
             .accessibilityIdentifier("uma.agent.settings.monitoring.\(providerID.rawValue)")
-
-            if providerID == AgentPreferenceRecord.codexProviderID {
-                Divider().opacity(0.35)
-                SettingsToggleRow(
-                    title: language.usageSummaryCard,
-                    systemImage: "gauge.with.dots.needle.67percent",
-                    language: language,
-                    isOn: codexDetailBinding(
-                        keyPath: \.showUsageSummary,
-                        legacy: $showUsageSummary
-                    )
-                )
-                SettingsToggleRow(
-                    title: language.recentTasks,
-                    systemImage: "list.bullet.rectangle",
-                    language: language,
-                    isOn: codexDetailBinding(
-                        keyPath: \.showRecentTasks,
-                        legacy: $showRecentTasks
-                    )
-                )
-                SettingsToggleRow(
-                    title: language.costCard,
-                    systemImage: "dollarsign.circle",
-                    language: language,
-                    isOn: codexDetailBinding(
-                        keyPath: \.showAPICost,
-                        legacy: $showAPICost
-                    )
-                )
-            }
 
             if providerID == AgentPreferenceRecord.antigravityProviderID,
                let antigravitySettings {
@@ -586,13 +552,6 @@ private struct AgentSpecificSettingsContent: View {
                 )
                 .accessibilityIdentifier("uma.agent.settings.monitoring.\(providerID.rawValue)")
                 SettingsToggleRow(
-                    title: language.recentTasks,
-                    systemImage: "list.bullet.rectangle",
-                    language: language,
-                    isOn: $showRecentTasks,
-                    refined: true
-                )
-                SettingsToggleRow(
                     title: language.costCard,
                     systemImage: "dollarsign.circle",
                     language: language,
@@ -652,26 +611,6 @@ private struct AgentSpecificSettingsContent: View {
                 } else {
                     coordinator.setMonitoringEnabled($0, for: providerID)
                 }
-            }
-        )
-    }
-
-    private func codexDetailBinding(
-        keyPath: WritableKeyPath<CodexDetailPreferences, Bool>,
-        legacy: Binding<Bool>
-    ) -> Binding<Bool> {
-        Binding(
-            get: {
-                coordinator.record(for: providerID)
-                    .providerSettings.codexDetails?[keyPath: keyPath]
-                    ?? legacy.wrappedValue
-            },
-            set: { newValue in
-                var details = coordinator.record(for: providerID)
-                    .providerSettings.codexDetails ?? .defaults
-                details[keyPath: keyPath] = newValue
-                legacy.wrappedValue = newValue
-                coordinator.setCodexDetails(details, for: providerID)
             }
         )
     }
@@ -989,7 +928,6 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
     let language: AppLanguage
     let presentation: SharedUsageCardPresentation?
     @ViewBuilder let settings: () -> Settings
-    @State private var showingConsent = false
     @State private var showsDetails = false
 
     var body: some View {
@@ -1077,23 +1015,13 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
 
     // MARK: Actions
 
-    /// Accuracy Sync leads whenever it is offered; otherwise the state's own
-    /// action does. The conditions for showing each button are unchanged.
+    /// Enabling Local Smart and Accuracy Sync are on Claude's page, which
+    /// opens this sheet; here are only the repair step for the current state
+    /// and the choices that shape how syncing runs.
     private var actions: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                if model.consentGranted, model.offersAccuracySync {
-                    ClaudeSettingsActionButton(
-                        title: language == .simplifiedChinese ? "精确同步" : "Accuracy Sync",
-                        identifier: "claude.browser.open-usage",
-                        role: .primary,
-                        isEnabled: !model.actionInProgress,
-                        action: model.accuracySync
-                    )
-                }
-                primaryAction
-            }
-            .disabled(model.actionInProgress)
+            primaryAction
+                .disabled(model.actionInProgress)
 
             if model.consentGranted {
                 SettingsToggleRow(
@@ -1129,10 +1057,6 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
                 )
             }
 
-            if showingConsent, !model.consentGranted {
-                consentConfirmation
-            }
-
             if let safeError = model.safeError {
                 Text(language.claudeBrowserError(safeError))
                     .font(AppTypography.systemFont(11))
@@ -1142,54 +1066,12 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
         }
     }
 
-    private var consentConfirmation: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(
-                language == .simplifiedChinese
-                    ? "启用 Claude 本地智能模式？"
-                    : "Enable Claude Local Smart Mode?"
-            )
-            .font(AppTypography.systemFont(12, weight: .semibold))
-
-            Text(language.claudeConsentDisclosure)
-                .font(AppTypography.systemFont(11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: 8) {
-                ClaudeSettingsActionButton(
-                    title: language == .simplifiedChinese ? "取消" : "Cancel",
-                    identifier: "claude.browser.consent.cancel",
-                    action: { showingConsent = false }
-                )
-
-                ClaudeSettingsActionButton(
-                    title: language == .simplifiedChinese ? "继续" : "Continue",
-                    identifier: "claude.browser.consent.continue",
-                    role: .primary,
-                    action: {
-                        showingConsent = false
-                        model.connectWithConsent()
-                    }
-                )
-            }
-        }
-        .modifier(ClaudeSettingsCardSurface())
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("claude.browser.consent")
-    }
-
     @ViewBuilder
     private var primaryAction: some View {
         switch model.state {
         case .disconnected:
-            ClaudeSettingsActionButton(
-                title: language.claudeEnableIntegration,
-                identifier: "claude.browser.connect",
-                role: .primary,
-                isEnabled: !model.actionInProgress,
-                action: { showingConsent = true }
-            )
+            // Enable Local Smart, with its consent, is on Claude's page.
+            EmptyView()
         case .fresh, .cached, .stale:
             ClaudeSettingsActionButton(
                 title: language == .simplifiedChinese ? "刷新本地数据" : "Refresh Local",
@@ -2456,8 +2338,6 @@ public struct AgentSpecificSettingsSheet: View {
     private let workBuddySettings: WorkBuddySettingsModel?
     private let workBuddyLogin: WorkBuddyLoginCoordinator?
     private let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
-    @AppStorage("display.showUsageSummaryCard") private var showUsageSummary = true
-    @AppStorage("display.showRecentTasksCard") private var showRecentTasks = false
     @AppStorage("display.showAPICostCard") private var showAPICost = false
 
     public init(
@@ -2482,7 +2362,7 @@ public struct AgentSpecificSettingsSheet: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(store.language.agentSettings).font(.headline)
+                Text(title).font(.headline)
                 Spacer()
                 Button(store.language == .simplifiedChinese ? "完成" : "Done", action: close)
                     .keyboardShortcut(.cancelAction)
@@ -2494,8 +2374,6 @@ public struct AgentSpecificSettingsSheet: View {
                         coordinator: coordinator,
                         providerID: id,
                         language: store.language,
-                        showUsageSummary: $showUsageSummary,
-                        showRecentTasks: $showRecentTasks,
                         showAPICost: $showAPICost,
                         claudeSettings: self.claudeSettings,
                         antigravitySettings: self.antigravitySettings,
@@ -2519,5 +2397,13 @@ public struct AgentSpecificSettingsSheet: View {
         .padding(18)
         .frame(minWidth: 340, idealWidth: 420, minHeight: 300, idealHeight: 480)
         .accessibilityIdentifier("uma.agent.settings-sheet")
+    }
+
+    /// Matches the button that opened it, "Claude Settings…".
+    private var title: String {
+        guard let name = ProviderProductID.allCases
+            .first(where: { $0.settingsProviderID == providerID })?.displayName
+        else { return store.language.agentSettings }
+        return store.language == .simplifiedChinese ? "\(name) 设置" : "\(name) Settings"
     }
 }

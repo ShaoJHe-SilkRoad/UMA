@@ -232,7 +232,7 @@ struct M5ADBGG1BrowserSyncClosureTests {
     }
 
     @Test
-    func settingsUsesAnInlineConsentControlInsteadOfAPanelAlert() throws {
+    func consentIsAskedOnceOnClaudesPageWithTheFullDisclosure() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -246,11 +246,22 @@ struct M5ADBGG1BrowserSyncClosureTests {
         let start = try #require(source.range(of: "private struct ClaudeBrowserSettingsSection"))
         let end = try #require(source.range(of: "private struct WorkBuddySettingsSection"))
         let section = String(source[start.lowerBound..<end.lowerBound])
-
-        #expect(section.contains("if showingConsent, !model.consentGranted"))
-        #expect(section.contains("claude.browser.consent.continue"))
-        #expect(section.contains("model.connectWithConsent()"))
+        // The sheet opens from Claude's page, which already asks; a second
+        // consent here used other words and stayed enabled when connecting
+        // was impossible, so its Continue did nothing.
+        #expect(!section.contains("claude.browser.consent"))
+        #expect(!section.contains("claude.browser.connect"))
+        #expect(!section.contains("model.connectWithConsent()"))
         #expect(!section.contains(".alert("))
+
+        let page = try String(
+            contentsOf: repository.appendingPathComponent(
+                "Sources/CodexUsageUI/Views/AgentSurfaceViews.swift"
+            ),
+            encoding: .utf8
+        )
+        #expect(page.contains("Text(store.language.claudeConsentDisclosure)"))
+        #expect(page.contains("Button(localized(\"Enable\", \"启用\"), action: connectClaude)"))
     }
 
     @Test

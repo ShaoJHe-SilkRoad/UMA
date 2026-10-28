@@ -167,7 +167,6 @@ private final class MainAgentSettingsFocusBridge {
 
 private struct MainAgentSettingsButton: NSViewRepresentable {
     let label: String
-    let enabled: Bool
     let focusBridge: MainAgentSettingsFocusBridge
     let action: () -> Void
 
@@ -176,8 +175,12 @@ private struct MainAgentSettingsButton: NSViewRepresentable {
     func makeNSView(context: Context) -> NSButton {
         let button = MainToolbarFocusableButton(title: "", target: context.coordinator,
             action: #selector(Coordinator.activate(_:)))
-        button.isBordered = false
-        button.imagePosition = .imageOnly
+        // A titled push button, not a bare gear: the toolbar's Global
+        // Settings is the only gear, so the two settings entries read apart.
+        button.bezelStyle = .push
+        button.controlSize = .small
+        button.font = .systemFont(ofSize: NSFont.systemFontSize(for: .small))
+        button.imagePosition = .noImage
         button.focusRingType = .exterior
         button.refusesFirstResponder = false
         focusBridge.button = button
@@ -187,8 +190,7 @@ private struct MainAgentSettingsButton: NSViewRepresentable {
 
     func updateNSView(_ button: NSButton, context: Context) {
         context.coordinator.action = action
-        button.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: label)
-        button.isEnabled = enabled
+        button.title = label
         button.setAccessibilityLabel(label)
         button.setAccessibilityIdentifier("uma.agent.selected-settings")
         button.toolTip = label
@@ -354,17 +356,8 @@ struct MainWindowRootView: View {
     private var agentsWorkspace: some View {
         HSplitView {
             VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(localized("Agents", "智能体")).font(.headline)
-                    Spacer(minLength: 4)
-                    MainAgentSettingsButton(
-                        label: localized("Selected agent settings", "所选智能体设置"),
-                        enabled: !workspaceProviders.isEmpty,
-                        focusBridge: agentSettingsFocusBridge,
-                        action: { sheetProviderID = selectedProviderID }
-                    )
-                    .frame(width: 20, height: 20)
-                }
+                Text(localized("Agents", "智能体")).font(.headline)
+                .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
                 .padding(.horizontal, 10)
                 .padding(.top, 12)
                 if workspaceProviders.isEmpty {
@@ -434,7 +427,7 @@ struct MainWindowRootView: View {
             AgentWorkspaceSurface(
                 store: store,
                 providerID: selectedProviderID,
-                refresh: refreshAll,
+                settingsButton: workspaceProviders.isEmpty ? nil : AnyView(agentSettingsButton),
                 connectCodex: connectCodex,
                 disconnectCodex: disconnectCodex,
                 claudeControlState: claudeControlState,
@@ -444,6 +437,20 @@ struct MainWindowRootView: View {
             )
             .frame(minWidth: 500)
         }
+    }
+
+    /// The one way into an agent's own settings, on that agent's page. It
+    /// names the agent, so it cannot be mistaken for Global Settings.
+    private var agentSettingsButton: some View {
+        MainAgentSettingsButton(
+            label: localized(
+                "\(selectedProviderID.displayName) Settings…",
+                "\(selectedProviderID.displayName) 设置…"
+            ),
+            focusBridge: agentSettingsFocusBridge,
+            action: { sheetProviderID = selectedProviderID }
+        )
+        .fixedSize()
     }
 
     private var workspaceProviders: [ProviderProductState] {

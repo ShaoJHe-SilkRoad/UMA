@@ -18,7 +18,7 @@ struct AgentDashboardLayoutTests {
             let view = AgentWorkspaceSurface(
                 store: store,
                 providerID: .codex,
-                refresh: {}, connectCodex: {}, disconnectCodex: {},
+                connectCodex: {}, disconnectCodex: {},
                 claudeControlState: { .consentRequired },
                 connectClaude: {}, claudeAccuracySync: {},
                 referenceDate: Date(timeIntervalSince1970: 1_800_000_000)
@@ -60,7 +60,7 @@ struct AgentDashboardLayoutTests {
             .frame(width: 230)
             AgentWorkspaceSurface(
                 store: store, providerID: .codex,
-                refresh: {}, connectCodex: {}, disconnectCodex: {},
+                connectCodex: {}, disconnectCodex: {},
                 claudeControlState: { .consentRequired }, connectClaude: {}, claudeAccuracySync: {}
             )
             .frame(minWidth: 500)

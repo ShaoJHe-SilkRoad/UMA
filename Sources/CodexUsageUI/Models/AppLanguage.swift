@@ -428,8 +428,8 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
 
     var costCard: String {
         switch self {
-        case .simplifiedChinese: "Token 价值估算"
-        case .english: "Token Cost Estimate"
+        case .simplifiedChinese: "本地费用估算"
+        case .english: "Local Cost Estimate"
         }
     }
 

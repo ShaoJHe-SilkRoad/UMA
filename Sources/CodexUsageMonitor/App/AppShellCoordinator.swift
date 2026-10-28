@@ -475,8 +475,14 @@ final class AppShellCoordinator {
     }
 
     func refreshAll() async {
-        guard let store = runtime?.store, store.allowsManualRefresh else { return }
-        await store.refresh()
+        guard let runtime, runtime.store.allowsManualRefresh else { return }
+        await runtime.store.refresh()
+        // The store refresh reads local sources only. With Claude in the list,
+        // one Refresh All also asks Claude's model for its exact reading,
+        // under that model's own rules, instead of needing a second click.
+        if runtime.store.orderedWorkspaceProviders.contains(where: { $0.id == .claude }) {
+            runtime.claudeSettings.accuracySyncAfterRefreshAll()
+        }
     }
 
     func refreshAllProviders() {

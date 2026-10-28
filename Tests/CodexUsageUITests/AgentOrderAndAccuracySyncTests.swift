@@ -102,6 +102,58 @@ struct PeriodicAccuracySyncTests {
     }
 }
 
+/// Refresh All goes on to Accuracy Sync when Claude is in the list, under the
+/// same rules as the timer: consent, an offered sync and Safari already open.
+@Suite("Refresh All Accuracy Sync", .timeLimit(.minutes(1)))
+@MainActor
+struct RefreshAllAccuracySyncTests {
+    @Test("Refresh All starts one sync only with consent and Safari open")
+    func refreshAllStartsSync() async throws {
+        let suite = "auv-refresh-sync-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let consent = ClaudeBrowserConsentStore(defaults: defaults)
+        let fixture = BrowserConnectorFixture(consent: true)
+        var safariRunning = true
+        let model = ClaudeBrowserSettingsModel(
+            connector: fixture.connector(),
+            consentStore: consent,
+            safariIsRunning: { safariRunning }
+        )
+        #expect(!model.accuracySyncAfterRefreshAll())
+
+        model.connectWithConsent()
+        try await waitForClaudeValue(model.$actionInProgress, matching: { !$0 })
+        try await waitForClaudeValue(model.$state, matching: { _ in model.offersAccuracySync })
+
+        safariRunning = false
+        #expect(!model.accuracySyncAfterRefreshAll())
+        #expect(await fixture.bridge.automaticRequests.isEmpty)
+
+        safariRunning = true
+        #expect(model.accuracySyncAfterRefreshAll())
+        try await fixture.bridge.waitForAutomaticRequest()
+        #expect(await fixture.bridge.automaticRequests.count == 1)
+    }
+
+    @Test("The coordinator runs it after the store refresh, only for a listed Claude")
+    func coordinatorWiring() throws {
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Sources/CodexUsageMonitor/App/AppShellCoordinator.swift"),
+            encoding: .utf8
+        )
+        let body = try #require(source.range(of: "func refreshAll() async {")
+            .flatMap { start in source.range(of: "func refreshAllProviders()", range: start.upperBound..<source.endIndex)
+                .map { source[start.lowerBound..<$0.lowerBound] } })
+        let refresh = try #require(body.range(of: "await runtime.store.refresh()"))
+        let sync = try #require(body.range(of: "runtime.claudeSettings.accuracySyncAfterRefreshAll()"))
+        #expect(refresh.upperBound <= sync.lowerBound)
+        #expect(body.contains("$0.id == .claude"))
+    }
+}
+
 /// A sleeper the test advances by hand.
 private actor PeriodicTicker {
     private var waiters: [CheckedContinuation<Void, Never>] = []
@@ -125,5 +177,67 @@ private actor PeriodicTicker {
             }
             try await Task.sleep(for: .milliseconds(10))
         }
+    }
+}
+
+/// One entry for each kind of setting: the app's own in Global Settings, an
+/// agent's on that agent's page, and Sectorium's on its tab.
+@Suite("Settings entry points")
+struct SettingsEntryPointTests {
+    private func source(_ path: String) throws -> String {
+        try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent(path),
+            encoding: .utf8
+        )
+    }
+
+    @Test("Agent settings open from the agent's page, under the agent's name")
+    func agentSettingsLiveOnThePage() throws {
+        let shell = try source("Sources/CodexUsageMonitor/App/NativeShellViews.swift")
+        let sidebar = try #require(shell.range(of: "private var agentsWorkspace: some View {"))
+        let list = try #require(shell.range(of: "if workspaceProviders.isEmpty {", range: sidebar.upperBound..<shell.endIndex))
+        #expect(!shell[sidebar.upperBound..<list.lowerBound].contains("MainAgentSettingsButton("))
+        #expect(shell.contains("settingsButton: workspaceProviders.isEmpty ? nil : AnyView(agentSettingsButton)"))
+        #expect(shell.contains("\"\\(selectedProviderID.displayName) Settings…\""))
+        let page = try source("Sources/CodexUsageUI/Views/AgentSurfaceViews.swift")
+        // The page's own Refresh read as this agent only but refreshed all.
+        #expect(!page.contains("Button(localized(\"Refresh\", \"刷新\"), action: refresh)"))
+        #expect(page.components(separatedBy: "if let settingsButton { settingsButton }").count == 3)
+    }
+
+    @Test("The sheet drops toggles nothing reads and actions the page already has")
+    func sheetHoldsNoDuplicates() throws {
+        let sheet = try source("Sources/CodexUsageUI/Views/UsageSettingsCard.swift")
+        let content = try #require(sheet.range(of: "private struct AgentSpecificSettingsContent"))
+        let end = try #require(sheet.range(of: "/// Settings renders the exact same", range: content.upperBound..<sheet.endIndex))
+        let body = sheet[content.lowerBound..<end.lowerBound]
+        #expect(!body.contains("language.usageSummaryCard"))
+        #expect(!body.contains("language.recentTasks"))
+        #expect(!body.contains("codexDetailBinding"))
+        #expect(body.contains("language.costCard"))
+        #expect(AppLanguage.english.costCard == "Local Cost Estimate")
+    }
+
+    @Test("Global Settings holds the Quick Panel with the menu bar, and no Sectorium copy")
+    func globalSettingsGrouping() throws {
+        #expect(!GlobalSettingsPane.allCases.map(\.rawValue).contains("HESectorium"))
+        let page = try source("Sources/CodexUsageUI/Views/AgentSurfaceViews.swift")
+        let menuBar = try #require(page.range(of: "case .menuBar:\n                settingsSection("))
+        let wizard = try #require(page.range(of: "case .desktopWizard:", range: menuBar.upperBound..<page.endIndex))
+        #expect(page[menuBar.upperBound..<wizard.lowerBound].contains("uma.settings.appearance.quick-rails"))
+        #expect(!page.contains("live in each Agent workspace"))
+    }
+
+    @Test("The consent names every way a sync can use Safari")
+    func consentNamesEverySyncRoute() {
+        let english = AppLanguage.english.claudeConsentDisclosure
+        #expect(english.contains("Refresh All while Safari is already open"))
+        #expect(english.contains("every 10 minutes"))
+        #expect(!english.contains("no browser timer"))
+        let chinese = AppLanguage.simplifiedChinese.claudeConsentDisclosure
+        #expect(chinese.contains("全部刷新"))
+        #expect(chinese.contains("每 10 分钟自动精确同步"))
     }
 }

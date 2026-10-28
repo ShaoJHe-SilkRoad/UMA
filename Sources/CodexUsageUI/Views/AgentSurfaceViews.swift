@@ -509,11 +509,11 @@ public struct QuickPanelSurface: View {
             .help(localized("Open AUV", "打开 AUV"))
             .accessibilityLabel(localized("Open AUV", "打开 AUV"))
             Spacer()
-            headerButton(localized("Scan All", "全部扫描"), "sparkle.magnifyingglass", scanAll)
+            headerButton(localized("Scan for Agents", "扫描智能体"), "sparkle.magnifyingglass", scanAll)
             headerButton(localized("Refresh All", "全部刷新"), "arrow.clockwise", refreshAll)
                 .disabled(!store.allowsManualRefresh)
             headerButton(localized("Desktop Assistant", "桌面助手"), "macwindow", toggleWizard)
-            headerButton(localized("Settings", "设置"), "gearshape", openSettings)
+            headerButton(localized("Global Settings", "全局设置"), "gearshape", openSettings)
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 9)
@@ -690,7 +690,7 @@ public struct AgentWorkspaceSurface: View {
     @AppStorage("display.showAPICostCard") private var showsAPICostCard = false
     @ObservedObject private var store: UsageStore
     public let providerID: ProviderProductID
-    private let refresh: () -> Void
+    private let settingsButton: AnyView?
     private let connectCodex: () -> Void
     private let disconnectCodex: () -> Void
     private let claudeControlState: () -> ClaudeAgentControlState
@@ -702,7 +702,7 @@ public struct AgentWorkspaceSurface: View {
     public init(
         store: UsageStore,
         providerID: ProviderProductID,
-        refresh: @escaping () -> Void,
+        settingsButton: AnyView? = nil,
         connectCodex: @escaping () -> Void,
         disconnectCodex: @escaping () -> Void,
         claudeControlState: @escaping () -> ClaudeAgentControlState,
@@ -712,7 +712,7 @@ public struct AgentWorkspaceSurface: View {
     ) {
         self.store = store
         self.providerID = providerID
-        self.refresh = refresh
+        self.settingsButton = settingsButton
         self.connectCodex = connectCodex
         self.disconnectCodex = disconnectCodex
         self.claudeControlState = claudeControlState
@@ -745,10 +745,9 @@ public struct AgentWorkspaceSurface: View {
             Button(localized("Cancel", "取消"), role: .cancel) {}
             Button(localized("Enable", "启用"), action: connectClaude)
         } message: {
-            Text(localized(
-                "AUV reads only approved local usage metadata. Prompt, response, session, credential, cookie, token, and Keychain content is never retained or transmitted.",
-                "AUV 仅读取已批准的本地用量元数据；不会保留或传输提示、回复、会话、凭据、Cookie、令牌或钥匙串内容。"
-            ))
+            // This is the only place consent is asked, so it carries the
+            // full disclosure rather than a summary of it.
+            Text(store.language.claudeConsentDisclosure)
         }
     }
 
@@ -794,8 +793,9 @@ public struct AgentWorkspaceSurface: View {
 
     private var codexHeaderActions: some View {
         HStack(spacing: 8) {
-            Button(localized("Refresh", "刷新"), action: refresh)
-                .disabled(!store.allowsManualRefresh)
+            // Refresh All sits in the toolbar above; a "Refresh" here read as
+            // this agent only but refreshed every agent.
+            if let settingsButton { settingsButton }
             if provider?.connection == .connected || provider?.connection == .transitional {
                 Button(localized("Disconnect", "断开连接"), action: disconnectCodex)
             } else {
@@ -1236,16 +1236,8 @@ public struct AgentWorkspaceSurface: View {
     private var controlsModule: some View {
         module(localized("Agent Controls", "智能体控制"), systemImage: "slider.horizontal.3") {
             HStack(spacing: 8) {
-                Button(localized("Refresh", "刷新"), action: refresh)
-                    .disabled(!store.allowsManualRefresh)
-                if providerID == .codex {
-                    if provider?.connection == .connected || provider?.connection == .transitional {
-                        Button(localized("Disconnect", "断开连接"), action: disconnectCodex)
-                    } else {
-                        Button(localized("Connect", "连接"), action: connectCodex)
-                            .buttonStyle(.borderedProminent)
-                    }
-                } else if providerID == .claude {
+                if let settingsButton { settingsButton }
+                if providerID == .claude {
                     switch claudeControlState() {
                     case .consentRequired:
                         Button(localized("Enable Local Smart", "启用本地智能")) {
@@ -1936,7 +1928,8 @@ public enum GlobalSettingsPane: String, CaseIterable, Identifiable, Sendable {
     case menuBar = "Menu Bar"
     case desktopWizard = "Desktop Wizard"
     case privacy = "Privacy & Data"
-    case hesectorium = "HESectorium"
+    // Sectorium's settings are on the Sectorium tab, beside the drive they act
+    // on; a second copy here ran on its own store and never saw that drive.
     public var id: String { rawValue }
 }
 
@@ -1953,18 +1946,15 @@ public struct GlobalSettingsSurface: View {
     @ObservedObject private var navigation: GlobalSettingsNavigationState
     @StateObject private var model: GlobalSettingsViewModel
     private let store: UsageStore
-    private let hesectoriumStore: HESectoriumStore?
 
     public init(
         preferences: ApplicationPreferences,
         store: UsageStore,
         navigation: GlobalSettingsNavigationState,
-        dataPaths: ApplicationDataPaths = .current(),
-        hesectoriumStore: HESectoriumStore? = nil
+        dataPaths: ApplicationDataPaths = .current()
     ) {
         self.navigation = navigation
         self.store = store
-        self.hesectoriumStore = hesectoriumStore
         _model = StateObject(
             wrappedValue: GlobalSettingsViewModel(
                 preferences: preferences, store: store, dataPaths: dataPaths
@@ -1994,7 +1984,7 @@ public struct GlobalSettingsSurface: View {
 
                 // Bound the detail to the actual window viewport. Intrinsic
                 // form widths must never push the sidebar out of the window.
-                settingsDetail
+                settingsForm
                     .frame(width: max(0, viewport.size.width - 181), height: viewport.size.height)
                     .accessibilityIdentifier("uma.settings.detail.\(navigation.pane.id)")
             }
@@ -2012,17 +2002,7 @@ public struct GlobalSettingsSurface: View {
         .accessibilityIdentifier("uma.settings.surface")
     }
 
-    @ViewBuilder
-    private var settingsDetail: some View {
-        switch navigation.pane {
-        case .hesectorium:
-                HESectoriumSettingsView(isChinese: model.language == .simplifiedChinese, store: hesectoriumStore)
-        default:
-            standardSettingsDetail
-        }
-    }
-
-    private var standardSettingsDetail: some View {
+    private var settingsForm: some View {
         Form {
             switch navigation.pane {
             case .general:
@@ -2112,8 +2092,11 @@ public struct GlobalSettingsSurface: View {
                     }
                     .accessibilityIdentifier("uma.settings.general.language")
                     settingFact(
-                        localized("Agent setup", "智能体设置"),
-                        localized("Setup and repair actions live in each Agent workspace.", "设置和修复操作位于各智能体工作区。")
+                        localized("Agent settings", "智能体设置"),
+                        localized(
+                            "Each agent's own settings open from its page in the main window.",
+                            "各智能体自己的设置，从主窗口中该智能体的页面打开。"
+                        )
                     )
                 }
             case .appearance:
@@ -2137,22 +2120,6 @@ public struct GlobalSettingsSurface: View {
                     }
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("uma.settings.appearance.theme")
-                    Toggle(
-                        localized("Show connectivity indicators", "显示连接状态指示器"),
-                        isOn: Binding(
-                            get: { model.quickPanelShowsConnectivity },
-                            set: model.setQuickPanelShowsConnectivity
-                        )
-                    )
-                    .accessibilityIdentifier("uma.settings.appearance.quick-connectivity")
-                    Toggle(
-                        localized("Show remaining-percentage rails", "显示剩余百分比用量条"),
-                        isOn: Binding(
-                            get: { model.quickPanelShowsRemainingRails },
-                            set: model.setQuickPanelShowsRemainingRails
-                        )
-                    )
-                    .accessibilityIdentifier("uma.settings.appearance.quick-rails")
                     settingFact(
                         localized("Accessibility", "辅助功能"),
                         localized("Reduce Transparency, Increase Contrast, and Reduce Motion are respected automatically.", "自动遵循降低透明度、提高对比度和减弱动态效果设置。")
@@ -2183,6 +2150,30 @@ public struct GlobalSettingsSurface: View {
                     .accessibilityIdentifier("uma.settings.appearance.menu-value")
                     MenuBarAgentSettingsPicker(store: store, language: model.language)
                         .disabled(!model.menuBarShowsRemaining)
+                }
+                // These only ever changed the Quick Panel, which opens from
+                // the menu bar item, so they sit with it rather than under a
+                // general Appearance heading.
+                settingsSection(
+                    title: localized("Quick Panel", "快速面板"),
+                    subtitle: localized("The panel that opens from the menu bar", "点按菜单栏图标打开的面板")
+                ) {
+                    Toggle(
+                        localized("Show connectivity indicators", "显示连接状态指示器"),
+                        isOn: Binding(
+                            get: { model.quickPanelShowsConnectivity },
+                            set: model.setQuickPanelShowsConnectivity
+                        )
+                    )
+                    .accessibilityIdentifier("uma.settings.appearance.quick-connectivity")
+                    Toggle(
+                        localized("Show remaining-percentage rails", "显示剩余百分比用量条"),
+                        isOn: Binding(
+                            get: { model.quickPanelShowsRemainingRails },
+                            set: model.setQuickPanelShowsRemainingRails
+                        )
+                    )
+                    .accessibilityIdentifier("uma.settings.appearance.quick-rails")
                 }
             case .desktopWizard:
                 settingsSection(
@@ -2237,9 +2228,6 @@ public struct GlobalSettingsSurface: View {
                     )
                     .accessibilityIdentifier("uma.settings.wizard.reset-position")
                 }
-            case .hesectorium:
-                // This pane owns its own scrolling Form above.
-                EmptyView()
             case .privacy:
                 settingsSection(
                     title: localized("Privacy & Data", "隐私与数据"),
@@ -2258,7 +2246,10 @@ public struct GlobalSettingsSurface: View {
                     )
                     settingFact(
                         localized("Agent access", "智能体访问"),
-                        localized("Authentication and repair remain inside the selected Agent workspace.", "认证和修复操作仅位于所选智能体工作区。")
+                        localized(
+                            "Connecting and repairing an agent happen only on its page and in its own settings.",
+                            "智能体的连接与修复只在该智能体的页面及其设置中进行。"
+                        )
                     )
                     settingFact(
                         localized("Credentials", "凭据"),
@@ -2336,7 +2327,6 @@ public struct GlobalSettingsSurface: View {
         case .menuBar: "menubar.rectangle"
         case .desktopWizard: "macwindow"
         case .privacy: "hand.raised"
-        case .hesectorium: "externaldrive"
         }
     }
 
@@ -2348,7 +2338,6 @@ public struct GlobalSettingsSurface: View {
         case .menuBar: localized("Menu Bar", "菜单栏")
         case .desktopWizard: localized("Desktop Assistant", "桌面助手")
         case .privacy: localized("Privacy & Data", "隐私与数据")
-        case .hesectorium: localized("Sectorium", "分区工")
         }
     }
 

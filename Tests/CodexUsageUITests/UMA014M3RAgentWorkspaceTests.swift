@@ -51,7 +51,9 @@ struct UMA014M3RAgentWorkspaceTests {
         #expect(source.contains("uma.agent.claude.accuracy-unavailable"))
         #expect(source.contains("Online verification unavailable"))
         #expect(source.contains("Button(localized(\"Enable\", \"启用\"), action: connectClaude)"))
-        #expect(source.contains("credential, cookie, token, and Keychain content is never retained or transmitted"))
+        // The page is the only place consent is asked, so it shows the full
+        // disclosure rather than a summary.
+        #expect(source.contains("Text(store.language.claudeConsentDisclosure)"))
         #expect(shell.contains("runtime?.claudeSettings.connectWithConsent()"))
         #expect(shell.contains("runtime?.claudeSettings.agentControlState"))
     }

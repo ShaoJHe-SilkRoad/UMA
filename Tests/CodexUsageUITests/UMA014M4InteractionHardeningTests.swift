@@ -19,7 +19,7 @@ struct UMA014M4InteractionHardeningTests {
         #expect(menus.contains("coordinator?.showSettingsWindow()"))
         let settingsEntry = try #require(main.components(separatedBy: "identifier: \"uma.main.settings\"").dropFirst().first)
         #expect(settingsEntry.components(separatedBy: ".frame").first?.contains("action: openSettings") == true)
-        #expect(quick.contains("headerButton(localized(\"Settings\""))
+        #expect(quick.contains("headerButton(localized(\"Global Settings\""))
         #expect(!main.contains("SettingsWindowController()"))
         #expect(!quick.contains("SettingsWindowController()"))
     }
