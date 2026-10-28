@@ -368,7 +368,7 @@ struct UMA014M1NativeShellTests {
         #expect(script.contains("Development.ApplicationName"))
         #expect(script.contains("Development.BundleIdentifier"))
         #expect(
-            development["ApplicationName"] as? String == "UMA 0.17 Dev"
+            development["ApplicationName"] as? String == "UMA 0.18 Dev"
         )
         #expect(
             development["BundleIdentifier"] as? String

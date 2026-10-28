@@ -5,15 +5,15 @@
 	<key>Development</key>
 	<dict>
 		<key>ApplicationName</key>
-		<string>UMA 0.17 Dev</string>
+		<string>UMA 0.18 Dev</string>
 		<key>BundleIdentifier</key>
 		<string>com.silkrd.uma.dev.uma014</string>
 		<key>DefaultBuildNumber</key>
 		<string>1</string>
 		<key>MarketingVersion</key>
-		<string>0.17.8</string>
+		<string>0.18.0</string>
 		<key>PackageStem</key>
-		<string>uma-0.17-m1-dev</string>
+		<string>uma-0.18-m1-dev</string>
 	</dict>
 	<key>FrozenProduction</key>
 	<dict>
@@ -27,7 +27,7 @@
 		<key>ApplicationName</key>
 		<string>UMA</string>
 		<key>BuildNumber</key>
-		<string>2026102707</string>
+		<string>2026102801</string>
 		<key>BundleIdentifier</key>
 		<string>com.silkrd.uma</string>
 		<key>FrozenHostBuild</key>
@@ -47,7 +47,7 @@
 		<key>MinimumSystemVersion</key>
 		<string>14.0</string>
 		<key>PackageStem</key>
-		<string>uma-0.17-rc</string>
+		<string>uma-0.18-rc</string>
 	</dict>
 	<key>SafariCompatibility</key>
 	<dict>
