@@ -295,7 +295,14 @@ struct M5RMXSAFARIG1ProductionExtensionTests {
         #expect(background.contains("port.onMessage.addListener((message) =>"))
         #expect(background.contains("port.onDisconnect.addListener(() =>"))
         #expect(background.contains("containingAppPortGeneration !== generation"))
-        #expect(background.contains("containingAppReconnectBudget"))
+        // A lost containing-app port reconnects with back-off and never gives
+        // up: a spent one-shot budget left the companion deaf to every wake
+        // until Safari reloaded it.
+        #expect(!background.contains("containingAppReconnectBudget"))
+        #expect(background.contains(
+            "containingAppReconnectDelays = Object.freeze([0, 1_000, 5_000, 15_000, 60_000])"
+        ))
+        #expect(background.contains("containingAppReconnectAttempt = 0;\n        handleCommandMessage"))
         #expect(background.contains("config.browserFamily !== \"safari\""))
         #expect(!background.contains("nativeReconnectTimer"))
         #expect(!loader.contains("companionVersion"))

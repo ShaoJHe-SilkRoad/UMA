@@ -47,6 +47,14 @@ public enum ClaudeSafariHostIPCOperation: String, Codable, CaseIterable, Sendabl
     case closeOwnedTab
 }
 
+/// Where the companion opens the provider page for one read. Safari does not
+/// load a page in a window that is on another desktop or minimized, so when
+/// no Safari window is on screen the read gets a temporary window of its own.
+public enum ClaudeSafariHostIPCProviderPlacement: String, Codable, CaseIterable, Sendable {
+    case existingWindow
+    case temporaryWindow
+}
+
 public struct ClaudeSafariHostIPCRequest: Codable, Equatable, Sendable {
     public let schemaVersion: Int
     public let requestID: String
@@ -58,6 +66,8 @@ public struct ClaudeSafariHostIPCRequest: Codable, Equatable, Sendable {
     /// stale close receipt from aliasing the original operation.
     public let targetRequestID: String?
     public let allowSafariLaunch: Bool
+    /// Present only for a read. Absent means the existing front window.
+    public let providerPlacement: ClaudeSafariHostIPCProviderPlacement?
     public let createdAt: String
 
     public init(
@@ -66,6 +76,7 @@ public struct ClaudeSafariHostIPCRequest: Codable, Equatable, Sendable {
         operation: ClaudeSafariHostIPCOperation,
         targetRequestID: String? = nil,
         allowSafariLaunch: Bool = false,
+        providerPlacement: ClaudeSafariHostIPCProviderPlacement? = nil,
         createdAt: String = ISO8601DateFormatter().string(from: Date())
     ) {
         schemaVersion = ClaudeSafariHostIPCContract.schemaVersion
@@ -74,6 +85,7 @@ public struct ClaudeSafariHostIPCRequest: Codable, Equatable, Sendable {
         self.operation = operation
         self.targetRequestID = targetRequestID?.lowercased()
         self.allowSafariLaunch = allowSafariLaunch
+        self.providerPlacement = providerPlacement
         self.createdAt = createdAt
     }
 
@@ -92,6 +104,9 @@ public struct ClaudeSafariHostIPCRequest: Codable, Equatable, Sendable {
             && (!allowSafariLaunch
                 || operation == .verifyCompanion
                 || operation == .accuracySync)
+            && (providerPlacement == nil
+                || operation == .accuracySync
+                || operation == .automaticRefresh)
             && targetIsValid
     }
 }

@@ -21,8 +21,17 @@ actor ClaudeSafariHostClientAdapter {
     private var controlRequestIDs: Set<String> = []
     private var controlRequestIDOrder: [String] = []
     private var activeWorkRequestIDs: Set<String> = []
+    /// The app that was in front when a read opened a temporary Safari window,
+    /// so it can be brought back if Safari took the front while reading.
+    private var focusReturnTargets: [String: pid_t] = [:]
+    private let safariWindowVisibility: @Sendable () -> Bool?
 
-    init?(bundle: Bundle = .main) {
+    init?(
+        bundle: Bundle = .main,
+        safariWindowVisibility: @escaping @Sendable () -> Bool? = {
+            SafariWindowVisibility.hasWindowOnCurrentDesktop()
+        }
+    ) {
         guard let context = ClaudeBrowserRuntimeContext.current(bundle: bundle),
               let endpoint = try? ClaudeSafariHostIPCEndpoint.appGroup(
                 identifier: context.appGroupIdentifier
@@ -31,6 +40,7 @@ actor ClaudeSafariHostClientAdapter {
         client = ClaudeSafariHostIPCClient(endpoint: endpoint)
         generation = context.runtimeGenerationID
         hostApplicationIdentifier = context.identity.containingApplicationIdentifier
+        self.safariWindowVisibility = safariWindowVisibility
     }
 
     func start(_ handler: @escaping ClaudeBrowserProductionIntegration.MessageHandler) -> Bool {
@@ -45,6 +55,7 @@ actor ClaudeSafariHostClientAdapter {
         controlRequestIDs.removeAll()
         controlRequestIDOrder.removeAll()
         activeWorkRequestIDs.removeAll()
+        focusReturnTargets.removeAll()
         let active = waiters.values
         waiters.removeAll()
         for waiter in active {
@@ -119,6 +130,14 @@ actor ClaudeSafariHostClientAdapter {
         else { return .workDispatchFailed }
         guard await wakeHost() else { return .browserUnavailable }
         let operation: ClaudeSafariHostIPCOperation = oneShot ? .accuracySync : .automaticRefresh
+        let placement = SafariWindowVisibility.placement(
+            hasWindowOnCurrentDesktop: safariWindowVisibility()
+        )
+        if placement == .temporaryWindow,
+           let front = NSWorkspace.shared.frontmostApplication,
+           front.bundleIdentifier != SafariWindowVisibility.bundleIdentifier {
+            focusReturnTargets[normalizedRequestID] = front.processIdentifier
+        }
         // Register before publishing the request file. The Host may consume and
         // answer immediately on a warm App Group listener; no valid terminal
         // response may arrive before the adapter recognizes its request ID.
@@ -128,16 +147,21 @@ actor ClaudeSafariHostClientAdapter {
                 requestID: normalizedRequestID,
                 runtimeGenerationID: generation,
                 operation: operation,
-                allowSafariLaunch: oneShot
+                allowSafariLaunch: oneShot,
+                providerPlacement: placement
             ))
             return .dispatched
         } catch {
             activeWorkRequestIDs.remove(normalizedRequestID)
+            focusReturnTargets.removeValue(forKey: normalizedRequestID)
             return .workDispatchFailed
         }
     }
 
     func close(_ requestID: String) async {
+        // Once AUV gives up on a read it is no longer in flight here, even if
+        // its answer never arrives; otherwise every later read is refused.
+        finishWork(requestID.lowercased())
         guard UUID(uuidString: requestID) != nil, listen(), await wakeHost() else { return }
         let commandID = UUID().uuidString.lowercased()
         rememberControlRequest(commandID)
@@ -151,6 +175,27 @@ actor ClaudeSafariHostClientAdapter {
         } catch {
             forgetControlRequest(commandID)
         }
+    }
+
+    @discardableResult
+    private func finishWork(_ requestID: String) -> Bool {
+        let wasActive = activeWorkRequestIDs.remove(requestID) != nil
+        if let target = focusReturnTargets.removeValue(forKey: requestID) {
+            Self.returnFocus(to: target)
+        }
+        return wasActive
+    }
+
+    /// Brings back the app that was in front before a temporary Safari window
+    /// opened, but only if Safari is in front now: anything the person switched
+    /// to in the meantime is left alone.
+    private static func returnFocus(to processIdentifier: pid_t) {
+        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+                == SafariWindowVisibility.bundleIdentifier,
+              let target = NSRunningApplication(processIdentifier: processIdentifier),
+              !target.isTerminated
+        else { return }
+        target.activate()
     }
 
     private func listen() -> Bool {
@@ -232,7 +277,7 @@ actor ClaudeSafariHostClientAdapter {
             ))
         } else if activeWorkRequestIDs.contains(response.requestID),
                   response.runtimeGenerationID != generation {
-            activeWorkRequestIDs.remove(response.requestID)
+            finishWork(response.requestID)
             consumer?.submit(.dispatchFailure(.protocolMismatch))
         } else if activeWorkRequestIDs.contains(response.requestID),
                   response.outcome == .completed,
@@ -241,7 +286,7 @@ actor ClaudeSafariHostClientAdapter {
             // A single IPC file establishes causal ordering. The ordered
             // consumer still receives the observation before the terminal
             // cleanup receipt so publication cannot race ahead of the anchor.
-            activeWorkRequestIDs.remove(response.requestID)
+            finishWork(response.requestID)
             consumer?.submit(.observation(.success(observation)))
             consumer?.submit(.automation(event))
         } else if activeWorkRequestIDs.contains(response.requestID),
@@ -249,10 +294,11 @@ actor ClaudeSafariHostClientAdapter {
             consumer?.submit(.observation(.success(observation)))
         } else if activeWorkRequestIDs.contains(response.requestID),
                   let event = response.automationEvent {
-            activeWorkRequestIDs.remove(response.requestID)
+            finishWork(response.requestID)
             consumer?.submit(.automation(event))
-        } else if activeWorkRequestIDs.remove(response.requestID) != nil,
+        } else if activeWorkRequestIDs.contains(response.requestID),
                   response.outcome == .failed {
+            finishWork(response.requestID)
             let status: ClaudeBrowserAutomationStatus
             switch response.failureReason {
             case .protocolMismatch, .runtimeGenerationMismatch:

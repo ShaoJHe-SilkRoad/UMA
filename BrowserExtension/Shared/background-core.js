@@ -37,6 +37,8 @@
   ]);
   const requestIDPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const automaticTimeoutMilliseconds = 30_000;
+  const providerPlacements = Object.freeze(["existingWindow", "temporaryWindow"]);
+  const temporaryWindowSize = Object.freeze({ width: 480, height: 640 });
   const ownedTabReceiptMaximumAgeMilliseconds = 2 * 60 * 1_000;
   const extractUsageMessage = "umaClaudeExtractUsage";
   const runtimeQualificationMessageName = "umaClaudeRuntimeQualification";
@@ -59,7 +61,8 @@
   let containingAppPortState = "disconnected";
   let containingAppPortGeneration = 0;
   let containingAppReconnectTicket = 0;
-  let containingAppReconnectBudget = 1;
+  let containingAppReconnectAttempt = 0;
+  const containingAppReconnectDelays = Object.freeze([0, 1_000, 5_000, 15_000, 60_000]);
   let containingAppReconnectScheduled = false;
   const activeQualificationRequests = new Set();
   let nativeQueue = Promise.resolve();
@@ -670,26 +673,85 @@
     scheduleV2Expiry(read);
   }
 
+  async function expireV2Receipt(read) {
+    if ([v2States.requestIntentPersisted, v2States.providerCreationPending,
+      v2States.providerDocumentDiscovered].includes(read.state)) {
+      if (await transitionV2(read, v2Events.expire)
+          && await removeV2Receipt(read, v2States.expired)) {
+        pendingV2Receipt = null;
+        ownedTabRecoveryBlocked = false;
+      }
+    }
+    if (Number.isInteger(read.providerOwnedTabID)) {
+      await recoverCleanupOnlyV2(read);
+    }
+  }
+
+  async function settleDueV2Receipt() {
+    const read = pendingV2Receipt;
+    if (!read || !read.expiresAt || Date.now() < Date.parse(read.expiresAt)) return;
+    if (ownedTabExpiryTimer !== null) {
+      clearTimeout(ownedTabExpiryTimer);
+      ownedTabExpiryTimer = null;
+    }
+    await expireV2Receipt(read);
+  }
+
   function scheduleV2Expiry(read) {
     if (!read || ownedTabExpiryTimer !== null) return;
     const remaining = Math.max(1, Date.parse(read.expiresAt) - Date.now() + 1);
     ownedTabExpiryTimer = setTimeout(() => {
       ownedTabExpiryTimer = null;
       if (pendingV2Receipt?.requestID !== read.requestID) return;
-      void (async () => {
-        if ([v2States.requestIntentPersisted, v2States.providerCreationPending,
-          v2States.providerDocumentDiscovered].includes(read.state)) {
-          if (await transitionV2(read, v2Events.expire)
-              && await removeV2Receipt(read, v2States.expired)) {
-            pendingV2Receipt = null;
-            ownedTabRecoveryBlocked = false;
-          }
-        }
-        if (Number.isInteger(read.providerOwnedTabID)) {
-          await recoverCleanupOnlyV2(read);
-        }
-      })();
+      void expireV2Receipt(read);
     }, remaining);
+  }
+
+  // Safari does not load a page in a window that is on another desktop or
+  // minimized. When AUV finds no Safari window on the current desktop, the read
+  // opens in a small window of its own, which closes with its only tab.
+  async function createTemporaryProviderWindow(read, providerURL) {
+    let created;
+    try {
+      created = await api.windows.create({
+        url: providerURL,
+        focused: false,
+        width: temporaryWindowSize.width,
+        height: temporaryWindowSize.height,
+      });
+    } catch (_) {
+      // A Safari that rejects the size or focus hints still opens the page.
+      created = await api.windows.create({ url: providerURL });
+    }
+    if (!Number.isInteger(created?.id)) return null;
+    read.temporaryWindowID = created.id;
+    let tab = Array.isArray(created.tabs) && created.tabs.length === 1
+      ? created.tabs[0] : null;
+    if (!Number.isInteger(tab?.id)) {
+      try {
+        const populated = await api.windows.get(created.id, { populate: true });
+        tab = Array.isArray(populated?.tabs) && populated.tabs.length === 1
+          ? populated.tabs[0] : null;
+      } catch (_) {
+        tab = null;
+      }
+    }
+    if (Number.isInteger(tab?.id)) read.temporaryWindowTabID = tab.id;
+    return tab;
+  }
+
+  async function closeTemporaryProviderWindow(read) {
+    const windowID = read?.temporaryWindowID;
+    if (!Number.isInteger(windowID) || !api.windows?.get || !api.windows?.remove) return;
+    read.temporaryWindowID = null;
+    const expectedTabID = read.createdCandidateTabID ?? read.temporaryWindowTabID;
+    if (!Number.isInteger(expectedTabID)) return;
+    try {
+      const current = await api.windows.get(windowID, { populate: true });
+      const tabs = Array.isArray(current?.tabs) ? current.tabs : [];
+      if (tabs.length !== 1 || tabs[0]?.id !== expectedTabID) return;
+      await api.windows.remove(windowID);
+    } catch (_) {}
   }
 
   function exactOwnedProviderSender(port) {
@@ -777,7 +839,10 @@
   async function cleanupV2(read, terminalState) {
     if (!read) return false;
     if (!Number.isInteger(read.providerOwnedTabID) || !read.providerPort) {
-      // No trusted live content-script proof means no close authority.
+      // No trusted live content-script proof means no close authority over a
+      // tab. A temporary window this read created and that still holds only
+      // its own candidate tab is the exception: nothing else can be in it.
+      await closeTemporaryProviderWindow(read);
       pendingV2Receipt = read;
       ownedTabRecoveryBlocked = true;
       scheduleV2Expiry(read);
@@ -1162,13 +1227,17 @@
     }
   }
 
-  async function beginAutomaticRead(requestID) {
+  async function beginAutomaticRead(requestID, placement) {
     if (!requestIDPattern.test(requestID)) return;
     if (automaticRead) {
       await sendNative(automationEnvelope(requestID, "usageUnavailable"));
       return;
     }
     await ownedTabRecoveryPromise;
+    // The expiry timer may never have fired: Safari can hold back a background
+    // page's timers, as it does while its windows are off screen. A receipt
+    // already past its expiry is settled here instead of blocking every read.
+    if (ownedTabRecoveryBlocked) await settleDueV2Receipt();
     if (ownedTabRecoveryBlocked) {
       await sendNative(automationEnvelope(requestID, "ownedTabOwnershipLost"));
       return;
@@ -1183,6 +1252,8 @@
       createdAt: null,
       expiresAt: null,
       createdCandidateTabID: null,
+      temporaryWindowID: null,
+      temporaryWindowTabID: null,
       candidateBindingPromise: Promise.resolve(),
       providerCandidateTabID: null,
       providerOwnedTabID: null,
@@ -1244,7 +1315,9 @@
       void finishAutomaticV2(read, "tabUnavailable");
     }, automaticTimeoutMilliseconds);
     try {
-      const tab = await api.tabs.create({ url: providerURL, active: false });
+      const tab = placement === "temporaryWindow" && api.windows?.create
+        ? await createTemporaryProviderWindow(read, providerURL)
+        : await api.tabs.create({ url: providerURL, active: false });
       // create() is only advisory lifecycle evidence. Ownership is established
       // exclusively by the provider document Port's trusted sender.tab.id.
       if (!Number.isInteger(tab?.id)) {
@@ -1307,6 +1380,13 @@
         ? value
         : null;
     }
+    if (value.command === config.automaticRefreshMessageName
+        && Object.prototype.hasOwnProperty.call(value, "placement")) {
+      return exactKeys(value, ["command", "placement", "requestID"])
+        && providerPlacements.includes(value.placement)
+        ? value
+        : null;
+    }
     return exactKeys(value, ["command", "requestID"]) ? value : null;
   }
 
@@ -1334,24 +1414,31 @@
       // reply may the handler publish bridgeReady to the containing app.
       retainRuntimeOperation(qualifyRuntime(command.requestID, portGeneration));
     } else if (command.command === config.automaticRefreshMessageName) {
-      retainRuntimeOperation(beginAutomaticRead(command.requestID));
+      retainRuntimeOperation(beginAutomaticRead(command.requestID, command.placement));
     } else if (command.command === config.closeOwnedTabMessageName) {
       retainRuntimeOperation(closeOwnedRead(command.requestID, command.targetRequestID));
     }
   }
 
+  // The containing app's port can drop whenever Safari ends the extension's
+  // native handler. The first reconnect is immediate; later ones back off, and
+  // they never stop, so a lost port is never permanent until Safari reloads.
   function scheduleContainingAppPortReconnect(disconnectedGeneration) {
     if (containingAppReconnectScheduled
-        || containingAppReconnectBudget <= 0
         || disconnectedGeneration !== containingAppPortGeneration) return;
-    containingAppReconnectBudget -= 1;
+    const delay = containingAppReconnectDelays[
+      Math.min(containingAppReconnectAttempt, containingAppReconnectDelays.length - 1)
+    ];
+    containingAppReconnectAttempt += 1;
     containingAppReconnectScheduled = true;
     const ticket = ++containingAppReconnectTicket;
-    Promise.resolve().then(() => {
+    const reconnect = () => {
       if (ticket !== containingAppReconnectTicket) return;
       containingAppReconnectScheduled = false;
       if (containingAppPortState === "disconnected") installContainingAppPort();
-    });
+    };
+    if (delay === 0) Promise.resolve().then(reconnect);
+    else setTimeout(reconnect, delay);
   }
 
   function installContainingAppPort() {
@@ -1377,7 +1464,7 @@
         if (containingAppPort !== port
             || containingAppPortGeneration !== generation
             || containingAppPortState !== "ready") return;
-        containingAppReconnectBudget = 1;
+        containingAppReconnectAttempt = 0;
         handleCommandMessage(message, generation);
       });
       port.onDisconnect.addListener(() => {

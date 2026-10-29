@@ -365,6 +365,7 @@ actor UMASafariBridgeHostCoordinator {
                 name: messageName,
                 requestID: requestID,
                 targetRequestID: item.request.targetRequestID,
+                providerPlacement: item.request.providerPlacement,
                 extensionIdentifier: runtime.extensionIdentifier
             )
             switch dispatchResult {
@@ -837,6 +838,7 @@ actor UMASafariBridgeHostCoordinator {
         name: String,
         requestID: String,
         targetRequestID: String?,
+        providerPlacement: ClaudeSafariHostIPCProviderPlacement? = nil,
         extensionIdentifier: String
     ) async -> ClaudeSafariHostDispatchCompletion {
         let gate = ClaudeSafariHostDispatchCompletionGate()
@@ -850,6 +852,10 @@ actor UMASafariBridgeHostCoordinator {
         }
         var userInfo = ["command": name, "requestID": requestID]
         if let targetRequestID { userInfo["targetRequestID"] = targetRequestID }
+        if name == ClaudeBrowserBridgeContract.automaticRefreshMessageName,
+           let providerPlacement {
+            userInfo["placement"] = providerPlacement.rawValue
+        }
         SFSafariApplication.dispatchMessage(
             withName: name,
             toExtensionWithIdentifier: extensionIdentifier,
