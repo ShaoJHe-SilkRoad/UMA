@@ -256,7 +256,101 @@
     return Number.isFinite(milliseconds) ? new Date(milliseconds).toISOString() : null;
   }
 
-  function readReset(card) {
+  // A reset read from text can be no further ahead than its window is long.
+  // A time past that bound was misread, so it is left unknown.
+  const RESET_HORIZON_MINUTES = Object.freeze({
+    fiveHour: 5 * 60 + 10,
+    weekly: 7 * 24 * 60 + 60,
+  });
+  const WEEKDAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  const MONTH_NAMES = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+  const ABSOLUTE_RESET = new RegExp(
+    "^(?:on\\s+)?(?:(" + MONTH_NAMES.join("|") + ")[a-z]*\\.?\\s+(\\d{1,2})(?![\\d:])(?:st|nd|rd|th)?,?" +
+    "|(today|tomorrow|(?:sun|mon|tue|wed|thu|fri|sat)[a-z]*))?\\s*(?:at\\s+)?(.+)$"
+  );
+
+  function clockTime(raw) {
+    const value = raw.trim();
+    if (value === "noon") return { hours: 12, minutes: 0 };
+    if (value === "midnight") return { hours: 0, minutes: 0 };
+    const twelve = value.match(/^(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s?m\.?$/);
+    if (twelve) {
+      const hour = Number(twelve[1]);
+      const minutes = Number(twelve[2] || 0);
+      if (hour < 1 || hour > 12 || minutes > 59) return null;
+      return { hours: (hour % 12) + (twelve[3] === "p" ? 12 : 0), minutes };
+    }
+    const day = value.match(/^(\d{1,2}):(\d{2})$/);
+    if (day && Number(day[1]) < 24 && Number(day[2]) < 60) {
+      return { hours: Number(day[1]), minutes: Number(day[2]) };
+    }
+    return null;
+  }
+
+  function atClock(base, dayOffset, time) {
+    return new Date(
+      base.getFullYear(), base.getMonth(), base.getDate() + dayOffset, time.hours, time.minutes
+    );
+  }
+
+  // Claude's redesigned Usage page shows a reset only as text in the viewer's
+  // own time zone: "Resets at 6:40 PM", "Resets Saturday 9:00 AM",
+  // "Resets tomorrow at 9:00 AM" or "Resets Nov 2, 9:00 AM". Only these
+  // shapes are read; any other wording leaves the reset unknown rather than
+  // guessed. A countdown such as "Resets in 2 hr 5 min" is not read: taken a
+  // minute apart it names a reset a minute apart, which the app rightly
+  // treats as a different window.
+  function textResetDate(text, now) {
+    const match = text.match(/^resets\s+(.+?)\.?$/i);
+    if (!match) return null;
+    const rest = match[1].trim().toLowerCase().replace(/\s+/g, " ");
+    const parts = rest.match(ABSOLUTE_RESET);
+    if (!parts) return null;
+    const [, monthWord, monthDay, dayWord, timeText] = parts;
+    const time = clockTime(timeText);
+    if (!time) return null;
+
+    if (monthWord) {
+      const month = MONTH_NAMES.indexOf(monthWord);
+      const date = new Date(now.getFullYear(), month, Number(monthDay), time.hours, time.minutes);
+      if (date.getMonth() !== month) return null;
+      // A date already well behind is next year's, as near New Year.
+      if (date.getTime() < now.getTime() - 86400000) date.setFullYear(date.getFullYear() + 1);
+      return date;
+    }
+    if (!dayWord || dayWord === "today") {
+      const today = atClock(now, 0, time);
+      return today.getTime() > now.getTime() - 60000 ? today : atClock(now, 1, time);
+    }
+    if (dayWord === "tomorrow") return atClock(now, 1, time);
+    const weekday = WEEKDAY_NAMES.findIndex((name) => name.startsWith(dayWord));
+    if (weekday < 0) return null;
+    let ahead = (weekday - now.getDay() + 7) % 7;
+    if (ahead === 0 && atClock(now, 0, time).getTime() <= now.getTime()) ahead = 7;
+    return atClock(now, ahead, time);
+  }
+
+  // Two different reset texts in one row cannot both be its reset, so neither
+  // is reported.
+  function textReset(card, horizonMinutes, now) {
+    const values = [];
+    const candidates = Array.from(card.querySelectorAll("span, p, div, time"))
+      .slice(0, CONTRACT.maximumCandidateCount);
+    for (const candidate of candidates) {
+      if (candidate.childElementCount > 0) continue;
+      const text = boundedOwnText(candidate, 64);
+      if (!text || !/^resets\s/i.test(text)) continue;
+      const date = textResetDate(text, now);
+      if (!date || !Number.isFinite(date.getTime())) continue;
+      const ahead = (date.getTime() - now.getTime()) / 60000;
+      if (ahead < -1 || ahead > horizonMinutes) continue;
+      values.push(date.toISOString());
+    }
+    const unique = Array.from(new Set(values));
+    return unique.length === 1 ? unique[0] : null;
+  }
+
+  function readReset(card, horizonMinutes, now) {
     const values = [];
     const candidates = Array.from(card.querySelectorAll('time[datetime], [data-reset-at]'))
       .slice(0, 8);
@@ -273,25 +367,26 @@
     }
     const unique = Array.from(new Set(values));
     if (unique.length > 1) return { valid: false, value: null };
-    return { valid: true, value: unique.length === 1 ? unique[0] : null };
+    if (unique.length === 1) return { valid: true, value: unique[0] };
+    return { valid: true, value: textReset(card, horizonMinutes, now) };
   }
 
-  function quotaWindow(card) {
+  function quotaWindow(card, horizonMinutes, now) {
     if (!card) return null;
     const usedPercentage = readPercentage(card);
     if (usedPercentage === null) return null;
-    const reset = readReset(card);
+    const reset = readReset(card, horizonMinutes, now || new Date());
     if (!reset.valid) return null;
     return { usedPercentage, resetAt: reset.value };
   }
 
-  function modelSpecificWindow(documentLike) {
+  function modelSpecificWindow(documentLike, now) {
     const candidates = [];
     for (const modelFamily of ["sonnet", "opus", "haiku"]) {
       const cards = matchingExplicitCards(documentLike, CARD_SELECTORS[modelFamily]);
       if (cards.length > 1) return null;
       if (cards.length === 1) {
-        const window = quotaWindow(cards[0]);
+        const window = quotaWindow(cards[0], RESET_HORIZON_MINUTES.weekly, now);
         if (window) candidates.push({ modelFamily, window });
       }
     }
@@ -326,13 +421,17 @@
 
   function extract(documentLike, locationLike, now) {
     if (!exactUsageURL(locationLike) || hasLoginForm(documentLike)) return null;
-    const fiveHour = quotaWindow(uniqueCard(documentLike, "fiveHour"));
-    const weeklyAllModels = quotaWindow(uniqueCard(documentLike, "weeklyAllModels"));
+    const fiveHour = quotaWindow(
+      uniqueCard(documentLike, "fiveHour"), RESET_HORIZON_MINUTES.fiveHour, now
+    );
+    const weeklyAllModels = quotaWindow(
+      uniqueCard(documentLike, "weeklyAllModels"), RESET_HORIZON_MINUTES.weekly, now
+    );
     if (!fiveHour && !weeklyAllModels) return null;
     const observation = {
       fiveHour,
       weeklyAllModels,
-      modelSpecificWeekly: modelSpecificWindow(documentLike),
+      modelSpecificWeekly: modelSpecificWindow(documentLike, now),
       observedAt: (now || new Date()).toISOString(),
       extractorSchemaVersion: CONTRACT.schemaVersion,
       sourceLayoutVersion: CONTRACT.sourceLayoutVersion,
@@ -385,6 +484,7 @@
     usageRouteState,
     finitePercentage,
     normalizedTimestamp,
+    textResetDate,
     validateObservation,
     extract,
     extractResult,
