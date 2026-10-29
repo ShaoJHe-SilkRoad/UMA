@@ -740,18 +740,24 @@
     return tab;
   }
 
+  // Closes the temporary window this read created, but only while it still
+  // holds nothing except the read's own tab. Returns whether it was closed.
   async function closeTemporaryProviderWindow(read) {
     const windowID = read?.temporaryWindowID;
-    if (!Number.isInteger(windowID) || !api.windows?.get || !api.windows?.remove) return;
-    read.temporaryWindowID = null;
-    const expectedTabID = read.createdCandidateTabID ?? read.temporaryWindowTabID;
-    if (!Number.isInteger(expectedTabID)) return;
+    if (!Number.isInteger(windowID) || !api.windows?.get || !api.windows?.remove) return false;
+    const expectedTabID = read.providerOwnedTabID
+      ?? read.createdCandidateTabID ?? read.temporaryWindowTabID;
+    if (!Number.isInteger(expectedTabID)) return false;
     try {
       const current = await api.windows.get(windowID, { populate: true });
       const tabs = Array.isArray(current?.tabs) ? current.tabs : [];
-      if (tabs.length !== 1 || tabs[0]?.id !== expectedTabID) return;
+      if (tabs.length !== 1 || tabs[0]?.id !== expectedTabID) return false;
       await api.windows.remove(windowID);
-    } catch (_) {}
+      read.temporaryWindowID = null;
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   function exactOwnedProviderSender(port) {
@@ -854,7 +860,11 @@
     if (!read.removalAlreadyConfirmed) {
       read.closingOwnedTab = true;
       try {
-        await api.tabs.remove(read.providerOwnedTabID);
+        // Safari keeps a window open after its last tab is removed, so a
+        // temporary window goes as a whole, with the proven tab in it.
+        if (!await closeTemporaryProviderWindow(read)) {
+          await api.tabs.remove(read.providerOwnedTabID);
+        }
       } catch (_) {
         read.closingOwnedTab = false;
         pendingV2Receipt = read;

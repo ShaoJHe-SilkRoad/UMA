@@ -88,6 +88,24 @@ struct ClaudeCompanionHiddenSafariTests {
         #expect(page.log.contains("tabs.create background"))
     }
 
+    /// Live on macOS 27.2, removing a temporary window's only tab left the
+    /// empty window open, so a finished read closes the window itself.
+    @Test("A finished read closes its temporary window, not only the tab")
+    func finishedReadClosesTheWholeWindow() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let background = try String(
+            contentsOf: root.appendingPathComponent("BrowserExtension/Shared/background-core.js"),
+            encoding: .utf8
+        )
+        #expect(background.contains("""
+                if (!await closeTemporaryProviderWindow(read)) {
+                  await api.tabs.remove(read.providerOwnedTabID);
+                }
+        """))
+        #expect(background.contains("const expectedTabID = read.providerOwnedTabID"))
+    }
+
     @Test("AUV asks for a temporary window only when Safari has none on screen")
     func placementFollowsSafariVisibility() {
         #expect(SafariWindowVisibility.placement(hasWindowOnCurrentDesktop: false) == .temporaryWindow)
