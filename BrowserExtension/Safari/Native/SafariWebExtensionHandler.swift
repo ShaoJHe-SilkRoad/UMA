@@ -667,6 +667,10 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
                 guard currentGenerationID == runtime.runtimeGenerationID else {
                     return ["ok": false]
                 }
+                try ClaudeBrowserOwnedTabReceiptStore.discardExpiredForeignReceipt(
+                    currentGenerationID: currentGenerationID,
+                    endpoint: endpoint
+                )
                 guard let receipt = try ClaudeBrowserOwnedTabReceiptStore.load(
                     endpoint: endpoint
                 ) else { return ["ok": true, "found": false] }

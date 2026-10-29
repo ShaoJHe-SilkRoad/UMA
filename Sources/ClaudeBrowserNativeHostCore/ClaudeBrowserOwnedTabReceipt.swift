@@ -398,6 +398,31 @@ public enum ClaudeBrowserOwnedTabReceiptStore {
         }
     }
 
+    /// Every compare-and-swap on a receipt is bound to the runtime generation
+    /// that wrote it, so a receipt left by an earlier generation can never be
+    /// settled by the current one and would block every read for good. Once it
+    /// has expired it is discarded. Nothing is closed: the current generation
+    /// holds no authority over the earlier one's tabs.
+    @discardableResult
+    public static func discardExpiredForeignReceipt(
+        currentGenerationID: String,
+        now: Date = Date(),
+        endpoint: ClaudeBrowserFileHandoffEndpoint,
+        uid: uid_t = getuid()
+    ) throws -> Bool {
+        try lock.withLock {
+            try validateDirectory(endpoint.directoryPath, uid: uid)
+            let path = receiptPath(endpoint)
+            guard let receipt = try loadUnlocked(path: path, uid: uid),
+                  receipt.runtimeGenerationID.lowercased() != currentGenerationID.lowercased(),
+                  let expiry = receipt.expiryDate,
+                  expiry <= now
+            else { return false }
+            guard unlink(path) == 0 else { throw ClaudeBrowserBridgeError.socketUnsafe }
+            return true
+        }
+    }
+
     private static func receiptPath(_ endpoint: ClaudeBrowserFileHandoffEndpoint) -> String {
         endpoint.directoryPath + "/owned-tab-receipt.plist"
     }

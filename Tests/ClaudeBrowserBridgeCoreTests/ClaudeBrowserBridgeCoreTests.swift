@@ -923,6 +923,50 @@ struct ClaudeBrowserBridgeCoreTests {
         ))
     }
 
+    /// A Bridge update gives the companion a new runtime generation. A receipt
+    /// the earlier one left behind can never be settled by the new one, so it
+    /// blocked every read until removed by hand. Once expired it is dropped.
+    @Test("an expired receipt from an earlier generation is discarded, nothing else")
+    func expiredForeignGenerationReceiptIsDiscarded() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "uma-owned-tab-foreign-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: root.path
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let endpoint = ClaudeBrowserFileHandoffEndpoint(directoryPath: root.path)
+        let earlier = UUID().uuidString.lowercased()
+        let current = UUID().uuidString.lowercased()
+        let receipt = ClaudeBrowserOwnedTabReceipt(
+            requestID: UUID().uuidString.lowercased(),
+            runtimeGenerationID: earlier,
+            ownershipNonceDigest: String(repeating: "d", count: 64),
+            createdAt: "2026-10-29T03:09:35.430Z",
+            expiresAt: "2026-10-29T03:11:35.430Z",
+            lifecycleState: .requestIntentPersisted,
+            revision: 1
+        )
+        let beforeExpiry = try #require(receipt.expiryDate).addingTimeInterval(-1)
+        let afterExpiry = try #require(receipt.expiryDate).addingTimeInterval(1)
+        try ClaudeBrowserOwnedTabReceiptStore.save(receipt, endpoint: endpoint)
+
+        #expect(try !ClaudeBrowserOwnedTabReceiptStore.discardExpiredForeignReceipt(
+            currentGenerationID: current, now: beforeExpiry, endpoint: endpoint
+        ))
+        #expect(try !ClaudeBrowserOwnedTabReceiptStore.discardExpiredForeignReceipt(
+            currentGenerationID: earlier, now: afterExpiry, endpoint: endpoint
+        ))
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.load(endpoint: endpoint) == receipt)
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.discardExpiredForeignReceipt(
+            currentGenerationID: current, now: afterExpiry, endpoint: endpoint
+        ))
+        #expect(try ClaudeBrowserOwnedTabReceiptStore.load(endpoint: endpoint) == nil)
+    }
+
     @Test("owned-tab receipt accepts JavaScript fractional-second timestamps")
     func ownedTabReceiptAcceptsJavaScriptTimestamp() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
