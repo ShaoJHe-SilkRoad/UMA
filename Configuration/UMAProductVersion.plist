@@ -20,22 +20,22 @@
 		<key>MarketingVersion</key>
 		<string>0.14.2</string>
 		<key>SourceCommit</key>
-		<string>ee742912fa910615400f399156a27514ac8d3c76</string>
+		<string>11c043dec071355b8ef92cb2260fb52ef9f9b84c</string>
 	</dict>
 	<key>ReleaseCandidate</key>
 	<dict>
 		<key>ApplicationName</key>
 		<string>UMA</string>
 		<key>BuildNumber</key>
-		<string>2026102901</string>
+		<string>2026102902</string>
 		<key>BundleIdentifier</key>
 		<string>com.silkrd.uma</string>
 		<key>FrozenHostBuild</key>
-		<string>202610291510</string>
+		<string>202610291540</string>
 		<key>FrozenHostExtensionVersion</key>
 		<string>0.14.2</string>
 		<key>FrozenHostRuntimeGenerationID</key>
-		<string>55aefd6d-fa37-41d4-887b-30bdcaed81f3</string>
+		<string>508526c9-dca1-483f-9da2-267ff53b6231</string>
 		<key>HostAppGroupIdentifier</key>
 		<string>group.com.silkrd.uma.bridge</string>
 		<key>HostBundleIdentifier</key>
