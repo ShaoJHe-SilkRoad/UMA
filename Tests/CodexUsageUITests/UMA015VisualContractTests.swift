@@ -1459,14 +1459,13 @@ struct UMA015VisualContractTests {
         let currentNavigation = try #require(descendants(of: content).first {
             $0.accessibilityIdentifier() == "uma.main.navigation"
         } as? NSSegmentedControl)
-        try nativeNavigate(.threadOS, using: currentNavigation, in: window)
+        try nativeNavigate(.sectorium, using: currentNavigation, in: window)
         try nativeNavigate(.agents, using: currentNavigation, in: window)
         #expect(controller.selectedAgentForTesting == .claude,
                 "Native navigation must preserve the selected provider.")
 
         var exercisedStorageRoute = false
-        for destination in [MainSurfaceDestination.threadOS, .sectorium, .agents,
-                            .threadOS, .sectorium, .agents] {
+        for destination in [MainSurfaceDestination.sectorium, .agents, .sectorium, .agents] {
             try nativeNavigate(destination, using: currentNavigation, in: window)
             settle(content)
             #expect(controller.destinationForTesting == destination)
@@ -2071,7 +2070,7 @@ struct UMA015VisualContractTests {
 
     private func nativeNavigate(_ destination: MainSurfaceDestination,
                                 using control: NSSegmentedControl, in window: NSWindow) throws {
-        let index = try #require(MainSurfaceDestination.allCases.firstIndex(of: destination))
+        let index = try #require(MainSurfaceDestination.toolbarDestinations.firstIndex(of: destination))
         let segmentWidth = control.bounds.width / CGFloat(control.segmentCount)
         try nativeClick(control, at: NSPoint(x: (CGFloat(index) + 0.5) * segmentWidth,
                                              y: control.bounds.midY), in: window)

@@ -7,6 +7,11 @@ enum MainSurfaceDestination: String, CaseIterable, Identifiable {
     case threadOS = "ThreadOS"
     case sectorium = "Sectorium"
     var id: String { rawValue }
+
+    /// ThreadOS is opened from Codex's settings instead of the toolbar, because
+    /// it is expected to stop being useful. Its page stays in the main window,
+    /// since the form needs more width than the settings sheet has.
+    static let toolbarDestinations: [MainSurfaceDestination] = [.agents, .sectorium]
 }
 
 private struct MainToolbarNavigationControl: NSViewRepresentable {
@@ -40,7 +45,8 @@ private struct MainToolbarNavigationControl: NSViewRepresentable {
             control.setWidth(Self.segmentWidth(for: label, in: control), forSegment: index)
         }
         control.invalidateIntrinsicContentSize()
-        control.selectedSegment = MainSurfaceDestination.allCases.firstIndex(of: selection) ?? 0
+        // No segment is selected while ThreadOS, which has none, is showing.
+        control.selectedSegment = MainSurfaceDestination.toolbarDestinations.firstIndex(of: selection) ?? -1
         control.setAccessibilityLabel(accessibilityLabel)
     }
 
@@ -61,8 +67,9 @@ private struct MainToolbarNavigationControl: NSViewRepresentable {
         init(selection: Binding<MainSurfaceDestination>) { self.selection = selection }
 
         @objc func selectionChanged(_ sender: NSSegmentedControl) {
-            guard MainSurfaceDestination.allCases.indices.contains(sender.selectedSegment) else { return }
-            selection.wrappedValue = MainSurfaceDestination.allCases[sender.selectedSegment]
+            let destinations = MainSurfaceDestination.toolbarDestinations
+            guard destinations.indices.contains(sender.selectedSegment) else { return }
+            selection.wrappedValue = destinations[sender.selectedSegment]
         }
     }
 }
@@ -297,7 +304,15 @@ struct MainWindowRootView: View {
         .sheet(item: $sheetProviderID, onDismiss: {
             agentSettingsFocusBridge.restoreAfterSheetDismiss()
         }) { providerID in
-            AgentSpecificSettingsSheet(store: store, providerID: providerID.settingsProviderID, claudeSettings: claudeSettings) {
+            AgentSpecificSettingsSheet(
+                store: store,
+                providerID: providerID.settingsProviderID,
+                claudeSettings: claudeSettings,
+                openThreadOS: {
+                    sheetProviderID = nil
+                    navigation.destination = .threadOS
+                }
+            ) {
                 sheetProviderID = nil
             }
         }
@@ -323,7 +338,7 @@ struct MainWindowRootView: View {
         HStack(spacing: 12) {
             MainToolbarNavigationControl(
                 selection: $navigation.destination,
-                labels: MainSurfaceDestination.allCases.map(destinationTitle),
+                labels: MainSurfaceDestination.toolbarDestinations.map(destinationTitle),
                 accessibilityLabel: localized("AUV navigation", "AUV 导航")
             )
             .fixedSize()
@@ -346,6 +361,22 @@ struct MainWindowRootView: View {
                     "Refresh every agent, including Claude's exact figures",
                     "刷新所有智能体，包括 Claude 的精确读数"
                 ))
+            }
+            if navigation.destination == .threadOS {
+                MainToolbarActionButton(
+                    label: localized(
+                        "Back to \(ProviderProductID.codex.displayName)",
+                        "返回 \(ProviderProductID.codex.displayName)"
+                    ),
+                    identifier: "uma.main.threados.back",
+                    isEnabled: true,
+                    symbol: "chevron.left",
+                    action: {
+                        navigation.selectedAgent = .codex
+                        navigation.destination = .agents
+                    }
+                )
+                .frame(width: store.language == .simplifiedChinese ? 124 : 150, height: 30)
             }
             MainToolbarActionButton(
                 label: localized("Global Settings", "全局设置"),

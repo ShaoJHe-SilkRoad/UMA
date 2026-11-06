@@ -439,6 +439,7 @@ private struct AgentSpecificSettingsContent: View {
     let checkAgain: () -> Void
     let syncWorkBuddyAccount: () -> Void
     let disconnectWorkBuddyAccount: () -> Void
+    var openThreadOS: (() -> Void)? = nil
 
     private var entry: AgentSettingsEntry? {
         coordinator.entries.first { $0.providerID == providerID }
@@ -478,6 +479,11 @@ private struct AgentSpecificSettingsContent: View {
             )
             .accessibilityIdentifier("uma.agent.settings.monitoring.\(providerID.rawValue)")
 
+            if providerID == AgentPreferenceRecord.codexProviderID, let openThreadOS {
+                Divider().opacity(0.35)
+                threadOSEntry(open: openThreadOS)
+            }
+
             if providerID == AgentPreferenceRecord.antigravityProviderID,
                let antigravitySettings {
                 Divider().opacity(0.35)
@@ -501,6 +507,25 @@ private struct AgentSpecificSettingsContent: View {
                     disconnectAccount: disconnectWorkBuddyAccount
                 )
             }
+        }
+    }
+
+    private func threadOSEntry(open: @escaping () -> Void) -> some View {
+        let isChinese = language == .simplifiedChinese
+        return HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(isChinese ? "ThreadOS（线程工）" : "ThreadOS")
+                    .font(AppTypography.font(12.5, weight: .medium, language: language))
+                Text(isChinese
+                    ? "为开发团队选择模型与思考档位。"
+                    : "Choose models and thinking levels for your coding team.")
+                    .font(AppTypography.font(11.5, language: language))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Button(isChinese ? "打开" : "Open", action: open)
+                .accessibilityIdentifier("uma.agent.settings.threados")
         }
     }
 
@@ -2348,6 +2373,7 @@ public struct AgentSpecificSettingsSheet: View {
     private let workBuddySettings: WorkBuddySettingsModel?
     private let workBuddyLogin: WorkBuddyLoginCoordinator?
     private let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
+    private let openThreadOS: (() -> Void)?
     @AppStorage("display.showAPICostCard") private var showAPICost = false
 
     public init(
@@ -2357,9 +2383,11 @@ public struct AgentSpecificSettingsSheet: View {
         workBuddySettings: WorkBuddySettingsModel? = nil,
         workBuddyLogin: WorkBuddyLoginCoordinator? = nil,
         workBuddyAccountWebSync: WorkBuddyAccountWebSessionController? = nil,
+        openThreadOS: (() -> Void)? = nil,
         close: @escaping () -> Void
     ) {
         self.store = store
+        self.openThreadOS = openThreadOS
         self.providerID = providerID
         self.claudeSettings = claudeSettings
         self.antigravitySettings = antigravitySettings
@@ -2396,7 +2424,8 @@ public struct AgentSpecificSettingsSheet: View {
                         },
                         checkAgain: { Task { await store.checkLocalSessionAgain() } },
                         syncWorkBuddyAccount: { Task { await store.syncWorkBuddyAccountNow() } },
-                        disconnectWorkBuddyAccount: { Task { await store.disconnectWorkBuddyAccount() } }
+                        disconnectWorkBuddyAccount: { Task { await store.disconnectWorkBuddyAccount() } },
+                        openThreadOS: openThreadOS
                     )
                 }
             } else {

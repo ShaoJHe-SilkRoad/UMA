@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import CodexUsageMonitor
 @testable import CodexUsageUI
@@ -23,5 +24,25 @@ import Testing
         #expect(navigation.destination == .agents)
         #expect(navigation.selectedAgent == .codex)
         #expect(ThreadOSSettingsPreferences.loadFactoriumV2(project: "R1_NAV", from: preferences) == draft)
+    }
+
+    @Test("ThreadOS is not in the toolbar; it opens from Codex's settings")
+    func threadOSLivesUnderCodexSettings() throws {
+        #expect(MainSurfaceDestination.toolbarDestinations == [.agents, .sectorium])
+        #expect(MainSurfaceDestination.allCases.contains(.threadOS))
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let shell = try String(
+            contentsOf: root.appendingPathComponent("Sources/CodexUsageMonitor/App/NativeShellViews.swift"),
+            encoding: .utf8
+        )
+        #expect(shell.contains("openThreadOS: {"))
+        #expect(shell.contains("navigation.destination = .threadOS"))
+        #expect(shell.contains("uma.main.threados.back"))
+        let settings = try String(
+            contentsOf: root.appendingPathComponent("Sources/CodexUsageUI/Views/UsageSettingsCard.swift"),
+            encoding: .utf8
+        )
+        #expect(settings.contains("providerID == AgentPreferenceRecord.codexProviderID, let openThreadOS"))
     }
 }

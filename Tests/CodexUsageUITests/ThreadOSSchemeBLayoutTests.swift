@@ -618,16 +618,17 @@ import HESectoriumRuntime
         #expect(initialIDs.contains("uma.main.refresh"))
         #expect(initialIDs.contains("uma.main.settings"))
 
-        navigation.selectedSegment = 2
-        #expect(navigation.sendAction(try #require(navigation.action), to: navigation.target))
-        settle(try #require(window.contentView))
-        #expect(window.contentView != nil)
-        #expect(navigation.selectedSegment == 2)
-        #expect(!keyViewRoute(in: window).contains { $0.accessibilityIdentifier() == "uma.hesectorium.quick-actions" })
-
         navigation.selectedSegment = 1
         #expect(navigation.sendAction(try #require(navigation.action), to: navigation.target))
         settle(try #require(window.contentView))
+        #expect(window.contentView != nil)
+        #expect(navigation.selectedSegment == 1)
+        #expect(!keyViewRoute(in: window).contains { $0.accessibilityIdentifier() == "uma.hesectorium.quick-actions" })
+
+        // ThreadOS has no segment: it opens from Codex's settings.
+        controller.showDestination(.threadOS)
+        settle(try #require(window.contentView))
+        #expect(navigation.selectedSegment == -1)
         let threadContent = try #require(window.contentView)
         let copy = try #require(descendants(of: threadContent).first {
             $0.accessibilityIdentifier() == "uma.threados.prompt.generate-copy"
