@@ -80,6 +80,12 @@
   const containingAppPortIdleRenewalMilliseconds = 5 * 60_000;
   const selfReloadMinimumSpacingMilliseconds = 30 * 60_000;
   const selfReloadStampKey = "umaCompanionLastSelfReload";
+  // Live on macOS 27.2, once the native process had died Safari delivered each
+  // containing-app command twice on the current port. Every command has its own
+  // request ID, so a repeat is dropped. Two reads started by one request would
+  // otherwise fight over the same receipt and leave a tab behind.
+  const handledCommandLimit = 64;
+  const handledCommands = new Set();
   let nativeInFlight = null;
   let livenessMisses = 0;
   let containingAppPortLastMessageAt = Date.now();
@@ -1296,6 +1302,11 @@
       await sendNative(automationEnvelope(requestID, "ownedTabOwnershipLost"));
       return;
     }
+    // The waits above let another request get here first.
+    if (automaticRead) {
+      await sendNative(automationEnvelope(requestID, "usageUnavailable"));
+      return;
+    }
     const read = {
       requestID,
       runtimeGenerationID: config.runtimeGenerationID,
@@ -1456,6 +1467,12 @@
     if (!isCurrentContainingAppPort(portGeneration)) return;
     const command = unpackNativeCommand(message);
     if (!command || !requestIDPattern.test(command.requestID)) return;
+    const commandKey = `${command.command}:${command.requestID}`;
+    if (handledCommands.has(commandKey)) return;
+    handledCommands.add(commandKey);
+    if (handledCommands.size > handledCommandLimit) {
+      handledCommands.delete(handledCommands.values().next().value);
+    }
     if (command.command === config.wakeMessageName) {
       // Wake and qualification are separate lifecycle phases. On a cold
       // launch Safari may accept this dispatch before the port listener exists;

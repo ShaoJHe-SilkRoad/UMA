@@ -94,12 +94,19 @@ struct LocalProviderEligibilityScannerDiagnostics: Sendable, Equatable {
 /// non-provider-reported account provenance admitted here; it remains visibly
 /// estimated and must still contain bounded, validated quota windows.
 enum ProviderUsageSurfacePolicy {
+    /// How long Claude's last exact reading stays on screen, marked stale, once
+    /// it is no longer current. A reading is current for five minutes and the
+    /// longest automatic refresh interval is an hour, so this outlasts one
+    /// missed sync at every interval.
+    static let claudeRetainedReadingLimit: TimeInterval = 2 * 60 * 60
+
     static func permitsRetainedValue(
         snapshot: AgentUsageSnapshot,
         capabilities: Set<AgentConnectorCapability>
     ) -> Bool {
         capabilities.contains(.sanitizedLastValidRestore)
             || isAuthorizedClaudeEstimate(snapshot)
+            || isRecentClaudeReading(snapshot)
     }
 
     static func hasAdmissibleAccountProvenance(
@@ -138,6 +145,18 @@ enum ProviderUsageSurfacePolicy {
         default:
             false
         }
+    }
+
+    /// Without this, Claude read "Unavailable, no quota reading" from five
+    /// minutes after each sync until the next one, with the reading still stored.
+    private static func isRecentClaudeReading(_ snapshot: AgentUsageSnapshot) -> Bool {
+        guard snapshot.id == ClaudeCodeUsageConnector.connectorID,
+              let account = snapshot.channels.first(where: { $0.id == .account }),
+              !account.rateLimitWindows.isEmpty,
+              let observedAt = snapshot.lastSuccessfulAt
+        else { return false }
+        let age = snapshot.capturedAt.timeIntervalSince(observedAt)
+        return age >= 0 && age <= claudeRetainedReadingLimit
     }
 
     private static func isAuthorizedClaudeEstimate(

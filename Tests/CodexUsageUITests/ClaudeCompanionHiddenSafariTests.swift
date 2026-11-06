@@ -265,6 +265,33 @@ struct ClaudeCompanionSelfRecoveryTests {
         #expect(page.log.contains("receipt-removed EXPIRED"))
     }
 
+    /// Seen live after the native process was killed: each command arrived
+    /// twice, both copies started a read, and the read was refused.
+    @Test("A command delivered twice is handled once")
+    func repeatedCommandsAreDropped() throws {
+        let page = try CompanionPage()
+        page.clearLog()
+        page.dispatchWake(Self.firstWake)
+        page.dispatchWake(Self.firstWake)
+        #expect(page.log.filter { $0 == "automation extensionBackgroundReady" }.count == 1)
+        page.dispatchRead(Self.read, placement: nil)
+        page.dispatchRead(Self.read, placement: nil)
+        #expect(page.log.filter { $0 == "automation refreshStarted" }.count == 1)
+        #expect(page.log.filter { $0 == "tabs.create background" }.count == 1)
+        #expect(!page.log.contains("automation ownedTabOwnershipLost"))
+    }
+
+    /// Both pass the first in-progress check while waiting on the receipt load.
+    @Test("Two different read requests at once start only one read")
+    func concurrentReadsStartOne() throws {
+        let page = try CompanionPage()
+        page.clearLog()
+        page.dispatchReadsTogether(Self.firstWake, Self.secondWake)
+        #expect(page.log.filter { $0 == "automation refreshStarted" }.count == 1)
+        #expect(page.log.filter { $0 == "tabs.create background" }.count == 1)
+        #expect(page.log.contains("automation usageUnavailable"))
+    }
+
     @Test("A disconnected port whose reconnect timer was lost is restored by the check")
     func lostReconnectIsRestored() throws {
         let page = try CompanionPage()
@@ -289,7 +316,7 @@ struct ClaudeCompanionSelfRecoveryTests {
         #expect(!page.log.contains("tabs.create background"))
         page.setNativeAnswers(true)
         page.advance(milliseconds: 60_000)
-        page.dispatchRead(Self.read, placement: nil)
+        page.dispatchRead(Self.secondWake, placement: nil)
         #expect(page.log.contains("tabs.create background"))
     }
 }
@@ -345,6 +372,14 @@ private final class CompanionPage {
     func dispatchWake(_ requestID: String) {
         context.evaluateScript("""
         UMACompanionHarness.dispatch({ command: "umaClaudeWakeBridge", requestID: "\(requestID)" })
+        """)
+    }
+
+    /// One script evaluation, so no promise job runs between the two commands.
+    func dispatchReadsTogether(_ first: String, _ second: String) {
+        context.evaluateScript("""
+        UMACompanionHarness.dispatch({ command: "umaClaudeAutomaticRefresh", requestID: "\(first)" });
+        UMACompanionHarness.dispatch({ command: "umaClaudeAutomaticRefresh", requestID: "\(second)" });
         """)
     }
 

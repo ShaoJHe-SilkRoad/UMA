@@ -366,6 +366,81 @@ struct ClaudeSafariRecoveryModelTests {
     }
 }
 
+/// Seen live on 0.18.4: with automatic refresh at ten minutes, Claude read
+/// "Unavailable, no quota reading" from five minutes after each sync, with the
+/// exact reading still stored, because a stale exact reading was not admitted.
+@Suite("Claude's reading between syncs", .timeLimit(.minutes(1)))
+struct ClaudeReadingBetweenSyncsTests {
+    private func syncedConnector(
+        _ fixture: BrowserConnectorFixture
+    ) async throws -> ClaudeCodeUsageConnector {
+        let connector = fixture.connector()
+        await connector.start()
+        await connector.accuracySync()
+        await fixture.bridge.send(browserEnvelope(five: 19, seven: 39))
+        let deadline = Date().addingTimeInterval(30)
+        while await connector.currentSnapshot().freshness != .fresh, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(await connector.currentSnapshot().freshness == .fresh)
+        return connector
+    }
+
+    @Test("A reading past five minutes stays on screen, marked stale")
+    func staleReadingStaysVisible() async throws {
+        let fixture = BrowserConnectorFixture(consent: true)
+        let connector = try await syncedConnector(fixture)
+        fixture.clock.advance(6 * 60)
+        let snapshot = await connector.currentSnapshot()
+        #expect(snapshot.freshness == .stale)
+        #expect(LocalProviderEligibilityScanner.admission(
+            for: snapshot, descriptor: connector.descriptor
+        ).admittedSnapshot != nil)
+        let provider = ProviderProductStatePolicy.reduce(
+            snapshots: [snapshot],
+            admissions: [],
+            monitoringEnabledIDs: [ClaudeCodeUsageConnector.connectorID],
+            previousCards: [],
+            language: .english,
+            now: fixture.clock.now()
+        ).inventory.provider(.claude)
+        #expect(provider?.primaryQuota != nil)
+        #expect(provider?.connection == .connected)
+        #expect(provider?.freshness == .stale)
+    }
+
+    @Test("A reading older than the limit is no longer shown")
+    func oldReadingIsHidden() async throws {
+        let fixture = BrowserConnectorFixture(consent: true)
+        let connector = try await syncedConnector(fixture)
+        fixture.clock.advance(ProviderUsageSurfacePolicy.claudeRetainedReadingLimit + 60)
+        let snapshot = await connector.currentSnapshot()
+        #expect(LocalProviderEligibilityScanner.admission(
+            for: snapshot, descriptor: connector.descriptor
+        ).admittedSnapshot == nil)
+    }
+
+    @Test("A sync that fails keeps the reading on screen")
+    func failedSyncKeepsReading() async throws {
+        let fixture = BrowserConnectorFixture(consent: true)
+        let connector = try await syncedConnector(fixture)
+        fixture.clock.advance(6 * 60)
+        await fixture.bridge.setHealth(.companionStarting)
+        await connector.accuracySync()
+        let snapshot = await connector.currentSnapshot()
+        #expect(LocalProviderEligibilityScanner.admission(
+            for: snapshot, descriptor: connector.descriptor
+        ).admittedSnapshot != nil)
+    }
+
+    /// Every automatic refresh interval must be covered, with one sync missed.
+    @Test("The limit outlasts one missed sync at the longest interval")
+    func limitCoversLongestInterval() {
+        let longest = UMABackgroundRefreshInterval.allCases.map(\.seconds).max() ?? 0
+        #expect(ProviderUsageSurfacePolicy.claudeRetainedReadingLimit >= 2 * longest)
+    }
+}
+
 /// A sleeper the test advances by hand. The deadlines in this file allow for the
 /// main actor being queued for 25 seconds and more during a full-suite run.
 private actor RecoveryTicker {
