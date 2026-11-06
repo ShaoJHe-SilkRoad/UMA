@@ -242,14 +242,14 @@ struct UMA014InfraFoundationTests {
         let development = try #require(plist["Development"] as? [String: Any])
         let frozen = try #require(plist["FrozenProduction"] as? [String: Any])
         let safari = try #require(plist["SafariCompatibility"] as? [String: Any])
-        #expect(development["MarketingVersion"] as? String == "0.18.3")
+        #expect(development["MarketingVersion"] as? String == "0.18.4")
         #expect(development["BundleIdentifier"] as? String == "com.silkrd.uma.dev.uma014")
-        #expect(frozen["MarketingVersion"] as? String == "0.14.2")
+        #expect(frozen["MarketingVersion"] as? String == "0.14.3")
         #expect(
             frozen["SourceCommit"] as? String
-                == "a47aa3a05911b6d19070c048d9dd617bca5d6d8b"
+                == "4d4f219ac812e82bf1e3154537239ed1b12abff4"
         )
-        #expect(safari["HostMarketingVersion"] as? String == "0.14.2")
+        #expect(safari["HostMarketingVersion"] as? String == "0.14.3")
         #expect(safari["CompanionMarketingVersion"] as? String == "1.4.0")
         #expect(safari["ProtocolVersion"] as? String == "2")
         #expect(
@@ -314,7 +314,7 @@ struct UMA014InfraFoundationTests {
         let script = Self.repositoryRoot.appendingPathComponent(
             "script/read_uma_product_version.sh"
         )
-        #expect(try Self.run(script, "Development.MarketingVersion") == "0.18.3")
+        #expect(try Self.run(script, "Development.MarketingVersion") == "0.18.4")
         #expect(try Self.run(script, "SafariCompatibility.ProtocolVersion") == "2")
         #expect(throws: VersionReaderFailure.self) {
             _ = try Self.run(script, "Development.Unknown")
