@@ -2187,8 +2187,8 @@ public struct GlobalSettingsSurface: View {
                 settingsSection(
                     localized("Schedule", "定时"),
                     footer: localized(
-                        "Covers every agent, Claude Code included: its exact figures sync at the same interval while Safari is open. Automatic refresh never opens Safari.",
-                        "涵盖所有智能体，包括 Claude Code：Safari 已打开时，其精确读数按同一间隔同步。自动刷新不会打开 Safari。"
+                        "Covers every agent, Claude Code included: its exact figures sync at the same interval while Safari is open. If Safari is closed or stops responding, AUV asks before opening or restarting it.",
+                        "涵盖所有智能体，包括 Claude Code：Safari 已打开时，其精确读数按同一间隔同步。Safari 未运行或停止响应时，AUV 会先询问，再打开或重启它。"
                     )
                 ) {
                     Toggle(
