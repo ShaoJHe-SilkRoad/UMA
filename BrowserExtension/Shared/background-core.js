@@ -71,6 +71,19 @@
   let pendingV2Receipt = null;
   let ownedTabExpiryTimer = null;
   const activeRuntimeOperations = new Set();
+  // A native message Safari never answers would otherwise hold back every later
+  // one. This stays below the Host's ten-second wait for the page's answer to a
+  // wake, so a released queue can still answer it.
+  const nativeReplyDeadlineMilliseconds = 8_000;
+  const livenessIntervalMilliseconds = 60_000;
+  const livenessMissesBeforeReload = 2;
+  const containingAppPortIdleRenewalMilliseconds = 5 * 60_000;
+  const selfReloadMinimumSpacingMilliseconds = 30 * 60_000;
+  const selfReloadStampKey = "umaCompanionLastSelfReload";
+  let nativeInFlight = null;
+  let livenessMisses = 0;
+  let containingAppPortLastMessageAt = Date.now();
+  let ownedTabRecoveryUnanswered = false;
 
   function retainRuntimeOperation(operation) {
     const retained = Promise.resolve(operation);
@@ -140,12 +153,36 @@
     }
   }
 
+  function boundedNativeMessage(payload) {
+    return new Promise((resolve) => {
+      let timer = null;
+      const entry = { startedAt: Date.now(), settle: null };
+      entry.settle = (reply) => {
+        if (nativeInFlight === entry) nativeInFlight = null;
+        clearTimeout(timer);
+        resolve(isPlainObject(reply) ? reply : null);
+      };
+      nativeInFlight = entry;
+      timer = setTimeout(() => entry.settle(null), nativeReplyDeadlineMilliseconds);
+      Promise.resolve()
+        .then(() => api.runtime.sendNativeMessage(config.nativeApplication, payload))
+        .then(entry.settle, () => entry.settle(null));
+    });
+  }
+
   function sendNativeReply(payload) {
-    const operation = nativeQueue
-      .then(() => api.runtime.sendNativeMessage(config.nativeApplication, payload))
-      .then((reply) => isPlainObject(reply) ? reply : null, () => null);
+    const operation = nativeQueue.then(() => boundedNativeMessage(payload));
     nativeQueue = operation.then(() => undefined, () => undefined);
     return operation;
+  }
+
+  // Safari can hold back this page's timers, so a late deadline is also noticed
+  // when a command arrives. The command would otherwise wait behind it.
+  function releaseOverdueNativeMessage() {
+    if (nativeInFlight
+        && Date.now() - nativeInFlight.startedAt >= nativeReplyDeadlineMilliseconds) {
+      nativeInFlight.settle(null);
+    }
   }
 
   async function sendNative(payload) {
@@ -641,6 +678,13 @@
     const reply = await sendNativeReply(v2ReceiptCommand("loadV2", {
       runtimeGenerationID: config.runtimeGenerationID,
     }));
+    // No answer says nothing about the receipt, so reads wait until the native
+    // side answers, and the load runs again then.
+    ownedTabRecoveryUnanswered = reply === null;
+    if (reply === null) {
+      ownedTabRecoveryBlocked = true;
+      return;
+    }
     const record = decodeV2Receipt(reply);
     if (record === null) return;
     if (record === false || record.runtimeGenerationID !== config.runtimeGenerationID) {
@@ -1451,7 +1495,7 @@
     else setTimeout(reconnect, delay);
   }
 
-  function installContainingAppPort() {
+  function installContainingAppPort(announcesReady = true) {
     if (config.browserFamily !== "safari"
         || containingAppPortState !== "disconnected"
         || typeof api.runtime.connectNative !== "function") return;
@@ -1474,6 +1518,8 @@
         if (containingAppPort !== port
             || containingAppPortGeneration !== generation
             || containingAppPortState !== "ready") return;
+        containingAppPortLastMessageAt = Date.now();
+        releaseOverdueNativeMessage();
         containingAppReconnectAttempt = 0;
         handleCommandMessage(message, generation);
       });
@@ -1495,7 +1541,7 @@
       });
       containingAppPortState = "ready";
       transitionCompanion(automaticReadStates.nativeBridgeReady);
-      const startupRequestID = root.crypto?.randomUUID?.();
+      const startupRequestID = announcesReady ? root.crypto?.randomUUID?.() : null;
       if (requestIDPattern.test(startupRequestID || "")) {
         retainRuntimeOperation(
           announceBackgroundReady(startupRequestID.toLowerCase(), generation)
@@ -1507,6 +1553,75 @@
       transitionCompanion(automaticReadStates.starting);
       scheduleContainingAppPortReconnect(generation);
     }
+  }
+
+  // Safari can end the native connection without telling this page, and the page
+  // then never hears another wake. No command means nothing has proved the port
+  // works, so an idle one is replaced; nothing can be in progress on it.
+  function renewIdleContainingAppPort() {
+    if (containingAppPortState === "disconnected") {
+      containingAppReconnectTicket += 1;
+      containingAppReconnectScheduled = false;
+      installContainingAppPort();
+      return;
+    }
+    if (containingAppPortState !== "ready"
+        || Date.now() - containingAppPortLastMessageAt
+          < containingAppPortIdleRenewalMilliseconds) return;
+    const idlePort = containingAppPort;
+    containingAppPort = null;
+    containingAppPortState = "disconnected";
+    containingAppPortLastMessageAt = Date.now();
+    transitionCompanion(automaticReadStates.starting);
+    try { idlePort?.disconnect?.(); } catch (_) {}
+    installContainingAppPort(false);
+  }
+
+  // Reloading is the page's last resort, spaced out across reloads so a native
+  // side that stays gone cannot keep restarting it. When that is not enough,
+  // AUV asks the person to restart Safari.
+  function reloadCompanionIfAllowed() {
+    if (typeof api.runtime.reload !== "function") return;
+    try {
+      const last = Number(root.localStorage.getItem(selfReloadStampKey));
+      const elapsed = Date.now() - last;
+      if (last > 0 && elapsed >= 0 && elapsed < selfReloadMinimumSpacingMilliseconds) return;
+      root.localStorage.setItem(selfReloadStampKey, String(Date.now()));
+    } catch (_) {
+      return;
+    }
+    livenessMisses = 0;
+    api.runtime.reload();
+  }
+
+  async function checkCompanionLiveness() {
+    if (automaticRead || activeQualificationRequests.size > 0) return;
+    const reply = await sendNativeReply(v2ReceiptCommand("loadV2", {
+      runtimeGenerationID: config.runtimeGenerationID,
+    }));
+    if (automaticRead) return;
+    if (reply === null) {
+      livenessMisses += 1;
+      if (livenessMisses >= livenessMissesBeforeReload) reloadCompanionIfAllowed();
+      return;
+    }
+    livenessMisses = 0;
+    // A receipt this page does not know of was saved by a message it stopped
+    // waiting for, and it would refuse every later read until it was settled.
+    if (ownedTabRecoveryUnanswered || (reply.found === true && !pendingV2Receipt)) {
+      ownedTabRecoveryBlocked = false;
+      ownedTabRecoveryPromise = recoverV2Receipt();
+      await ownedTabRecoveryPromise;
+    }
+    renewIdleContainingAppPort();
+  }
+
+  function scheduleCompanionLivenessCheck() {
+    setTimeout(() => {
+      const check = checkCompanionLiveness();
+      retainRuntimeOperation(check);
+      void check.catch(() => {}).then(scheduleCompanionLivenessCheck);
+    }, livenessIntervalMilliseconds);
   }
 
   api.runtime.onMessage.addListener((message, sender) => {
@@ -1540,7 +1655,11 @@
   ownedTabRecoveryPromise = recoverV2Receipt();
 
   // Safari delivers SFSafariApplication.dispatchMessage payloads only through
-  // a containing-app native port. Install exactly one port for the lifetime of
-  // this persistent background page; failure remains closed until reload.
+  // a containing-app native port. One port is installed at a time; the liveness
+  // check replaces it if it goes quiet.
   installContainingAppPort();
+  if (config.browserFamily === "safari"
+      && requestIDPattern.test(config.runtimeGenerationID || "")) {
+    scheduleCompanionLivenessCheck();
+  }
 })(globalThis);

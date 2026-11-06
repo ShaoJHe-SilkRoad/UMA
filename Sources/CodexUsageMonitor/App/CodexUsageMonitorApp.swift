@@ -23,11 +23,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     override convenience init() {
         self.init(
             runtimeFactory: { startProviders in
-                try UsageMonitorRuntime.live(
+                let runtime = try UsageMonitorRuntime.live(
                     bundleIdentifier: Bundle.main.bundleIdentifier,
                     environment: ProcessInfo.processInfo.environment,
                     startProviders: startProviders
                 )
+                runtime.claudeSettings.enableSafariPrompts { [weak store = runtime.store] in
+                    store?.language ?? .systemMatch()
+                }
+                return runtime
             },
             wakeNotificationCenter: NSWorkspace.shared.notificationCenter,
             shellCoordinator: AppShellCoordinator(),

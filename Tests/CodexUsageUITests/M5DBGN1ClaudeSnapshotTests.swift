@@ -192,7 +192,8 @@ actor BrowserTestBridge {
     }
 
     func stop() { stopCount += 1; handler = nil }
-    func currentHealth() -> ClaudeBrowserCompanionHealth { health }
+    private(set) var healthChecks = 0
+    func currentHealth() -> ClaudeBrowserCompanionHealth { healthChecks += 1; return health }
     func setHealth(_ next: ClaudeBrowserCompanionHealth) { health = next }
     func setStartError(_ next: ClaudeBrowserBridgeError?) { startError = next }
     func open() -> Bool { openCount += 1; return true }

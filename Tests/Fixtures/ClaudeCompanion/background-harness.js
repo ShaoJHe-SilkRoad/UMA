@@ -84,6 +84,14 @@
   let tabSequence = 70;
   let windowSequence = 900;
   const windows = new Map();
+  let nativeAnswers = root.UMACompanionHarnessNativeAnswersAtStart !== false;
+  let receiptLoads = 0;
+  let plantedReceiptID = null;
+  const stored = new Map();
+  root.localStorage = {
+    getItem: (key) => (stored.has(key) ? stored.get(key) : null),
+    setItem: (key, value) => { stored.set(key, String(value)); },
+  };
 
   function listenerSet() {
     const listeners = [];
@@ -100,8 +108,23 @@
   function receiptReply(payload) {
     const id = payload.requestID;
     switch (payload.action) {
-      case "loadV2":
-        return { ok: true, found: false };
+      case "loadV2": {
+        receiptLoads += 1;
+        const planted = plantedReceiptID ? receipts.get(plantedReceiptID) : null;
+        if (!planted) return { ok: true, found: false };
+        return {
+          ok: true,
+          found: true,
+          schemaVersion: 3,
+          requestID: plantedReceiptID,
+          runtimeGenerationID: root.UMA_BROWSER_CONFIG.runtimeGenerationID,
+          ownershipNonceDigest: "a".repeat(64),
+          createdAt: new Date(nowMilliseconds - 300_000).toISOString(),
+          expiresAt: new Date(nowMilliseconds - 180_000).toISOString(),
+          lifecycleState: planted.state,
+          revision: planted.revision,
+        };
+      }
       case "saveV2":
         receipts.set(id, { revision: 1, state: payload.lifecycleState });
         return { ok: true, revision: 1 };
@@ -122,21 +145,28 @@
     }
   }
 
+  function nativeReply(payload) {
+    if (payload?.kind === "claudeOwnedProviderTabV2ReceiptCommand") return receiptReply(payload);
+    if (payload?.kind === "claudeBrowserAutomationEvent") log.push(`automation ${payload.status}`);
+    return { ok: true };
+  }
+
   root.browser = {
     runtime: {
       id: "com.silkrd.uma.ClaudeBrowserCompanion",
       onMessage: listenerSet(),
       onConnect: listenerSet(),
-      async sendNativeMessage(_application, payload) {
-        if (payload?.kind === "claudeOwnedProviderTabV2ReceiptCommand") return receiptReply(payload);
-        if (payload?.kind === "claudeBrowserAutomationEvent") log.push(`automation ${payload.status}`);
-        return { ok: true };
+      reload() { log.push("runtime.reload"); },
+      sendNativeMessage(_application, payload) {
+        if (!nativeAnswers) return new Promise(() => {});
+        return Promise.resolve(nativeReply(payload));
       },
       connectNative() {
         const port = {
           onMessage: listenerSet(),
           onDisconnect: listenerSet(),
           postMessage() {},
+          disconnect() { log.push("port.disconnect"); },
         };
         ports.push(port);
         log.push("connect-native");
@@ -181,6 +211,17 @@
     entries: () => log.slice(),
     clearLog: () => { log.length = 0; },
     portCount: () => ports.length,
+    receiptLoads: () => receiptLoads,
+    // A receipt the native side saved after the page stopped waiting for it.
+    plantExpiredReceipt(requestID) {
+      plantedReceiptID = requestID;
+      receipts.set(requestID, {
+        revision: 1,
+        state: root.UMAOwnedProviderTabV2Reducer.STATES.requestIntentPersisted,
+      });
+    },
+    // While false, sendNativeMessage returns a promise that never settles.
+    setNativeAnswers(value) { nativeAnswers = value; },
     // Delivers a containing-app command on the newest port, as Safari does
     // for SFSafariApplication.dispatchMessage.
     dispatch(command) {

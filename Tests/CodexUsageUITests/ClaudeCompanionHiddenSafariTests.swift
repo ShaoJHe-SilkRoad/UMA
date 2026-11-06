@@ -156,13 +156,151 @@ struct ClaudeCompanionHiddenSafariTests {
     }
 }
 
+/// On Nov 1 2026 the installed companion stopped answering wakes while Safari kept
+/// running, and every sync then stopped at the handshake. Why it went quiet was
+/// not established, so these cover each way the page can recover by itself.
+@Suite("Claude companion self-recovery")
+struct ClaudeCompanionSelfRecoveryTests {
+    private static let firstWake = "11111111-1111-4111-8111-111111111111"
+    private static let secondWake = "22222222-2222-4222-8222-222222222222"
+    private static let read = "33333333-3333-4333-8333-333333333333"
+
+    @Test("A native message that is never answered stops holding back later ones")
+    func unansweredNativeMessageExpires() throws {
+        let page = try CompanionPage()
+        page.clearLog()
+        page.setNativeAnswers(false)
+        page.dispatchWake(Self.firstWake)
+        page.advance(milliseconds: 7_000)
+        page.setNativeAnswers(true)
+        page.dispatchWake(Self.secondWake)
+        #expect(!page.log.contains("automation extensionBackgroundReady"))
+        page.advance(milliseconds: 1_000)
+        #expect(page.log.contains("automation extensionBackgroundReady"))
+    }
+
+    @Test("A command releases an overdue native message when timers are held back")
+    func commandReleasesOverdueMessage() throws {
+        let page = try CompanionPage()
+        page.setNativeAnswers(false)
+        page.dispatchWake(Self.firstWake)
+        page.suspendTimers(true)
+        page.advance(milliseconds: 9_000)
+        page.setNativeAnswers(true)
+        page.clearLog()
+        page.dispatchWake(Self.secondWake)
+        #expect(page.log.contains("automation extensionBackgroundReady"))
+    }
+
+    @Test("Two missed liveness checks reload the page; one does not")
+    func missedChecksReload() throws {
+        let page = try CompanionPage()
+        page.setNativeAnswers(false)
+        page.advance(milliseconds: 68_000)
+        #expect(!page.log.contains("runtime.reload"))
+        page.advance(milliseconds: 68_000)
+        #expect(page.log.contains("runtime.reload"))
+    }
+
+    @Test("An answered check clears a missed one")
+    func answeredCheckClearsMiss() throws {
+        let page = try CompanionPage()
+        page.setNativeAnswers(false)
+        page.advance(milliseconds: 68_000)
+        page.setNativeAnswers(true)
+        page.advance(milliseconds: 60_000)
+        page.setNativeAnswers(false)
+        page.advance(milliseconds: 60_000)
+        #expect(!page.log.contains("runtime.reload"))
+    }
+
+    /// A native side that stays gone must not restart the page every two minutes.
+    @Test("Reloads are at least 30 minutes apart")
+    func reloadsAreSpaced() throws {
+        let page = try CompanionPage()
+        page.setNativeAnswers(false)
+        page.advance(milliseconds: 136_000)
+        #expect(page.log.filter { $0 == "runtime.reload" }.count == 1)
+        page.advance(milliseconds: 20 * 60_000)
+        #expect(page.log.filter { $0 == "runtime.reload" }.count == 1)
+        page.advance(milliseconds: 12 * 60_000)
+        #expect(page.log.filter { $0 == "runtime.reload" }.count == 2)
+    }
+
+    @Test("The liveness check leaves a read in progress alone")
+    func checkSkipsARead() throws {
+        let page = try CompanionPage()
+        page.advance(milliseconds: 50_000)
+        page.dispatchRead(Self.read, placement: nil)
+        let loads = page.receiptLoads
+        page.advance(milliseconds: 15_000)
+        #expect(page.receiptLoads == loads)
+        #expect(!page.log.contains("runtime.reload"))
+    }
+
+    @Test("A port with no commands for five minutes is replaced, without announcing itself")
+    func idlePortIsRenewed() throws {
+        let page = try CompanionPage()
+        #expect(page.portCount == 1)
+        page.advance(milliseconds: 4 * 60_000)
+        page.dispatchWake(Self.firstWake)
+        page.advance(milliseconds: 2 * 60_000)
+        #expect(page.portCount == 1)
+        page.clearLog()
+        page.advance(milliseconds: 4 * 60_000)
+        #expect(page.portCount == 2)
+        #expect(page.log.contains("port.disconnect"))
+        #expect(!page.log.contains("automation extensionBackgroundReady"))
+        page.dispatchWake(Self.secondWake)
+        #expect(page.log.contains("automation extensionBackgroundReady"))
+    }
+
+    /// A slow native reply can save a receipt after the page stopped waiting for
+    /// it. Nothing else would ever settle that receipt without a reload.
+    @Test("The check settles a receipt the page does not know about")
+    func unknownReceiptIsSettled() throws {
+        let page = try CompanionPage()
+        page.plantExpiredReceipt(Self.read)
+        page.advance(milliseconds: 60_000)
+        #expect(page.log.contains("receipt-removed EXPIRED"))
+    }
+
+    @Test("A disconnected port whose reconnect timer was lost is restored by the check")
+    func lostReconnectIsRestored() throws {
+        let page = try CompanionPage()
+        page.disconnectNewestPort()
+        #expect(page.portCount == 2)
+        page.disconnectNewestPort()
+        page.suspendTimers(true)
+        page.advance(milliseconds: 500)
+        page.suspendTimers(false)
+        page.advance(milliseconds: 60_000)
+        #expect(page.portCount == 3)
+    }
+
+    /// With no answer the receipt's state is unknown, so reads are refused, but
+    /// only until the native side answers.
+    @Test("Reads resume once the native side answers after a silent start")
+    func silentStartDoesNotBlockForever() throws {
+        let page = try CompanionPage(nativeAnswersAtStart: false)
+        page.advance(milliseconds: 8_000)
+        page.dispatchRead(Self.read, placement: nil)
+        page.advance(milliseconds: 8_000)
+        #expect(!page.log.contains("tabs.create background"))
+        page.setNativeAnswers(true)
+        page.advance(milliseconds: 60_000)
+        page.dispatchRead(Self.read, placement: nil)
+        #expect(page.log.contains("tabs.create background"))
+    }
+}
+
 /// One background page in its own JavaScriptCore context. JavaScriptCore runs
 /// every pending promise job when a script evaluation returns, so each call
 /// here leaves the page settled.
 private final class CompanionPage {
     private let context: JSContext
 
-    init() throws {
+    init(nativeAnswersAtStart: Bool = true) throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -170,6 +308,7 @@ private final class CompanionPage {
         let context = try #require(JSContext())
         var failure: String?
         context.exceptionHandler = { _, exception in failure = exception?.toString() }
+        context.evaluateScript("globalThis.UMACompanionHarnessNativeAnswersAtStart = \(nativeAnswersAtStart)")
         for file in [
             "BrowserExtension/Shared/claude-usage-extractor.js",
             "BrowserExtension/Shared/owned-provider-tab-v2-reducer.js",
@@ -189,6 +328,24 @@ private final class CompanionPage {
 
     var portCount: Int {
         Int(context.evaluateScript("UMACompanionHarness.portCount()")?.toInt32() ?? 0)
+    }
+
+    var receiptLoads: Int {
+        Int(context.evaluateScript("UMACompanionHarness.receiptLoads()")?.toInt32() ?? 0)
+    }
+
+    func plantExpiredReceipt(_ requestID: String) {
+        context.evaluateScript("UMACompanionHarness.plantExpiredReceipt(\"\(requestID)\")")
+    }
+
+    func setNativeAnswers(_ answers: Bool) {
+        context.evaluateScript("UMACompanionHarness.setNativeAnswers(\(answers))")
+    }
+
+    func dispatchWake(_ requestID: String) {
+        context.evaluateScript("""
+        UMACompanionHarness.dispatch({ command: "umaClaudeWakeBridge", requestID: "\(requestID)" })
+        """)
     }
 
     func dispatchRead(_ requestID: String, placement: String?) {

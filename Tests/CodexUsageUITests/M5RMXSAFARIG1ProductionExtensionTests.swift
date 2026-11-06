@@ -290,7 +290,7 @@ struct M5RMXSAFARIG1ProductionExtensionTests {
         #expect(background.contains(
             "api.runtime.sendNativeMessage(config.nativeApplication, payload)"
         ))
-        #expect(background.contains("function installContainingAppPort()"))
+        #expect(background.contains("function installContainingAppPort(announcesReady = true)"))
         #expect(background.contains("api.runtime.connectNative(config.nativeApplication)"))
         #expect(background.contains("port.onMessage.addListener((message) =>"))
         #expect(background.contains("port.onDisconnect.addListener(() =>"))

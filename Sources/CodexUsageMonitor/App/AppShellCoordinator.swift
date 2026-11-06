@@ -513,7 +513,7 @@ final class AppShellCoordinator {
     }
 
     func accuracySyncClaude() {
-        runtime?.claudeSettings.accuracySync()
+        runtime?.claudeSettings.accuracySyncForRefreshAll()
     }
 
     func toggleDesktopAssistant() {

@@ -209,11 +209,13 @@ private actor PeriodicTicker {
         resumed.forEach { $0.resume() }
     }
 
+    /// A full-suite run can keep the main actor queued for 25 seconds and more,
+    /// and the sleeper is scheduled there.
     func waitForSleeper() async throws {
-        let deadline = Date().addingTimeInterval(10)
+        let deadline = Date().addingTimeInterval(30)
         while waiters.isEmpty {
             guard Date() < deadline else {
-                Issue.record("No sleeper within 10s")
+                Issue.record("No sleeper within 30s")
                 return
             }
             try await Task.sleep(for: .milliseconds(10))

@@ -122,6 +122,7 @@ final class ClaudeBrowserConsentStore {
         static let autoRefresh = "ClaudeBrowserSyncAutoRefresh.v1"
         static let allowSafariLaunch = "ClaudeBrowserSyncAllowSafariLaunch.v1"
         static let periodicAccuracySync = "ClaudeBrowserPeriodicAccuracySync.v1"
+        static let automaticSafariPromptsOff = "ClaudeSafariAutomaticPromptsOff.v1"
     }
 
     private let defaults: UserDefaults
@@ -151,6 +152,13 @@ final class ClaudeBrowserConsentStore {
     var legacyPeriodicAccuracySyncEnabled: Bool {
         get { defaults.bool(forKey: Key.periodicAccuracySync) }
         set { defaults.set(newValue, forKey: Key.periodicAccuracySync) }
+    }
+
+    /// The person chose not to be asked about Safari by the timer. Refresh All
+    /// and the Accuracy Sync button still ask.
+    var automaticSafariPromptsOff: Bool {
+        get { defaults.bool(forKey: Key.automaticSafariPromptsOff) }
+        set { defaults.set(newValue, forKey: Key.automaticSafariPromptsOff) }
     }
 
     func clearLegacyPeriodicAccuracySync() {
@@ -233,6 +241,11 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     private let periodicSleep: @Sendable (TimeInterval) async throws -> Void
     private let safariIsRunning: @MainActor () -> Bool
     private var configurationRestoreFailure: ClaudeSettingsPresentationState?
+    /// Only the running app can ask; a model made for a test or a preview,
+    /// and the command-line verifier, never shows a prompt.
+    private var safariRecovery: ClaudeSafariRecovery?
+    private var safariPromptPolicy = ClaudeSafariPromptPolicy()
+    private var safariPromptOpen = false
 
     /// The first run comes shortly after launch rather than a whole refresh
     /// interval in, so Claude is not left without a reading after every start.
@@ -360,7 +373,25 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     }
 
     public func accuracySync() {
-        run(.refreshing) { connector in await connector.accuracySync() }
+        accuracySync(trigger: .user)
+    }
+
+    private func accuracySync(trigger: ClaudeSafariPromptTrigger) {
+        run(.refreshing, completion: { [weak self] in
+            self?.noteSyncOutcome(trigger: trigger)
+        }) { connector in
+            await connector.accuracySync()
+        }
+    }
+
+    func useSafariRecovery(_ recovery: ClaudeSafariRecovery) {
+        safariRecovery = recovery
+    }
+
+    /// Turns on the real prompts. Only the app itself calls this, because the
+    /// alerts are modal: a runtime made anywhere else must never block on one.
+    public func enableSafariPrompts(language: @escaping @MainActor () -> AppLanguage) {
+        useSafariRecovery(.live(language: language))
     }
 
     /// Whether a sync nobody pressed for, from the timer or Refresh All, may
@@ -379,10 +410,10 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
 
     /// Claude follows the app's automatic refresh: Accuracy Sync repeats at
     /// its interval while it is on, and stops when it is off (`nil`). Each run
-    /// is the same one-shot sync as Refresh All, and it is skipped, not
-    /// queued, when Safari is not running: automatic refresh never opens
-    /// Safari. The runtime calls this at launch and on every change; a model
-    /// made for a test or a preview never runs a timer.
+    /// is the same one-shot sync as Refresh All. When Safari is not running it
+    /// is skipped, not queued, and automatic refresh opens Safari only if the
+    /// person agrees when asked. The runtime calls this at launch and on every
+    /// change; a model made for a test or a preview never runs a timer.
     public func setAutomaticAccuracySync(every interval: TimeInterval?) {
         // An unrelated preference change must not push the next run back.
         guard interval != automaticAccuracySyncInterval else { return }
@@ -401,23 +432,112 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     private var accuracySyncCanRun: Bool {
         consentGranted
             && !actionInProgress
+            && !safariPromptOpen
             && offersAccuracySync
     }
 
     /// Refresh All includes Accuracy Sync when Claude is in the list, so one
-    /// refresh also brings the exact figures. It is the user's own action, so,
-    /// like the Accuracy Sync button it replaced, it may start Safari in the
-    /// background for the one temporary tab. Returns whether it started.
+    /// refresh also brings the exact figures. It is the user's own action, so
+    /// with Safari closed it asks to open it. Returns whether it went ahead.
     @discardableResult
     public func accuracySyncForRefreshAll() -> Bool {
         guard accuracySyncCanRun else { return false }
-        accuracySync()
+        if safariRecovery != nil, !safariIsRunning() {
+            offerToStartSafari(.launch, trigger: .user)
+        } else {
+            accuracySync(trigger: .user)
+        }
         return true
     }
 
     func runPeriodicAccuracySyncIfDue() {
-        guard periodicAccuracySyncIsDue else { return }
-        accuracySync()
+        guard automaticAccuracySyncInterval != nil, accuracySyncCanRun else { return }
+        if safariIsRunning() {
+            safariPromptPolicy.safariWasRunning()
+            accuracySync(trigger: .automatic)
+        } else {
+            offerToStartSafari(.launch, trigger: .automatic)
+        }
+    }
+
+    /// A handshake that gets no answer while Safari runs leaves this stage, and
+    /// the sync never reaches Safari. Once that has lasted, the page has had its
+    /// chance to recover by itself and only a Safari restart is left.
+    private func noteSyncOutcome(trigger: ClaudeSafariPromptTrigger) {
+        guard browserAccuracyStage == .accuracyCompanionStarting else {
+            safariPromptPolicy.companionAnswered()
+            return
+        }
+        guard let safariRecovery, safariIsRunning() else { return }
+        let now = safariRecovery.now()
+        safariPromptPolicy.companionWasSilent(at: now)
+        offerToStartSafari(.restart, trigger: trigger, at: now)
+    }
+
+    private func offerToStartSafari(
+        _ prompt: ClaudeSafariPrompt,
+        trigger: ClaudeSafariPromptTrigger,
+        at date: Date = Date()
+    ) {
+        guard let safariRecovery, !safariPromptOpen else { return }
+        let promptsOff = consentStore.automaticSafariPromptsOff
+        switch prompt {
+        case .launch:
+            safariPromptPolicy.safariWasClosed()
+            guard safariPromptPolicy.asksToLaunch(trigger: trigger, automaticPromptsOff: promptsOff)
+            else { return }
+        case .restart:
+            guard safariPromptPolicy.asksToRestart(
+                at: date, trigger: trigger, automaticPromptsOff: promptsOff
+            ) else { return }
+        }
+        safariPromptPolicy.didAsk(prompt)
+        safariPromptOpen = true
+        let answer = safariRecovery.ask(prompt, trigger)
+        safariPromptOpen = false
+        if answer.stopAskingDuringAutomaticRefresh {
+            consentStore.automaticSafariPromptsOff = true
+        }
+        guard answer.accepted else { return }
+        if prompt == .restart { safariPromptPolicy.restartAttempted() }
+        startSafariThenSync(prompt, using: safariRecovery)
+    }
+
+    private func startSafariThenSync(
+        _ prompt: ClaudeSafariPrompt,
+        using recovery: ClaudeSafariRecovery
+    ) {
+        guard !actionInProgress else { return }
+        actionInProgress = true
+        activeAction = .refreshing
+        safeError = nil
+        let connector = connector
+        Task {
+            let started = switch prompt {
+            case .launch: await recovery.launch()
+            case .restart: await recovery.restart()
+            }
+            if started {
+                for attempt in 0..<ClaudeSafariRecovery.syncAttemptsAfterStart {
+                    if attempt > 0 {
+                        await recovery.sleep(ClaudeSafariRecovery.delayBetweenAttemptsAfterStart)
+                    }
+                    await connector.accuracySync()
+                    updatePresentation(
+                        lifecycle: await connector.lifecycleState(),
+                        snapshot: await connector.currentSnapshot(),
+                        diagnostics: await connector.diagnostics()
+                    )
+                    guard browserAccuracyStage == .accuracyCompanionStarting else {
+                        safariPromptPolicy.companionAnswered()
+                        break
+                    }
+                }
+            }
+            activeAction = nil
+            actionInProgress = false
+            await refreshAdmissions()
+        }
     }
 
     private func schedulePeriodicAccuracySync() {
@@ -584,6 +704,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
 
     private func run(
         _ action: ClaudeSettingsAction,
+        completion: (@MainActor () -> Void)? = nil,
         _ operation: @escaping @Sendable (ClaudeCodeUsageConnector) async -> Void
     ) {
         guard !actionInProgress else { return }
@@ -603,6 +724,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
             activeAction = nil
             actionInProgress = false
             await refreshAdmissions()
+            completion?()
         }
     }
 
