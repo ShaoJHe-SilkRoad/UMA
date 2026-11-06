@@ -28,6 +28,10 @@
   }
 
   const readinessTimeoutMilliseconds = 20_000;
+  // A tab that is not on screen runs no animation frames, so the second read
+  // that confirms a stable result would otherwise wait for the page to change
+  // again, or for the deadline.
+  const renderTurnFallbackMilliseconds = 1_000;
   const readinessReasons = Object.freeze({
     routeNotReady: "ROUTE_NOT_READY",
     routeReadinessTimeout: "ROUTE_READINESS_TIMEOUT",
@@ -77,6 +81,7 @@
     readinessEvaluationScheduled: false,
     readinessEvaluationCount: 0,
     renderTurnConfirmationID: null,
+    renderTurnFallbackID: null,
     lastSuccessProjection: null,
     signInConfirmationCount: 0,
     lastReadinessReason: null,
@@ -150,6 +155,10 @@
   }
 
   function cancelRenderTurnConfirmation() {
+    if (state.renderTurnFallbackID !== null) {
+      clearTimeout(state.renderTurnFallbackID);
+      state.renderTurnFallbackID = null;
+    }
     if (state.renderTurnConfirmationID === null) return;
     globalThis.cancelAnimationFrame?.(state.renderTurnConfirmationID);
     state.renderTurnConfirmationID = null;
@@ -158,10 +167,12 @@
   function scheduleRenderTurnConfirmation() {
     if (state.renderTurnConfirmationID !== null
         || typeof globalThis.requestAnimationFrame !== "function") return;
-    state.renderTurnConfirmationID = globalThis.requestAnimationFrame(() => {
-      state.renderTurnConfirmationID = null;
+    const confirm = () => {
+      cancelRenderTurnConfirmation();
       scheduleReadinessEvaluation();
-    });
+    };
+    state.renderTurnConfirmationID = globalThis.requestAnimationFrame(confirm);
+    state.renderTurnFallbackID = setTimeout(confirm, renderTurnFallbackMilliseconds);
   }
 
   function stableProjection(observation) {

@@ -366,6 +366,7 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
     private var snapshot: AgentUsageSnapshot
     private var lastGood: AgentUsageSnapshot?
     private var lifecycle: ClaudeConnectorLifecycleState = .disconnected
+    private var safariExactCurrentWindow = ClaudeSmartSourceSelector.exactFreshnessInterval
     private var snapshotContinuations: [UUID: AsyncStream<AgentUsageSnapshot>.Continuation] = [:]
     private var snapshotRemovalObserver: (@Sendable () -> Void)?
     private var snapshotPublicationRevision: UInt64 = 0
@@ -765,6 +766,13 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
             browserAccuracyState: browserAccuracyState,
             localSmartStage: localSmartStage,
             browserAccuracyStage: browserAccuracyStage
+        )
+    }
+
+    /// `nil` while automatic refresh is off.
+    func setAutomaticAccuracySyncInterval(_ interval: TimeInterval?) {
+        safariExactCurrentWindow = ClaudeSmartSourceSelector.safariCurrentWindow(
+            automaticSyncInterval: interval
         )
     }
 
@@ -1467,6 +1475,7 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
                 estimate: estimate,
                 desktopEstimate: latestDesktopPlanUsage?.value(for: kind),
                 staleExact: matching.max { $0.observedAt < $1.observedAt },
+                safariCurrentWindow: safariExactCurrentWindow,
                 now: current
             )
             if let selected { values.append(selected) }
@@ -1779,8 +1788,7 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
             $0.source == .exactSafariAccuracy
                 && ($0.resetsAt.map { $0 > current } ?? true)
                 && current.timeIntervalSince($0.observedAt) >= 0
-                && current.timeIntervalSince($0.observedAt)
-                    <= ClaudeSmartSourceSelector.exactFreshnessInterval
+                && current.timeIntervalSince($0.observedAt) <= safariExactCurrentWindow
         }.map(\.observedAt).max()
     }
 

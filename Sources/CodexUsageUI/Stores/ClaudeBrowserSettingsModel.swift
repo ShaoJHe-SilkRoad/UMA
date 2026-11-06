@@ -246,10 +246,16 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     private var safariRecovery: ClaudeSafariRecovery?
     private var safariPromptPolicy = ClaudeSafariPromptPolicy()
     private var safariPromptOpen = false
+    private var automaticRetryTask: Task<Void, Never>?
+    private let automaticRetrySleep: @Sendable (TimeInterval) async throws -> Void
 
     /// The first run comes shortly after launch rather than a whole refresh
     /// interval in, so Claude is not left without a reading after every start.
     static let periodicAccuracySyncFirstDelay: TimeInterval = 15
+
+    /// A timed sync that brought no reading is tried once more after this long:
+    /// past the connector's own 45-second limit, well before the next interval.
+    static let automaticRetryDelay: TimeInterval = 75
 
     init(
         connector: ClaudeCodeUsageConnector,
@@ -265,8 +271,12 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
             !NSRunningApplication.runningApplications(
                 withBundleIdentifier: "com.apple.Safari"
             ).isEmpty
+        },
+        automaticRetrySleep: @escaping @Sendable (TimeInterval) async throws -> Void = { interval in
+            try await Task.sleep(for: .seconds(interval))
         }
     ) {
+        self.automaticRetrySleep = automaticRetrySleep
         self.connector = connector
         self.periodicSleep = periodicSleep
         self.safariIsRunning = safariIsRunning
@@ -305,6 +315,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     deinit {
         observationTask?.cancel()
         periodicAccuracySyncTask?.cancel()
+        automaticRetryTask?.cancel()
     }
 
     func checkCompanion() {
@@ -418,6 +429,10 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         // An unrelated preference change must not push the next run back.
         guard interval != automaticAccuracySyncInterval else { return }
         automaticAccuracySyncInterval = interval
+        let connector = connector
+        Task { await connector.setAutomaticAccuracySyncInterval(interval) }
+        automaticRetryTask?.cancel()
+        automaticRetryTask = nil
         schedulePeriodicAccuracySync()
     }
 
@@ -455,8 +470,33 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         if safariIsRunning() {
             safariPromptPolicy.safariWasRunning()
             accuracySync(trigger: .automatic)
+            scheduleAutomaticRetry()
         } else {
             offerToStartSafari(.launch, trigger: .automatic)
+        }
+    }
+
+    /// About one timed read in five got no answer from its page, which left the
+    /// last reading to age for a whole interval.
+    private func scheduleAutomaticRetry() {
+        automaticRetryTask?.cancel()
+        let connector = connector
+        let sleep = automaticRetrySleep
+        automaticRetryTask = Task { [weak self] in
+            let readingsBefore = await connector.diagnostics().acceptedObservationCount
+            do {
+                try await sleep(Self.automaticRetryDelay)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled,
+                  await connector.diagnostics().acceptedObservationCount == readingsBefore,
+                  let self,
+                  self.automaticAccuracySyncInterval != nil,
+                  self.accuracySyncCanRun,
+                  self.safariIsRunning()
+            else { return }
+            self.accuracySync(trigger: .automatic)
         }
     }
 

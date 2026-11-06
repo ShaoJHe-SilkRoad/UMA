@@ -275,6 +275,17 @@ enum ClaudeSmartUsageEstimator {
 
 enum ClaudeSmartSourceSelector {
     static let exactFreshnessInterval: TimeInterval = 5 * 60
+    /// Enough for the next scheduled sync to finish, and for its one retry.
+    static let automaticSyncGrace: TimeInterval = 2 * 60
+
+    /// Automatic refresh is what keeps Claude exact, so an exact Safari reading
+    /// stays current until the next scheduled sync has had its chance. A local
+    /// estimate must not replace it in between: live, an estimate read 48% six
+    /// minutes after an exact 74%.
+    static func safariCurrentWindow(automaticSyncInterval: TimeInterval?) -> TimeInterval {
+        guard let automaticSyncInterval else { return exactFreshnessInterval }
+        return max(exactFreshnessInterval, automaticSyncInterval + automaticSyncGrace)
+    }
 
     static func select(
         windowKind: AgentRateLimitWindow.Kind,
@@ -283,12 +294,15 @@ enum ClaudeSmartSourceSelector {
         estimate: ClaudeSmartWindowValue?,
         desktopEstimate: ClaudeSmartWindowValue? = nil,
         staleExact: ClaudeSmartWindowAnchor?,
+        safariCurrentWindow: TimeInterval = exactFreshnessInterval,
         now: Date
     ) -> ClaudeSmartWindowValue? {
         if let anchor = latestCurrent(statusLineAnchors, kind: windowKind, now: now) {
             return exactValue(anchor)
         }
-        if let anchor = latestCurrent(safariAnchors, kind: windowKind, now: now) {
+        if let anchor = latestCurrent(
+            safariAnchors, kind: windowKind, window: safariCurrentWindow, now: now
+        ) {
             return exactValue(anchor)
         }
         if let estimated = [estimate, desktopEstimate]
@@ -314,6 +328,7 @@ enum ClaudeSmartSourceSelector {
     private static func latestCurrent(
         _ anchors: [ClaudeSmartWindowAnchor],
         kind: AgentRateLimitWindow.Kind,
+        window: TimeInterval = exactFreshnessInterval,
         now: Date
     ) -> ClaudeSmartWindowAnchor? {
         anchors.filter {
@@ -321,7 +336,7 @@ enum ClaudeSmartSourceSelector {
                 && ($0.resetsAt.map { $0 > now }
                     ?? ($0.source == .exactSafariAccuracy))
                 && now.timeIntervalSince($0.observedAt) >= 0
-                && now.timeIntervalSince($0.observedAt) <= exactFreshnessInterval
+                && now.timeIntervalSince($0.observedAt) <= window
         }
             .max { $0.observedAt < $1.observedAt }
     }

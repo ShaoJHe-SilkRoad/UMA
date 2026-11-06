@@ -441,6 +441,168 @@ struct ClaudeReadingBetweenSyncsTests {
     }
 }
 
+/// "Refresh every 5 minutes means to obtain the accurate data": between scheduled
+/// syncs the last exact reading stands. Live, a local estimate read 48% six
+/// minutes after an exact 74%.
+@Suite("Exact readings under automatic refresh", .timeLimit(.minutes(1)))
+struct ClaudeExactUnderAutomaticRefreshTests {
+    private func syncedConnector(
+        _ fixture: BrowserConnectorFixture,
+        interval: TimeInterval?
+    ) async throws -> ClaudeCodeUsageConnector {
+        let connector = fixture.connector()
+        await connector.setAutomaticAccuracySyncInterval(interval)
+        await connector.start()
+        await connector.accuracySync()
+        await fixture.bridge.send(browserEnvelope(five: 19, seven: 39))
+        let deadline = Date().addingTimeInterval(30)
+        while await connector.currentSnapshot().freshness != .fresh, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        return connector
+    }
+
+    @Test("A reading stays exact and current until the next sync has had its chance",
+          arguments: [(300.0, 6.5), (600.0, 11.5), (3_600.0, 61.0)])
+    func readingLastsThroughTheInterval(interval: TimeInterval, minutes: Double) async throws {
+        let fixture = BrowserConnectorFixture(consent: true)
+        let connector = try await syncedConnector(fixture, interval: interval)
+        fixture.clock.advance(minutes * 60)
+        let snapshot = await connector.currentSnapshot()
+        #expect(snapshot.freshness == .fresh)
+        #expect(snapshot.channels.first { $0.id == .account }?.sourceConfidence == "exact")
+    }
+
+    @Test("Past that, or with automatic refresh off, the reading is no longer current",
+          arguments: [(600.0 as TimeInterval?, 12.5), (nil, 6.0)])
+    func readingEnds(interval: TimeInterval?, minutes: Double) async throws {
+        let fixture = BrowserConnectorFixture(consent: true)
+        let connector = try await syncedConnector(fixture, interval: interval)
+        fixture.clock.advance(minutes * 60)
+        #expect(await connector.currentSnapshot().freshness == .stale)
+    }
+
+    @Test("Every interval's window covers it, and never shortens the base five minutes")
+    func windows() {
+        for interval in UMABackgroundRefreshInterval.allCases {
+            #expect(ClaudeSmartSourceSelector.safariCurrentWindow(
+                automaticSyncInterval: interval.seconds
+            ) >= interval.seconds + ClaudeSettingsRetryExpectations.finishedRetry)
+        }
+        #expect(ClaudeSmartSourceSelector.safariCurrentWindow(automaticSyncInterval: nil)
+            == ClaudeSmartSourceSelector.exactFreshnessInterval)
+    }
+}
+
+@MainActor
+private enum ClaudeSettingsRetryExpectations {
+    /// The retry's delay plus the connector's own limit on its read.
+    nonisolated static let finishedRetry: TimeInterval = 75 + 45
+}
+
+@Suite("Retrying a timed sync", .timeLimit(.minutes(1)))
+@MainActor
+struct ClaudeAutomaticRetryTests {
+    private func model(
+        fixture: BrowserConnectorFixture,
+        ticker: RecoveryTicker,
+        retries: RecoveryTicker,
+        defaults: UserDefaults
+    ) async throws -> ClaudeBrowserSettingsModel {
+        let consent = ClaudeBrowserConsentStore(defaults: defaults)
+        consent.consentGranted = true
+        let model = ClaudeBrowserSettingsModel(
+            connector: fixture.connector(),
+            consentStore: consent,
+            periodicSleep: { _ in await ticker.sleep() },
+            safariIsRunning: { true },
+            automaticRetrySleep: { _ in await retries.sleep() }
+        )
+        model.connectWithConsent()
+        try await waitForClaudeValue(model.$actionInProgress, matching: { !$0 })
+        try await waitForClaudeValue(model.$state, matching: { _ in model.offersAccuracySync })
+        return model
+    }
+
+    @Test("A timed read whose page never answered is tried once more")
+    func failedReadRetriesOnce() async throws {
+        let suite = "auv-retry-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let fixture = BrowserConnectorFixture(consent: true)
+        let ticker = RecoveryTicker()
+        let retries = RecoveryTicker()
+        let model = try await model(
+            fixture: fixture, ticker: ticker, retries: retries, defaults: defaults
+        )
+        model.setAutomaticAccuracySync(every: 600)
+        try await ticker.waitForSleeper()
+        await ticker.tick()
+        try await fixture.bridge.waitForAutomaticRequest()
+        let first = try #require(await fixture.bridge.automaticRequests.first?.requestID)
+        await fixture.bridge.sendAutomation(requestID: first, status: .tabUnavailable)
+        try await retries.waitForSleeper()
+        try await waitForClaudeValue(model.$actionInProgress, matching: { !$0 })
+        await retries.tick()
+        try await fixture.bridge.waitForAutomaticRequest(count: 2)
+        // The retry does not set up another retry of its own.
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await retries.hasSleeper == false)
+        model.setAutomaticAccuracySync(every: nil)
+        await ticker.tick()
+    }
+
+    @Test("A timed read that brought a reading is not repeated")
+    func successfulReadDoesNotRetry() async throws {
+        let suite = "auv-retry-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let fixture = BrowserConnectorFixture(consent: true)
+        let ticker = RecoveryTicker()
+        let retries = RecoveryTicker()
+        let model = try await model(
+            fixture: fixture, ticker: ticker, retries: retries, defaults: defaults
+        )
+        model.setAutomaticAccuracySync(every: 600)
+        try await ticker.waitForSleeper()
+        await ticker.tick()
+        try await fixture.bridge.waitForAutomaticRequest()
+        try await retries.waitForSleeper()
+        await fixture.bridge.send(browserEnvelope(five: 19, seven: 39))
+        try await waitForClaudeValue(model.$browserAccuracyStage, matching: { $0 == .accuracyExactReceived })
+        await retries.tick()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await fixture.bridge.automaticRequests.count == 1)
+        model.setAutomaticAccuracySync(every: nil)
+        await ticker.tick()
+    }
+
+    @Test("Turning automatic refresh off cancels a pending retry")
+    func turningOffCancelsRetry() async throws {
+        let suite = "auv-retry-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let fixture = BrowserConnectorFixture(consent: true)
+        let ticker = RecoveryTicker()
+        let retries = RecoveryTicker()
+        let model = try await model(
+            fixture: fixture, ticker: ticker, retries: retries, defaults: defaults
+        )
+        model.setAutomaticAccuracySync(every: 600)
+        try await ticker.waitForSleeper()
+        await ticker.tick()
+        try await fixture.bridge.waitForAutomaticRequest()
+        let first = try #require(await fixture.bridge.automaticRequests.first?.requestID)
+        await fixture.bridge.sendAutomation(requestID: first, status: .tabUnavailable)
+        try await retries.waitForSleeper()
+        model.setAutomaticAccuracySync(every: nil)
+        await retries.tick()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await fixture.bridge.automaticRequests.count == 1)
+        await ticker.tick()
+    }
+}
+
 /// A sleeper the test advances by hand. The deadlines in this file allow for the
 /// main actor being queued for 25 seconds and more during a full-suite run.
 private actor RecoveryTicker {
@@ -455,6 +617,8 @@ private actor RecoveryTicker {
         waiters = []
         resumed.forEach { $0.resume() }
     }
+
+    var hasSleeper: Bool { !waiters.isEmpty }
 
     func waitForSleeper() async throws {
         let deadline = Date().addingTimeInterval(30)

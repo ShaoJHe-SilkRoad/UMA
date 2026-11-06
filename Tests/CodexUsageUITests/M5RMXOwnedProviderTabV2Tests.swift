@@ -183,6 +183,77 @@ struct M5RMXOwnedProviderTabV2Tests {
         #expect(transientLoginThenSuccess.terminalStatus == "success")
     }
 
+    /// A tab that is not on screen runs no animation frames. When the page then
+    /// stopped changing, the confirming read waited for the 20-second deadline.
+    @Test
+    func aPageWithoutAnimationFramesStillConfirmsItsResultWithinASecond() throws {
+        let content = try String(
+            contentsOf: v2RepositoryRoot().appendingPathComponent(
+                "BrowserExtension/Shared/content-script.js"
+            ),
+            encoding: .utf8
+        )
+        let context = try #require(JSContext())
+        context.exceptionHandler = { _, exception in
+            Issue.record("JavaScript exception: \(exception?.toString() ?? "unknown")")
+        }
+        context.evaluateScript(#"""
+          var route = "exact", dataReady = false, domReads = 0, connectCount = 0;
+          var portMessageHandler = null, disconnectHandler = null, mutationHandler = null, rafHandler = null;
+          var listeners = {}, outbound = [];
+          var location = {href:"https://claude.ai/new#settings/usage", protocol:"https:", origin:"https://claude.ai", pathname:"/new", search:"", hash:"#settings/usage"};
+          var history = {};
+          var document = {
+            readyState: "complete", documentElement: {},
+            addEventListener:function(n,f){listeners["doc:"+n]=f;},
+            removeEventListener:function(n,f){delete listeners["doc:"+n];}
+          };
+          function MutationObserver(callback){ mutationHandler=callback; this.observe=function(){}; this.disconnect=function(){}; }
+          var timers = {}, timerSequence = 0;
+          function setTimeout(callback, delay){ timerSequence += 1; timers[timerSequence]={callback:callback,delay:delay}; return timerSequence; }
+          function clearTimeout(id){ delete timers[id]; }
+          function requestAnimationFrame(callback){ rafHandler=callback; return 7; }
+          function cancelAnimationFrame(){ rafHandler=null; }
+          function queueMicrotask(callback){ callback(); }
+          globalThis.addEventListener=function(n,f){listeners[n]=f;};
+          globalThis.removeEventListener=function(n,f){delete listeners[n];};
+          globalThis.UMAProviderOwnershipV2={parseProviderMarker:function(){return "n";},finalizeProviderRoute:function(){return true;}};
+          globalThis.UMAClaudeUsageExtractor={
+            CONTRACT:{origin:"https://claude.ai",href:"https://claude.ai/new#settings/usage"},
+            FAILURE_REASONS:{providerStructureUnsupported:"PROVIDER_STRUCTURE_UNSUPPORTED"},
+            exactUsageURL:function(){return route === "exact";},
+            usageRouteState:function(){return route === "exact" ? "exact" : "providerRoutePending";},
+            extractResult:function(){
+              domReads += 1;
+              return dataReady ? {status:"success",observation:{fiveHour:{usedPercentage:25,resetAt:null},weeklyAllModels:null,modelSpecificWeekly:null,observedAt:"2026-08-28T00:00:00.000Z",extractorSchemaVersion:2,sourceLayoutVersion:1}} : {status:"usageUnavailable",reasonCode:"TARGET_DATA_NOT_READY"};
+            }
+          };
+          var port={
+            onMessage:{addListener:function(f){portMessageHandler=f;}},
+            onDisconnect:{addListener:function(f){disconnectHandler=f;}},
+            postMessage:function(m){outbound.push(m);}, disconnect:function(){}
+          };
+          globalThis.browser={runtime:{getManifest:function(){return {manifest_version:2};},connect:function(){connectCount += 1; return port;},onMessage:{addListener:function(){}}}};
+        """#)
+        context.evaluateScript(content)
+        context.evaluateScript(#"""
+          portMessageHandler({type:"umaClaudeProviderOwnershipAcceptedV2",requestID:"r",runtimeGenerationID:"g"});
+          dataReady=true;
+          portMessageHandler({type:"umaClaudeExtractProviderUsageV2",requestID:"r",runtimeGenerationID:"g"});
+          var deliveredBeforeTimer=outbound.filter(function(m){return m.type==="umaClaudeProviderResultV2";}).length;
+          Object.keys(timers).forEach(function(id){
+            var timer=timers[id];
+            if (timer && timer.delay <= 1000) { delete timers[id]; timer.callback(); }
+          });
+          var deliveredAfterTimer=outbound.filter(function(m){return m.type==="umaClaudeProviderResultV2";}).length;
+          var timersLeft=Object.keys(timers).length;
+        """#)
+        #expect(context.exception == nil)
+        #expect(context.evaluateScript("deliveredBeforeTimer")?.toInt32() == 0)
+        #expect(context.evaluateScript("deliveredAfterTimer")?.toInt32() == 1)
+        #expect(context.evaluateScript("timersLeft")?.toInt32() == 0)
+    }
+
     @Test
     func productionContentScriptSPAEventTraceReadsOnlyExactReadyDocumentAndDeliversOnce() throws {
         let content = try String(
