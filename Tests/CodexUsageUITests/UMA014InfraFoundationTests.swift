@@ -247,7 +247,7 @@ struct UMA014InfraFoundationTests {
         #expect(frozen["MarketingVersion"] as? String == "0.14.3")
         #expect(
             frozen["SourceCommit"] as? String
-                == "ce5fb7c095a94f6ce81edaf1adc6b5b8bc8487eb"
+                == "425f21c7a68fe62ba45d648b2c22e8ea05b59edb"
         )
         #expect(safari["HostMarketingVersion"] as? String == "0.14.3")
         #expect(safari["CompanionMarketingVersion"] as? String == "1.4.0")
