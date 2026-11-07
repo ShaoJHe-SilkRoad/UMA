@@ -497,7 +497,7 @@ struct ClaudeExactUnderAutomaticRefreshTests {
 @MainActor
 private enum ClaudeSettingsRetryExpectations {
     /// The retry's delay plus the connector's own limit on its read.
-    nonisolated static let finishedRetry: TimeInterval = 75 + 45
+    nonisolated static let finishedRetry: TimeInterval = 20 + 45
 }
 
 @Suite("Retrying a timed sync", .timeLimit(.minutes(1)))

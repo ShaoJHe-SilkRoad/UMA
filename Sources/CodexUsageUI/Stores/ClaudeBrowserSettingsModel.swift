@@ -255,7 +255,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
 
     /// A timed sync that brought no reading is tried once more after this long:
     /// past the connector's own 45-second limit, well before the next interval.
-    static let automaticRetryDelay: TimeInterval = 75
+    static let automaticRetryDelay: TimeInterval = 20
 
     init(
         connector: ClaudeCodeUsageConnector,
@@ -461,6 +461,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
             offerToStartSafari(.launch, trigger: .user)
         } else {
             accuracySync(trigger: .user)
+            scheduleAutomaticRetry(evenWithAutomaticRefreshOff: true)
         }
         return true
     }
@@ -476,7 +477,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         }
     }
 
-    /// About one timed read in five got no answer from its page, which left the
+    /// A read now and then ends because Safari suspended its page, which left the
     /// last reading to age for a whole interval.
     private func scheduleAutomaticRetry(evenWithAutomaticRefreshOff: Bool = false) {
         automaticRetryTask?.cancel()

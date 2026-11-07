@@ -39,6 +39,11 @@
   const automaticTimeoutMilliseconds = 30_000;
   // How often a page that has not answered is asked again during extraction.
   const extractionNudgeMilliseconds = 1_000;
+  // Safari suspends a background tab's process about two seconds after its page
+  // goes quiet, and it stays suspended until the tab closes. A read caught by
+  // that can never finish, so it ends here and AUV tries again soon after,
+  // instead of waiting out the whole read deadline.
+  const silentPageMilliseconds = 6_000;
   const pageTraceKind = "umaCompanionPageTraceV1";
   const pageProgressSteps = new Set([
     "extractReceived", "dataSeen", "extractorThrew", "deadlineFired",
@@ -634,6 +639,7 @@
       providerFailureReason: null,
       extractionNudgeID: null,
       extractionNudges: 0,
+      pageLastHeardAt: 0,
       acceptedPorts: 0,
       trace: [],
       traceStartedAt: null,
@@ -980,9 +986,15 @@
   function startExtractionNudge(read) {
     stopExtractionNudge(read);
     notePageTrace(read, "extractSent");
+    read.pageLastHeardAt = Date.now();
     const nudge = () => {
       read.extractionNudgeID = null;
       if (automaticRead !== read || read.finished || read.state !== v2States.extracting) return;
+      if (Date.now() - read.pageLastHeardAt >= silentPageMilliseconds) {
+        notePageTrace(read, "pageSilent");
+        void finishAutomaticV2(read, "tabUnavailable");
+        return;
+      }
       read.extractionNudges += 1;
       postToProviderPort(read, "umaClaudeExtractProviderUsageV2");
       postToProviderPort(read, "umaClaudeProviderRouteEventV2");
@@ -1293,6 +1305,8 @@
         || port.sender.tab.id !== read.providerOwnedTabID
         || message.requestID !== read.requestID
         || message.runtimeGenerationID !== config.runtimeGenerationID) return;
+    read.pageLastHeardAt = Date.now();
+    if (message.type === "umaClaudeProviderAliveV2") return;
     if (message.type === "umaClaudeProviderReadyV2"
         && exactKeys(message, ["requestID", "runtimeGenerationID", "type"])) {
       const becameReady = read.state === v2States.providerOwnershipProven
@@ -1402,6 +1416,7 @@
       timeoutID: null,
       extractionNudgeID: null,
       extractionNudges: 0,
+      pageLastHeardAt: 0,
       acceptedPorts: 0,
       trace: [],
       traceStartedAt: null,

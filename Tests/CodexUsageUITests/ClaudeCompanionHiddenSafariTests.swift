@@ -267,10 +267,10 @@ struct ClaudeCompanionSelfRecoveryTests {
 
     /// Seen live after the native process was killed: each command arrived
     /// twice, both copies started a read, and the read was refused.
-    /// Reads sometimes reached this point and heard nothing until the deadline,
-    /// with no way to tell how far the page got.
-    @Test("A page that does not answer is asked again each second, and the read leaves a trace")
-    func unansweredExtractionIsRepeatedAndTraced() throws {
+    /// Safari suspends a background tab's process when its page goes quiet, and
+    /// the read used to wait out its whole deadline with nothing able to answer.
+    @Test("A read ends early once its page stops answering, and leaves a trace")
+    func silentPageEndsTheReadEarly() throws {
         let page = try CompanionPage()
         page.dispatchRead(Self.read, placement: nil)
         page.connectProvider(tabID: 71)
@@ -285,22 +285,47 @@ struct ClaudeCompanionSelfRecoveryTests {
         #expect(page.providerPosted.filter { $0 == extract }.count == 4)
         #expect(page.providerPosted.filter { $0 == "umaClaudeProviderRouteEventV2" }.count >= 3)
         #expect(page.providerPosted.filter { $0 == "umaClaudeProviderResendResultV2" }.count == 3)
-
         page.providerSendProgress("extractReceived", requestID: Self.read)
         page.providerSendProgress("not-a-step", requestID: Self.read)
-        page.advance(milliseconds: 28_000)
+        #expect(!page.log.contains { $0.hasPrefix("trace ") })
 
+        // Six seconds after it was last heard from, at second nine.
+        page.advance(milliseconds: 5_000)
+        #expect(!page.log.contains { $0.hasPrefix("trace ") })
+        page.advance(milliseconds: 1_000)
         let trace = try #require(page.log.first { $0.hasPrefix("trace ") })
         #expect(trace.contains("status=tabUnavailable"))
         #expect(trace.contains("ports=1"))
         #expect(trace.contains("extractSent+0"))
         #expect(trace.contains("extractReceived+3000"))
+        #expect(trace.contains("pageSilent+9000"))
         #expect(!trace.contains("not-a-step"))
+        #expect(page.log.contains("tabs.remove 71"))
 
         // Finishing stops the asking.
         page.providerClearPosted()
         page.advance(milliseconds: 5_000)
         #expect(!page.providerPosted.contains(extract))
+    }
+
+    @Test("A page that keeps answering is given the whole deadline")
+    func answeringPageIsNotCutShort() throws {
+        let page = try CompanionPage()
+        page.dispatchRead(Self.read, placement: nil)
+        page.connectProvider(tabID: 71)
+        page.providerSend("""
+        { type: "umaClaudeProviderDocumentDiscoveredV2", ownershipNonce: "uma-v2-\(String(repeating: "a", count: 43))" }
+        """)
+        page.providerSendCorrelated(type: "umaClaudeProviderReadyV2", requestID: Self.read)
+        for _ in 0..<25 {
+            page.advance(milliseconds: 1_000)
+            page.providerSendCorrelated(type: "umaClaudeProviderAliveV2", requestID: Self.read)
+        }
+        #expect(!page.log.contains { $0.hasPrefix("trace ") })
+        page.advance(milliseconds: 6_000)
+        let trace = try #require(page.log.first { $0.hasPrefix("trace ") })
+        #expect(trace.contains("status=tabUnavailable"))
+        #expect(!trace.contains("pageSilent"))
     }
 
     @Test("A command delivered twice is handled once")

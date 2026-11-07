@@ -246,6 +246,7 @@ struct M5RMXOwnedProviderTabV2Tests {
           var resultsAfterLimit=results();
           send("umaClaudeProviderResultAcceptedV2");
           var steps=outbound.filter(function(m){return m.type==="umaClaudeProviderProgressV2";}).map(function(m){return m.step;}).join(",");
+          var aliveAnswers=outbound.filter(function(m){return m.type==="umaClaudeProviderAliveV2";}).length;
         """#)
         #expect(context.exception == nil)
         #expect(context.evaluateScript("deadlinesAfterFirst")?.toInt32() == 1)
@@ -255,6 +256,7 @@ struct M5RMXOwnedProviderTabV2Tests {
         #expect(context.evaluateScript("resultsAfterRepeatedRequest")?.toInt32() == 1)
         #expect(context.evaluateScript("resultsAfterResend")?.toInt32() == 2)
         #expect(context.evaluateScript("resultsAfterLimit")?.toInt32() == 2)
+        #expect(context.evaluateScript("aliveAnswers")?.toInt32() == 2)
         #expect(context.evaluateScript("steps")?.toString()
             == "extractReceived,extractorThrew,dataSeen,resultPostedBy-routeEvent,resultResent")
     }

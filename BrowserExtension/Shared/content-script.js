@@ -432,6 +432,15 @@
         && state.ownershipAccepted
         && message.requestID === state.requestID
         && message.runtimeGenerationID === state.runtimeGenerationID) {
+      // A running page answers. Safari can suspend a background tab's process,
+      // and a suspended page can't answer, or do anything else.
+      try {
+        state.port?.postMessage({
+          type: "umaClaudeProviderAliveV2",
+          requestID: state.requestID,
+          runtimeGenerationID: state.runtimeGenerationID,
+        });
+      } catch (_) {}
       state.evaluationSource = "routeEvent";
       scheduleReadinessEvaluation();
       return;
