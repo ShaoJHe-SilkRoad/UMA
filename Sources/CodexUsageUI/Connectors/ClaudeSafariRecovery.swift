@@ -155,7 +155,7 @@ enum ClaudeSafariPromptCopy {
         case (.restart, .simplifiedChinese):
             Text(
                 title: "重启 Safari 以恢复 Claude 同步？",
-                body: "AUV 的 Safari 伴侣已停止响应，因此读不到 Claude 的精确用量。重启 Safari 可以重新加载它。Safari 会退出并重新打开，部分窗口可能不会恢复，请先保存正在进行的内容。",
+                body: "AUV 的 Safari 伴侣已停止响应，因此读不到 Claude 的精确用量。重启 Safari 可以重新加载它。Safari 会退出并重新打开，当前打开的窗口和标签页可能不会恢复，请先保存正在进行的内容。",
                 accept: "重启 Safari",
                 decline: "暂不",
                 stopAsking: "自动刷新时不再询问"
@@ -163,7 +163,7 @@ enum ClaudeSafariPromptCopy {
         case (.restart, _):
             Text(
                 title: "Restart Safari to resume Claude sync?",
-                body: "AUV's Safari companion has stopped responding, so Claude's exact usage can't be read. Restarting Safari reloads it. Safari will quit and reopen, and some windows may not come back, so save your work there first.",
+                body: "AUV's Safari companion has stopped responding, so Claude's exact usage can't be read. Restarting Safari reloads it. Safari will quit and reopen. Your open windows and tabs may not come back, so save your work there first.",
                 accept: "Restart Safari",
                 decline: "Not Now",
                 stopAsking: "Don't ask during automatic refresh"
