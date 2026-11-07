@@ -172,6 +172,24 @@ enum ClaudeSafariPromptCopy {
     }
 }
 
+/// A prompt can appear while the person is clicking or typing in another app,
+/// and accepting the restart prompt quits Safari. One such click was seen 3.1
+/// seconds after the prompt appeared, so its accept button waits longer than
+/// that, and Return answers Not Now. Opening Safari costs little, so that
+/// prompt only waits out a click already on its way.
+enum ClaudeSafariPromptSafety {
+    static func acceptButtonDelay(for prompt: ClaudeSafariPrompt) -> TimeInterval {
+        switch prompt {
+        case .launch: 1
+        case .restart: 4
+        }
+    }
+
+    static func returnKeyAccepts(_ prompt: ClaudeSafariPrompt) -> Bool {
+        prompt == .launch
+    }
+}
+
 @MainActor
 private enum ClaudeSafariPromptAlert {
     static func run(
@@ -184,8 +202,21 @@ private enum ClaudeSafariPromptAlert {
         alert.alertStyle = .informational
         alert.messageText = copy.title
         alert.informativeText = copy.body
-        alert.addButton(withTitle: copy.accept)
-        alert.addButton(withTitle: copy.decline)
+        let acceptButton = alert.addButton(withTitle: copy.accept)
+        let declineButton = alert.addButton(withTitle: copy.decline)
+        if !ClaudeSafariPromptSafety.returnKeyAccepts(prompt) {
+            acceptButton.keyEquivalent = ""
+            declineButton.keyEquivalent = "\r"
+        }
+        acceptButton.isEnabled = false
+        let enableAccept = Timer(
+            timeInterval: ClaudeSafariPromptSafety.acceptButtonDelay(for: prompt),
+            repeats: false
+        ) { [weak acceptButton] _ in
+            MainActor.assumeIsolated { acceptButton?.isEnabled = true }
+        }
+        RunLoop.main.add(enableAccept, forMode: .modalPanel)
+        defer { enableAccept.invalidate() }
         if trigger == .automatic {
             alert.showsSuppressionButton = true
             alert.suppressionButton?.title = copy.stopAsking

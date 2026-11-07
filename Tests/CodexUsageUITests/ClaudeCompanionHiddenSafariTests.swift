@@ -267,6 +267,42 @@ struct ClaudeCompanionSelfRecoveryTests {
 
     /// Seen live after the native process was killed: each command arrived
     /// twice, both copies started a read, and the read was refused.
+    /// Reads sometimes reached this point and heard nothing until the deadline,
+    /// with no way to tell how far the page got.
+    @Test("A page that does not answer is asked again each second, and the read leaves a trace")
+    func unansweredExtractionIsRepeatedAndTraced() throws {
+        let page = try CompanionPage()
+        page.dispatchRead(Self.read, placement: nil)
+        page.connectProvider(tabID: 71)
+        page.providerSend("""
+        { type: "umaClaudeProviderDocumentDiscoveredV2", ownershipNonce: "uma-v2-\(String(repeating: "a", count: 43))" }
+        """)
+        page.providerSendCorrelated(type: "umaClaudeProviderReadyV2", requestID: Self.read)
+        let extract = "umaClaudeExtractProviderUsageV2"
+        #expect(page.providerPosted.filter { $0 == extract }.count == 1)
+
+        page.advance(milliseconds: 3_000)
+        #expect(page.providerPosted.filter { $0 == extract }.count == 4)
+        #expect(page.providerPosted.filter { $0 == "umaClaudeProviderRouteEventV2" }.count >= 3)
+        #expect(page.providerPosted.filter { $0 == "umaClaudeProviderResendResultV2" }.count == 3)
+
+        page.providerSendProgress("extractReceived", requestID: Self.read)
+        page.providerSendProgress("not-a-step", requestID: Self.read)
+        page.advance(milliseconds: 28_000)
+
+        let trace = try #require(page.log.first { $0.hasPrefix("trace ") })
+        #expect(trace.contains("status=tabUnavailable"))
+        #expect(trace.contains("ports=1"))
+        #expect(trace.contains("extractSent+0"))
+        #expect(trace.contains("extractReceived+3000"))
+        #expect(!trace.contains("not-a-step"))
+
+        // Finishing stops the asking.
+        page.providerClearPosted()
+        page.advance(milliseconds: 5_000)
+        #expect(!page.providerPosted.contains(extract))
+    }
+
     @Test("A command delivered twice is handled once")
     func repeatedCommandsAreDropped() throws {
         let page = try CompanionPage()
@@ -405,6 +441,34 @@ private final class CompanionPage {
 
     func disconnectNewestPort() {
         context.evaluateScript("UMACompanionHarness.disconnectNewestPort()")
+    }
+
+    func connectProvider(tabID: Int) {
+        context.evaluateScript("UMACompanionHarness.connectProvider(\(tabID))")
+    }
+
+    func providerSend(_ message: String) {
+        context.evaluateScript("UMACompanionHarness.providerSend(\(message))")
+    }
+
+    func providerSendCorrelated(type: String, requestID: String) {
+        providerSend("""
+        { type: "\(type)", requestID: "\(requestID)", runtimeGenerationID: UMA_BROWSER_CONFIG.runtimeGenerationID }
+        """)
+    }
+
+    func providerSendProgress(_ step: String, requestID: String) {
+        providerSend("""
+        { type: "umaClaudeProviderProgressV2", step: "\(step)", requestID: "\(requestID)", runtimeGenerationID: UMA_BROWSER_CONFIG.runtimeGenerationID }
+        """)
+    }
+
+    var providerPosted: [String] {
+        context.evaluateScript("UMACompanionHarness.providerPosted()")?.toArray() as? [String] ?? []
+    }
+
+    func providerClearPosted() {
+        context.evaluateScript("UMACompanionHarness.providerClearPosted()")
     }
 
     func suspendTimers(_ suspended: Bool) {

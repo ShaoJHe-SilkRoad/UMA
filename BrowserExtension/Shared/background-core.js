@@ -37,6 +37,14 @@
   ]);
   const requestIDPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const automaticTimeoutMilliseconds = 30_000;
+  // How often a page that has not answered is asked again during extraction.
+  const extractionNudgeMilliseconds = 1_000;
+  const pageTraceKind = "umaCompanionPageTraceV1";
+  const pageProgressSteps = new Set([
+    "extractReceived", "dataSeen", "extractorThrew", "deadlineFired",
+    "resultPostedBy-mutation", "resultPostedBy-frame", "resultPostedBy-timer",
+    "resultPostedBy-routeEvent", "resultPostedBy-deadline", "resultResent",
+  ]);
   const providerPlacements = Object.freeze(["existingWindow", "temporaryWindow"]);
   const temporaryWindowSize = Object.freeze({ width: 480, height: 640 });
   const ownedTabReceiptMaximumAgeMilliseconds = 2 * 60 * 1_000;
@@ -624,6 +632,11 @@
       resultMessageAccepted: false,
       resultMessageInFlight: false,
       providerFailureReason: null,
+      extractionNudgeID: null,
+      extractionNudges: 0,
+      acceptedPorts: 0,
+      trace: [],
+      traceStartedAt: null,
       recovered: true,
     };
   }
@@ -931,6 +944,54 @@
     return true;
   }
 
+  function notePageTrace(read, step) {
+    if (!read.traceStartedAt) read.traceStartedAt = Date.now();
+    if (read.trace.length < 24) {
+      read.trace.push(`${step}+${Date.now() - read.traceStartedAt}`);
+    }
+  }
+
+  // One content-free line per read. The appex logs it and nothing else sees it.
+  function sendPageTrace(read, status) {
+    const trace = `status=${status} nudges=${read.extractionNudges}`
+      + ` ports=${read.acceptedPorts} steps=${read.trace.join(",")}`;
+    void sendNativeReply({ kind: pageTraceKind, trace });
+  }
+
+  function stopExtractionNudge(read) {
+    if (read.extractionNudgeID !== null) clearTimeout(read.extractionNudgeID);
+    read.extractionNudgeID = null;
+  }
+
+  function postToProviderPort(read, type) {
+    try {
+      read.providerPort?.postMessage({
+        type,
+        requestID: read.requestID,
+        runtimeGenerationID: config.runtimeGenerationID,
+      });
+    } catch (_) {}
+  }
+
+  // A page sometimes never answers an extraction request, and nothing else
+  // would ask again before the read's deadline. Repeating the request and the
+  // route event is safe: the page starts extraction once, and a second equal
+  // reading is what it is waiting for to confirm a result.
+  function startExtractionNudge(read) {
+    stopExtractionNudge(read);
+    notePageTrace(read, "extractSent");
+    const nudge = () => {
+      read.extractionNudgeID = null;
+      if (automaticRead !== read || read.finished || read.state !== v2States.extracting) return;
+      read.extractionNudges += 1;
+      postToProviderPort(read, "umaClaudeExtractProviderUsageV2");
+      postToProviderPort(read, "umaClaudeProviderRouteEventV2");
+      postToProviderPort(read, "umaClaudeProviderResendResultV2");
+      read.extractionNudgeID = setTimeout(nudge, extractionNudgeMilliseconds);
+    };
+    read.extractionNudgeID = setTimeout(nudge, extractionNudgeMilliseconds);
+  }
+
   async function finishAutomaticV2(
     read,
     status,
@@ -941,6 +1002,8 @@
     if (!read || automaticRead !== read || read.finished) return "ownedTabOwnershipLost";
     read.finished = true;
     if (read.timeoutID !== null) clearTimeout(read.timeoutID);
+    stopExtractionNudge(read);
+    sendPageTrace(read, status);
     let finalStatus = status;
     if (!read.ownershipNonceDigest) {
       if (!suppressTerminal) {
@@ -1009,6 +1072,7 @@
       v2States.cleanupRequested, v2States.cleanupConfirmed].includes(read.state)
         && read.providerOwnedTabID === senderTabID) {
       read.providerPort = port;
+      read.acceptedPorts += 1;
       read.rawNonce = ownershipNonce;
       if (!read.removalListener && !armV2TabLifecycle(read)) return false;
       port.postMessage({
@@ -1042,6 +1106,7 @@
 
     read.rawNonce = ownershipNonce;
     read.providerPort = port;
+    read.acceptedPorts += 1;
     read.providerOwnedTabID = senderTabID;
     read.tabID = senderTabID;
     read.verifiedTab = {id: senderTabID};
@@ -1156,6 +1221,7 @@
         requestID: read.requestID,
         runtimeGenerationID: config.runtimeGenerationID,
       });
+      startExtractionNudge(read);
       return;
     }
     // The isolated content script owns the sole sanitized result projection.
@@ -1238,7 +1304,13 @@
           requestID: read.requestID,
           runtimeGenerationID: config.runtimeGenerationID,
         });
+        startExtractionNudge(read);
       }
+      return;
+    }
+    if (message.type === "umaClaudeProviderProgressV2"
+        && exactKeys(message, ["requestID", "runtimeGenerationID", "step", "type"])) {
+      if (pageProgressSteps.has(message.step)) notePageTrace(read, message.step);
       return;
     }
     if (message.type === "umaClaudeProviderMarkerRemovalFailedV2"
@@ -1259,10 +1331,12 @@
           || (read.state === v2States.resultReady && !retransmittable)
           || read.resultMessageAccepted || read.resultMessageInFlight) return;
       read.resultMessageInFlight = true;
+      stopExtractionNudge(read);
       const resultCaptured = read.state === v2States.resultReady
         || await transitionV2(read, v2Events.captureResult);
       if (!resultCaptured) {
         read.resultMessageInFlight = false;
+        if (read.state === v2States.extracting) startExtractionNudge(read);
         return;
       }
       read.resultMessageAccepted = true;
@@ -1326,6 +1400,11 @@
       replacementCandidateTabID: null,
       pendingProviderDiscovery: null,
       timeoutID: null,
+      extractionNudgeID: null,
+      extractionNudges: 0,
+      acceptedPorts: 0,
+      trace: [],
+      traceStartedAt: null,
       removalListener: null,
       replacementListener: null,
       updateListener: null,

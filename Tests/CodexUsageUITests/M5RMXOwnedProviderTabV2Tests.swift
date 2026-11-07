@@ -183,6 +183,82 @@ struct M5RMXOwnedProviderTabV2Tests {
         #expect(transientLoginThenSuccess.terminalStatus == "success")
     }
 
+    /// Some reads got no answer until the deadline. The background page repeats
+    /// its requests, so these must be safe to receive more than once, and must
+    /// be enough to confirm a result or recover a lost one.
+    @Test
+    func repeatedRequestsConfirmOnceAndResendALostResult() throws {
+        let content = try String(
+            contentsOf: v2RepositoryRoot().appendingPathComponent(
+                "BrowserExtension/Shared/content-script.js"
+            ),
+            encoding: .utf8
+        )
+        let context = try #require(JSContext())
+        context.exceptionHandler = { _, exception in
+            Issue.record("JavaScript exception: \(exception?.toString() ?? "unknown")")
+        }
+        context.evaluateScript(#"""
+          var domReads = 0, throwOnce = true, portMessageHandler = null, outbound = [];
+          var location = {href:"https://claude.ai/new#settings/usage", protocol:"https:", origin:"https://claude.ai", pathname:"/new", search:"", hash:"#settings/usage"};
+          var history = {};
+          var document = {readyState:"complete", documentElement:{}, addEventListener:function(){}, removeEventListener:function(){}};
+          function MutationObserver(){ this.observe=function(){}; this.disconnect=function(){}; }
+          var timers = {}, timerSequence = 0;
+          function setTimeout(callback, delay){ timerSequence += 1; timers[timerSequence]={callback:callback,delay:delay}; return timerSequence; }
+          function clearTimeout(id){ delete timers[id]; }
+          function queueMicrotask(callback){ callback(); }
+          globalThis.addEventListener=function(){}; globalThis.removeEventListener=function(){};
+          globalThis.UMAProviderOwnershipV2={parseProviderMarker:function(){return "n";},finalizeProviderRoute:function(){return true;}};
+          globalThis.UMAClaudeUsageExtractor={
+            CONTRACT:{origin:"https://claude.ai",href:"https://claude.ai/new#settings/usage"},
+            FAILURE_REASONS:{providerStructureUnsupported:"PROVIDER_STRUCTURE_UNSUPPORTED"},
+            exactUsageURL:function(){return true;},
+            usageRouteState:function(){return "exact";},
+            extractResult:function(){
+              domReads += 1;
+              if (throwOnce) { throwOnce = false; throw new Error("page in an odd state"); }
+              return {status:"success",observation:{fiveHour:{usedPercentage:25,resetAt:null},weeklyAllModels:null,modelSpecificWeekly:null,observedAt:"2026-08-28T00:00:00.000Z",extractorSchemaVersion:2,sourceLayoutVersion:1}};
+            }
+          };
+          var port={onMessage:{addListener:function(f){portMessageHandler=f;}},onDisconnect:{addListener:function(){}},postMessage:function(m){outbound.push(m);},disconnect:function(){}};
+          globalThis.browser={runtime:{getManifest:function(){return {manifest_version:2};},connect:function(){return port;},onMessage:{addListener:function(){}}}};
+        """#)
+        context.evaluateScript(content)
+        context.evaluateScript(#"""
+          function send(type){ portMessageHandler({type:type,requestID:"r",runtimeGenerationID:"g"}); }
+          function results(){ return outbound.filter(function(m){return m.type==="umaClaudeProviderResultV2";}).length; }
+          function deadlines(){ return Object.keys(timers).filter(function(id){return timers[id].delay===20000;}).length; }
+          send("umaClaudeProviderOwnershipAcceptedV2");
+          send("umaClaudeExtractProviderUsageV2");
+          var deadlinesAfterFirst=deadlines();
+          send("umaClaudeExtractProviderUsageV2");
+          var deadlinesAfterRepeat=deadlines();
+          send("umaClaudeProviderRouteEventV2");
+          var resultsAfterFirstSuccess=results();
+          send("umaClaudeProviderRouteEventV2");
+          var resultsAfterConfirm=results();
+          send("umaClaudeExtractProviderUsageV2");
+          var resultsAfterRepeatedRequest=results();
+          send("umaClaudeProviderResendResultV2");
+          var resultsAfterResend=results();
+          send("umaClaudeProviderResendResultV2");
+          var resultsAfterLimit=results();
+          send("umaClaudeProviderResultAcceptedV2");
+          var steps=outbound.filter(function(m){return m.type==="umaClaudeProviderProgressV2";}).map(function(m){return m.step;}).join(",");
+        """#)
+        #expect(context.exception == nil)
+        #expect(context.evaluateScript("deadlinesAfterFirst")?.toInt32() == 1)
+        #expect(context.evaluateScript("deadlinesAfterRepeat")?.toInt32() == 1)
+        #expect(context.evaluateScript("resultsAfterFirstSuccess")?.toInt32() == 0)
+        #expect(context.evaluateScript("resultsAfterConfirm")?.toInt32() == 1)
+        #expect(context.evaluateScript("resultsAfterRepeatedRequest")?.toInt32() == 1)
+        #expect(context.evaluateScript("resultsAfterResend")?.toInt32() == 2)
+        #expect(context.evaluateScript("resultsAfterLimit")?.toInt32() == 2)
+        #expect(context.evaluateScript("steps")?.toString()
+            == "extractReceived,extractorThrew,dataSeen,resultPostedBy-routeEvent,resultResent")
+    }
+
     /// A tab that is not on screen runs no animation frames. When the page then
     /// stopped changing, the confirming read waited for the 20-second deadline.
     @Test

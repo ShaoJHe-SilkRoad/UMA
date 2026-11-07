@@ -82,6 +82,8 @@
     readinessEvaluationCount: 0,
     renderTurnConfirmationID: null,
     renderTurnFallbackID: null,
+    evaluationSource: "mutation",
+    reportedProgress: new Set(),
     lastSuccessProjection: null,
     signInConfirmationCount: 0,
     lastReadinessReason: null,
@@ -90,6 +92,21 @@
     terminal: false,
   };
   Object.defineProperty(globalThis, stateKey, { value: state, configurable: false });
+
+  // Content-free steps for the read's diagnostic trace. Each is sent once; the
+  // background page drops anything that is not one of these names.
+  function noteProgress(step) {
+    if (state.reportedProgress.has(step) || !state.port || !state.requestID) return;
+    state.reportedProgress.add(step);
+    try {
+      state.port.postMessage({
+        type: "umaClaudeProviderProgressV2",
+        requestID: state.requestID,
+        runtimeGenerationID: state.runtimeGenerationID,
+        step,
+      });
+    } catch (_) {}
+  }
 
   function providerResultMessage(result) {
     return result.status === "success"
@@ -117,6 +134,8 @@
       state.port.postMessage(providerResultMessage(state.pendingResult));
       state.resultDelivered = true;
       state.resultTransmissionCount += 1;
+      noteProgress(state.resultTransmissionCount === 1
+        ? `resultPostedBy-${state.evaluationSource}` : "resultResent");
     } catch (_) {}
   }
 
@@ -167,12 +186,13 @@
   function scheduleRenderTurnConfirmation() {
     if (state.renderTurnConfirmationID !== null
         || typeof globalThis.requestAnimationFrame !== "function") return;
-    const confirm = () => {
+    const confirm = (source) => {
       cancelRenderTurnConfirmation();
+      state.evaluationSource = source;
       scheduleReadinessEvaluation();
     };
-    state.renderTurnConfirmationID = globalThis.requestAnimationFrame(confirm);
-    state.renderTurnFallbackID = setTimeout(confirm, renderTurnFallbackMilliseconds);
+    state.renderTurnConfirmationID = globalThis.requestAnimationFrame(() => confirm("frame"));
+    state.renderTurnFallbackID = setTimeout(() => confirm("timer"), renderTurnFallbackMilliseconds);
   }
 
   function stableProjection(observation) {
@@ -230,6 +250,7 @@
     state.readinessEvaluationCount += 1;
     const result = extractor.extractResult(document, location, new Date());
     if (result.status === "success") {
+      noteProgress("dataSeen");
       const projection = stableProjection(result.observation);
       if (projection === state.lastSuccessProjection) {
         completeReadiness(result);
@@ -285,12 +306,31 @@
     }
   }
 
+  // An exception would otherwise end the evaluation, and at the deadline leave
+  // the read with no answer at all.
+  function evaluateGuarded(deadlineReached) {
+    try {
+      evaluateProviderReadiness(deadlineReached);
+    } catch (_) {
+      noteProgress("extractorThrew");
+      if (deadlineReached) {
+        completeReadiness({
+          status: "usageUnavailable",
+          providerFailureReason: readinessReasons.targetDataTimeout,
+        });
+      }
+    }
+    // Only the evaluation a confirmation asked for is credited to it. Anything
+    // after this one comes from the mutation observer unless it says otherwise.
+    state.evaluationSource = "mutation";
+  }
+
   function scheduleReadinessEvaluation() {
     if (state.readinessEvaluationScheduled || state.pendingResult || state.resultDelivered) return;
     state.readinessEvaluationScheduled = true;
     queueMicrotask(() => {
       state.readinessEvaluationScheduled = false;
-      evaluateProviderReadiness(false);
+      evaluateGuarded(false);
     });
   }
 
@@ -313,9 +353,11 @@
       globalThis.navigation?.addEventListener?.("navigatesuccess", routeReadinessChanged);
       document.addEventListener("DOMContentLoaded", scheduleReadinessEvaluation);
       state.routeListenersInstalled = true;
-      state.readinessTimeoutID = setTimeout(
-        () => evaluateProviderReadiness(true), readinessTimeoutMilliseconds
-      );
+      state.readinessTimeoutID = setTimeout(() => {
+        noteProgress("deadlineFired");
+        state.evaluationSource = "deadline";
+        evaluateGuarded(true);
+      }, readinessTimeoutMilliseconds);
       scheduleReadinessEvaluation();
     });
   }
@@ -390,7 +432,23 @@
         && state.ownershipAccepted
         && message.requestID === state.requestID
         && message.runtimeGenerationID === state.runtimeGenerationID) {
+      state.evaluationSource = "routeEvent";
       scheduleReadinessEvaluation();
+      return;
+    }
+
+    // The background page asks for this until a result is accepted, so a result
+    // lost on the way costs a second rather than the whole read.
+    if (exactKeys(message, ["requestID", "runtimeGenerationID", "type"])
+        && message.type === "umaClaudeProviderResendResultV2"
+        && state.ownershipAccepted
+        && message.requestID === state.requestID
+        && message.runtimeGenerationID === state.runtimeGenerationID
+        && state.pendingResult
+        && state.resultDelivered
+        && !state.resultAcknowledged) {
+      state.resultDelivered = false;
+      flushPendingResult();
       return;
     }
 
@@ -401,6 +459,7 @@
         && message.runtimeGenerationID === state.runtimeGenerationID
         && !state.extractionStarted
         && !state.resultDelivered) {
+      noteProgress("extractReceived");
       state.extractionInFlight = true;
       void extractAfterUsageLandmarksRender().finally(() => {
         state.extractionInFlight = false;

@@ -132,6 +132,12 @@
       case "bindCandidateV2": {
         const receipt = receipts.get(id);
         if (!receipt || receipt.revision !== payload.expectedRevision) return { ok: false };
+        // Binding the same tab again is a confirmation, not a new revision.
+        if (payload.action === "bindCandidateV2"
+            && receipt.candidateTabID === payload.providerCandidateTabID) {
+          return { ok: true, revision: receipt.revision };
+        }
+        if (payload.action === "bindCandidateV2") receipt.candidateTabID = payload.providerCandidateTabID;
         receipt.revision += 1;
         if (payload.nextLifecycleState) receipt.state = payload.nextLifecycleState;
         return { ok: true, revision: receipt.revision };
@@ -148,6 +154,7 @@
   function nativeReply(payload) {
     if (payload?.kind === "claudeOwnedProviderTabV2ReceiptCommand") return receiptReply(payload);
     if (payload?.kind === "claudeBrowserAutomationEvent") log.push(`automation ${payload.status}`);
+    if (payload?.kind === "umaCompanionPageTraceV1") log.push(`trace ${payload.trace}`);
     return { ok: true };
   }
 
@@ -206,8 +213,45 @@
     },
   };
 
+  let providerPort = null;
+  // JavaScriptCore has no URL; the provider sender check needs these two parts.
+  root.URL = root.URL || class {
+    constructor(value) {
+      const match = /^(https?:\/\/[^/?#]+)(\/[^?#]*)?/.exec(String(value));
+      if (!match) throw new TypeError("Invalid URL");
+      this.origin = match[1];
+      this.pathname = match[2] || "/";
+    }
+  };
+
   root.UMACompanionHarness = {
     log,
+    // Connects a provider page in the given tab, as its content script does.
+    connectProvider(tabID) {
+      const posted = [];
+      providerPort = {
+        name: "umaClaudeOwnedProviderV2",
+        sender: {
+          id: root.browser.runtime.id,
+          frameId: 0,
+          url: "https://claude.ai/new",
+          tab: { id: tabID },
+        },
+        posted,
+        onMessage: listenerSet(),
+        onDisconnect: listenerSet(),
+        postMessage(message) { posted.push(message); },
+        disconnect() {},
+      };
+      for (const listener of root.browser.runtime.onConnect.listeners.slice()) {
+        listener(providerPort);
+      }
+    },
+    providerSend(message) {
+      for (const listener of providerPort.onMessage.listeners.slice()) listener(message);
+    },
+    providerPosted: () => providerPort.posted.map((message) => message.type),
+    providerClearPosted: () => { providerPort.posted.length = 0; },
     entries: () => log.slice(),
     clearLog: () => { log.length = 0; },
     portCount: () => ports.length,

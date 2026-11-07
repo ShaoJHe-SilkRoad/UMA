@@ -552,6 +552,44 @@ struct ClaudeAutomaticRetryTests {
         await ticker.tick()
     }
 
+    @Test("A read right after Safari starts is retried, even with automatic refresh off")
+    func readAfterStartingSafariRetries() async throws {
+        let suite = "auv-retry-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let fixture = BrowserConnectorFixture(consent: true)
+        let ticker = RecoveryTicker()
+        let retries = RecoveryTicker()
+        let running = RecoverySafariState(false)
+        let consent = ClaudeBrowserConsentStore(defaults: defaults)
+        consent.consentGranted = true
+        let model = ClaudeBrowserSettingsModel(
+            connector: fixture.connector(),
+            consentStore: consent,
+            periodicSleep: { _ in await ticker.sleep() },
+            safariIsRunning: { running.value },
+            automaticRetrySleep: { _ in await retries.sleep() }
+        )
+        model.connectWithConsent()
+        try await waitForClaudeValue(model.$actionInProgress, matching: { !$0 })
+        try await waitForClaudeValue(model.$state, matching: { _ in model.offersAccuracySync })
+        model.useSafariRecovery(ClaudeSafariRecovery(
+            ask: { _, _ in ClaudeSafariPromptAnswer(accepted: true, stopAskingDuringAutomaticRefresh: false) },
+            launch: { running.value = true; return true },
+            restart: { true },
+            now: { Date() },
+            sleep: { _ in }
+        ))
+        #expect(model.accuracySyncForRefreshAll())
+        try await fixture.bridge.waitForAutomaticRequest()
+        let first = try #require(await fixture.bridge.automaticRequests.first?.requestID)
+        await fixture.bridge.sendAutomation(requestID: first, status: .tabUnavailable)
+        try await retries.waitForSleeper()
+        try await waitForClaudeValue(model.$actionInProgress, matching: { !$0 })
+        await retries.tick()
+        try await fixture.bridge.waitForAutomaticRequest(count: 2)
+    }
+
     @Test("A timed read that brought a reading is not repeated")
     func successfulReadDoesNotRetry() async throws {
         let suite = "auv-retry-\(UUID().uuidString)"
@@ -629,5 +667,26 @@ private actor RecoveryTicker {
             }
             try await Task.sleep(for: .milliseconds(10))
         }
+    }
+}
+
+@MainActor
+private final class RecoverySafariState {
+    var value: Bool
+    init(_ value: Bool) { self.value = value }
+}
+
+@Suite("Safari prompt safety")
+struct ClaudeSafariPromptSafetyTests {
+    @Test("Accepting a restart waits longer than the stray click that was seen")
+    func restartWaitsPastTheSeenClick() {
+        #expect(ClaudeSafariPromptSafety.acceptButtonDelay(for: .restart) > 3.2)
+        #expect(ClaudeSafariPromptSafety.acceptButtonDelay(for: .launch) >= 1)
+    }
+
+    @Test("Return never restarts Safari")
+    func returnDoesNotRestart() {
+        #expect(!ClaudeSafariPromptSafety.returnKeyAccepts(.restart))
+        #expect(ClaudeSafariPromptSafety.returnKeyAccepts(.launch))
     }
 }

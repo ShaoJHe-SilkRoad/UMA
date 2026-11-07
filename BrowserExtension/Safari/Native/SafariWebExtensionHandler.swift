@@ -26,6 +26,21 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         category: "NativeBridge"
     )
 
+    /// The page's content-free record of how far a read got: fixed step names
+    /// and millisecond offsets. It is logged here and goes no further.
+    private static func pageTrace(from object: Any) -> String? {
+        guard let value = object as? [String: Any],
+              value.count == 2,
+              value["kind"] as? String == "umaCompanionPageTraceV1",
+              let trace = value["trace"] as? String,
+              trace.count <= 800,
+              trace.allSatisfy({
+                  $0.isASCII && ($0.isLetter || $0.isNumber || "=+,- ".contains($0))
+              })
+        else { return nil }
+        return trace
+    }
+
     func beginRequest(with context: NSExtensionContext) {
         logger.notice("Claude companion diagnostic stage=handlerEntered reached=true")
         let replyItem = NSExtensionItem()
@@ -51,6 +66,13 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         logger.notice(
             "Claude companion diagnostic stage=runtimeIdentityValidated reached=true generation=\(signedRuntime.runtimeGenerationID, privacy: .public)"
         )
+        if let trace = Self.pageTrace(from: object) {
+            logger.notice(
+                "Claude companion diagnostic stage=pageTrace \(trace, privacy: .public)"
+            )
+            replyItem.userInfo = [SFExtensionMessageKey: ["ok": true]]
+            return
+        }
         if let command = Self.ownedTabReceiptCommand(from: object),
            let receiptReply = Self.handleOwnedTabReceiptCommand(
             command,

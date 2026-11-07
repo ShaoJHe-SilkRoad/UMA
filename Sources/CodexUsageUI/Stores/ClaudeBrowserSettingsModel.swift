@@ -478,7 +478,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
 
     /// About one timed read in five got no answer from its page, which left the
     /// last reading to age for a whole interval.
-    private func scheduleAutomaticRetry() {
+    private func scheduleAutomaticRetry(evenWithAutomaticRefreshOff: Bool = false) {
         automaticRetryTask?.cancel()
         let connector = connector
         let sleep = automaticRetrySleep
@@ -492,7 +492,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
             guard !Task.isCancelled,
                   await connector.diagnostics().acceptedObservationCount == readingsBefore,
                   let self,
-                  self.automaticAccuracySyncInterval != nil,
+                  evenWithAutomaticRefreshOff || self.automaticAccuracySyncInterval != nil,
                   self.accuracySyncCanRun,
                   self.safariIsRunning()
             else { return }
@@ -558,6 +558,10 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
             case .restart: await recovery.restart()
             }
             if started {
+                // The first read after Safari starts has failed with no answer
+                // from the page. The person just agreed to this, so a figure
+                // should not have to wait for the next timed sync.
+                scheduleAutomaticRetry(evenWithAutomaticRefreshOff: true)
                 for attempt in 0..<ClaudeSafariRecovery.syncAttemptsAfterStart {
                     if attempt > 0 {
                         await recovery.sleep(ClaudeSafariRecovery.delayBetweenAttemptsAfterStart)
