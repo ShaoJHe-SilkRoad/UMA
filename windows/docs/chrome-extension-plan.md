@@ -556,3 +556,28 @@ reg delete "HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.silkrd.auv.cla
 - 移除 `--load-extension`（Chrome 137）：https://developer.chrome.com/blog/extension-news-june-2025
 - Edge `ExtensionInstallForcelist`（非受管设备限制）：https://learn.microsoft.com/en-us/deployedge/microsoft-edge-browser-policies/extensioninstallforcelist
 - Mac 源码（只读）：`BrowserExtension/`、`Sources/ClaudeBrowserBridgeProtocol/`、`Sources/ClaudeBrowserNativeHostCore/`、`Sources/ClaudeSafariHostIPC/`、`Sources/UMASafariBridgeHost/`、`Sources/CodexUsageUI/Connectors/Claude*.swift`、`docs/releases/AUV_Mac_0.18.2–0.18.4.md`
+
+---
+
+## 17. 决策记录（2026-11-08，用户选择“按推荐批准”）
+
+| 编号 | 决定 |
+|---|---|
+| D1 | 原生消息 + `AUV.BrowserHost.exe` + 命名管道 |
+| D2 | 独立的小程序 `AUV.BrowserHost.exe` |
+| D3 | 同时支持 Chrome 与 Edge |
+| D4 | 首发用开发者模式加载；上架商店以后再议 |
+| D5 | 为 Windows 新生成 key，manifest 只放公钥，私钥不保存 |
+| D6 | 文件放在 `%LOCALAPPDATA%\AUV.Windows.UI.Preview\browser-companion\` |
+| D7 | 自动：有普通窗口用后台标签页，否则用最小化小窗口 |
+| D8 | 沿用 Windows 规则：间隔 + 2 分钟后隐藏 |
+| D9 | 允许 AUV 先询问再打开浏览器；自动刷新一轮只问一次，可勾选不再询问 |
+| D10 | 伴侣沉默时只提示，不替用户重启浏览器 |
+| D11 | 不申请 `background` 权限 |
+| D12 | Claude 有读数时出现在桌面浮窗列表，外观不变 |
+| D13 | 扩展图标点击后让 AUV 立即同步一次 |
+| D14 | 版本号未给推荐值，打包前再向用户确认；实现期间不改版本号 |
+| D15 | 默认关闭，用户开启并完成设置后才读取 |
+| D16 | 共享 JS 用固定副本 + 哈希比对测试 |
+| D17 | JS 测试用 WebView2 运行 |
+| D18 | Claude Code 本地估算、Antigravity 不在本项 |
