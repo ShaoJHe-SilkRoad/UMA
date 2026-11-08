@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\AUV.Windows.Core\AUV.Windows.Core.csproj" />
     <ProjectReference Include="..\..\src\AUV.Windows.App\AUV.Windows.App.csproj" />
+    <ProjectReference Include="..\..\src\AUV.Windows.BrowserHost\AUV.Windows.BrowserHost.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
   </ItemGroup>
 
 </Project>

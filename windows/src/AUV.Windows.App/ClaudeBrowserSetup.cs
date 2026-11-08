@@ -1,0 +1,125 @@
+using System.IO;
+using System.Text.Json;
+using AUV.Windows.Core;
+using Microsoft.Win32;
+
+namespace AUV.Windows.App;
+
+public enum CompanionInstallState { NotPackaged, NotInstalled, Installed, UpdateAvailable, RegistrationMissing }
+public sealed record CompanionStatus(CompanionInstallState State, ClaudeCompanionManifest? Packaged, ClaudeCompanionManifest? Installed,
+    IReadOnlyList<string> RegisteredBrowsers, IReadOnlyList<string> ForeignRegistrations);
+
+/// <summary>
+/// Installs, updates and removes the companion's files and its per-user native messaging registration (HKCU only).
+/// Nothing is overwritten that AUV did not create: an older extension folder is kept as a backup, an older host build
+/// keeps its own folder, and a registry value pointing somewhere else is reported instead of replaced.
+/// </summary>
+public sealed class ClaudeBrowserSetup(string installRoot, string packageRoot, string pipeName, RegistryKey? hive = null, string registryBase = "Software")
+{
+    public const string HostExecutable = "AUV.BrowserHost.exe";
+    private readonly RegistryKey hive = hive ?? Registry.CurrentUser;
+    public string InstallRoot => installRoot;
+    public string ExtensionFolder => Path.Combine(installRoot, "extension");
+    public static readonly (string Browser, string Path)[] Browsers =
+        [("chrome", @"Google\Chrome\NativeMessagingHosts\" + ClaudeBrowserContract.NativeHostName), ("edge", @"Microsoft\Edge\NativeMessagingHosts\" + ClaudeBrowserContract.NativeHostName)];
+    private string KeyPath(string relative) => registryBase + @"\" + relative;
+    private string HostFolder(ClaudeCompanionManifest manifest) => Path.Combine(installRoot, "host", manifest.CompanionBuild);
+    public string HostManifestPath(ClaudeCompanionManifest manifest) => Path.Combine(HostFolder(manifest), ClaudeBrowserContract.NativeHostName + ".json");
+    private bool Ours(string? value) => value != null && Path.GetFullPath(value).StartsWith(Path.GetFullPath(installRoot) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    private string? RegisteredValue(string relative) { using var key = hive.OpenSubKey(KeyPath(relative)); return key?.GetValue(null) as string; }
+
+    public CompanionStatus Status()
+    {
+        var packaged = ClaudeBrowserPaths.LoadManifest(packageRoot);
+        var installed = ClaudeBrowserPaths.LoadManifest(installRoot);
+        var registered = new List<string>(); var foreign = new List<string>();
+        foreach (var (browser, path) in Browsers)
+        {
+            var value = RegisteredValue(path);
+            if (value == null) continue;
+            if (Ours(value) && installed != null && Path.GetFullPath(value).Equals(Path.GetFullPath(HostManifestPath(installed)), StringComparison.OrdinalIgnoreCase) && File.Exists(value)) registered.Add(browser);
+            else if (!Ours(value)) foreign.Add(browser);
+        }
+        var state = packaged == null && installed == null ? CompanionInstallState.NotPackaged
+            : installed == null ? CompanionInstallState.NotInstalled
+            : packaged != null && packaged != installed ? CompanionInstallState.UpdateAvailable
+            : registered.Count == 0 ? CompanionInstallState.RegistrationMissing : CompanionInstallState.Installed;
+        return new(state, packaged, installed, registered, foreign);
+    }
+
+    /// <summary>Copies the packaged companion and registers the host for Chrome and Edge. Returns the installed manifest.</summary>
+    public ClaudeCompanionManifest Install(bool replaceForeignRegistrations)
+    {
+        var packaged = ClaudeBrowserPaths.LoadManifest(packageRoot) ?? throw new InvalidOperationException("This copy of AUV has no browser companion package.");
+        var status = Status();
+        if (status.ForeignRegistrations.Count > 0 && !replaceForeignRegistrations) throw new ForeignRegistrationException(status.ForeignRegistrations);
+        Directory.CreateDirectory(installRoot);
+        // Host: one folder per build. An existing folder for this build is left as it is unless it is incomplete.
+        var hostFolder = HostFolder(packaged);
+        if (!File.Exists(Path.Combine(hostFolder, HostExecutable)))
+        {
+            var staging = hostFolder + ".installing-" + Guid.NewGuid().ToString("N")[..8];
+            CopyTree(Path.Combine(packageRoot, "host"), staging);
+            if (Directory.Exists(hostFolder)) Directory.Move(hostFolder, hostFolder + ".incomplete-" + DateTime.Now.ToString("yyyyMMddHHmmss"));
+            Directory.Move(staging, hostFolder);
+        }
+        WriteJson(Path.Combine(hostFolder, "host-config.json"), w =>
+        {
+            w.WriteNumber("schemaVersion", 1); w.WriteString("pipeName", pipeName); w.WriteString("allowedOrigin", packaged.ExtensionOrigin);
+            w.WriteString("runtimeGenerationID", packaged.RuntimeGenerationId); w.WriteString("hostVersion", packaged.CompanionVersion); w.WriteString("hostBuild", packaged.CompanionBuild);
+        });
+        WriteJson(HostManifestPath(packaged), w =>
+        {
+            w.WriteString("name", ClaudeBrowserContract.NativeHostName); w.WriteString("description", "AUV Browser Companion for Claude");
+            w.WriteString("path", HostExecutable); w.WriteString("type", "stdio");
+            w.WriteStartArray("allowed_origins"); w.WriteStringValue(packaged.ExtensionOrigin); w.WriteEndArray();
+        });
+        // Extension: a fixed folder, because the browser remembers the folder it loaded. The previous copy is kept as a backup.
+        var extension = ExtensionFolder;
+        var stagingExtension = extension + ".installing-" + Guid.NewGuid().ToString("N")[..8];
+        CopyTree(Path.Combine(packageRoot, "extension"), stagingExtension);
+        if (Directory.Exists(extension))
+        {
+            var previous = ClaudeBrowserPaths.LoadManifest(installRoot)?.CompanionBuild ?? "unknown";
+            Directory.Move(extension, extension + ".backup-" + previous + "-" + DateTime.Now.ToString("yyyyMMddHHmmss"));
+        }
+        Directory.Move(stagingExtension, extension);
+        File.WriteAllBytes(Path.Combine(installRoot, "companion.json"), packaged.ToJson());
+        foreach (var (_, path) in Browsers)
+        {
+            using var key = hive.CreateSubKey(KeyPath(path), true);
+            key.SetValue(null, HostManifestPath(packaged), RegistryValueKind.String);
+        }
+        return packaged;
+    }
+
+    /// <summary>Removes AUV's registry values (only those pointing into its own folder) and, if asked, the folder AUV created.</summary>
+    public void Remove(bool deleteFiles)
+    {
+        foreach (var (_, path) in Browsers)
+            if (Ours(RegisteredValue(path))) hive.DeleteSubKey(KeyPath(path), false);
+        if (deleteFiles && Directory.Exists(installRoot)) Directory.Delete(installRoot, true);
+    }
+
+    private static void CopyTree(string source, string destination)
+    {
+        if (!Directory.Exists(source)) throw new DirectoryNotFoundException("The browser companion package is incomplete.");
+        Directory.CreateDirectory(destination);
+        foreach (var directory in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
+            Directory.CreateDirectory(Path.Combine(destination, Path.GetRelativePath(source, directory)));
+        foreach (var file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
+            File.Copy(file, Path.Combine(destination, Path.GetRelativePath(source, file)), false);
+    }
+    private static void WriteJson(string path, Action<Utf8JsonWriter> body)
+    {
+        var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        using (var stream = File.Create(temp))
+        using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true })) { writer.WriteStartObject(); body(writer); writer.WriteEndObject(); }
+        File.Move(temp, path, true);
+    }
+}
+
+public sealed class ForeignRegistrationException(IReadOnlyList<string> browsers) : Exception("Another program registered the same native messaging host name.")
+{
+    public IReadOnlyList<string> Browsers { get; } = browsers;
+}
