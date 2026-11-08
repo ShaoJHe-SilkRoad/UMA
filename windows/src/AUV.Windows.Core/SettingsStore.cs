@@ -37,8 +37,11 @@ public sealed class PreviewSettings
     public bool ShowCostEstimate { get; set; }
     public double? SettingsWidth { get; set; }
     public double? SettingsHeight { get; set; }
+    // Added with the Claude browser companion. Absent from 0.18.4 files; the default keeps it off.
+    public ClaudeBrowserPreferences ClaudeBrowser { get; set; } = new();
     public void Normalize(ModelCatalog catalog)
     {
+        ClaudeBrowser ??= new(); ClaudeBrowser.Normalize();
         if (Theme is not ("Dark" or "Light" or "System")) Theme = "Dark";
         if (Language is not ("System" or "en" or "zh")) Language = "System";
         Refresh ??= new(); Refresh.Normalize();

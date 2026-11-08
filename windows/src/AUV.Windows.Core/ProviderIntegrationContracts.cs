@@ -32,8 +32,7 @@ public static class PreparedConnections
 {
     public static IReadOnlyList<UsageConnectionPlan> Plans { get; } = Array.AsReadOnly(new[]
     {
-        new UsageConnectionPlan("claude", "Claude", "Sanitized Claude status-line packets; separate official-account page channel",
-            "Explicitly selected local aggregate records", "Windows status-line producer, account identity and browser qualification"),
+        // Claude is read live through the browser companion (ClaudeBrowserSync), so it has no prepared plan.
         new UsageConnectionPlan("antigravity", "Antigravity", "Versioned read-only quota buckets",
             "No local history source admitted", "A Windows executable identity and proven no-inference usage command; Mac arm64 admission is not portable")
     });
