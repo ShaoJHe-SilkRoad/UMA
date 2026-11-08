@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "AUV Browser Companion for Claude",
+  "version": "1.0.0",
+  "description": "Reads Claude's plan-limit percentages from the official claude.ai Usage page for AUV on this computer. Nothing else is read.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvEhXur3zJNttLEQq0SFuw82nBA+sDO1LZZqkmQwG0LheK7B/NIf+szR0liL7zlkCbVasATUDAemj6pKs+VUDR/qTx88pAblTFv+L07sEAFAvhO8IAJr59TYtHQRwdm68ekwBumpYWLT0n7Bd6PHJFKwwscYcUrGXCO61RG7geAtMQ5+UVspl64dy0b0SqNxz8RfU5rPAwpWfjHBTW85rth2I9heFlTvpxkYiMi9xShPNVMN7SxGLfm1IvFB93fCCwIPkZjsek5ehUg4Y7xBCuJaGflDaCm0OpdMcnBFGjdnIwadkN6p7qGQN7EH1PJsVFZIfoQpiwV0ogNmNVNhH/QIDAQAB",
+  "minimum_chrome_version": "120",
+  "permissions": ["nativeMessaging", "storage", "alarms"],
+  "host_permissions": ["https://claude.ai/new*"],
+  "background": {"service_worker": "background-loader.js"},
+  "content_scripts": [{
+    "matches": ["https://claude.ai/new*"],
+    "js": [
+      "Shared/claude-usage-extractor.js",
+      "Shared/provider-ownership-v2.js",
+      "Shared/content-script.js"
+    ],
+    "run_at": "document_start",
+    "all_frames": false
+  }],
+  "action": {"default_title": "Sync Claude usage in AUV now", "default_icon": {"16": "icons/icon16.png", "32": "icons/icon32.png"}},
+  "icons": {"16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png"}
+}

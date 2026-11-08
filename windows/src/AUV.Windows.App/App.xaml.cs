@@ -74,6 +74,9 @@ public partial class App : Application, System.ComponentModel.INotifyPropertyCha
             var featureIndex = Array.IndexOf(e.Args, "--feature-check-dir");
             if (featureIndex >= 0 && featureIndex + 1 < e.Args.Length)
                 await FeatureVerification.Run(this, window, Path.GetFullPath(e.Args[featureIndex + 1]));
+            var companionIndex = Array.IndexOf(e.Args, "--companion-check-dir");
+            if (companionIndex >= 0 && companionIndex + 1 < e.Args.Length)
+                await CompanionVerification.Run(Path.GetFullPath(e.Args[companionIndex + 1]));
             if (!e.Args.Contains("--offline")) Providers.Start();
             var refreshIndex = Array.IndexOf(e.Args, "--refresh-check-dir");
             if (refreshIndex >= 0 && refreshIndex + 1 < e.Args.Length)

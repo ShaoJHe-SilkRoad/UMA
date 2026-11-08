@@ -1,0 +1,22 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>AUV companion checks</title>
+<!-- Served from AUV's own WebView2 under a virtual https host mapped to the repository. Nothing is fetched from the network. -->
+<script src="/windows/browser-extension/Shared/claude-usage-extractor.js"></script>
+<script src="/windows/browser-extension/Shared/provider-ownership-v2.js"></script>
+<script src="/windows/browser-extension/Shared/owned-provider-tab-v2-reducer.js"></script>
+<script src="extractor-checks.js"></script>
+<script src="chrome-harness.js"></script>
+<script>
+  (async () => {
+    const results = [];
+    const webview = window.chrome?.webview;
+    try {
+      results.push(...await AUVExtractorChecks.run());
+      results.push(...await AUVChromeHarness.run());
+    } catch (error) {
+      results.push({ name: "harness", pass: false, detail: String(error && error.stack || error) });
+    }
+    webview?.postMessage(JSON.stringify({ kind: "auvCompanionChecks", results }));
+  })();
+</script>
