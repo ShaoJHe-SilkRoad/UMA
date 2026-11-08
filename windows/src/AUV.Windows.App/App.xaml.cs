@@ -78,12 +78,17 @@ public partial class App : Application, System.ComponentModel.INotifyPropertyCha
             var refreshIndex = Array.IndexOf(e.Args, "--refresh-check-dir");
             if (refreshIndex >= 0 && refreshIndex + 1 < e.Args.Length)
                 await FeatureVerification.RecordRefresh(this, window, Path.GetFullPath(e.Args[refreshIndex + 1]), 2);
+            var liveIndex = Array.IndexOf(e.Args, "--live-check-dir"); var stageIndex = Array.IndexOf(e.Args, "--live-stage"); var baselineIndex = Array.IndexOf(e.Args, "--upgrade-baseline");
+            if (liveIndex >= 0 && liveIndex + 1 < e.Args.Length && stageIndex >= 0 && stageIndex + 1 < e.Args.Length)
+                await FeatureVerification.Live(this, window, Path.GetFullPath(e.Args[liveIndex + 1]), e.Args[stageIndex + 1],
+                    baselineIndex >= 0 && baselineIndex + 1 < e.Args.Length ? Path.GetFullPath(e.Args[baselineIndex + 1]) : null);
             var providerIndex = Array.IndexOf(e.Args, "--provider-check-dir");
             if (providerIndex >= 0 && providerIndex + 1 < e.Args.Length)
                 await ProviderVerification.Run(this, window, Path.GetFullPath(e.Args[providerIndex + 1]));
             var focusIndex = Array.IndexOf(e.Args, "--focus-check-dir");
             if (focusIndex >= 0 && focusIndex + 1 < e.Args.Length && Demo && e.Args.Contains("--offline"))
                 await RefinementVerification.CheckExternalFocus(this, window, Path.GetFullPath(e.Args[focusIndex + 1]));
+            if (e.Args.Contains("--quit-after-checks")) Desktop.Quit();
         };
         window.Show();
         if (Store.LastError != null) window.Model.Status = Store.LastError;

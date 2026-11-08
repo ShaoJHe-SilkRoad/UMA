@@ -120,6 +120,85 @@ internal static class FeatureVerification
         }
     }
 
+    /// <summary>
+    /// Normal mode on real preferences. Stage "reorder": compares preferences with a 0.16.x baseline file, reads Codex,
+    /// captures every surface, opens ThreadOS from Codex settings and returns, then moves WorkBuddy to the top and quits.
+    /// Stage "verify" (next launch): confirms the saved order, captures the rail, restores the default order and the
+    /// baseline page. Records displayed values and states only.
+    /// </summary>
+    internal static async Task Live(App app, MainWindow main, string directory, string stage, string? baselinePath)
+    {
+        Directory.CreateDirectory(directory); var checks = new List<string>(); var notes = new List<object>();
+        void Require(bool valid, string message) { if (!valid) throw new InvalidOperationException(message); checks.Add(message); }
+        SettingsWindow? settings = null;
+        try
+        {
+            if (app.Demo) throw new InvalidOperationException("Requires normal mode.");
+            if (stage == "reorder")
+            {
+                if (baselinePath != null)
+                {
+                    using var old = JsonDocument.Parse(File.ReadAllText(baselinePath)); var o = old.RootElement; var s = app.Settings;
+                    Require(o.GetProperty("Theme").GetString() == s.Theme && o.GetProperty("LargerText").GetBoolean() == s.LargerText, "Upgrade keeps theme and text size");
+                    Require(o.GetProperty("SelectedAgent").GetString() == s.SelectedAgent && o.GetProperty("ActiveSection").GetString() == s.ActiveSection, "Upgrade keeps selected agent and page");
+                    var d = o.GetProperty("Desktop");
+                    Require(d.GetProperty("Enabled").GetBoolean() == s.Desktop.Enabled && d.GetProperty("WidgetVisible").GetBoolean() == s.Desktop.WidgetVisible && d.GetProperty("AlwaysOnTop").GetBoolean() == s.Desktop.AlwaysOnTop
+                        && d.GetProperty("CloseToTray").GetBoolean() == s.Desktop.CloseToTray && d.GetProperty("HideTrayIcon").GetBoolean() == s.Desktop.HideTrayIcon && d.GetProperty("Density").GetInt32() == (int)s.Desktop.Density
+                        && d.GetProperty("ShowStatus").GetBoolean() == s.Desktop.ShowStatus && d.GetProperty("ShowFill").GetBoolean() == s.Desktop.ShowFill, "Upgrade keeps every Desktop Wizard and tray preference");
+                    var p = o.GetProperty("Providers");
+                    Require(p.GetProperty("CodexEnabled").GetBoolean() == s.Providers.CodexEnabled && p.GetProperty("WorkBuddyConsent").GetBoolean() == s.Providers.WorkBuddyConsent, "Upgrade keeps provider preferences");
+                    var roles = o.GetProperty("Roles").EnumerateObject().ToDictionary(r => r.Name, r => new RoleSelection(r.Value.GetProperty("Model").GetString()!, r.Value.GetProperty("Effort").GetString()!));
+                    Require(roles.Count == s.Roles.Count && roles.All(r => s.Roles.TryGetValue(r.Key, out var v) && v == r.Value) && main.Model.Roles.All(r => roles[r.Key] == r.Selection), "Upgrade keeps the ThreadOS team draft");
+                    Require(s.Refresh.Automatic && s.Refresh.IntervalMinutes == 5 && s.AgentOrder.Count == 0 && !s.ShowCostEstimate && s.Language == "System", "New settings start at their defaults");
+                    Require(app.Store.PathName.EndsWith(Path.Combine("AUV.Windows.UI.Preview", "settings.v1.json"), StringComparison.OrdinalIgnoreCase), "Preference directory unchanged");
+                }
+                var section = main.Model.Shell.Section; var selected = main.Model.Shell.SelectedAgent.Id;
+                await app.Providers.RefreshAllAsync(); await Settle(main);
+                var codex = main.Model.Shell.Agents.First(a => a.Id == "codex");
+                notes.Add(new { Stage = "codex", codex.Card.Connection, codex.Card.Value, codex.Card.WindowMinutes, Displayed = codex.Card.HasDisplayableQuota, Windows = codex.Windows.Select(w => new { w.Minutes, w.Remaining }), Selected = codex.Selection?.SelectedId, Tooltip = app.Desktop.TrayTooltip });
+                Require(codex.Card.Connection == ConnectionState.Connected && codex.Card.HasDisplayableQuota, "Live Codex reading admitted");
+                main.Model.Shell.Section = "AUV"; main.Model.Shell.SelectedAgent = codex; await Settle(main);
+                ProductVerification.Capture((FrameworkElement)main.Content, Path.Combine(directory, "live-main-codex.png"));
+                settings = new SettingsWindow(main, null); settings.Show(); await Settle(settings);
+                foreach (var pane in SettingsWindow.Panes) { settings.ShowPane(pane); await Settle(settings); ProductVerification.Capture((FrameworkElement)settings.Content, Path.Combine(directory, $"live-settings-{pane}.png")); }
+                Require(SettingsWindow.Panes.Length == 6, "Six settings panes captured"); settings.Close(); settings = null;
+                app.Desktop.ToggleFlyout(); await Task.Delay(2400); await Settle(main);
+                ProductVerification.Capture((FrameworkElement)app.Windows.OfType<UsageFlyout>().Single().Content, Path.Combine(directory, "live-tray-panel.png")); app.Desktop.ToggleFlyout();
+                var widgetWanted = app.Settings.Desktop.WidgetVisible; app.Desktop.SetWidgetVisible(true); await Settle(main);
+                if (app.Windows.OfType<DesktopWidget>().FirstOrDefault() is { IsVisible: true } wizard) ProductVerification.Capture((FrameworkElement)wizard.Content, Path.Combine(directory, "live-wizard.png"));
+                app.Desktop.SetWidgetVisible(widgetWanted);
+                settings = new SettingsWindow(main, "codex"); settings.Show(); await Settle(settings);
+                ProductVerification.Capture((FrameworkElement)settings.Content, Path.Combine(directory, "live-codex-settings.png"));
+                Walk(settings).OfType<Button>().Single(b => System.Windows.Automation.AutomationProperties.GetAutomationId(b) == "auv.agent.settings.threados").RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); settings = null; await Settle(main);
+                Require(main.Model.Shell.Section == "ThreadOS", "Live: Codex settings opens ThreadOS");
+                ProductVerification.Capture((FrameworkElement)main.Content, Path.Combine(directory, "live-threados.png"));
+                Walk(main).OfType<Button>().Single(b => System.Windows.Automation.AutomationProperties.GetAutomationId(b) == "auv.threados.back").RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await Settle(main);
+                Require(main.Model.Shell.Section == "AUV" && main.Model.Shell.SelectedAgent.Id == "codex", "Live: Back to Codex returns to the Codex page");
+                main.Model.Shell.SelectedAgent = main.Model.Shell.Agents.First(a => a.Id == selected); main.Model.Shell.Section = section;
+                app.Desktop.MoveAgent("workbuddy", 0); await Settle(main);
+                ProductVerification.Capture((FrameworkElement)main.Content, Path.Combine(directory, "live-after-move.png"));
+                Require(app.Settings.AgentOrder.FirstOrDefault() == "workbuddy", "Live: WorkBuddy moved to the top and saved");
+            }
+            else
+            {
+                main.Model.Shell.Section = "AUV"; await Settle(main);
+                Require(main.Model.Shell.Agents.Select(a => a.Id).SequenceEqual(["workbuddy", "codex", "claude", "antigravity"]), "Live: order kept after restarting AUV");
+                ProductVerification.Capture((FrameworkElement)main.Content, Path.Combine(directory, "live-after-restart.png"));
+                notes.Add(new { Stage = "restart", Order = main.Model.Shell.Agents.Select(a => a.Id), Tooltip = app.Desktop.TrayTooltip });
+                app.Desktop.RestoreDefaultOrder();
+                if (baselinePath != null) { using var old = JsonDocument.Parse(File.ReadAllText(baselinePath)); main.Model.Shell.Section = old.RootElement.GetProperty("ActiveSection").GetString()!; }
+                Require(app.Settings.AgentOrder.Count == 0, "Default order restored after the check");
+            }
+            File.WriteAllLines(Path.Combine(directory, "PASS.txt"), checks);
+        }
+        catch (Exception e) { File.WriteAllText(Path.Combine(directory, "ERROR.txt"), e.Message); }
+        finally
+        {
+            settings?.Close(); main.Persist();
+            File.WriteAllText(Path.Combine(directory, "live-results.json"), JsonSerializer.Serialize(new { Stage = stage, Checks = checks, Notes = notes }, new JsonSerializerOptions { WriteIndented = true }));
+        }
+    }
+
     /// <summary>Normal mode: waits for the configured automatic refresh to fire the given number of times.</summary>
     internal static async Task RecordRefresh(App app, MainWindow main, string directory, int ticks)
     {

@@ -17,7 +17,13 @@ if ($ValidatedRefinement -or $Stable) {
         if (!(Test-Path -LiteralPath $evidence.Path) -or (Get-FileHash -LiteralPath $evidence.Path -Algorithm SHA256).Hash -ne $evidence.SHA256) { throw 'Required verification evidence is missing or changed.' }
     }
 }
-$sourcePaths = & rg --files (Join-Path $windowsRoot 'src') (Join-Path $windowsRoot 'tests') $PSScriptRoot -g '!**/bin/**' -g '!**/obj/**'
+if (Get-Command rg -ErrorAction SilentlyContinue) {
+    $sourcePaths = & rg --files (Join-Path $windowsRoot 'src') (Join-Path $windowsRoot 'tests') $PSScriptRoot -g '!**/bin/**' -g '!**/obj/**'
+} else {
+    # Same file set without ripgrep: tracked and untracked-but-not-ignored files under src, tests and scripts.
+    $sourcePaths = @(& git -C $windowsRoot ls-files --cached --others --exclude-standard -- src tests scripts | ForEach-Object { Join-Path $windowsRoot $_ } | Where-Object { Test-Path -LiteralPath $_ })
+    if ($LASTEXITCODE) { throw 'Listing source files failed.' }
+}
 $sourcePaths += @('AUV.Windows.sln','NuGet.Config','global.json') | ForEach-Object { Join-Path $windowsRoot $_ } | Where-Object { Test-Path -LiteralPath $_ }
 $sourceFiles = @($sourcePaths | Sort-Object -Unique | ForEach-Object {
     $sourceFile = [IO.Path]::GetFullPath($_)
@@ -209,26 +215,30 @@ the candidate. ZIP SHA-256 is supplied alongside the archive.
 }
 if ($Stable) {
 @"
-AUV $Version — Windows 11 x64 — Stable — build $Build
+AUV $Version - Windows 11 x64 - Stable - build $Build
 
-The user-designated Windows stable version.
-Extract the complete folder and run AUV.exe. Keep all supporting files together.
-The executable, window identity, account client identity and package metadata use $Version.
-Existing Windows settings and owned connection sessions retain their current locations.
+Extract the COMPLETE package and run AUV.exe as your normal Windows user. Keep all files together.
+The .NET desktop runtime is included; no separate .NET installation is needed.
+Optional WorkBuddy connection needs Microsoft Edge WebView2 Runtime (not bundled).
+Upgrade: quit the old copy, extract this package separately and run its AUV.exe.
+Existing settings in %LOCALAPPDATA%\AUV.Windows.UI.Preview are kept and still read.
 
-Includes AUV, ThreadOS, Desktop Wizard and the tray usage/performance popup.
-Only fetched, connected, non-stale quota cards appear; verified zero remains visible.
-Regular Wizard base rows are 138.6 x 48 DIPs. Minimalist WorkBuddy Credits use compact
-labels of at most four characters; hover shows the exact balance. Native icons adapt to appearance.
+New in $Version (aligned with AUV for Mac 0.18.4 where Windows can support it):
+- Refresh All for every agent; automatic refresh every 5, 10, 15, 30 or 60 minutes.
+- The quota window shown is the one that changed most recently; a spent window comes first.
+- Drag agents into your order; the tray panel, tray tooltip and Desktop Wizard follow it.
+- Redesigned main window and six-pane Settings; English and Chinese interface.
+- ThreadOS opens from Codex settings, with Back to Codex.
+- Optional Local Cost Estimate for Codex, off by default.
 
-Codex reads the installed client's existing login using its read-only usage interface.
-WorkBuddy retains experimental official-page Credit sync through its separate WebView2 session;
-the optional connection requires Microsoft Edge WebView2 Runtime and manual sign-in.
-Claude and Antigravity remain prepared connectors without enabled live transports.
-Sectorium remains an interface with storage mutation disabled.
+Codex reads the installed client's existing login through a read-only usage interface.
+WorkBuddy Credit sync is experimental and uses AUV's separate official-site browser session.
+Only current readings appear; out-of-date and unknown quotas are hidden. Verified zero remains visible.
+Claude and Antigravity have no live connection on Windows. Sectorium storage operations are disabled.
+ThreadOS generates and copies instructions; it does not dispatch them.
 
-Ctrl+Shift+W: Wizard; Ctrl+Shift+U: usage popup; Ctrl+Comma: settings; Ctrl+Shift+Q: Quit.
-F5: refresh selected provider. Alt+A / Alt+T / Alt+S: module navigation.
+Ctrl+Shift+W: Wizard; Ctrl+Shift+U: tray panel; Ctrl+Comma: settings; F5: Refresh All;
+Ctrl+Shift+Q: Quit. Alt+Up / Alt+Down in the agent list: move the selected agent.
 Offline: AUV.exe --offline --show-widget
 Explicit sample data: AUV.exe --demo --offline --show-widget (separate preferences).
 
