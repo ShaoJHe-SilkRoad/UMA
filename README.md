@@ -7,7 +7,7 @@
 | Platform | Download | Requirements |
 | --- | --- | --- |
 | macOS | [Download for Mac — 0.18.4](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.4/AUV_Mac_0.18.4_Universal.zip) | macOS 14+ · Apple silicon and Intel · Universal app · signed and notarized |
-| Windows | [Download for Windows — 0.16.3](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Win_0.16.3.zip) | Windows 11 · x64 · portable ZIP · **unsigned** |
+| Windows | [Download for Windows — 0.18.4](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.4-win/AUV_Win_0.18.4.zip) | Windows 11 · x64 · portable ZIP · **unsigned** |
 
 [Install or upgrade](docs/INSTALLATION.md) · [Mac release notes](docs/releases/AUV_Mac_0.18.4.md) · [Mac compatibility](docs/MAC_COMPATIBILITY.md) · [中文](#中文)
 
@@ -61,14 +61,13 @@ Sectorium remembers registered volumes across page changes. It listens for macOS
 
 The basic Load → Unload → Load and Disconnect cycle has been confirmed on the tested external-drive setup. This does not establish compatibility with every drive or filesystem. Keep a backup of important data. [Sectorium guide](https://shaotinghe.com/sectorium/).
 
-## Windows 0.16.3
+## Windows 0.18.4
 
-Extract the entire ZIP and run **AUV.exe**; verify **0.16.3** in AUV.exe → Properties → Details → Product version. The .NET desktop runtime is included. WorkBuddy's optional connection needs WebView2 Runtime. Enable the floating Wizard in Settings; click the AUV tray icon for usage. **Ctrl+Shift+Q** quits completely. Preserve **%LOCALAPPDATA%\AUV.Windows.UI.Preview** during upgrades. See the [Windows guide](docs/INSTALLATION.md#windows-installation-guide) for unsigned-build verification and provider limits.
+Extract the entire ZIP and run **AUV.exe**; verify **0.18.4** in AUV.exe → Properties → Details → Product version. The .NET desktop runtime is included. WorkBuddy's optional connection needs WebView2 Runtime. **Refresh All** refreshes every agent, and automatic refresh runs every 5–60 minutes. Drag agents to arrange them. ThreadOS opens from Codex settings. The interface is in English and Chinese. **Ctrl+Shift+Q** quits completely. Preserve **%LOCALAPPDATA%\AUV.Windows.UI.Preview** during upgrades; 0.16.x settings carry over. See the [Windows guide](docs/INSTALLATION.md#windows-installation-guide) for unsigned-build verification and provider limits.
 
+Windows build **20261107.1** is released separately from the Mac app (tag `v0.18.4-win`). Codex read-only usage is available; WorkBuddy Credit sync is experimental and needs WebView2 Runtime. Claude and Antigravity have no live reading on Windows; the Mac's Safari-based Claude features do not apply. ThreadOS generates and copies instructions; receiving-client application and live Ultra execution remain untested. **Sectorium is UI only on Windows; storage operations are disabled.**
 
-Windows build **20261011.1** remains a separate release. Codex read-only usage is available; WorkBuddy Credit sync is experimental and needs WebView2 Runtime. Claude and Antigravity live connections are unavailable. ThreadOS generates and copies instructions; receiving-client application and live Ultra execution remain untested. **Sectorium is UI only on Windows; storage operations are disabled.**
-
-[Windows release notes](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.16.3) · [Windows source and build instructions](windows/README.md) · [Report a problem](https://github.com/ShaoJHe-SilkRoad/UMA/issues)
+[Windows release notes](docs/releases/AUV_Win_0.18.4.md) · [Windows source and build instructions](windows/README.md) · [Report a problem](https://github.com/ShaoJHe-SilkRoad/UMA/issues)
 
 ---
 
@@ -79,7 +78,7 @@ Windows build **20261011.1** remains a separate release. Codex read-only usage i
 | 平台 | 下载 | 要求 |
 | --- | --- | --- |
 | macOS | [下载 Mac 版 · 0.18.4](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.4/AUV_Mac_0.18.4_Universal.zip) | macOS 14 及以上 · Apple silicon 和 Intel · 通用包 · 已签名并通过公证 |
-| Windows | [下载 Windows 版 · 0.16.3](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.16.3/AUV_Win_0.16.3.zip) | Windows 11 · x64 · 便携 ZIP · **未签名** |
+| Windows | [下载 Windows 版 · 0.18.4](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.4-win/AUV_Win_0.18.4.zip) | Windows 11 · x64 · 便携 ZIP · **未签名** |
 
 [安装与升级](docs/INSTALLATION.md#中文安装指南) · [Mac 更新说明](docs/releases/AUV_Mac_0.18.4.md#中文) · [Mac 兼容性](docs/MAC_COMPATIBILITY.md#中文)
 
@@ -133,11 +132,10 @@ Claude 额度条在余量偏低时变红、充足时变绿。Claude 不报告订
 
 基本的装载→卸载→再次装载及断开流程，已在本次外接硬盘环境中确认可用。这不代表所有硬盘和文件系统都经过测试。请保留重要数据备份。[分区工指南](https://shaotinghe.com/sectorium/)。
 
-### Windows 0.16.3
+### Windows 0.18.4
 
-构建号 **20261011.1**。全部解压 ZIP 后运行 **AUV.exe**，在 AUV.exe 文件属性 → 详细信息确认 0.16.3。已包含 .NET 桌面运行时；可选 WorkBuddy 连接需 WebView2 Runtime。设置中启用独立桌面浮窗，托盘图标展开用量，**Ctrl+Shift+Q** 完全退出。升级请保留 **%LOCALAPPDATA%\AUV.Windows.UI.Preview**。
+构建号 **20261107.1**。全部解压 ZIP 后运行 **AUV.exe**，在 AUV.exe 文件属性 → 详细信息确认 0.18.4。已包含 .NET 桌面运行时；可选 WorkBuddy 连接需 WebView2 Runtime。**全部刷新**会刷新所有智能体，也可每 5–60 分钟自动刷新；拖动智能体即可排序；线程工从 Codex 设置进入；界面支持中英文。**Ctrl+Shift+Q** 完全退出。升级请保留 **%LOCALAPPDATA%\AUV.Windows.UI.Preview**，0.16.x 的设置会原样沿用。
 
-Codex 只读用量已接入；WorkBuddy 同步为试验功能；Claude/Antigravity 实时连接不可用。线程工可生成和复制，接收端与真实 Ultra 执行未验证。分区工**仅为界面，存储后台未实现，磁盘操作禁用**。详见[Windows 安装指南](docs/INSTALLATION.md#windows-中文安装指南)。
+Codex 只读用量已接入；WorkBuddy 同步为试验功能；Claude、Antigravity 在 Windows 上没有实时读数，Mac 上依赖 Safari 的 Claude 功能不适用。线程工可生成和复制，接收端与真实 Ultra 执行未验证。分区工**仅为界面，存储后台未实现，磁盘操作禁用**。详见[Windows 安装指南](docs/INSTALLATION.md#windows-中文安装指南)。
 
-
-[Windows 更新说明](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.16.3) · [反馈问题](https://github.com/ShaoJHe-SilkRoad/UMA/issues)
+[Windows 更新说明](docs/releases/AUV_Win_0.18.4.md#中文) · [反馈问题](https://github.com/ShaoJHe-SilkRoad/UMA/issues)
