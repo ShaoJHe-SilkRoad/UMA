@@ -11,7 +11,9 @@ public sealed class ProviderDataTests
     [Fact] public void CodexSelectsItsBucketAndWeeklyWindowByDuration()
     {
         var value = CodexUsageDecoder.Decode(Account, Json("""{"rateLimits":{"primary":{"usedPercent":99,"windowDurationMins":300}},"rateLimitsByLimitId":{"other":{"primary":{"usedPercent":100,"windowDurationMins":10080}},"codex":{"limitId":"codex","primary":{"usedPercent":21,"windowDurationMins":300},"secondary":{"usedPercent":68,"windowDurationMins":10080}}}}"""), default, Now);
-        Assert.Equal("32%", value.Card.Value); Assert.StartsWith("7-day window", value.Card.Window); Assert.Equal("79% remaining", value.SecondaryValue);
+        // 0.18.4 parity: with no previous reading the five-hour window is shown first; the weekly one is the other window.
+        Assert.Equal("79%", value.Card.Value); Assert.StartsWith("5-hour window", value.Card.Window); Assert.Equal("32% remaining", value.SecondaryValue);
+        Assert.Equal(32, value.Usage.WeeklyRemaining);
         Assert.DoesNotContain("example.test", value.Card.Description); Assert.Null(value.Usage.AccountWeek); Assert.Empty(value.Usage.Days);
     }
     [Fact] public void CodexDoesNotBorrowNonCodexQuotaOrInventUnlimited()

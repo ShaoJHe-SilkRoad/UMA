@@ -1,42 +1,124 @@
-<Window Style="{StaticResource {x:Type Window}}" x:Class="AUV.Windows.App.SettingsWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="AUV — Global Settings" Width="550" Height="650" MinWidth="430" MinHeight="380" WindowStartupLocation="CenterOwner" ShowInTaskbar="False" UseLayoutRounding="True" AutomationProperties.AutomationId="auv.settings.window">
- <Grid Margin="20"><Grid.RowDefinitions><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel><TextBlock x:Name="Heading" Text="Settings" FontSize="22" FontWeight="SemiBold"/><TextBlock x:Name="Subtitle" Text="AUV preferences" Style="{StaticResource Muted}" Margin="0,4,0,16"/>
-  <StackPanel x:Name="GlobalPanel">
-   <TextBlock Text="Appearance" FontWeight="SemiBold"/><WrapPanel Margin="0,8,0,8"><RadioButton x:Name="DarkChoice" Content="Dark" GroupName="Theme" Checked="ThemeChoice_Checked" Margin="0,4,20,4" AutomationProperties.AutomationId="auv.settings.dark"/><RadioButton x:Name="LightChoice" Content="Light" GroupName="Theme" Checked="ThemeChoice_Checked" Margin="0,4,20,4" AutomationProperties.AutomationId="auv.settings.light"/><RadioButton x:Name="SystemChoice" Content="System" GroupName="Theme" Checked="ThemeChoice_Checked" Margin="0,4,0,4" AutomationProperties.AutomationId="auv.settings.system"/></WrapPanel>
-   <CheckBox x:Name="LargerChoice" Content="Larger text and Wizard cards" Click="Larger_Click" Margin="0,4,0,8"/>
-   <Border Style="{StaticResource Divider}"/><StackPanel x:Name="DesktopPanel">
-    <TextBlock Text="System tray · 系统托盘" FontSize="18" FontWeight="SemiBold"/>
-    <CheckBox Content="Hide tray icon · 隐藏托盘图标" IsChecked="{Binding HideTrayIcon, Mode=TwoWay}" Margin="0,10,0,5" AutomationProperties.AutomationId="auv.settings.hide-tray"/>
-    <TextBlock Text="{Binding TrayStatus}" Style="{StaticResource Muted}" FontSize="12" Margin="0,4" AutomationProperties.AutomationId="auv.settings.tray-status"/>
-    <TextBlock Text="Drag AUV out of the hidden icons menu to keep it beside the clock." Style="{StaticResource Muted}" FontSize="12" Margin="0,4,0,8"/>
-    <Button Content="Windows taskbar settings" Command="{Binding TaskbarSettingsCommand}" HorizontalAlignment="Left" Margin="0,0,0,8" AutomationProperties.AutomationId="auv.settings.taskbar"/>
-    <Border Style="{StaticResource Divider}"/>
-    <TextBlock Text="Desktop Wizard · 桌面浮窗" FontSize="18" FontWeight="SemiBold"/>
-    <CheckBox Content="Enable Desktop Wizard" IsChecked="{Binding Enabled, Mode=TwoWay}" Margin="0,5"/>
-    <CheckBox Content="Always on top" IsChecked="{Binding AlwaysOnTop, Mode=TwoWay}" Margin="0,5"/>
-    <CheckBox Content="Show connection indicator" IsChecked="{Binding ShowStatus, Mode=TwoWay}" Margin="0,5"/>
-    <CheckBox Content="Show usage fill" IsChecked="{Binding ShowFill, Mode=TwoWay}" Margin="0,5"/>
-    <TextBlock Text="Density" Margin="0,10,0,4"/><ComboBox ItemsSource="{Binding Densities}" SelectedItem="{Binding Density, Mode=TwoWay}" MaxWidth="220" HorizontalAlignment="Left" MinWidth="180" AutomationProperties.Name="Wizard density"/>
-    <WrapPanel Margin="0,10,0,4"><Button Content="{Binding WidgetButton}" Command="{Binding ToggleWidgetCommand}"/><Button Content="Move to lower right" Command="{Binding DockWidgetCommand}" Margin="8,0,0,0"/></WrapPanel>
-    <CheckBox Content="Close to tray" IsChecked="{Binding CloseToTray, Mode=TwoWay}" IsEnabled="{Binding TrayAvailable}" Margin="0,10,0,5"/>
-    <TextBlock Text="Drag to move; right-click for options. Only available quotas appear." Style="{StaticResource Muted}" FontSize="12" Margin="0,8,0,0"/>
+<Window Style="{StaticResource {x:Type Window}}" x:Class="AUV.Windows.App.SettingsWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:AUV.Windows.App" Title="AUV — Settings" Width="760" Height="620" MinWidth="560" MinHeight="420" WindowStartupLocation="CenterOwner" ShowInTaskbar="False" UseLayoutRounding="True" AutomationProperties.AutomationId="auv.settings.window">
+ <Window.Resources><BooleanToVisibilityConverter x:Key="Visible"/><local:InverseVisibilityConverter x:Key="InverseVisible"/>
+  <Style x:Key="PaneNav" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}"><Setter Property="Padding" Value="10,7"/><Setter Property="Margin" Value="0,0,0,3"/></Style>
+  <Style x:Key="Group" TargetType="TextBlock" BasedOn="{StaticResource CardTitle}"><Setter Property="Margin" Value="0,4,0,8"/></Style>
+ </Window.Resources>
+ <Grid Background="{DynamicResource CanvasBrush}"><Grid Margin="16"><Grid.RowDefinitions><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition x:Name="NavColumn" Width="180"/><ColumnDefinition/></Grid.ColumnDefinitions>
+  <ListBox x:Name="PaneList" SelectionChanged="PaneList_SelectionChanged" Margin="0,0,16,0" AutomationProperties.Name="Settings sections" AutomationProperties.AutomationId="auv.settings.panes" ItemContainerStyle="{StaticResource PaneNav}">
+   <ListBoxItem Tag="general" Content="{local:Tr General, 通用}" AutomationProperties.AutomationId="auv.settings.pane.general"/>
+   <ListBoxItem Tag="refresh" Content="{local:Tr Refresh, 刷新}" AutomationProperties.AutomationId="auv.settings.pane.refresh"/>
+   <ListBoxItem Tag="agents" Content="{local:Tr Agents, 智能体}" AutomationProperties.AutomationId="auv.settings.pane.agents"/>
+   <ListBoxItem Tag="tray" Content="{local:Tr 'System Tray', 系统托盘}" AutomationProperties.AutomationId="auv.settings.pane.tray"/>
+   <ListBoxItem Tag="desktop" Content="{local:Tr 'Desktop Wizard', 桌面浮窗}" AutomationProperties.AutomationId="auv.settings.pane.desktop"/>
+   <ListBoxItem Tag="privacy" Content="{local:Tr 'Privacy &amp; Data', 隐私与数据}" AutomationProperties.AutomationId="auv.settings.pane.privacy"/>
+  </ListBox>
+  <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+   <StackPanel>
+    <TextBlock x:Name="Heading" Text="{local:Tr Settings, 设置}" Style="{StaticResource PageTitle}" Margin="0,0,0,14"/>
+    <!-- General -->
+    <StackPanel x:Name="GeneralPane" Tag="general">
+     <TextBlock Text="{local:Tr Language, 语言}" Style="{StaticResource Group}"/>
+     <WrapPanel Margin="0,0,0,12"><RadioButton x:Name="LanguageSystem" Content="{local:Tr 'Same as Windows', 跟随系统}" GroupName="Language" Checked="Language_Checked" Margin="0,4,20,4" AutomationProperties.AutomationId="auv.settings.language.system"/><RadioButton x:Name="LanguageEnglish" Content="English" GroupName="Language" Checked="Language_Checked" Margin="0,4,20,4" AutomationProperties.AutomationId="auv.settings.language.en"/><RadioButton x:Name="LanguageChinese" Content="中文" GroupName="Language" Checked="Language_Checked" Margin="0,4,0,4" AutomationProperties.AutomationId="auv.settings.language.zh"/></WrapPanel>
+     <TextBlock Text="{local:Tr Appearance, 外观}" Style="{StaticResource Group}"/>
+     <WrapPanel Margin="0,0,0,8"><RadioButton x:Name="DarkChoice" Content="{local:Tr Dark, 深色}" GroupName="Theme" Checked="ThemeChoice_Checked" Margin="0,4,20,4" AutomationProperties.AutomationId="auv.settings.dark"/><RadioButton x:Name="LightChoice" Content="{local:Tr Light, 浅色}" GroupName="Theme" Checked="ThemeChoice_Checked" Margin="0,4,20,4" AutomationProperties.AutomationId="auv.settings.light"/><RadioButton x:Name="SystemChoice" Content="{local:Tr 'Same as Windows', 跟随系统}" GroupName="Theme" Checked="ThemeChoice_Checked" Margin="0,4,0,4" AutomationProperties.AutomationId="auv.settings.system"/></WrapPanel>
+     <CheckBox x:Name="LargerChoice" Content="{local:Tr 'Larger text and Wizard cards', 更大的文字和浮窗卡片}" Click="Larger_Click" Margin="0,4,0,12"/>
+     <TextBlock Text="{local:Tr 'Window', 窗口}" Style="{StaticResource Group}"/>
+     <CheckBox Content="{local:Tr 'Keep AUV running in the tray when the main window closes', 关闭主窗口后在托盘中继续运行}" IsChecked="{Binding Desktop.CloseToTray, Mode=TwoWay}" IsEnabled="{Binding Desktop.TrayAvailable}" Margin="0,4"/>
+     <TextBlock Text="{local:Tr 'AUV adds no startup item, service or installer on Windows. Ctrl+Shift+Q quits completely.', 'AUV 在 Windows 上不添加开机启动项、服务或安装程序。Ctrl+Shift+Q 完全退出。'}" Style="{StaticResource Caption}" Margin="0,8,0,0"/>
+    </StackPanel>
+    <!-- Refresh -->
+    <StackPanel x:Name="RefreshPane" Tag="refresh">
+     <TextBlock Text="{local:Tr Schedule, 定时}" Style="{StaticResource Group}"/>
+     <CheckBox Content="{local:Tr 'Refresh automatically', 自动刷新}" IsChecked="{Binding Providers.AutomaticRefresh, Mode=TwoWay}" Margin="0,4" AutomationProperties.AutomationId="auv.settings.refresh.auto"/>
+     <StackPanel Orientation="Horizontal" Margin="0,8,0,4" IsEnabled="{Binding Providers.AutomaticRefresh}"><TextBlock Text="{local:Tr Every, 间隔}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+      <ComboBox ItemsSource="{Binding Providers.Intervals}" SelectedItem="{Binding Providers.RefreshInterval, Mode=TwoWay}" MinWidth="150" AutomationProperties.Name="Refresh interval" AutomationProperties.AutomationId="auv.settings.refresh.interval"><ComboBox.ItemTemplate><DataTemplate><TextBlock><Run Text="{Binding Mode=OneWay}"/><Run Text="{local:Tr ' minutes', ' 分钟'}"/></TextBlock></DataTemplate></ComboBox.ItemTemplate></ComboBox>
+     </StackPanel>
+     <TextBlock Text="{local:Tr 'Covers every agent AUV can read on Windows: Codex, and WorkBuddy while its connection window is open. Readings older than the interval plus two minutes are hidden until the next successful read.', 涵盖 AUV 在 Windows 上能读取的所有智能体：Codex，以及连接窗口打开时的 WorkBuddy。超过“间隔 + 2 分钟”的读数会被隐藏，直到下一次读取成功。}" Style="{StaticResource Caption}" Margin="0,6,0,14"/>
+     <TextBlock Text="{local:Tr 'Also Refresh', 其他时机}" Style="{StaticResource Group}"/>
+     <CheckBox Content="{local:Tr 'After Windows wakes from sleep', Windows 从睡眠唤醒后}" IsChecked="{Binding Providers.RefreshOnWake, Mode=TwoWay}" Margin="0,4"/>
+     <Button Content="{local:Tr 'Refresh All now', 立即全部刷新}" Click="RefreshAll_Click" HorizontalAlignment="Left" Margin="0,12,0,4"/>
+     <TextBlock Text="{local:Tr 'Refresh All in the main window, the tray menu and the tray panel refreshes every agent at once.', 主窗口、托盘菜单和托盘面板中的“全部刷新”会立即刷新所有智能体。}" Style="{StaticResource Caption}"/>
+    </StackPanel>
+    <!-- Agents -->
+    <StackPanel x:Name="AgentsPane" Tag="agents">
+     <TextBlock Text="{local:Tr Order, 顺序}" Style="{StaticResource Group}"/>
+     <ItemsControl x:Name="OrderList" ItemsSource="{Binding Desktop.Main.Shell.Agents}" AutomationProperties.Name="Agent order" AutomationProperties.AutomationId="auv.settings.order">
+      <ItemsControl.ItemTemplate><DataTemplate><Border Background="{DynamicResource RaisedBrush}" CornerRadius="6" Padding="10,6" Margin="0,0,0,4"><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+       <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
+       <Button Grid.Column="1" Content="↑" Tag="{Binding Id}" Click="MoveUp_Click" Padding="10,2" MinHeight="26" ToolTip="{local:Tr 'Move up', 上移}" AutomationProperties.Name="{Binding Name, StringFormat={}Move {0} up}"/>
+       <Button Grid.Column="2" Content="↓" Tag="{Binding Id}" Click="MoveDown_Click" Padding="10,2" MinHeight="26" Margin="6,0,0,0" ToolTip="{local:Tr 'Move down', 下移}" AutomationProperties.Name="{Binding Name, StringFormat={}Move {0} down}"/>
+      </Grid></Border></DataTemplate></ItemsControl.ItemTemplate>
+     </ItemsControl>
+     <Button Content="{local:Tr 'Restore Default Order', 恢复默认顺序}" Command="{Binding Desktop.RestoreOrderCommand}" HorizontalAlignment="Left" Margin="0,8,0,8" AutomationProperties.AutomationId="auv.settings.order.restore"/>
+     <TextBlock Text="{local:Tr 'Drag agents in the main window, or use the arrows here. The order applies to the main window, the tray panel, the tray tooltip and the Desktop Wizard. Each agent’s own settings open from its page.', 可在主窗口中拖动智能体，或使用这里的箭头。顺序用于主窗口、托盘面板、托盘提示和桌面浮窗。各智能体自己的设置在其页面中打开。}" Style="{StaticResource Caption}"/>
+    </StackPanel>
+    <!-- System tray -->
+    <StackPanel x:Name="TrayPane" Tag="tray">
+     <TextBlock Text="{local:Tr 'Tray Icon', 托盘图标}" Style="{StaticResource Group}"/>
+     <CheckBox Content="{local:Tr 'Show the AUV icon in the system tray', 在系统托盘中显示 AUV 图标}" IsChecked="{Binding Desktop.ShowTrayIcon, Mode=TwoWay}" Margin="0,4" AutomationProperties.AutomationId="auv.settings.hide-tray"/>
+     <TextBlock Text="{Binding Desktop.TrayStatus}" Style="{StaticResource Caption}" Margin="0,4" AutomationProperties.AutomationId="auv.settings.tray-status"/>
+     <TextBlock Text="{local:Tr 'Windows decides whether the icon sits beside the clock or in the hidden icons menu. Drag it out of that menu to keep it visible.', 图标显示在时钟旁还是隐藏图标菜单中由 Windows 决定。把它从该菜单中拖出即可一直显示。}" Style="{StaticResource Caption}" Margin="0,4,0,8"/>
+     <Button Content="{local:Tr 'Windows taskbar settings', Windows 任务栏设置}" Command="{Binding Desktop.TaskbarSettingsCommand}" HorizontalAlignment="Left" Margin="0,0,0,14" AutomationProperties.AutomationId="auv.settings.taskbar"/>
+     <TextBlock Text="{local:Tr 'Agent shown in the tray tooltip', 托盘提示中显示的智能体}" Style="{StaticResource Group}"/>
+     <StackPanel x:Name="TrayAgentChoices" AutomationProperties.AutomationId="auv.settings.tray-agent"/>
+     <TextBlock Text="{Binding Desktop.TrayAgentDescription}" Style="{StaticResource Caption}" Margin="0,6,0,4"/>
+     <TextBlock Text="{local:Tr 'The Windows tray shows the AUV icon, not a number. Hover it to see this agent’s remaining allowance. The tray panel lists agents in your order and shows reset times.', Windows 托盘显示的是 AUV 图标而不是数字。把鼠标悬停在图标上可以看到该智能体的剩余额度。托盘面板按你的顺序列出智能体，并显示重置时间。}" Style="{StaticResource Caption}"/>
+    </StackPanel>
+    <!-- Desktop Wizard: controls and wording kept; the Wizard's own appearance is unchanged. -->
+    <StackPanel x:Name="DesktopPane" Tag="desktop">
+     <TextBlock Text="{local:Tr Display, 显示}" Style="{StaticResource Group}"/>
+     <CheckBox Content="{local:Tr 'Enable Desktop Wizard', 启用桌面浮窗}" IsChecked="{Binding Desktop.Enabled, Mode=TwoWay}" Margin="0,5"/>
+     <CheckBox Content="{local:Tr 'Always on top', 始终置顶}" IsChecked="{Binding Desktop.AlwaysOnTop, Mode=TwoWay}" IsEnabled="{Binding Desktop.Enabled}" Margin="0,5"/>
+     <TextBlock Text="{local:Tr Content, 内容}" Style="{StaticResource Group}" Margin="0,12,0,8"/>
+     <StackPanel Orientation="Horizontal" Margin="0,0,0,6"><TextBlock Text="{local:Tr Density, 密度}" VerticalAlignment="Center" Margin="0,0,10,0"/><ComboBox ItemsSource="{Binding Desktop.Densities}" SelectedItem="{Binding Desktop.Density, Mode=TwoWay}" MinWidth="180" AutomationProperties.Name="Wizard density"><ComboBox.ItemTemplate><DataTemplate><TextBlock><TextBlock.Text><MultiBinding Converter="{x:Static local:DensityLabelConverter.Instance}"><Binding/><Binding Path="Language" Source="{x:Static local:Loc.Instance}"/></MultiBinding></TextBlock.Text></TextBlock></DataTemplate></ComboBox.ItemTemplate></ComboBox></StackPanel>
+     <CheckBox Content="{local:Tr 'Show connection indicator', 显示连接状态指示器}" IsChecked="{Binding Desktop.ShowStatus, Mode=TwoWay}" Margin="0,5"/>
+     <CheckBox Content="{local:Tr 'Show usage fill', 显示剩余用量填充}" IsChecked="{Binding Desktop.ShowFill, Mode=TwoWay}" Margin="0,5"/>
+     <TextBlock Text="{local:Tr 'The indicator and fill also apply to the main window list and the tray panel.', 指示器和填充同样用于主窗口列表和托盘面板。}" Style="{StaticResource Caption}" Margin="0,2,0,12"/>
+     <TextBlock Text="{local:Tr Position, 位置}" Style="{StaticResource Group}"/>
+     <WrapPanel Margin="0,0,0,4"><Button Content="{Binding Desktop.WidgetButton}" Command="{Binding Desktop.ToggleWidgetCommand}"/><Button Content="{local:Tr 'Move to lower right', 移到右下角}" Command="{Binding Desktop.DockWidgetCommand}" Margin="8,0,0,0"/></WrapPanel>
+     <TextBlock Text="{local:Tr 'Drag to move; right-click for options; double-click opens AUV. Only current quotas appear.', 拖动可移动；右键查看选项；双击打开 AUV。只显示当前的额度。}" Style="{StaticResource Caption}" Margin="0,8,0,0"/>
+    </StackPanel>
+    <!-- Privacy & Data -->
+    <StackPanel x:Name="PrivacyPane" Tag="privacy">
+     <TextBlock Text="{local:Tr 'What AUV Keeps', AUV 保留的内容}" Style="{StaticResource Group}"/>
+     <TextBlock Text="{local:Tr 'Usage data: only current, allowlisted usage figures, kept in memory.', 用量数据：只在内存中保留当前的、允许范围内的用量数据。}" Margin="0,0,0,6"/>
+     <TextBlock Text="{local:Tr 'Credentials: passwords, tokens, cookies and conversations are never kept by AUV.', 凭据：AUV 从不保留密码、令牌、Cookie 或对话。}" Margin="0,0,0,6"/>
+     <TextBlock Text="{local:Tr 'Old values: readings that are out of date are hidden, never shown as current.', 旧数据：过期的读数会被隐藏，不会显示为当前读数。}" Margin="0,0,0,6"/>
+     <TextBlock Text="{local:Tr 'Local Cost Estimate (off unless you turn it on in Codex settings): reads only token counters and model names from local Codex session logs; prompts, responses and file names are not read.', 本地费用估算（除非你在 Codex 设置中开启，否则关闭）：只读取本地 Codex 会话日志中的令牌计数和模型名称，不读取提示、回复或文件名。}" Margin="0,0,0,6"/>
+     <TextBlock Text="{local:Tr 'WorkBuddy: its sign-in lives in AUV’s own browser profile; Disconnect clears it.', WorkBuddy：其登录状态保存在 AUV 自己的浏览器配置中；断开连接会清除它。}" Margin="0,0,0,12"/>
+     <TextBlock Text="{local:Tr 'Preferences', 偏好设置}" Style="{StaticResource Group}"/>
+     <TextBlock x:Name="PreferencePath" Style="{StaticResource Caption}" Margin="0,0,0,8"/>
+     <Button Content="{local:Tr 'Open preferences folder', 打开偏好设置文件夹}" Click="OpenPreferences_Click" HorizontalAlignment="Left"/>
+    </StackPanel>
+    <!-- One agent's own settings, opened from its page -->
+    <StackPanel x:Name="ProviderPanel" Visibility="Collapsed">
+     <TextBlock x:Name="ConnectionBody" Style="{StaticResource Muted}" Margin="0,0,0,12" AutomationProperties.AutomationId="auv.agent.status"/>
+     <StackPanel x:Name="CodexPanel" Visibility="Collapsed">
+      <TextBlock Text="{local:Tr Monitoring, 监控}" Style="{StaticResource Group}"/>
+      <TextBlock Text="{local:Tr 'Uses your installed Codex client and its ChatGPT sign-in, read-only.', 使用已安装的 Codex 客户端及其 ChatGPT 登录，只读。}" Style="{StaticResource Muted}"/>
+      <CheckBox Content="{local:Tr 'Monitoring enabled', 启用监控}" IsChecked="{Binding Providers.CodexEnabled, Mode=TwoWay}" Margin="0,10" AutomationProperties.AutomationId="auv.codex.enabled"/>
+      <Border Style="{StaticResource Card}" Margin="0,0,0,14"><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+       <StackPanel><TextBlock Text="{local:Tr ThreadOS, ThreadOS（线程工）}" FontWeight="SemiBold"/><TextBlock Text="{local:Tr 'Choose models and thinking levels for your coding team.', 为开发团队选择模型与思考档位。}" Style="{StaticResource Caption}" Margin="0,3,0,0"/></StackPanel>
+       <Button Grid.Column="1" Content="{local:Tr Open, 打开}" Click="OpenThreadOS_Click" VerticalAlignment="Center" AutomationProperties.AutomationId="auv.agent.settings.threados"/>
+      </Grid></Border>
+      <TextBlock Text="{local:Tr 'Codex executable · leave blank to detect', Codex 程序 · 留空则自动检测}"/><TextBox Text="{Binding Providers.CodexExecutable, UpdateSourceTrigger=LostFocus}" Margin="0,6" AutomationProperties.Name="Codex executable path"/>
+      <TextBlock Text="{Binding Providers.ResolvedCodex}" Style="{StaticResource Caption}"/>
+      <WrapPanel Margin="0,10"><Button Content="{local:Tr 'Choose codex.exe', 选择 codex.exe}" Click="ChooseCodex_Click"/><Button Content="{local:Tr 'Read Codex now', 立即读取 Codex}" Click="ReadCodex_Click" Margin="8,0,0,0"/></WrapPanel>
+      <TextBlock Text="{local:Tr 'Turning monitoring off keeps you signed in to Codex.', 关闭监控不会让你退出 Codex。}" Style="{StaticResource Caption}" Margin="0,0,0,12"/>
+      <TextBlock Text="{local:Tr 'Local Cost Estimate', 本地费用估算}" Style="{StaticResource Group}"/>
+      <CheckBox Content="{local:Tr 'Show Local Cost Estimate', 显示本地费用估算}" IsChecked="{Binding Providers.ShowCostEstimate, Mode=TwoWay}" Margin="0,4" AutomationProperties.AutomationId="auv.codex.cost"/>
+      <TextBlock Text="{local:Tr 'Off by default. An API-equivalent figure from token counters in local Codex session logs and public list prices; not a bill.', 默认关闭。根据本地 Codex 会话日志中的令牌计数和公开价目表折算的 API 等效金额，并非账单。}" Style="{StaticResource Caption}" Margin="0,0,0,12"/>
+     </StackPanel>
+     <StackPanel x:Name="WorkBuddyPanel" Visibility="Collapsed">
+      <TextBlock Text="{local:Tr 'Sign in to the official Plan and Usage page, then Sync Credits.', 在官方套餐与用量页登录，然后同步 Credits。}" Style="{StaticResource Muted}"/>
+      <WrapPanel Margin="0,16"><Button Content="{local:Tr Connect, 连接}" Click="ConnectWorkBuddy_Click" ToolTip="{local:Tr 'Opens the official website in AUV’s separate browser session.', 在 AUV 独立的浏览器会话中打开官方网站。}"/><Button Content="{local:Tr Disconnect, 断开连接}" Click="DisconnectWorkBuddy_Click" Margin="8,0,0,0" ToolTip="{local:Tr 'Clears only AUV’s WorkBuddy browser session.', 只清除 AUV 的 WorkBuddy 浏览器会话。}"/></WrapPanel>
+      <TextBlock Text="{local:Tr 'Experimental page sync · incomplete data stays hidden. Requires Microsoft Edge WebView2 Runtime.', 试验性页面同步 · 不完整的数据不会显示。需要 Microsoft Edge WebView2 Runtime。}" Style="{StaticResource Caption}"/>
+     </StackPanel>
+     <TextBlock x:Name="OtherProviderNote" Style="{StaticResource Muted}" Visibility="Collapsed"/>
+    </StackPanel>
+    <TextBlock x:Name="SaveStatus" Style="{StaticResource Caption}" Margin="0,12,0,0" AutomationProperties.LiveSetting="Polite"/>
    </StackPanel>
-  </StackPanel>
-  <StackPanel x:Name="ProviderPanel" Visibility="Collapsed"><TextBlock x:Name="ConnectionHeading" FontWeight="SemiBold" FontSize="18"/><TextBlock x:Name="ConnectionBody" Style="{StaticResource Muted}" Margin="0,8,0,12"/>
-   <StackPanel x:Name="CodexPanel" Visibility="Collapsed">
-    <TextBlock Text="Uses your installed Codex client and its ChatGPT sign-in." Style="{StaticResource Muted}"/>
-    <CheckBox Content="Read Codex on launch and refresh every minute" IsChecked="{Binding CodexEnabled, Mode=TwoWay}" Margin="0,12"/>
-    <TextBlock Text="Codex executable · leave blank to detect"/><TextBox Text="{Binding CodexExecutable, UpdateSourceTrigger=LostFocus}" Margin="0,6" AutomationProperties.Name="Codex executable path"/>
-    <TextBlock Text="{Binding ResolvedCodex}" Style="{StaticResource Muted}" FontSize="12"/>
-    <WrapPanel Margin="0,12"><Button Content="Choose codex.exe" Click="ChooseCodex_Click"/><Button Content="Read / refresh Codex" Click="ReadCodex_Click" Margin="8,0,0,0"/></WrapPanel>
-    <TextBlock Text="Disabling reading keeps you signed in to Codex." Style="{StaticResource Muted}" FontSize="12"/>
-   </StackPanel>
-   <StackPanel x:Name="WorkBuddyPanel" Visibility="Collapsed">
-    <TextBlock Text="Sign in to the official Plan and Usage page, then Sync Credits." Style="{StaticResource Muted}"/>
-    <WrapPanel Margin="0,16"><Button Content="Connect" Click="ConnectWorkBuddy_Click" ToolTip="Opens the official website in AUV's separate browser session."/><Button Content="Disconnect" Click="DisconnectWorkBuddy_Click" Margin="8,0,0,0" ToolTip="Clears only AUV's WorkBuddy browser session."/></WrapPanel>
-    <TextBlock Text="Experimental page sync · incomplete data stays hidden." Style="{StaticResource Muted}" FontSize="12"/>
-   </StackPanel>
-   <TextBlock x:Name="OtherProviderNote" Text="This provider's Windows connection is not implemented yet." Style="{StaticResource Muted}" Visibility="Collapsed"/>
-  </StackPanel>
-  <TextBlock x:Name="SaveStatus" Style="{StaticResource Muted}" FontSize="12" Margin="0,12,0,0" AutomationProperties.LiveSetting="Polite"/>
- </StackPanel></ScrollViewer><Button Grid.Row="1" Content="_Done" HorizontalAlignment="Right" MinWidth="90" Margin="0,16,0,0" Click="Done_Click" IsDefault="True" IsCancel="True"/></Grid>
+  </ScrollViewer>
+  <Button Grid.Row="1" Grid.ColumnSpan="2" Content="{local:Tr _Done, 完成(_D)}" HorizontalAlignment="Right" MinWidth="90" Margin="0,16,0,0" Click="Done_Click" IsDefault="True" IsCancel="True"/>
+ </Grid></Grid>
 </Window>

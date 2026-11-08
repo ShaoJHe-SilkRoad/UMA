@@ -44,11 +44,10 @@ public partial class MainWindow : Window
         Icon = AppBrandIcon.Create(!Host.IsDark);
         InputBindings.Add(new KeyBinding(new RelayCommand(() => Host.Desktop.ToggleWidgetCommand.Execute(null)), new KeyGesture(Key.W, ModifierKeys.Control | ModifierKeys.Shift)));
         InputBindings.Add(new KeyBinding(new RelayCommand(() => Host.Desktop.ToggleFlyout()), new KeyGesture(Key.U, ModifierKeys.Control | ModifierKeys.Shift)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(() => new SettingsWindow(this, null).ShowDialog()), new KeyGesture(Key.OemComma, ModifierKeys.Control)));
+        InputBindings.Add(new KeyBinding(new RelayCommand(() => OpenSettings(null)), new KeyGesture(Key.OemComma, ModifierKeys.Control)));
         InputBindings.Add(new KeyBinding(new RelayCommand(() => Host.Desktop.Quit()), new KeyGesture(Key.Q, ModifierKeys.Control | ModifierKeys.Shift)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(async () => await Host.Providers.RefreshSelectedAsync()), new KeyGesture(Key.F5)));
+        InputBindings.Add(new KeyBinding(new RelayCommand(() => _ = RefreshAllSafely()), new KeyGesture(Key.F5)));
         FontSize = Host.Settings.LargerText ? 17.5 : 14;
-        if (model.Demo) Title += " [DEMO — sample data]";
         var bounds = Host.Settings.Geometry; bounds.Normalize();
         var work = SystemParameters.WorkArea;
         Width = Math.Min(bounds.Width, work.Width); Height = Math.Min(bounds.Height, work.Height);
@@ -71,8 +70,8 @@ public partial class MainWindow : Window
         Closing += (_, _) => Persist();
         Model.CopyText = text =>
         {
-            try { Clipboard.SetText(text); Model.InstructionStatus = "Instruction copied. Paste it to your receiving Leader; no setting has been applied."; }
-            catch (ExternalException) { Model.InstructionStatus = "Clipboard is busy. Select the preview and copy manually, or try again."; }
+            try { Clipboard.SetText(text); Model.InstructionStatus = Loc.T("Instruction copied. Paste it to your receiving Leader; no setting has been applied.", "指令已复制。请粘贴给接收端 Leader；没有应用任何设置。"); }
+            catch (ExternalException) { Model.InstructionStatus = Loc.T("Clipboard is busy. Select the preview and copy manually, or try again.", "剪贴板正忙。请选中预览手动复制，或稍后重试。"); }
         };
     }
     public bool Persist()
@@ -86,7 +85,50 @@ public partial class MainWindow : Window
         if (!success) Model.Status = Host.Store.LastError!;
         return success;
     }
-    private void GlobalSettings_Click(object sender, RoutedEventArgs e) => new SettingsWindow(this, null).ShowDialog();
+    private void GlobalSettings_Click(object sender, RoutedEventArgs e) => OpenSettings(null);
+    /// <summary>Global settings (null) or one agent's own settings, opened from its page.</summary>
+    internal void OpenSettings(string? agentId) => new SettingsWindow(this, agentId).ShowDialog();
+    private async Task RefreshAllSafely()
+    {
+        try { await Host.Providers.RefreshAllAsync(); }
+        catch (Exception e) when (e is not OutOfMemoryException) { Model.Status = Loc.T("Refresh did not complete. Try again.", "刷新未完成，请重试。"); }
+    }
+    private void RefreshAll_Click(object sender, RoutedEventArgs e) => _ = RefreshAllSafely();
+    private void BackToCodex_Click(object sender, RoutedEventArgs e)
+    {
+        Model.Shell.SelectedAgent = Model.Shell.Agents.First(a => a.Id == "codex"); Model.Shell.Section = "AUV"; Persist();
+    }
+    /// <summary>Opens ThreadOS from Codex settings (0.18.4: it no longer has a top-level tab).</summary>
+    internal void OpenThreadOS() { Model.Shell.Section = "ThreadOS"; Persist(); }
+    // Agent rail: drag one row onto another to move it there; Alt+Up/Down for keyboard users.
+    private Point? dragStart; private AgentPresentation? dragAgent;
+    private static T? Ancestor<T>(DependencyObject? node) where T : DependencyObject { while (node != null && node is not T) node = VisualTreeHelper.GetParent(node); return node as T; }
+    private void Rail_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    { dragStart = e.GetPosition(AgentRail); dragAgent = (Ancestor<ListBoxItem>(e.OriginalSource as DependencyObject))?.DataContext as AgentPresentation; }
+    private void Rail_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed || dragStart is not Point start || dragAgent == null) return;
+        var delta = e.GetPosition(AgentRail) - start;
+        if (Math.Abs(delta.Y) < SystemParameters.MinimumVerticalDragDistance && Math.Abs(delta.X) < SystemParameters.MinimumHorizontalDragDistance) return;
+        var agent = dragAgent; dragStart = null; dragAgent = null;
+        DragDrop.DoDragDrop(AgentRail, new DataObject(typeof(AgentPresentation), agent), DragDropEffects.Move);
+    }
+    private void Rail_DragOver(object sender, DragEventArgs e)
+    { e.Effects = e.Data.GetDataPresent(typeof(AgentPresentation)) ? DragDropEffects.Move : DragDropEffects.None; e.Handled = true; }
+    private void Rail_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(typeof(AgentPresentation)) is not AgentPresentation moved) return;
+        var target = Ancestor<ListBoxItem>(e.OriginalSource as DependencyObject)?.DataContext as AgentPresentation;
+        var index = target == null ? Model.Shell.Agents.Length - 1 : Array.IndexOf(Model.Shell.Agents, target);
+        Host.Desktop.MoveAgent(moved.Id, index); e.Handled = true;
+    }
+    private void Rail_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (Keyboard.Modifiers != ModifierKeys.Alt || e.SystemKey is not (Key.Up or Key.Down)) return;
+        var agent = Model.Shell.SelectedAgent; var index = Array.IndexOf(Model.Shell.Agents, agent);
+        Host.Desktop.MoveAgent(agent.Id, index + (e.SystemKey == Key.Up ? -1 : 1));
+        (AgentRail.ItemContainerGenerator.ContainerFromItem(Model.Shell.SelectedAgent) as ListBoxItem)?.Focus(); e.Handled = true;
+    }
     private void Minimize_Click(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);
     private void MaximizeRestore_Click(object sender, RoutedEventArgs e)
     {
@@ -94,9 +136,8 @@ public partial class MainWindow : Window
         else SystemCommands.MaximizeWindow(this);
     }
     private void Close_Click(object sender, RoutedEventArgs e) => SystemCommands.CloseWindow(this);
-    private void AgentSettings_Click(object sender, RoutedEventArgs e) => new SettingsWindow(this, Model.Shell.SelectedAgent.Name).ShowDialog();
+    private void AgentSettings_Click(object sender, RoutedEventArgs e) => OpenSettings(Model.Shell.SelectedAgent.Id);
     private void UsagePopup_Click(object sender, RoutedEventArgs e) => Host.Desktop.ToggleFlyout();
-    private async void RefreshUsage_Click(object sender, RoutedEventArgs e) => await Host.Providers.RefreshSelectedAsync();
     private void Widget_Click(object sender, RoutedEventArgs e) => Host.Desktop.ToggleWidgetCommand.Execute(null);
     private void HideToTray_Click(object sender, RoutedEventArgs e) => Host.Desktop.HideMain();
     private void Exit_Click(object sender, RoutedEventArgs e) => Host.Desktop.Quit();

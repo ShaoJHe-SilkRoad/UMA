@@ -1,0 +1,17 @@
+{
+  "Version": 1,
+  "Theme": "Light",
+  "LargerText": true,
+  "SelectedAgent": "workbuddy",
+  "ActiveSection": "ThreadOS",
+  "CatalogRevision": "sol-luna-ultra-20261010.1",
+  "Geometry": { "Width": 1100, "Height": 780, "Left": 120, "Top": 80.5, "Maximized": false },
+  "Desktop": { "Enabled": true, "WidgetVisible": true, "AlwaysOnTop": false, "CloseToTray": false, "HideTrayIcon": true, "Left": 1500, "Top": 900, "Density": 2, "ShowStatus": false, "ShowFill": true },
+  "Providers": { "CodexEnabled": false, "CodexExecutable": null, "WorkBuddyConsent": true },
+  "Roles": {
+    "leader": { "Model": "gpt-6.1-sol", "Effort": "ultra" },
+    "coderCluster": { "Model": "gpt-6-luna", "Effort": "high" },
+    "reviewerCluster": { "Model": "gpt-6-luna", "Effort": "medium" },
+    "qa": { "Model": "gpt-6.1-sol", "Effort": "high" }
+  }
+}

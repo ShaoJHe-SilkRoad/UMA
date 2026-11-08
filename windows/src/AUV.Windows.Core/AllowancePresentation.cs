@@ -20,6 +20,11 @@ public sealed record AllowanceCard
     public string Freshness { get; init; }
     public ConnectionState Connection { get; init; }
     public bool IsStale { get; init; }
+    /// <summary>Structured window length, so compact labels do not depend on display language.</summary>
+    public long? WindowMinutes { get; init; }
+    public DateTimeOffset? ResetsAt { get; init; }
+    /// <summary>When the provider reading was verified. Used for the fresh-only display rule.</summary>
+    public DateTimeOffset? ObservedAt { get; init; }
     public AllowanceKind Kind { get; }
     public double? Percent { get; }
     public decimal? Credits { get; }
@@ -34,10 +39,13 @@ public sealed record AllowanceCard
         _ => "—"
     };
     public string Detail => Plan is { Length: > 0 } ? $"{Plan} · {Window}" : Window;
+    /// <summary>Tray panel line: plan, window and the reset time when it is known and still ahead.</summary>
+    public string DetailWithReset => ResetText.Format(ResetsAt, DateTimeOffset.UtcNow) is { } reset ? $"{Detail} · {reset}" : Detail;
     public string WizardWindow
     {
         get
         {
+            if (WindowMinutes is long minutes && minutes > 0) return new QuotaWindow("", minutes, 0, null).Compact;
             var window = Regex.Replace(Window, @"\s*·\s*resets\b.*$", "", RegexOptions.IgnoreCase).Trim();
             window = Regex.Replace(window, @"\b(\d+)\s*[- ]?\s*(?:days?|d)\b(?:\s+(?:window|limit))?", "$1d", RegexOptions.IgnoreCase);
             window = Regex.Replace(window, @"\b(\d+)\s*[- ]?\s*(?:hours?|hrs?|h)\b(?:\s+(?:window|limit))?", "$1h", RegexOptions.IgnoreCase);
@@ -46,7 +54,9 @@ public sealed record AllowanceCard
     }
     public string MinimalistValue => Id == "workbuddy" && Kind == AllowanceKind.Credits ? CompactCredits.Format(Credits!.Value) : Value;
     public QuotaSeverity Severity => LowRemainingPolicy.Resolve(Id, Plan, Percent, Credits, Kind);
-    public string Description => $"{Name}; {Plan ?? "plan unknown"}; {Value} remaining; {Window}; {Source}; {Freshness}; {Connection}; {Severity}{(IsStale ? "; retained stale snapshot" : "")}";
+    public string Description => UiText.T(
+        $"{Name}; {Plan ?? "plan unknown"}; {Value} remaining; {Window}; {Source}; {Freshness}; {Connection}; {Severity}{(IsStale ? "; retained stale snapshot" : "")}",
+        $"{Name}；{Plan ?? "方案未知"}；剩余 {Value}；{Window}；{Source}；{Freshness}；{Connection}；{Severity}{(IsStale ? "；已过期的保留读数" : "")}");
     public static string FormatPercent(double value) => value.ToString("0.#", CultureInfo.InvariantCulture) + "%";
     public AllowanceCard(string id, string name, string mark, string? plan, AllowanceKind kind,
         double? percent, decimal? credits, string window, string source, string freshness,
@@ -123,14 +133,14 @@ public sealed class SectoriumState : Observable
     public bool Demo { get; }
     private bool volumeSelected;
     public bool VolumeSelected { get => volumeSelected; set { if (Set(ref volumeSelected, value)) { Changed(nameof(DetailHeading)); Changed(nameof(SelectedIdentity)); } } }
-    public string DetailHeading => VolumeSelected ? "Selected development volume" : "Selected physical drive";
+    public string DetailHeading => VolumeSelected ? UiText.T("Selected development volume", "所选开发卷") : UiText.T("Selected physical drive", "所选物理磁盘");
     public string SelectedIdentity => VolumeSelected ? Volume : Identity;
     private bool error;
     public bool FixtureError { get => error; set { if (Demo && Set(ref error, value)) { Changed(nameof(Feedback)); Changed(nameof(Installation)); } } }
-    public string PhysicalDrive => Demo ? "DEMO · External SSD" : "Drive discovery unavailable";
-    public string Identity => Demo ? "Fixture SSD · 1 TB · synthetic identity" : "Unknown · no inventory read";
-    public string Volume => Demo ? "↳ DEMO · Development.vhdx (illustration)" : "None associated";
-    public string Installation => Demo ? FixtureError ? "Fixture error · configuration unavailable" : "Fixture only · unmounted" : "Backend unavailable";
-    public string Feedback => Demo ? FixtureError ? "DEMO error: synthetic volume configuration could not be read. No operation was attempted." : "DEMO populated layout. No real drive or image is represented." : "Windows storage backend is not implemented. No operation was attempted.";
+    public string PhysicalDrive => Demo ? "DEMO · External SSD" : UiText.T("Drive discovery unavailable", "无法发现磁盘");
+    public string Identity => Demo ? "Fixture SSD · 1 TB · synthetic identity" : UiText.T("Unknown · no inventory read", "未知 · 未读取磁盘清单");
+    public string Volume => Demo ? "↳ DEMO · Development.vhdx (illustration)" : UiText.T("None associated", "无关联卷");
+    public string Installation => Demo ? FixtureError ? "Fixture error · configuration unavailable" : "Fixture only · unmounted" : UiText.T("Backend unavailable", "后端不可用");
+    public string Feedback => Demo ? FixtureError ? "DEMO error: synthetic volume configuration could not be read. No operation was attempted." : "DEMO populated layout. No real drive or image is represented." : UiText.T("Windows storage backend is not implemented. No operation was attempted.", "Windows 存储后端尚未实现，未执行任何操作。");
     public SectoriumState(bool demo) { Demo = demo; }
 }

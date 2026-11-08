@@ -34,6 +34,9 @@ public sealed class AllowanceRow : Control
     public WizardDensity Density { get; set; } = WizardDensity.Regular;
     public static readonly DependencyProperty ShowStatusProperty = DependencyProperty.Register(nameof(ShowStatus), typeof(bool), typeof(AllowanceRow), new FrameworkPropertyMetadata(true, FrameworkPropertyMetadataOptions.AffectsRender));
     public static readonly DependencyProperty ShowFillProperty = DependencyProperty.Register(nameof(ShowFill), typeof(bool), typeof(AllowanceRow), new FrameworkPropertyMetadata(true, FrameworkPropertyMetadataOptions.AffectsRender));
+    public static readonly DependencyProperty ShowResetProperty = DependencyProperty.Register(nameof(ShowReset), typeof(bool), typeof(AllowanceRow), new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.AffectsRender));
+    /// <summary>Tray panel rows show the reset time; the main rail does not (Mac 0.17.3).</summary>
+    public bool ShowReset { get => (bool)GetValue(ShowResetProperty); set => SetValue(ShowResetProperty, value); }
     public bool ShowStatus { get => (bool)GetValue(ShowStatusProperty); set => SetValue(ShowStatusProperty, value); }
     public bool ShowFill { get => (bool)GetValue(ShowFillProperty); set => SetValue(ShowFillProperty, value); }
     public double TextScale { get; set; } = 1;
@@ -108,7 +111,7 @@ public sealed class AllowanceRow : Control
             var name = WizardTypography.Text(card.Name, 13 * TextScale, Resource("TextBrush"), dpi, FontWeights.SemiBold);
             name.MaxTextWidth = Math.Max(20, ActualWidth - textX - (native ? 10 : value.Width + 16)); name.MaxTextHeight = name.Height; name.Trimming = TextTrimming.CharacterEllipsis;
             dc.DrawText(name, new Point(textX, 9 * TextScale));
-            var detail = WizardTypography.Text(card.Detail, 11 * TextScale, Resource("MutedBrush"), dpi);
+            var detail = WizardTypography.Text(ShowReset ? card.DetailWithReset : card.Detail, 11 * TextScale, Resource("MutedBrush"), dpi);
             detail.MaxTextWidth = Math.Max(20, ActualWidth - textX - 10); detail.MaxTextHeight = detail.Height; detail.Trimming = TextTrimming.CharacterEllipsis;
             if (!native) dc.DrawText(detail, new Point(textX, 31 * TextScale));
             dc.DrawText(value, new Point(ActualWidth - 10 - value.WidthIncludingTrailingWhitespace, native ? 30 * TextScale : 8 * TextScale));

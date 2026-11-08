@@ -29,9 +29,23 @@ public sealed class PreviewSettings
     public DesktopPreferences Desktop { get; set; } = new();
     public ProviderPreferences Providers { get; set; } = new();
     public Dictionary<string, RoleSelection> Roles { get; set; } = [];
+    // Added in 0.18.4. Absent from 0.16.x files, so these initializers are the upgrade defaults.
+    public string Language { get; set; } = "System";
+    public RefreshPreferences Refresh { get; set; } = new();
+    public List<string> AgentOrder { get; set; } = [];
+    public string TrayAgent { get; set; } = "";
+    public bool ShowCostEstimate { get; set; }
+    public double? SettingsWidth { get; set; }
+    public double? SettingsHeight { get; set; }
     public void Normalize(ModelCatalog catalog)
     {
         if (Theme is not ("Dark" or "Light" or "System")) Theme = "Dark";
+        if (Language is not ("System" or "en" or "zh")) Language = "System";
+        Refresh ??= new(); Refresh.Normalize();
+        AgentOrder = AgentOrdering.Normalize(AgentOrder);
+        if (!AgentCatalog.IsKnown(TrayAgent)) TrayAgent = "";
+        if (SettingsWidth is double w && (!double.IsFinite(w) || w < 560 || w > 10000)) SettingsWidth = null;
+        if (SettingsHeight is double h && (!double.IsFinite(h) || h < 420 || h > 10000)) SettingsHeight = null;
         if (ActiveSection is not ("AUV" or "ThreadOS" or "Sectorium")) ActiveSection = "AUV";
         if (!new[] { "codex", "claude", "workbuddy", "antigravity" }.Contains(SelectedAgent)) SelectedAgent = "codex";
         Geometry ??= new(); Geometry.Normalize(); Roles ??= [];
@@ -53,11 +67,13 @@ public sealed class SettingsStore(string path)
         LastError = null;
         try
         {
-            if (!File.Exists(path)) return new();
+            if (!File.Exists(path)) { var fresh = new PreviewSettings(); fresh.Normalize(catalog); return fresh; }
             if (new FileInfo(path).Length > 1024 * 1024) throw new InvalidDataException("Settings file is too large.");
             var settings = JsonSerializer.Deserialize<PreviewSettings>(File.ReadAllText(path)) ?? throw new InvalidDataException("Empty settings.");
             if (settings.Version != 1) throw new InvalidDataException("Unsupported settings version.");
             settings.Normalize(catalog); return settings;
+            // Unknown future fields are ignored by System.Text.Json, and 0.16.x ignores the 0.18.4 fields,
+            // so the shared preference file stays readable in both directions.
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
         { LastError = "Settings could not be loaded. Defaults are in use. " + e.Message; return new(); }

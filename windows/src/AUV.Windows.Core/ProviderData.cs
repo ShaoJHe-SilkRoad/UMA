@@ -17,10 +17,10 @@ public static class ProviderData
     {
         var (name, mark) = id switch { "codex" => ("Codex", "C"), "claude" => ("Claude", "✳"), "workbuddy" => ("WorkBuddy", "W"), "antigravity" => ("Antigravity", "A"), _ => throw new ArgumentOutOfRangeException(nameof(id)) };
         return new(id, name, mark, UsageSnapshot.Unknown, false,
-            new(id, name, mark, null, AllowanceKind.Unavailable, null, null, "Quota unavailable", message,
-                "No current verified data", state), "Secondary allowance", "Unavailable");
+            new(id, name, mark, null, AllowanceKind.Unavailable, null, null, UiText.T("Quota unavailable", "额度不可用"), message,
+                UiText.T("No current verified data", "没有当前的已验证数据"), state), UiText.T("Secondary allowance", "另一额度"), UiText.T("Unavailable", "不可用"));
     }
-    public static string Observed(DateTimeOffset time) => "Verified " + time.ToLocalTime().ToString("MMM dd HH:mm:ss zzz", CultureInfo.InvariantCulture);
+    public static string Observed(DateTimeOffset time) => UiText.T("Verified ", "已验证 ") + time.ToLocalTime().ToString("MMM dd HH:mm:ss zzz", CultureInfo.InvariantCulture);
     internal static bool Object(JsonElement e) => e.ValueKind == JsonValueKind.Object;
     internal static JsonElement Get(JsonElement e, string key) => Object(e) && e.TryGetProperty(key, out var v) ? v : default;
     internal static string? Text(JsonElement e) => e.ValueKind == JsonValueKind.String ? e.GetString() : null;
@@ -29,32 +29,34 @@ public static class ProviderData
 
 public static class CodexUsageDecoder
 {
-    private sealed record Window(double Remaining, long Minutes, long? Reset);
-    private static Window? ReadWindow(JsonElement value)
+    private static QuotaWindow? ReadWindow(JsonElement value, string id)
     {
-        var used = ProviderData.Get(value, "usedPercent"); var minutes = ProviderData.Integer(ProviderData.Get(value, "windowDurationMins"));
+        var used = ProviderData.Get(value, "usedPercent");
+        // 0.17.2 compatibility: newer clients name the length windowDurationMinutes; older ones windowDurationMins.
+        var minutes = ProviderData.Integer(ProviderData.Get(value, "windowDurationMinutes")) ?? ProviderData.Integer(ProviderData.Get(value, "windowDurationMins"));
         if (used.ValueKind != JsonValueKind.Number || !used.TryGetDouble(out var percent) || !double.IsFinite(percent) || percent < 0 || percent > 100 || minutes is null or 0) return null;
-        return new(100 - percent, minutes.Value, ProviderData.Integer(ProviderData.Get(value, "resetsAt")));
+        DateTimeOffset? reset = null;
+        if (ProviderData.Integer(ProviderData.Get(value, "resetsAt")) is long unix)
+            try { reset = DateTimeOffset.FromUnixTimeSeconds(unix); } catch (ArgumentOutOfRangeException) { }
+        return new(id, minutes.Value, 100 - percent, reset);
     }
-    private static string Label(Window? window)
-    {
-        if (window == null) return "Window unavailable";
-        var length = window.Minutes % 1440 == 0 ? $"{window.Minutes / 1440}-day window" : window.Minutes % 60 == 0 ? $"{window.Minutes / 60}-hour window" : $"{window.Minutes}-minute window";
-        try { return window.Reset is long unix ? length + " · resets " + DateTimeOffset.FromUnixTimeSeconds(unix).ToLocalTime().ToString("MMM dd HH:mm", CultureInfo.InvariantCulture) : length; }
-        catch (ArgumentOutOfRangeException) { return length; }
-    }
-    public static AgentPresentation Decode(JsonElement accountResult, JsonElement rateResult, JsonElement usageResult, DateTimeOffset now)
+    private static string Label(QuotaWindow? window) => window?.Label ?? UiText.T("Window unavailable", "窗口不可用");
+    public static AgentPresentation Decode(JsonElement accountResult, JsonElement rateResult, JsonElement usageResult, DateTimeOffset now) =>
+        Decode(accountResult, rateResult, usageResult, now, null);
+    /// <summary>Decodes one read. <paramref name="previous"/> is the in-memory selection from the prior read, if any.</summary>
+    public static AgentPresentation Decode(JsonElement accountResult, JsonElement rateResult, JsonElement usageResult, DateTimeOffset now, QuotaSelection? previous)
     {
         var account = ProviderData.Get(accountResult, "account");
-        if (ProviderData.Text(ProviderData.Get(account, "type")) != "chatgpt") return ProviderData.Unavailable("codex", "Sign in to Codex with ChatGPT to read plan allowances.", ConnectionState.Disconnected);
+        if (ProviderData.Text(ProviderData.Get(account, "type")) != "chatgpt") return ProviderData.Unavailable("codex", UiText.T("Sign in to Codex with ChatGPT to read plan allowances.", "请在 Codex 中用 ChatGPT 登录后再读取套餐额度。"), ConnectionState.Disconnected);
         var buckets = ProviderData.Get(rateResult, "rateLimitsByLimitId");
         // A populated multi-bucket response must select Codex explicitly; never borrow another product's bucket.
         var bucket = ProviderData.Object(buckets) && buckets.EnumerateObject().Any() ? ProviderData.Get(buckets, "codex") : ProviderData.Get(rateResult, "rateLimits");
         var bucketId = ProviderData.Text(ProviderData.Get(bucket, "limitId"));
         if (bucketId != null && bucketId != "codex") bucket = default;
-        var windows = new[] { ReadWindow(ProviderData.Get(bucket, "primary")), ReadWindow(ProviderData.Get(bucket, "secondary")) }.OfType<Window>().ToArray();
+        var windows = new[] { ReadWindow(ProviderData.Get(bucket, "primary"), "codex.primary"), ReadWindow(ProviderData.Get(bucket, "secondary"), "codex.secondary") }.OfType<QuotaWindow>().ToArray();
         var weekly = windows.FirstOrDefault(w => w.Minutes == 10080);
-        var primary = weekly ?? windows.FirstOrDefault();
+        var selectedId = QuotaWindowPolicy.Select(windows, previous, now);
+        var primary = windows.FirstOrDefault(w => w.Id == selectedId);
         var secondary = windows.FirstOrDefault(w => !ReferenceEquals(w, primary));
         var plan = ProviderData.Text(ProviderData.Get(bucket, "planType")) ?? ProviderData.Text(ProviderData.Get(account, "planType"));
         var kind = primary != null ? AllowanceKind.Percentage : AllowanceKind.Unavailable;
@@ -76,10 +78,12 @@ public static class CodexUsageDecoder
         var lifetime = ProviderData.Integer(ProviderData.Get(ProviderData.Get(usageResult, "summary"), "lifetimeTokens"));
         var usage = new UsageSnapshot(weekly?.Remaining, windows.FirstOrDefault(w => w.Minutes == 300)?.Remaining, weekTokens, lifetime, null,
             days.Select(d => new DayUsage(d.Key.ToString("MMM dd", CultureInfo.InvariantCulture), d.Value)).ToArray());
-        var source = "Codex app-server · account/rateLimits/read";
-        var card = new AllowanceCard("codex", "Codex", "C", plan, kind, primary?.Remaining, null, Label(primary), source, ProviderData.Observed(now), ConnectionState.Connected);
-        return new("codex", "Codex", "C", usage, false, card, "Secondary · " + Label(secondary),
-            secondary == null ? "Unknown" : UsageSnapshot.RemainingText(secondary.Remaining), "Codex account/usage/read · account tokens · service daily buckets");
+        var source = UiText.T("Codex app-server · official local account source", "Codex app-server · 官方本地账户来源");
+        var card = new AllowanceCard("codex", "Codex", "C", plan, kind, primary?.Remaining, null, Label(primary), source, ProviderData.Observed(now), ConnectionState.Connected)
+        { WindowMinutes = primary?.Minutes, ResetsAt = primary?.ResetsAt, ObservedAt = now };
+        return new("codex", "Codex", "C", usage, false, card, UiText.T("Other · ", "另一窗口 · ") + Label(secondary),
+            secondary == null ? UsageSnapshot.RemainingText(null) : UsageSnapshot.RemainingText(secondary.Remaining), UiText.T("Codex account/usage/read · account tokens · service daily buckets", "Codex account/usage/read · 账户令牌 · 服务端每日统计"))
+        { Selection = new(selectedId, windows), Windows = windows };
     }
 }
 
@@ -161,7 +165,8 @@ public static class WorkBuddyCreditsDecoder
         if (authoritative.ValueKind != JsonValueKind.Array || authoritative.GetArrayLength() > 1) throw new InvalidDataException("Ambiguous account balance.");
         if (authoritative.GetArrayLength() == 1 && Math.Abs(Credit(authoritative[0]) - sum) > .01m) throw new InvalidDataException("Account balance reconciliation failed.");
         return new("workbuddy", "WorkBuddy", "W", UsageSnapshot.Unknown, false,
-            new("workbuddy", "WorkBuddy", "W", null, AllowanceKind.Credits, null, sum, "Shared Buddy AI Credits", "WorkBuddy official Plan and Usage page · verified eligible pools: " + included,
-                ProviderData.Observed(now), ConnectionState.Connected), "Secondary allowance", "Unavailable");
+            new AllowanceCard("workbuddy", "WorkBuddy", "W", null, AllowanceKind.Credits, null, sum, UiText.T("Shared Buddy AI Credits", "共享 Buddy AI Credits"),
+                UiText.T("WorkBuddy official Plan and Usage page · verified eligible pools: ", "WorkBuddy 官方套餐与用量页 · 已核对的有效额度池：") + included,
+                ProviderData.Observed(now), ConnectionState.Connected) { ObservedAt = now }, UiText.T("Secondary allowance", "另一额度"), UiText.T("Unavailable", "不可用"));
     }
 }

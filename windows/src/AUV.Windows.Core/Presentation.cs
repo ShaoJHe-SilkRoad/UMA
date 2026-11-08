@@ -92,7 +92,8 @@ public sealed record UsageSnapshot(double? WeeklyRemaining, double? ShortRemaini
 {
     public static UsageSnapshot Unknown { get; } = new(null, null, null, null, null, []);
     public static double? ValidRemaining(double? value) => value is >= 0 and <= 100 && double.IsFinite(value.Value) ? value : null;
-    public static string RemainingText(double? value) => ValidRemaining(value) is double number ? $"{number:0.#}% remaining" : "Unknown";
+    public static string RemainingText(double? value) => ValidRemaining(value) is double number
+        ? UiText.T($"{number.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)}% remaining", $"剩余 {number.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)}%") : UiText.T("Unknown", "未知");
     public static string TokensText(long? value) => value is >= 0 ? value.Value.ToString("N0") : "—";
 }
 
@@ -107,6 +108,10 @@ public sealed class AgentPresentation
     public string SecondaryLabel { get; }
     public string SecondaryValue { get; }
     public string? TokenSource { get; }
+    /// <summary>All admitted quota windows and the selection made for this read (in memory only).</summary>
+    public QuotaSelection? Selection { get; init; }
+    public IReadOnlyList<QuotaWindow> Windows { get; init; } = [];
+    public bool HasSecondaryWindow => Windows.Count > 1 && Card.HasDisplayableQuota;
     public string Status => IsDemo ? "Development fixture" : Card.Connection.ToString();
     public string Remaining => UsageSnapshot.RemainingText(Usage.WeeklyRemaining);
     public bool HasUsage => UsageSnapshot.ValidRemaining(Usage.WeeklyRemaining) != null;
@@ -115,11 +120,16 @@ public sealed class AgentPresentation
         string? secondaryLabel = null, string? secondaryValue = null, string? tokenSource = null)
     {
         Id = id; Name = name; Monogram = monogram; Usage = usage; IsDemo = demo;
-        SecondaryLabel = secondaryLabel ?? "Secondary · 5-hour window"; SecondaryValue = secondaryValue ?? UsageSnapshot.RemainingText(usage.ShortRemaining); TokenSource = tokenSource;
-        Card = card ?? new(id, name, monogram, demo ? id == "codex" ? "Pro" : "Pro" : null,
+        SecondaryLabel = secondaryLabel ?? UiText.T("Other · 5-hour window", "另一窗口 · 5 小时窗口"); SecondaryValue = secondaryValue ?? UsageSnapshot.RemainingText(usage.ShortRemaining); TokenSource = tokenSource;
+        Card = card ?? new AllowanceCard(id, name, monogram, demo ? "Pro" : null,
             UsageSnapshot.ValidRemaining(usage.WeeklyRemaining) != null ? AllowanceKind.Percentage : AllowanceKind.Unavailable,
-            usage.WeeklyRemaining, null, demo ? "7-day window" : "Quota unavailable", demo ? "Development fixture · no account connected" : "No Windows provider connection configured",
-            demo ? "Fixture snapshot · Oct 10, 2026" : "Never · no verified data", demo ? ConnectionState.Connected : ConnectionState.Disconnected);
+            usage.WeeklyRemaining, null, demo ? UiText.T("7-day window", "7 天窗口") : UiText.T("Quota unavailable", "额度不可用"),
+            demo ? UiText.T("Development fixture · no account connected", "开发用样例数据 · 未连接账户") : UiText.T("No Windows provider connection configured", "尚未配置 Windows 连接"),
+            demo ? UiText.T("Fixture snapshot · Oct 10, 2026", "样例快照 · 2026-10-10") : UiText.T("Never · no verified data", "从未 · 没有已验证数据"), demo ? ConnectionState.Connected : ConnectionState.Disconnected)
+            { WindowMinutes = demo ? 10080 : null };
+        if (demo && UsageSnapshot.ValidRemaining(usage.WeeklyRemaining) is double weekly)
+            Windows = new[] { new QuotaWindow(id + ".secondary", 10080, weekly, null) }
+                .Concat(UsageSnapshot.ValidRemaining(usage.ShortRemaining) is double shortWindow ? [new QuotaWindow(id + ".primary", 300, shortWindow, null)] : Array.Empty<QuotaWindow>()).ToArray();
     }
     public static AgentPresentation[] Create(bool demo) =>
     [
@@ -142,6 +152,9 @@ public sealed class ShellState : Observable
         var previous = selectedAgent.Id; Agents = admitted; Changed(nameof(Agents));
         if (admitted.Length > 0) { selectedAgent = admitted.FirstOrDefault(a => a.Id == previous) ?? admitted[0]; Changed(nameof(SelectedAgent)); }
     }
+    /// <summary>Applies the user's agent order; an empty order restores the default Codex-first order.</summary>
+    public void Reorder(IReadOnlyList<string> order) =>
+        ReplaceAdmittedPresentation(AgentOrdering.Apply(Agents, a => a.Id, order.Count > 0 ? order : AgentCatalog.DefaultOrder).ToArray());
     public string Section { get => section; set { if (value is "AUV" or "ThreadOS" or "Sectorium") Set(ref section, value); } }
     public AgentPresentation SelectedAgent { get => selectedAgent; set { if (value != null && Agents.Contains(value)) Set(ref selectedAgent, value); } }
     public ShellState(bool demo, string agentId = "codex", string section = "AUV")

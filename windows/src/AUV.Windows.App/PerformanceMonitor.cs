@@ -39,12 +39,12 @@ public sealed class PerformanceViewModel : Observable
     public PerformanceSnapshot Snapshot { get; private set; } = PerformanceSnapshot.Unknown;
     public string CpuText => Snapshot.CpuPercent is double value ? $"{value:0}%" : "—";
     public string MemoryText => Snapshot.MemoryPercent is double value ? $"{value:0}%" : "—";
-    public string MemoryDetail => Snapshot.MemoryPercent != null ? $"{(Snapshot.TotalMemory!.Value - Snapshot.AvailableMemory!.Value) / 1073741824d:0.0} / {Snapshot.TotalMemory.Value / 1073741824d:0.0} GiB" : "Memory unavailable";
+    public string MemoryDetail => Snapshot.MemoryPercent != null ? $"{(Snapshot.TotalMemory!.Value - Snapshot.AvailableMemory!.Value) / 1073741824d:0.0} / {Snapshot.TotalMemory.Value / 1073741824d:0.0} GiB" : Loc.T("Memory unavailable", "内存信息不可用");
     public double CpuValue => Snapshot.CpuPercent ?? 0;
     public double MemoryValue => Snapshot.MemoryPercent ?? 0;
     public bool HasCpu => Snapshot.CpuPercent != null;
     public bool HasMemory => Snapshot.MemoryPercent != null;
-    public string Updated => Snapshot.SampledAt == DateTimeOffset.MinValue ? "Waiting for system counters" : $"Live system counters · {Snapshot.SampledAt:HH:mm:ss} · 2 s";
+    public string Updated => Snapshot.SampledAt == DateTimeOffset.MinValue ? Loc.T("Waiting for system counters", "正在等待系统计数器") : Loc.T($"Live system counters · {Snapshot.SampledAt:HH:mm:ss} · 2 s", $"实时系统计数 · {Snapshot.SampledAt:HH:mm:ss} · 每 2 秒");
     public void Update(PerformanceSnapshot snapshot)
     {
         Snapshot = snapshot;

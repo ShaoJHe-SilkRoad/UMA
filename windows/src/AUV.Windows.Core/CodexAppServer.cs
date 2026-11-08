@@ -28,32 +28,49 @@ public sealed class CodexAppServer : IDisposable
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         return (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator).Select(d => Path.Combine(d.Trim('"'), "codex.exe")).FirstOrDefault(File.Exists);
     }
-    public async Task<AgentPresentation> ReadAsync(string? configured, CancellationToken cancellationToken)
+    public static readonly TimeSpan OptionalUsageTimeout = TimeSpan.FromSeconds(5);
+    private bool optionalUsageUnavailable;
+    public Task<AgentPresentation> ReadAsync(string? configured, CancellationToken cancellationToken) => ReadAsync(configured, null, cancellationToken);
+    public async Task<AgentPresentation> ReadAsync(string? configured, QuotaSelection? previous, CancellationToken cancellationToken)
     {
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); timeout.CancelAfter(TimeSpan.FromSeconds(45));
         try
         {
             Executable = ResolveExecutable(configured);
-            if (Executable == null) { Stop(); return ProviderData.Unavailable("codex", "Codex executable not found. Choose the installed codex.exe in provider settings."); }
+            if (Executable == null) { Stop(); return ProviderData.Unavailable("codex", UiText.T("Codex executable not found. Choose the installed codex.exe in Codex settings.", "找不到 Codex 程序。请在 Codex 设置中选择已安装的 codex.exe。")); }
             if (process == null || process.HasExited || activeExecutable != Executable)
             {
                 Stop(); var start = new ProcessStartInfo(Executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
-                start.ArgumentList.Add("app-server"); start.ArgumentList.Add("--listen"); start.ArgumentList.Add("stdio://");
+                // 0.17.2: stdio is the documented default transport; avoid version-specific listen aliases.
+                start.ArgumentList.Add("app-server");
                 process = Process.Start(start) ?? throw new IOException("Could not start Codex local interface."); activeExecutable = Executable;
+                optionalUsageUnavailable = false;
                 _ = DiscardErrorOutput(process);
-                await Request("initialize", new { clientInfo = new { name = "auv_windows", title = "AUV Windows", version = "0.16.3" }, capabilities = new { experimentalApi = true } }, timeout.Token).ConfigureAwait(false);
+                await Request("initialize", new { clientInfo = new { name = "auv_windows", title = "AUV Windows", version = ProductInfo.Version }, capabilities = new { experimentalApi = true } }, timeout.Token).ConfigureAwait(false);
                 await process.StandardInput.WriteLineAsync("{\"method\":\"initialized\"}".AsMemory(), timeout.Token).ConfigureAwait(false);
                 await process.StandardInput.FlushAsync(timeout.Token).ConfigureAwait(false);
             }
             var account = await Request("account/read", new { refreshToken = false }, timeout.Token).ConfigureAwait(false);
             if (ProviderData.Text(ProviderData.Get(ProviderData.Get(account, "account"), "type")) != "chatgpt")
-                return ProviderData.Unavailable("codex", "Open Codex and sign in with ChatGPT, then refresh here.", ConnectionState.Disconnected);
+                return ProviderData.Unavailable("codex", UiText.T("Open Codex and sign in with ChatGPT, then refresh here.", "请打开 Codex 并用 ChatGPT 登录，然后在这里刷新。"), ConnectionState.Disconnected);
             var limits = await Request("account/rateLimits/read", null, timeout.Token).ConfigureAwait(false);
             JsonElement usage = default;
-            try { usage = await Request("account/usage/read", null, timeout.Token).ConfigureAwait(false); }
-            catch (CodexRpcException) { /* Optional aggregate endpoint: keep the independently verified quota; token totals stay unknown. */ }
-            return CodexUsageDecoder.Decode(account, limits, usage, DateTimeOffset.UtcNow);
+            if (!optionalUsageUnavailable)
+            {
+                // Optional aggregate endpoint: its failure never hides the independently verified quota.
+                using var optional = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token); optional.CancelAfter(OptionalUsageTimeout);
+                try { usage = await Request("account/usage/read", null, optional.Token).ConfigureAwait(false); }
+                catch (CodexRpcException) { optionalUsageUnavailable = true; }
+                catch (Exception e) when (e is JsonException or InvalidDataException) { optionalUsageUnavailable = true; }
+                catch (OperationCanceledException) when (!timeout.IsCancellationRequested)
+                {
+                    // A partially read response cannot be resumed safely; restart the owned session next time.
+                    var limitsOnly = CodexUsageDecoder.Decode(account, limits, default, DateTimeOffset.UtcNow, previous);
+                    Stop(); return limitsOnly;
+                }
+            }
+            return CodexUsageDecoder.Decode(account, limits, usage, DateTimeOffset.UtcNow, previous);
         }
         catch { Stop(); throw; }
         finally { gate.Release(); }

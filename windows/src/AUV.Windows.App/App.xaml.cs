@@ -31,6 +31,19 @@ public partial class App : Application, System.ComponentModel.INotifyPropertyCha
         instance = new(path, () => { if (!Dispatcher.HasShutdownStarted) Dispatcher.BeginInvoke(() => Desktop?.OpenMain()); });
         if (!instance.IsOwner) { Shutdown(); return; }
         Store = new(path); Settings = Store.Load(new ModelCatalog());
+        // 0.17.5 parity: a provider failure must never end the whole app. Keep running and say so.
+        DispatcherUnhandledException += (_, args) =>
+        {
+            if (args.Exception is OutOfMemoryException or StackOverflowException) return;
+            args.Handled = true;
+            // Opt-in developer diagnostics: exception type and stack only, never provider payloads.
+            var logIndex = Array.IndexOf(e.Args, "--error-log-dir");
+            if (logIndex >= 0 && logIndex + 1 < e.Args.Length)
+                try { Directory.CreateDirectory(e.Args[logIndex + 1]); File.AppendAllText(Path.Combine(e.Args[logIndex + 1], "errors.txt"), DateTimeOffset.Now.ToString("O") + " " + args.Exception + Environment.NewLine); } catch (IOException) { }
+            if (MainWindow is AUV.Windows.App.MainWindow main) main.Model.Status = UiText.T("An operation did not complete. AUV kept running; try again.", "有一项操作未完成。AUV 仍在运行，请重试。");
+        };
+        TaskScheduler.UnobservedTaskException += (_, args) => args.SetObserved();
+        UiText.Current = UiText.Resolve(Settings.Language);
         if (e.Args.Contains("--show-widget")) Settings.Desktop.WidgetVisible = true;
         ApplyTheme(Settings.Theme);
         SystemEvents.UserPreferenceChanged += SystemPreferenceChanged;
@@ -58,7 +71,13 @@ public partial class App : Application, System.ComponentModel.INotifyPropertyCha
             var layoutIndex = Array.IndexOf(e.Args, "--layout-check-dir");
             if (layoutIndex >= 0 && layoutIndex + 1 < e.Args.Length)
                 await LayoutVerification.Run(window, Path.GetFullPath(e.Args[layoutIndex + 1]));
+            var featureIndex = Array.IndexOf(e.Args, "--feature-check-dir");
+            if (featureIndex >= 0 && featureIndex + 1 < e.Args.Length)
+                await FeatureVerification.Run(this, window, Path.GetFullPath(e.Args[featureIndex + 1]));
             if (!e.Args.Contains("--offline")) Providers.Start();
+            var refreshIndex = Array.IndexOf(e.Args, "--refresh-check-dir");
+            if (refreshIndex >= 0 && refreshIndex + 1 < e.Args.Length)
+                await FeatureVerification.RecordRefresh(this, window, Path.GetFullPath(e.Args[refreshIndex + 1]), 2);
             var providerIndex = Array.IndexOf(e.Args, "--provider-check-dir");
             if (providerIndex >= 0 && providerIndex + 1 < e.Args.Length)
                 await ProviderVerification.Run(this, window, Path.GetFullPath(e.Args[providerIndex + 1]));
@@ -72,6 +91,14 @@ public partial class App : Application, System.ComponentModel.INotifyPropertyCha
     private void SystemPreferenceChanged(object sender, UserPreferenceChangedEventArgs e) => Dispatcher.BeginInvoke(() => ApplyTheme(Settings.Theme));
     private void SystemParameterChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e) => Dispatcher.BeginInvoke(() => ApplyTheme(Settings.Theme));
     protected override void OnExit(ExitEventArgs e) { SystemEvents.UserPreferenceChanged -= SystemPreferenceChanged; SystemParameters.StaticPropertyChanged -= SystemParameterChanged; Providers?.Dispose(); Desktop?.Dispose(); instance?.Dispose(); base.OnExit(e); }
+    /// <summary>"System", "en" or "zh". Applies at once to every window, the tray and provider text.</summary>
+    public void ApplyLanguage(string language)
+    {
+        Settings.Language = language is "en" or "zh" ? language : "System";
+        UiText.Current = UiText.Resolve(Settings.Language);
+        if (MainWindow is AUV.Windows.App.MainWindow main) { if (main.Model.Status is "Ready" or "就绪") main.Model.Status = UiText.T("Ready", "就绪"); main.Model.RefreshText(); }
+        Desktop?.RefreshText(); Desktop?.RefreshWizard();
+    }
     public bool IsDark { get; private set; }
     public bool FluentComboStyleAvailable { get; private set; }
     public void SetLargerText(bool larger) { Settings.LargerText = larger; foreach (Window w in Windows) w.FontSize = larger ? 17.5 : 14; Desktop?.RefreshWizard(); }

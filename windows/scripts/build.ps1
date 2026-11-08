@@ -1,4 +1,4 @@
-param([switch]$Publish, [string]$PublishName = 'AUV_Win_0.16.3', [switch]$SkipTests)
+param([switch]$Publish, [string]$PublishName = 'AUV_Win_0.18.4', [switch]$SkipTests)
 $ErrorActionPreference = 'Stop'
 $windowsRoot = Split-Path -Parent $PSScriptRoot
 $dotnet = Join-Path $windowsRoot '.tools\dotnet\dotnet.exe'

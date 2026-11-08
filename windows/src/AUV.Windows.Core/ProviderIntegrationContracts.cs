@@ -10,7 +10,7 @@ public enum IntegrationStage { Prepared, Live }
 public sealed record UsageConnectionPlan(string ProviderId, string Name, string AccountChannel, string LocalChannel,
     string PendingQualification, IntegrationStage Stage = IntegrationStage.Prepared)
 {
-    public string UserStatus => "Connection prepared · live reading is not enabled.";
+    public string UserStatus => UiText.T("Not available on Windows yet · live reading is not enabled.", "Windows 上暂不可用 · 未启用实时读取。");
 }
 public interface IReadOnlyUsageConnector
 {
@@ -153,5 +153,5 @@ public interface IWindowsStorageBackend
 }
 public sealed class PreparedWindowsStorageBackend : IWindowsStorageBackend
 {
-    public StorageReadiness Readiness { get; } = new(false, false, "Windows storage connection prepared; drive access is not enabled.");
+    public StorageReadiness Readiness { get; } = new(false, false, UiText.T("Windows storage connection prepared; drive access is not enabled.", "Windows 存储连接已准备；未启用磁盘访问。"));
 }
