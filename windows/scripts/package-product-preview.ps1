@@ -1,5 +1,18 @@
 param([string]$PublishName = 'AUV-0.16.0-win-x64-product-preview', [string]$Build = '20261010.3', [switch]$ProviderIntegration, [switch]$UiRefinement, [switch]$VisibilityRefinement, [switch]$ValidatedRefinement, [string]$ValidationPath, [switch]$Stable, [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.16.0')
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 and PowerShell 7 compatible helpers (.NET Framework lacks GetRelativePath, ToHexString and static HashData).
+Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+function Get-RelativePath([string]$Base, [string]$Path) {
+    $baseFull = [IO.Path]::GetFullPath($Base).TrimEnd('\') + '\'
+    $full = [IO.Path]::GetFullPath($Path)
+    if (-not $full.StartsWith($baseFull, [StringComparison]::OrdinalIgnoreCase)) { throw "Path is outside the Windows root: $Path" }
+    $full.Substring($baseFull.Length)
+}
+function Get-Sha256Hex($Data) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { if ($Data -is [IO.Stream]) { $bytes = $sha.ComputeHash($Data) } else { $bytes = $sha.ComputeHash([byte[]]$Data) } } finally { $sha.Dispose() }
+    ([BitConverter]::ToString($bytes)).Replace('-', '')
+}
 if (@($ProviderIntegration, $UiRefinement, $VisibilityRefinement, $ValidatedRefinement, $Stable).Where({ $_ }).Count -gt 1) { throw 'Choose one candidate stage.' }
 $windowsRoot = Split-Path -Parent $PSScriptRoot
 $artifactRoot = Join-Path $windowsRoot 'artifacts'
@@ -27,10 +40,10 @@ if (Get-Command rg -ErrorAction SilentlyContinue) {
 $sourcePaths += @('AUV.Windows.sln','NuGet.Config','global.json') | ForEach-Object { Join-Path $windowsRoot $_ } | Where-Object { Test-Path -LiteralPath $_ }
 $sourceFiles = @($sourcePaths | Sort-Object -Unique | ForEach-Object {
     $sourceFile = [IO.Path]::GetFullPath($_)
-    [ordered]@{ Path = [IO.Path]::GetRelativePath($windowsRoot, $sourceFile).Replace('\','/'); SHA256 = (Get-FileHash -LiteralPath $sourceFile -Algorithm SHA256).Hash }
+    [ordered]@{ Path = (Get-RelativePath $windowsRoot $sourceFile).Replace('\','/'); SHA256 = (Get-FileHash -LiteralPath $sourceFile -Algorithm SHA256).Hash }
 })
 $canonical = $sourceFiles | ConvertTo-Json -Depth 5 -Compress
-$sourceHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($canonical)))
+$sourceHash = Get-Sha256Hex ([Text.Encoding]::UTF8.GetBytes($canonical))
 $manifest = [ordered]@{ Algorithm = 'SHA256 of UTF-8 compact ordered source-file manifest'; SourceIdentity = $sourceHash; Files = $sourceFiles }
 $manifest | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath (Join-Path $publishRoot 'SOURCE-MANIFEST.json') -Encoding utf8
 $buildInfo = [ordered]@{ Product = $(if ($Stable) { 'AUV Windows' } else { 'AUV Windows Preview' }); Version = $Version; Build = $Build; Task = $(if ($Stable) { 'Validated Windows stable build' } elseif ($ValidatedRefinement) { 'Tested visibility refinement and native UI fixes' } elseif ($VisibilityRefinement) { 'Available-quota visibility and visual refinement' } elseif ($UiRefinement) { 'Prepared connections and compact UI refinement' } elseif ($ProviderIntegration) { 'Provider integration 1 — Codex and WorkBuddy' } else { 'AUV-WIN-016-PRODUCT-SURFACES-02' }); Target = 'win-x64'; SelfContained = $true; SDK = '10.0.401'; Runtime = '10.0.12'; MacReference = '766b808f2af537af4d6edfe8606221cb78c88b79'; WindowsSourceIdentity = $sourceHash; PackagedAtUtc = [DateTime]::UtcNow.ToString('o') }
@@ -257,7 +270,7 @@ try {
     foreach ($entry in $archive.Entries) {
         if ($entry.FullName.EndsWith('/')) { continue }
         $stream = $entry.Open()
-        try { $entryHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($stream)) } finally { $stream.Dispose() }
+        try { $entryHash = Get-Sha256Hex $stream } finally { $stream.Dispose() }
         $original = Join-Path $publishRoot $entry.FullName.Replace('/','\')
         if ($entryHash -ne (Get-FileHash -LiteralPath $original -Algorithm SHA256).Hash) { throw "Archive verification failed: $($entry.FullName)" }
         $checked++
