@@ -92,7 +92,8 @@ public sealed class MainViewModel : Observable
     }
     public string NoQuotaText => Shell.SelectedAgent.Id switch
     {
-        "claude" or "antigravity" => Loc.T("Not available on Windows yet. AUV shows no estimate in its place.", "Windows 上暂不可用，AUV 不会用估算值代替。"),
+        "claude" => Loc.T("No current Claude reading. Turn on browser sync in Claude settings, or Refresh All once the companion is connected. AUV shows no estimate in its place.", "没有当前的 Claude 读数。请在 Claude 设置中开启浏览器同步，或在伴侣连接后全部刷新。AUV 不会用估算值代替。"),
+        "antigravity" => Loc.T("Not available on Windows yet. AUV shows no estimate in its place.", "Windows 上暂不可用，AUV 不会用估算值代替。"),
         "workbuddy" => Loc.T("Connect WorkBuddy in its settings, then Sync Credits on the official page.", "请在 WorkBuddy 设置中连接，然后在官方页面同步 Credits。"),
         _ => Loc.T("No quota reading. Check that Codex is installed and signed in, then Refresh All.", "无额度读数。请确认 Codex 已安装并登录，然后全部刷新。")
     };

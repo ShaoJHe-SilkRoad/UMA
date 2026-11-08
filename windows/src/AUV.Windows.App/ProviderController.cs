@@ -8,7 +8,7 @@ using Microsoft.Win32;
 namespace AUV.Windows.App;
 
 /// <summary>One provider admission point, shared by main, tray and Wizard. Owns the single refresh schedule.</summary>
-public sealed class ProviderController : Observable, IDisposable
+public sealed partial class ProviderController : Observable, IDisposable
 {
     private readonly App app;
     private readonly MainWindow main;
@@ -81,6 +81,7 @@ public sealed class ProviderController : Observable, IDisposable
         if (app.Demo || started) return;
         started = true;
         foreach (var plan in PreparedConnections.Plans) { var id = plan.ProviderId; Admit(id, () => ProviderData.Unavailable(id, plan.UserStatus)); }
+        StartClaude();
         freshnessTimer.Start(); Reschedule();
         _ = RefreshAllAsync(automatic: false);
     }
@@ -114,6 +115,7 @@ public sealed class ProviderController : Observable, IDisposable
         {
             var work = new List<Task>();
             if (CodexEnabled) work.Add(RefreshCodexAsync());
+            if (ClaudeBrowserEnabled) work.Add(RefreshClaudeAsync(userInitiated: !automatic));
             if (workBuddy is { IsVisible: true } open) work.Add(open.SyncAsync());
             if (ShowCostEstimate) work.Add(RefreshCostAsync());
             await Task.WhenAll(work);
@@ -222,6 +224,7 @@ public sealed class ProviderController : Observable, IDisposable
         var id = main.Model.Shell.SelectedAgent.Id;
         if (id == "codex") { if (!CodexEnabled) CodexEnabled = true; await RefreshCodexAsync(); }
         else if (id == "workbuddy") { OpenWorkBuddy(); }
+        else if (id == "claude") { if (ClaudeBrowserEnabled) await RefreshClaudeAsync(userInitiated: true); else main.Model.Status = ClaudeBrowserPresentation.Disabled; }
         else if (prepared.TryGetValue(id, out var connector))
         {
             Admit(await connector.ReadAsync(lifetime.Token));
@@ -243,7 +246,7 @@ public sealed class ProviderController : Observable, IDisposable
     }
     public void Dispose()
     {
-        if (disposed) return; disposed = true; refreshTimer.Stop(); freshnessTimer.Stop(); generation++; lifetime.Cancel(); codex.Dispose(); workBuddy?.Close(); lifetime.Dispose();
+        if (disposed) return; disposed = true; refreshTimer.Stop(); freshnessTimer.Stop(); generation++; lifetime.Cancel(); codex.Dispose(); workBuddy?.Close(); StopClaudeLink(); lifetime.Dispose();
         UiText.Changed -= Relocalize; SystemEvents.PowerModeChanged -= PowerModeChanged;
     }
 }

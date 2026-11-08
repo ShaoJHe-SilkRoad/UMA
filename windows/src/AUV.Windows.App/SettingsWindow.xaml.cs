@@ -28,10 +28,10 @@ public partial class SettingsWindow : Window
             ProviderPanel.Visibility = Visibility.Visible; Width = 540; Height = 700;
             CodexPanel.Visibility = providerId == "codex" ? Visibility.Visible : Visibility.Collapsed;
             WorkBuddyPanel.Visibility = providerId == "workbuddy" ? Visibility.Visible : Visibility.Collapsed;
-            OtherProviderNote.Visibility = providerId is "codex" or "workbuddy" ? Visibility.Collapsed : Visibility.Visible;
-            OtherProviderNote.Text = PreparedConnections.Find(providerId) is { } plan ? plan.UserStatus + "\n\n" + Loc.T(
-                "On the Mac, Claude's exact figures come from Safari and Claude Code. Neither route exists in AUV for Windows yet, so this agent shows no reading.",
-                "在 Mac 上，Claude 的精确读数来自 Safari 和 Claude Code。AUV Windows 版还没有这两条途径，因此这个智能体不显示读数。") : "";
+            ClaudePanel.Visibility = providerId == "claude" ? Visibility.Visible : Visibility.Collapsed;
+            if (providerId == "claude") BuildClaudeChoices();
+            OtherProviderNote.Visibility = providerId is "codex" or "workbuddy" or "claude" ? Visibility.Collapsed : Visibility.Visible;
+            OtherProviderNote.Text = PreparedConnections.Find(providerId) is { } plan ? plan.UserStatus : "";
             UpdateConnection(); main.Model.Shell.PropertyChanged += ConnectionChanged;
             Closed += (_, _) => main.Model.Shell.PropertyChanged -= ConnectionChanged;
         }

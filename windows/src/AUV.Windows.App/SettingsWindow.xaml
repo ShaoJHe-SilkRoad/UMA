@@ -33,7 +33,7 @@
      <StackPanel Orientation="Horizontal" Margin="0,8,0,4" IsEnabled="{Binding Providers.AutomaticRefresh}"><TextBlock Text="{local:Tr Every, 间隔}" VerticalAlignment="Center" Margin="0,0,10,0"/>
       <ComboBox ItemsSource="{Binding Providers.Intervals}" SelectedItem="{Binding Providers.RefreshInterval, Mode=TwoWay}" MinWidth="150" AutomationProperties.Name="Refresh interval" AutomationProperties.AutomationId="auv.settings.refresh.interval"><ComboBox.ItemTemplate><DataTemplate><TextBlock><Run Text="{Binding Mode=OneWay}"/><Run Text="{local:Tr ' minutes', ' 分钟'}"/></TextBlock></DataTemplate></ComboBox.ItemTemplate></ComboBox>
      </StackPanel>
-     <TextBlock Text="{local:Tr 'Covers every agent AUV can read on Windows: Codex, and WorkBuddy while its connection window is open. Readings older than the interval plus two minutes are hidden until the next successful read.', 涵盖 AUV 在 Windows 上能读取的所有智能体：Codex，以及连接窗口打开时的 WorkBuddy。超过“间隔 + 2 分钟”的读数会被隐藏，直到下一次读取成功。}" Style="{StaticResource Caption}" Margin="0,6,0,14"/>
+     <TextBlock Text="{local:Tr 'Covers every agent AUV can read on Windows: Codex, Claude while its browser companion is connected, and WorkBuddy while its connection window is open. Readings older than the interval plus two minutes are hidden until the next successful read.', 涵盖 AUV 在 Windows 上能读取的所有智能体：Codex、浏览器伴侣已连接时的 Claude，以及连接窗口打开时的 WorkBuddy。超过“间隔 + 2 分钟”的读数会被隐藏，直到下一次读取成功。}" Style="{StaticResource Caption}" Margin="0,6,0,14"/>
      <TextBlock Text="{local:Tr 'Also Refresh', 其他时机}" Style="{StaticResource Group}"/>
      <CheckBox Content="{local:Tr 'After Windows wakes from sleep', Windows 从睡眠唤醒后}" IsChecked="{Binding Providers.RefreshOnWake, Mode=TwoWay}" Margin="0,4"/>
      <Button Content="{local:Tr 'Refresh All now', 立即全部刷新}" Click="RefreshAll_Click" HorizontalAlignment="Left" Margin="0,12,0,4"/>
@@ -85,6 +85,7 @@
      <TextBlock Text="{local:Tr 'Credentials: passwords, tokens, cookies and conversations are never kept by AUV.', 凭据：AUV 从不保留密码、令牌、Cookie 或对话。}" Margin="0,0,0,6"/>
      <TextBlock Text="{local:Tr 'Old values: readings that are out of date are hidden, never shown as current.', 旧数据：过期的读数会被隐藏，不会显示为当前读数。}" Margin="0,0,0,6"/>
      <TextBlock Text="{local:Tr 'Local Cost Estimate (off unless you turn it on in Codex settings): reads only token counters and model names from local Codex session logs; prompts, responses and file names are not read.', 本地费用估算（除非你在 Codex 设置中开启，否则关闭）：只读取本地 Codex 会话日志中的令牌计数和模型名称，不读取提示、回复或文件名。}" Margin="0,0,0,6"/>
+     <TextBlock Text="{local:Tr 'Claude (off unless you turn it on in Claude settings): the browser companion reads only plan-limit percentages, reset times and when they were read, from claude.ai’s Usage page. Your Claude sign-in stays in Chrome or Edge.', Claude（除非你在 Claude 设置中开启，否则关闭）：浏览器伴侣只从 claude.ai 用量页读取套餐额度百分比、重置时间和读取时间。你的 Claude 登录状态留在 Chrome 或 Edge 中。}" Margin="0,0,0,6"/>
      <TextBlock Text="{local:Tr 'WorkBuddy: its sign-in lives in AUV’s own browser profile; Disconnect clears it.', WorkBuddy：其登录状态保存在 AUV 自己的浏览器配置中；断开连接会清除它。}" Margin="0,0,0,12"/>
      <TextBlock Text="{local:Tr 'Preferences', 偏好设置}" Style="{StaticResource Group}"/>
      <TextBlock x:Name="PreferencePath" Style="{StaticResource Caption}" Margin="0,0,0,8"/>
@@ -113,6 +114,32 @@
       <TextBlock Text="{local:Tr 'Sign in to the official Plan and Usage page, then Sync Credits.', 在官方套餐与用量页登录，然后同步 Credits。}" Style="{StaticResource Muted}"/>
       <WrapPanel Margin="0,16"><Button Content="{local:Tr Connect, 连接}" Click="ConnectWorkBuddy_Click" ToolTip="{local:Tr 'Opens the official website in AUV’s separate browser session.', 在 AUV 独立的浏览器会话中打开官方网站。}"/><Button Content="{local:Tr Disconnect, 断开连接}" Click="DisconnectWorkBuddy_Click" Margin="8,0,0,0" ToolTip="{local:Tr 'Clears only AUV’s WorkBuddy browser session.', 只清除 AUV 的 WorkBuddy 浏览器会话。}"/></WrapPanel>
       <TextBlock Text="{local:Tr 'Experimental page sync · incomplete data stays hidden. Requires Microsoft Edge WebView2 Runtime.', 试验性页面同步 · 不完整的数据不会显示。需要 Microsoft Edge WebView2 Runtime。}" Style="{StaticResource Caption}"/>
+     </StackPanel>
+     <StackPanel x:Name="ClaudePanel" Visibility="Collapsed">
+      <TextBlock Text="{local:Tr 'Exact figures from claude.ai', 来自 claude.ai 的精确读数}" Style="{StaticResource Group}"/>
+      <TextBlock Text="{local:Tr 'AUV’s companion extension in Chrome or Edge reads Claude’s plan-limit percentages and reset times from the official claude.ai Usage page, in a background tab it opens and closes for each sync. Your sign-in stays in the browser; AUV never sees passwords, cookies or conversations.', AUV 的伴侣扩展在 Chrome 或 Edge 中从 claude.ai 官方用量页读取 Claude 的套餐额度百分比和重置时间，每次同步时打开一个后台标签页，读完即关闭。登录状态留在浏览器中，AUV 不会接触密码、Cookie 或对话。}" Style="{StaticResource Muted}" TextWrapping="Wrap"/>
+      <CheckBox Content="{local:Tr 'Sync Claude through the browser companion', 通过浏览器伴侣同步 Claude}" IsChecked="{Binding Providers.ClaudeBrowserEnabled, Mode=TwoWay}" Margin="0,10" AutomationProperties.AutomationId="auv.claude.enabled"/>
+      <Border Style="{StaticResource Card}"><StackPanel>
+       <TextBlock Text="{Binding Providers.ClaudeLinkText}" TextWrapping="Wrap" AutomationProperties.AutomationId="auv.claude.link"/>
+       <TextBlock x:Name="ClaudeSetupStatus" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,4,0,0" AutomationProperties.AutomationId="auv.claude.setup-status"/>
+       <TextBlock Text="{Binding Providers.ClaudeLastResult}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,4,0,0" AutomationProperties.AutomationId="auv.claude.last-result"/>
+      </StackPanel></Border>
+      <TextBlock Text="{local:Tr 'Set Up', 设置步骤}" Style="{StaticResource Group}"/>
+      <TextBlock Text="{local:Tr '1. Choose Set Up. AUV copies the companion into its own folder and registers it for Chrome and Edge, for your Windows account only.&#x0a;2. In the browser, open the extensions page, turn on Developer mode, choose Load unpacked and select the folder below.&#x0a;3. Sign in to claude.ai in that browser if you have not already.', 1. 选择“设置”。AUV 会把伴侣复制到自己的文件夹，并只为你的 Windows 账户在 Chrome 和 Edge 中注册。&#x0a;2. 在浏览器中打开扩展页，开启“开发者模式”，选择“加载已解压的扩展程序”，然后选择下面的文件夹。&#x0a;3. 如果还没有登录，请在该浏览器中登录 claude.ai。}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+      <TextBox x:Name="ClaudeFolder" IsReadOnly="True" Margin="0,0,0,8" AutomationProperties.Name="Companion extension folder" AutomationProperties.AutomationId="auv.claude.folder"/>
+      <WrapPanel Margin="0,0,0,12">
+       <Button x:Name="ClaudeSetupButton" Content="{local:Tr 'Set Up', 设置}" Click="ClaudeSetup_Click" Margin="0,0,8,6" AutomationProperties.AutomationId="auv.claude.setup"/>
+       <Button Content="{local:Tr 'Copy folder path', 复制文件夹路径}" Click="ClaudeCopyFolder_Click" Margin="0,0,8,6"/>
+       <Button Content="{local:Tr 'Open folder', 打开文件夹}" Click="ClaudeOpenFolder_Click" Margin="0,0,8,6"/>
+       <Button Content="{local:Tr 'Chrome extensions page', Chrome 扩展页}" Tag="chrome" Click="ClaudeExtensionsPage_Click" Margin="0,0,8,6"/>
+       <Button Content="{local:Tr 'Edge extensions page', Edge 扩展页}" Tag="edge" Click="ClaudeExtensionsPage_Click" Margin="0,0,8,6"/>
+      </WrapPanel>
+      <TextBlock Text="{local:Tr Options, 选项}" Style="{StaticResource Group}"/>
+      <StackPanel Orientation="Horizontal" Margin="0,0,0,6"><TextBlock Text="{local:Tr Browser, 浏览器}" VerticalAlignment="Center" MinWidth="130"/><ComboBox x:Name="ClaudeBrowserChoice" MinWidth="200" SelectionChanged="ClaudeBrowserChoice_Changed" AutomationProperties.Name="Claude companion browser" AutomationProperties.AutomationId="auv.claude.browser"/></StackPanel>
+      <StackPanel Orientation="Horizontal" Margin="0,0,0,6"><TextBlock Text="{local:Tr 'Read in', 读取位置}" VerticalAlignment="Center" MinWidth="130"/><ComboBox x:Name="ClaudePlacementChoice" MinWidth="200" SelectionChanged="ClaudePlacementChoice_Changed" AutomationProperties.Name="Where the Usage page opens" AutomationProperties.AutomationId="auv.claude.placement"/></StackPanel>
+      <CheckBox Content="{local:Tr 'Ask to open the browser when it is not running', 浏览器未运行时询问是否打开}" IsChecked="{Binding Providers.ClaudeAskToOpenBrowser, Mode=TwoWay}" Margin="0,6" AutomationProperties.AutomationId="auv.claude.ask-open"/>
+      <WrapPanel Margin="0,10,0,6"><Button Content="{local:Tr 'Sync Claude now', 立即同步 Claude}" Click="ClaudeSync_Click" Margin="0,0,8,6" AutomationProperties.AutomationId="auv.claude.sync"/><Button Content="{local:Tr 'Remove companion', 移除伴侣}" Click="ClaudeRemove_Click" Margin="0,0,8,6" AutomationProperties.AutomationId="auv.claude.remove"/></WrapPanel>
+      <TextBlock Text="{local:Tr 'Remove deletes AUV’s browser registration and, if you agree, its companion folder. Remove the extension itself on the browser’s extensions page. If the companion stops answering, reload it there or restart the browser.', “移除”会删除 AUV 的浏览器注册；如果你同意，还会删除伴侣文件夹。扩展本身请在浏览器的扩展页中移除。如果伴侣没有响应，请在扩展页重新加载它或重启浏览器。}" Style="{StaticResource Caption}" TextWrapping="Wrap"/>
      </StackPanel>
      <TextBlock x:Name="OtherProviderNote" Style="{StaticResource Muted}" Visibility="Collapsed"/>
     </StackPanel>

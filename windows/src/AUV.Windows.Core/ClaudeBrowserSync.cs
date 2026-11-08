@@ -264,7 +264,7 @@ public static class ClaudeBrowserPresentation
         });
 
     public static string Disabled => UiText.T("Browser sync is off. Turn it on in Claude settings to read Claude's exact figures from claude.ai.", "浏览器同步已关闭。在 Claude 设置中开启后，可从 claude.ai 读取 Claude 的精确读数。");
+    public static string NotSetUp => UiText.T("Set up the browser companion in Claude settings to read Claude's exact figures.", "请在 Claude 设置中设置浏览器伴侣，以读取 Claude 的精确读数。");
     public static string NotPackaged => UiText.T("This copy of AUV has no browser companion package.", "这份 AUV 不含浏览器伴侣安装包。");
     public static string Syncing => UiText.T("Syncing exact figures…", "正在同步精确读数…");
-    public static string FormatBuild(DateTimeOffset at) => at.ToString("yyyyMMddHH", CultureInfo.InvariantCulture);
 }
