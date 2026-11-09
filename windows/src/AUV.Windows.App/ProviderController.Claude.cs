@@ -158,10 +158,20 @@ public sealed partial class ProviderController
             var message = ClaudeBrowserPresentation.Message(result.Outcome, result.BrowserProduct);
             // A failed sync does not withdraw a reading that is still current; it goes out of date on the usual schedule.
             if (!CurrentClaudeReading()) Admit("claude", () => ClaudeBrowserPresentation.Failure(result.Outcome, result.BrowserProduct));
-            claudeLastResult = Loc.T("Last sync: ", "上次同步：") + message;
+            claudeLastResult = Loc.T("Last sync: ", "上次同步：") + message + ClaudeDetails(result);
             main.Model.Status = "Claude: " + message;
         }
         ClaudeChanged();
+    }
+
+    /// <summary>Content-free details for a failed sync: the page's failure code and its step trace (step names and milliseconds only).</summary>
+    private string ClaudeDetails(ClaudeSyncResult result)
+    {
+        var parts = new List<string>();
+        if (result.ProviderFailureReason is { } reason) parts.Add(Loc.T("code ", "代码 ") + reason);
+        if (result.Attempts > 1) parts.Add(Loc.T("after a retry", "已重试"));
+        if (claudeCoordinator?.LastTrace is { Length: > 0 } trace) parts.Add(Loc.T("last page steps: ", "最近一次页面步骤：") + trace);
+        return parts.Count == 0 ? "" : "\n" + string.Join(" · ", parts);
     }
 
     // ---- D9: ask before opening the browser ----

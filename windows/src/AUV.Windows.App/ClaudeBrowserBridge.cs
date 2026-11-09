@@ -105,7 +105,7 @@ public sealed class ClaudeBrowserPipeServer : IClaudeCompanionLink, IDisposable
                 CompanionMessage message;
                 try { message = CompanionMessageCodec.DecodeFromHost(frame); }
                 catch (CompanionProtocolException) { continue; }
-                if (message is CompanionTrace or HostHello) continue;
+                if (message is HostHello) continue;
                 Received?.Invoke(message);
             }
         }

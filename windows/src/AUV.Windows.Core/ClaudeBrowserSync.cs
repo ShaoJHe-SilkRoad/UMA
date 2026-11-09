@@ -97,6 +97,7 @@ public sealed class ClaudeCompanionCoordinator : IDisposable
     public DateTimeOffset? SilentSince { get; private set; }
     public int ConsecutiveSilent { get; private set; }
     public int AcceptedObservations { get; private set; }
+    public string? LastTrace { get; private set; }
     public event Action<CompanionSyncRequest>? SyncRequested;
     public ClaudeCompanionCoordinator(IClaudeCompanionLink link, ClaudeCompanionManifest expected, CompanionTimings? timings = null, Func<DateTimeOffset>? now = null)
     {
@@ -109,6 +110,8 @@ public sealed class ClaudeCompanionCoordinator : IDisposable
     private void OnReceived(CompanionMessage message)
     {
         if (message is CompanionSyncRequest request) { SyncRequested?.Invoke(request); return; }
+        // The page trace is a content-free list of step names and timings (allowlisted charset), kept for diagnostics only.
+        if (message is CompanionTrace trace) { LastTrace = trace.Trace; return; }
         lock (gate)
         {
             for (var i = waiters.Count - 1; i >= 0; i--)
