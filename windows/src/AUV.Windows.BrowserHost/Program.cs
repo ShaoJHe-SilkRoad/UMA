@@ -157,14 +157,32 @@ internal static class BrowserProduct
     [DllImport("ntdll.dll")] private static extern int NtQueryInformationProcess(nint process, int informationClass, ref ProcessBasicInformation information, int length, out int returned);
     public static string Detect()
     {
+        // Chrome and Edge start native hosts through "cmd.exe /d /s /c", so the browser is the parent of that cmd.exe.
         try
         {
-            var info = new ProcessBasicInformation();
             using var self = Process.GetCurrentProcess();
-            if (NtQueryInformationProcess(self.Handle, 0, ref info, Marshal.SizeOf<ProcessBasicInformation>(), out _) != 0) return "unknown";
-            using var parent = Process.GetProcessById((int)info.InheritedFromUniqueProcessId);
-            return parent.ProcessName.ToLowerInvariant() switch { "chrome" => "chrome", "msedge" => "edge", _ => "unknown" };
+            var current = self.Id;
+            for (var level = 0; level < 2; level++)
+            {
+                var parentId = ParentOf(current);
+                if (parentId is not int id) return "unknown";
+                using var parent = Process.GetProcessById(id);
+                switch (parent.ProcessName.ToLowerInvariant())
+                {
+                    case "chrome": return "chrome";
+                    case "msedge": return "edge";
+                    case "cmd": current = id; continue;
+                    default: return "unknown";
+                }
+            }
+            return "unknown";
         }
         catch (Exception e) when (e is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { return "unknown"; }
+    }
+    private static int? ParentOf(int processId)
+    {
+        using var process = Process.GetProcessById(processId);
+        var info = new ProcessBasicInformation();
+        return NtQueryInformationProcess(process.Handle, 0, ref info, Marshal.SizeOf<ProcessBasicInformation>(), out _) == 0 ? (int)info.InheritedFromUniqueProcessId : null;
     }
 }
