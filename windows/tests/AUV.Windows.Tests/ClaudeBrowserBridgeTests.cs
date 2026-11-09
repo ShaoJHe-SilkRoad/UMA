@@ -193,6 +193,27 @@ public class ClaudeBrowserBridgeTests : IDisposable
         Assert.Equal(CompanionLinkState.Rejected, server.State);
     }
 
+    [Fact] public async Task ARestartedServerIsTheOnlyOneListening()
+    {
+        // Found live: after Update restarted the server, a host could land on the old, cancelled pipe instance and get no welcome.
+        var pipeName = "AUV.Windows.Preview." + Convert.ToHexString(Guid.NewGuid().ToByteArray())[..24] + ".ClaudeBrowser";
+        var first = new ClaudeBrowserPipeServer(pipeName, ClaudeBrowserTests.Manifest, _ => true, () => "auto");
+        // Restarted immediately, as Update does; a pipe write blocks until the server reads, so every step has a deadline.
+        first.Start(); await Task.Delay(300); first.Dispose();
+        using var second = new ClaudeBrowserPipeServer(pipeName, ClaudeBrowserTests.Manifest, _ => true, () => "auto");
+        second.Start();
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var client = new System.IO.Pipes.NamedPipeClientStream(".", pipeName, System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous | System.IO.Pipes.PipeOptions.CurrentUserOnly);
+            await client.ConnectAsync(5000, deadline.Token);
+            await CompanionFraming.WriteAsync(client, CompanionMessageCodec.Encode(new HostHello("1.0.0", "2026110801", ClaudeBrowserTests.Manifest.ExtensionOrigin, "chrome", ClaudeBrowserTests.Generation)), 8192, deadline.Token);
+            var reply = await CompanionFraming.ReadAsync(client, 8192, deadline.Token);
+            Assert.Equal(new HostWelcome(true, "accepted"), CompanionMessageCodec.DecodeFromApp(reply!));
+            client.Dispose(); for (var i = 0; i < 50 && second.State == CompanionLinkState.Connected; i++) await Task.Delay(100);
+        }
+    }
+
     [Fact] public void PipeNameFollowsTheProfileKey()
     {
         var name = ClaudeBrowserPaths.PipeName(@"C:\Users\x\AppData\Local\AUV.Windows.UI.Preview\settings.v1.json");

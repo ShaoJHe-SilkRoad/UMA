@@ -42,6 +42,7 @@ public sealed class ClaudeBrowserPipeServer : IClaudeCompanionLink, IDisposable
     private readonly object gate = new();
     private Connection? active;
     private Task? acceptLoop;
+    private NamedPipeServerStream? listening;
     public CompanionLinkState State { get; private set; } = CompanionLinkState.NoBrowser;
     public HostHello? Host => active?.Hello;
     public string? RejectionReason { get; private set; }
@@ -64,14 +65,20 @@ public sealed class ClaudeBrowserPipeServer : IClaudeCompanionLink, IDisposable
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            NamedPipeServerStream stream;
+            NamedPipeServerStream? stream = null;
             try
             {
                 stream = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 4, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+                lock (gate) { if (cancellationToken.IsCancellationRequested) { stream.Dispose(); return; } listening = stream; }
                 await stream.WaitForConnectionAsync(cancellationToken);
             }
-            catch (OperationCanceledException) { return; }
-            catch (IOException) { try { await Task.Delay(1000, cancellationToken); } catch (OperationCanceledException) { return; } continue; }
+            // A cancelled wait leaves the pipe instance listening: a host could connect to it and wait for a welcome that
+            // never comes. Close it, so a restarted server (after Update or a browser change) is the only one listening.
+            catch (OperationCanceledException) { stream?.Dispose(); return; }
+            catch (IOException) { stream?.Dispose(); if (cancellationToken.IsCancellationRequested) return; try { await Task.Delay(1000, cancellationToken); } catch (OperationCanceledException) { return; } continue; }
+            catch (ObjectDisposedException) { stream?.Dispose(); return; }
+            lock (gate) listening = null;
+            if (cancellationToken.IsCancellationRequested) { stream.Dispose(); return; }
             _ = Task.Run(() => ServeAsync(stream, cancellationToken), cancellationToken);
         }
     }
@@ -139,7 +146,9 @@ public sealed class ClaudeBrowserPipeServer : IClaudeCompanionLink, IDisposable
     public void Dispose()
     {
         lifetime.Cancel();
-        lock (gate) { active?.Stream.Dispose(); active = null; }
+        // Close the waiting pipe instance now, not when the cancelled wait gets round to it: a server started right
+        // after this one (Update, a browser change) must be the only instance a host can reach.
+        lock (gate) { listening?.Dispose(); listening = null; active?.Stream.Dispose(); active = null; }
     }
 
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GetNamedPipeClientProcessId(nint pipe, out uint clientProcessId);
