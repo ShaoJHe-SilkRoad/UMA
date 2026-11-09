@@ -251,6 +251,53 @@
       return (tab && tab.windowId !== 1 && world.windows.get(tab.windowId)?.state === "minimized") || { tab };
     });
 
+    await check("with no browser window the read's window is kept minimized with a blank tab, and reused next time", async () => {
+      // Found live: Edge quit when the read closed its last window, and the result was lost.
+      const world = await startWorker();
+      world.windows.clear();
+      const first = sendCommand(world, "umaClaudeAutomaticRefresh");
+      await flush();
+      const tab = world.created.at(-1);
+      const windowID = tab?.windowId;
+      if (!world.windows.get(windowID)?.temporary) return { tab };
+      openPage(world, tab.id);
+      await advance(100);
+      const kept = world.windows.has(windowID) && !world.removedWindows.includes(windowID);
+      const blank = [...world.tabs.values()].filter((t) => t.windowId === windowID);
+      const delivered = terminalFor(world, first)?.status === "refreshCompleted";
+      if (!kept || !delivered || blank.length !== 1 || blank[0].url !== "about:blank" || world.tabs.has(tab.id)
+          || world.sessionStorage.get("auvParkedWindowV1") !== windowID) {
+        return { kept, delivered, blank, parked: world.sessionStorage.get("auvParkedWindowV1") };
+      }
+      const windowsBefore = world.windows.size;
+      const second = sendCommand(world, "umaClaudeAutomaticRefresh");
+      await flush();
+      const again = world.created.at(-1);
+      if (again.windowId !== windowID || world.windows.size !== windowsBefore) return { again, windows: world.windows.size };
+      openPage(world, again.id);
+      await advance(100);
+      return (terminalFor(world, second)?.status === "refreshCompleted" && world.windows.has(windowID) && !world.tabs.has(again.id)
+        && [...world.tabs.values()].filter((t) => t.windowId === windowID).length === 1)
+        || { terminal: terminalFor(world, second), tabs: [...world.tabs.values()] };
+    });
+
+    await check("a kept window the user closed is not reused", async () => {
+      const world = await startWorker();
+      world.windows.clear();
+      const first = sendCommand(world, "umaClaudeAutomaticRefresh");
+      await flush();
+      const tab = world.created.at(-1);
+      openPage(world, tab.id);
+      await advance(100);
+      const parked = world.sessionStorage.get("auvParkedWindowV1");
+      await world.chrome.windows.remove(parked);
+      sendCommand(world, "umaClaudeAutomaticRefresh");
+      await flush();
+      const next = world.created.at(-1);
+      return (terminalFor(world, first)?.status === "refreshCompleted" && next.windowId !== parked && world.windows.get(next.windowId)?.state === "minimized")
+        || { parked, next };
+    });
+
     await check("a page that never answers ends the read early as tabUnavailable", async () => {
       const world = await startWorker();
       const id = sendCommand(world, "umaClaudeAutomaticRefresh");

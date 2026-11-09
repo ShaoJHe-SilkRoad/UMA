@@ -26,6 +26,7 @@ The extension's ID is `jnbjegolfmhehndgimjidefmggpnagji`. The browser may remind
 
 - Refresh All, automatic refresh, **Sync Claude now**, and the companion's toolbar button all start a sync.
 - If a normal browser window is open, the Usage page opens as an inactive tab in it; otherwise it opens in a small minimized window. You can choose either one under **Read in**.
+- Chrome and Edge quit when their last window closes. So when that minimized window is the browser's only window, the companion keeps it minimized with a blank tab instead of closing it, and later reads reuse it. You may see it in the taskbar; closing it is fine, and the next read opens a new one.
 - A read that gets no answer ends after about 6 seconds of silence and is retried 20 seconds after the sync started.
 - If the browser is not running, AUV asks whether to open it minimized. During automatic refresh it asks once per stretch, and you can tell it not to ask.
 - If the companion stops answering, AUV says so. Reload the extension on the browser's extensions page, or restart the browser. AUV never restarts your browser.
@@ -85,6 +86,7 @@ AUV Windows 版通过 Chrome 或 Edge 中的一个小型伴侣扩展读取 Claud
 
 - “全部刷新”、自动刷新、**立即同步 Claude**，以及伴侣在工具栏上的按钮，都会触发一次同步。
 - 如果浏览器有打开的普通窗口，用量页会在其中以非活动标签页打开；没有时，会在一个最小化的小窗口中打开。你可以在**读取位置**中固定选择其中一种。
+- Chrome 和 Edge 在最后一个窗口关闭时会退出。因此，当这个最小化窗口是浏览器唯一的窗口时，伴侣不会关闭它，而是保留为一个带空白标签页的最小化窗口，之后的读取会复用它。任务栏里可能会看到它；关掉也没关系，下一次读取会再开一个。
 - 页面沉默约 6 秒没有回应时，这次读取会结束，并在同步开始 20 秒后重试一次。
 - 浏览器未运行时，AUV 会询问是否以最小化方式打开它。自动刷新时同一轮只问一次，你也可以让它不再询问。
 - 伴侣没有响应时，AUV 会提示你。请在浏览器扩展页重新加载扩展，或重启浏览器。AUV 不会替你重启浏览器。

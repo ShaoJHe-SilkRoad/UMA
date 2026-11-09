@@ -609,15 +609,36 @@
 
   // D7: with no placement from AUV, a read opens as an inactive tab in a normal
   // browser window that is not minimized, and otherwise in a small minimized
-  // window of its own that closes with its only tab.
+  // window of its own that closes with its only tab. A window this companion
+  // kept open (see closeTemporaryProviderWindow) is reused instead of opening
+  // another one.
   async function resolvePlacement(requested) {
-    if (requested === "minimizedWindow") return { kind: "minimizedWindow" };
-    try {
-      const windows = await api.windows.getAll({ windowTypes: ["normal"] });
-      const usable = windows.find((w) => w.state !== "minimized" && !w.incognito);
-      if (usable) return { kind: "backgroundTab", windowId: usable.id };
-    } catch (_) {}
+    if (requested !== "minimizedWindow") {
+      try {
+        const windows = await api.windows.getAll({ windowTypes: ["normal"] });
+        const usable = windows.find((w) => w.state !== "minimized" && !w.incognito);
+        if (usable) return { kind: "backgroundTab", windowId: usable.id };
+      } catch (_) {}
+    }
+    const parked = await parkedWindowID();
+    if (parked !== null) return { kind: "parkedWindow", windowId: parked };
     return { kind: "minimizedWindow" };
+  }
+
+  // On Windows, Chrome and Edge quit when their last window closes, and this
+  // companion goes with them. When the read's own minimized window is the
+  // browser's last window, it is kept, minimized, with a blank tab, and reused
+  // by later reads (user decision, 2026-11-08). Only the window ID is stored,
+  // in session storage, which the browser clears when it restarts.
+  const parkedWindowKey = "auvParkedWindowV1";
+  async function parkedWindowID() {
+    try {
+      const stored = await api.storage.session.get(parkedWindowKey);
+      const id = stored?.[parkedWindowKey];
+      if (!Number.isInteger(id)) return null;
+      const window = await api.windows.get(id);
+      return window?.id === id && !window.incognito ? id : null;
+    } catch (_) { return null; }
   }
 
   async function createTemporaryProviderWindow(read, providerURL) {
@@ -653,6 +674,15 @@
       const current = await api.windows.get(windowID, { populate: true });
       const tabs = Array.isArray(current?.tabs) ? current.tabs : [];
       if (tabs.length !== 1 || tabs[0]?.id !== expectedTabID) return false;
+      const others = (await api.windows.getAll({ windowTypes: ["normal"] })).filter((w) => w.id !== windowID);
+      if (others.length === 0) {
+        // The browser's last window: keep it (see parkedWindowID). A blank tab
+        // keeps the window open once the caller closes the read's own tab.
+        await api.tabs.create({ windowId: windowID, url: "about:blank", active: false });
+        await api.storage.session.set({ [parkedWindowKey]: windowID });
+        read.temporaryWindowID = null;
+        return false;
+      }
       await api.windows.remove(windowID);
       read.temporaryWindowID = null;
       return true;
