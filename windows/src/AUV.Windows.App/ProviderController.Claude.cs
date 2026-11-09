@@ -20,6 +20,7 @@ public sealed partial class ProviderController
     private bool claudeAskedThisStretch;
     private DateTimeOffset claudeLastAttempt = DateTimeOffset.MinValue;
     private string claudeLastResult = "";
+    private bool claudeSyncOnConnect;
 
     public ClaudeBrowserSetup ClaudeSetup => new(ClaudeBrowserPaths.InstallRoot(app.Store.PathName), ClaudeBrowserPaths.PackageRoot, ClaudeBrowserPaths.PipeName(app.Store.PathName));
     public string[] ClaudeBrowsers => ClaudeBrowserPreferences.Browsers;
@@ -31,7 +32,7 @@ public sealed partial class ProviderController
         {
             if (value == ClaudeBrowserEnabled) return;
             app.Settings.ClaudeBrowser.Enabled = value; Changed(); main.Persist();
-            if (value) { StartClaudeLink(); _ = RefreshClaudeAsync(userInitiated: true); }
+            if (value) { claudeSyncOnConnect = true; StartClaudeLink(); _ = RefreshClaudeAsync(userInitiated: true); }
             else { StopClaudeLink(); claudeSelection = null; Admit("claude", () => ProviderData.Unavailable("claude", ClaudeBrowserPresentation.Disabled, ConnectionState.Disconnected)); }
             ClaudeChanged();
         }
@@ -67,7 +68,7 @@ public sealed partial class ProviderController
     private void StartClaude()
     {
         if (!ClaudeBrowserEnabled) { Admit("claude", () => ProviderData.Unavailable("claude", ClaudeBrowserPresentation.Disabled, ConnectionState.Disconnected)); return; }
-        StartClaudeLink();
+        claudeSyncOnConnect = true; StartClaudeLink();
     }
 
     /// <summary>Opens AUV's pipe for the installed companion. Without an installed companion there is nothing to connect to.</summary>
@@ -99,7 +100,8 @@ public sealed partial class ProviderController
     internal void RestartClaudeLink()
     {
         StopClaudeLink();
-        if (ClaudeBrowserEnabled) { StartClaudeLink(); _ = RefreshClaudeAsync(userInitiated: true); }
+        // A new link has no browser yet: read as soon as one connects instead of reporting "waiting" straight away.
+        if (ClaudeBrowserEnabled) { claudeSyncOnConnect = true; StartClaudeLink(); }
     }
 
     private void ClaudeLinkChanged()
@@ -109,7 +111,8 @@ public sealed partial class ProviderController
         if (claudeLink.State != CompanionLinkState.Connected) return;
         claudeAskedThisStretch = false;
         // A browser that just connected (opened after AUV, or after a prompt) is read at once when Claude has no current reading.
-        if (!CurrentClaudeReading() && DateTimeOffset.UtcNow - claudeLastAttempt > TimeSpan.FromSeconds(30)) _ = RefreshClaudeAsync(userInitiated: false);
+        if (claudeSyncOnConnect || !CurrentClaudeReading() && DateTimeOffset.UtcNow - claudeLastAttempt > TimeSpan.FromSeconds(30))
+        { claudeSyncOnConnect = false; _ = RefreshClaudeAsync(userInitiated: false); }
     }
 
     private bool CurrentClaudeReading() =>
