@@ -44,10 +44,27 @@ public class CompanionExtensionTests
         Assert.Throws<CryptographicException>(() => rsa.ExportRSAPrivateKey());
     }
 
+    // Line endings are ignored: git may check either copy out with CRLF.
+    private static string Digest(string path) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path).Where(b => b != 13).ToArray())).ToLowerInvariant();
+
     [Theory]
-    [InlineData("claude-usage-extractor.js")] [InlineData("provider-ownership-v2.js")] [InlineData("owned-provider-tab-v2-reducer.js")] [InlineData("content-script.js")]
+    [InlineData("provider-ownership-v2.js")] [InlineData("owned-provider-tab-v2-reducer.js")] [InlineData("content-script.js")]
     public void VendoredSharedScriptsMatchTheMacOriginals(string file) =>
-        Assert.Equal(SHA256.HashData(File.ReadAllBytes(Path.Combine(Repository(), "BrowserExtension", "Shared", file))), SHA256.HashData(File.ReadAllBytes(Extension(Path.Combine("Shared", file)))));
+        Assert.Equal(Digest(Path.Combine(Repository(), "BrowserExtension", "Shared", file)), Digest(Extension(Path.Combine("Shared", file))));
+
+    /// <summary>
+    /// Plan §18: the Windows extractor is the Mac original plus reviewed Chinese rules. Both are pinned, so a change on
+    /// either side fails here until it is synced and reviewed on purpose.
+    /// </summary>
+    [Fact] public void ExtractorIsThePinnedMacOriginalPlusTheReviewedChineseRules()
+    {
+        Assert.Equal("def5975b4b22c118fde912871ba9501a1df78d5129d24e99414b0fb740eb8291", Digest(Path.Combine(Repository(), "BrowserExtension", "Shared", "claude-usage-extractor.js")));
+        Assert.Equal("16478bc934801b2c0b0d6cd20e137f3572c6d503649ac1ed04084ce16d1b20d5", Digest(Extension(Path.Combine("Shared", "claude-usage-extractor.js"))));
+        // Every English rule line of the Mac original is still present in the Windows copy.
+        var windows = File.ReadAllText(Extension(Path.Combine("Shared", "claude-usage-extractor.js"))).Replace("\r", "");
+        foreach (var rule in new[] { "/^current session$/i", "/^this week$/i", "/^resets\\s/i", "/^(?:sonnet|opus|haiku)(?: only)?$/i", "%(?:\\s+used)?" })
+            Assert.Contains(rule, windows);
+    }
 
     [Fact] public void LoaderCarriesBuildPlaceholdersForPackaging()
     {
