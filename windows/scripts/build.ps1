@@ -1,4 +1,4 @@
-param([switch]$Publish, [string]$PublishName = 'AUV_Win_0.18.4', [switch]$SkipTests)
+param([switch]$Publish, [string]$PublishName = 'AUV_Win_0.18.4', [switch]$SkipTests, [ValidatePattern('^\d{1,32}$')][string]$CompanionBuild = (Get-Date -Format 'yyyyMMddHHmm'))
 $ErrorActionPreference = 'Stop'
 $windowsRoot = Split-Path -Parent $PSScriptRoot
 $dotnet = Join-Path $windowsRoot '.tools\dotnet\dotnet.exe'
@@ -23,4 +23,7 @@ if ($Publish) {
     $configPath = Join-Path $windowsRoot 'NuGet.Config'
     & $dotnet publish (Join-Path $windowsRoot 'src\AUV.Windows.App\AUV.Windows.App.csproj') -c Release -r win-x64 --self-contained true "-p:RestoreConfigFile=$configPath" -m:1 -o (Join-Path $windowsRoot "artifacts\$PublishName")
     if ($LASTEXITCODE) { throw 'Publish failed.' }
+    # The Claude browser companion (Chrome/Edge extension and native host) is staged beside AUV.exe.
+    & (Join-Path $PSScriptRoot 'stage-browser-companion.ps1') -Destination (Join-Path $windowsRoot "artifacts\$PublishName") -Build $CompanionBuild
+    if (!$?) { throw 'Staging the browser companion failed.' }
 }

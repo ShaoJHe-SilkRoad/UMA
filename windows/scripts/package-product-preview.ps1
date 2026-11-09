@@ -31,10 +31,10 @@ if ($ValidatedRefinement -or $Stable) {
     }
 }
 if (Get-Command rg -ErrorAction SilentlyContinue) {
-    $sourcePaths = & rg --files (Join-Path $windowsRoot 'src') (Join-Path $windowsRoot 'tests') $PSScriptRoot -g '!**/bin/**' -g '!**/obj/**'
+    $sourcePaths = & rg --files (Join-Path $windowsRoot 'src') (Join-Path $windowsRoot 'tests') (Join-Path $windowsRoot 'browser-extension') $PSScriptRoot -g '!**/bin/**' -g '!**/obj/**'
 } else {
     # Same file set without ripgrep: tracked and untracked-but-not-ignored files under src, tests and scripts.
-    $sourcePaths = @(& git -C $windowsRoot ls-files --cached --others --exclude-standard -- src tests scripts | ForEach-Object { Join-Path $windowsRoot $_ } | Where-Object { Test-Path -LiteralPath $_ })
+    $sourcePaths = @(& git -C $windowsRoot ls-files --cached --others --exclude-standard -- src tests scripts browser-extension | ForEach-Object { Join-Path $windowsRoot $_ } | Where-Object { Test-Path -LiteralPath $_ })
     if ($LASTEXITCODE) { throw 'Listing source files failed.' }
 }
 $sourcePaths += @('AUV.Windows.sln','NuGet.Config','global.json') | ForEach-Object { Join-Path $windowsRoot $_ } | Where-Object { Test-Path -LiteralPath $_ }

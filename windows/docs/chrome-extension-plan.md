@@ -295,7 +295,7 @@
 1. **只读一个页面，只取几个数字**：路由、白名单和失败即不报的规则与 Mac 相同。不读套餐名、邮箱、组织 ID、对话或页面文本。
 2. **AUV 不接触凭据**：登录状态只在 Chrome 自己的配置里；扩展不申请 `cookies` 权限；协议里没有凭据字段；AUV、主机、日志、测试数据和提交都不包含凭据或账户数据。
 3. **扩展权限最小化**：
-   - 只申请 `nativeMessaging`、`storage`，主机权限只有 `https://claude.ai/new*`；
+   - 只申请 `nativeMessaging`、`storage`、`alarms`（实现时增加：每分钟唤醒一次 Service Worker 做存活检查，安装时不产生额外提示），主机权限只有 `https://claude.ai/new*`；
    - 安装时浏览器会提示“读取和更改 claude.ai 上的数据”和“与协作的本机应用通信”。
 4. **主机校验**：
    - argv[1] 必须是配置的扩展 origin；
@@ -576,7 +576,7 @@ reg delete "HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.silkrd.auv.cla
 | D11 | 不申请 `background` 权限 |
 | D12 | Claude 有读数时出现在桌面浮窗列表，外观不变 |
 | D13 | 扩展图标点击后让 AUV 立即同步一次 |
-| D14 | 版本号未给推荐值，打包前再向用户确认；实现期间不改版本号 |
+| D14 | 用户决定：0.18.5（“14: 0.18.5，按你说的来”）；在 M6 打包时应用 |
 | D15 | 默认关闭，用户开启并完成设置后才读取 |
 | D16 | 共享 JS 用固定副本 + 哈希比对测试 |
 | D17 | JS 测试用 WebView2 运行 |
