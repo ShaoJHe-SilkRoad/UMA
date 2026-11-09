@@ -20,7 +20,7 @@ public sealed class ClaudeBrowserPreferences
         if (InstalledBuild != null && (InstalledBuild.Length is 0 or > 32 || !InstalledBuild.All(char.IsAsciiDigit))) InstalledBuild = null;
     }
     /// <summary>The placement sent with a read; "auto" lets the extension choose from the browser's windows (D7).</summary>
-    public string? CommandPlacement => Placement == "auto" ? null : Placement;
+    [System.Text.Json.Serialization.JsonIgnore] public string? CommandPlacement => Placement == "auto" ? null : Placement;
 }
 
 /// <summary>The packaged companion's identity (BrowserCompanion\companion.json). It holds no secret.</summary>
