@@ -236,18 +236,19 @@ Optional WorkBuddy connection needs Microsoft Edge WebView2 Runtime (not bundled
 Upgrade: quit the old copy, extract this package separately and run its AUV.exe.
 Existing settings in %LOCALAPPDATA%\AUV.Windows.UI.Preview are kept and still read.
 
-New in $Version (aligned with AUV for Mac 0.18.4 where Windows can support it):
-- Refresh All for every agent; automatic refresh every 5, 10, 15, 30 or 60 minutes.
-- The quota window shown is the one that changed most recently; a spent window comes first.
-- Drag agents into your order; the tray panel, tray tooltip and Desktop Wizard follow it.
-- Redesigned main window and six-pane Settings; English and Chinese interface.
-- ThreadOS opens from Codex settings, with Back to Codex.
-- Optional Local Cost Estimate for Codex, off by default.
+New in $Version:
+- Claude's exact plan limits through the AUV Browser Companion for Chrome or Edge (off until you
+  turn it on in Claude settings). The companion reads only the 5-hour and weekly used percentages
+  and reset times from claude.ai's official Usage page, in English or Chinese; your sign-in stays in
+  the browser. Set it up from Claude settings; see BrowserCompanion\README.txt.
+- Everything from 0.18.4: Refresh All and automatic refresh, the most recently changed quota window,
+  your agent order, the six-pane Settings, English and Chinese, ThreadOS from Codex settings and the
+  optional Codex Local Cost Estimate.
 
 Codex reads the installed client's existing login through a read-only usage interface.
 WorkBuddy Credit sync is experimental and uses AUV's separate official-site browser session.
 Only current readings appear; out-of-date and unknown quotas are hidden. Verified zero remains visible.
-Claude and Antigravity have no live connection on Windows. Sectorium storage operations are disabled.
+Antigravity has no live connection on Windows. Sectorium storage operations are disabled.
 ThreadOS generates and copies instructions; it does not dispatch them.
 
 Ctrl+Shift+W: Wizard; Ctrl+Shift+U: tray panel; Ctrl+Comma: settings; F5: Refresh All;

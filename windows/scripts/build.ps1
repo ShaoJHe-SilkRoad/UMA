@@ -1,4 +1,4 @@
-param([switch]$Publish, [string]$PublishName = 'AUV_Win_0.18.4', [switch]$SkipTests, [ValidatePattern('^\d{1,32}$')][string]$CompanionBuild = (Get-Date -Format 'yyyyMMddHHmm'))
+param([switch]$Publish, [string]$PublishName = 'AUV_Win_0.18.5', [switch]$SkipTests, [ValidatePattern('^\d{1,32}$')][string]$CompanionBuild = (Get-Date -Format 'yyyyMMddHHmm'))
 $ErrorActionPreference = 'Stop'
 $windowsRoot = Split-Path -Parent $PSScriptRoot
 $dotnet = Join-Path $windowsRoot '.tools\dotnet\dotnet.exe'

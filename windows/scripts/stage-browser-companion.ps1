@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory = $true)][string]$Destination,
     [ValidatePattern('^\d{1,32}$')][string]$Build = (Get-Date -Format 'yyyyMMddHHmm'),
     [string]$RuntimeGenerationId = ([guid]::NewGuid().ToString())
@@ -40,5 +40,27 @@ $loader = $loader.Replace('__AUV_COMPANION_BUILD__', $Build).Replace('__AUV_RUNT
 [IO.File]::WriteAllText($loaderPath, $loader, (New-Object Text.UTF8Encoding $false))
 $companion = [ordered]@{ schemaVersion = 1; extensionId = $extensionId; runtimeGenerationID = $RuntimeGenerationId; companionVersion = $version; companionBuild = $Build }
 [IO.File]::WriteAllText((Join-Path $target 'companion.json'), ($companion | ConvertTo-Json), (New-Object Text.UTF8Encoding $false))
+$readme = @"
+AUV Browser Companion for Claude $version (build $Build) - Chrome / Edge
+
+Do not load this folder directly. In AUV, open Claude settings, tick "Sync Claude through the browser
+companion" and choose Set Up: AUV copies the companion to
+%LOCALAPPDATA%\AUV.Windows.UI.Preview\browser-companion\ and registers its helper for Chrome and Edge
+under your Windows account. Then load ...\browser-companion\extension on the browser's extensions page
+(Developer mode -> Load unpacked). Extension ID: $extensionId
+
+It reads only Claude's 5-hour and weekly used percentages, their reset times and when they were read,
+from https://claude.ai/new#settings/usage (English or Chinese interface). Passwords, cookies, tokens,
+conversations and page text are never read or sent. Remove it from Claude settings (Remove companion),
+then remove the extension on the browser's extensions page. To remove the registration by hand:
+  reg delete "HKCU\Software\Google\Chrome\NativeMessagingHosts\com.silkrd.auv.claude_browser" /f
+  reg delete "HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.silkrd.auv.claude_browser" /f
+
+AUV 浏览器伴侣（Claude）：请勿直接加载本文件夹。在 AUV 的 Claude 设置中勾选“通过浏览器伴侣同步 Claude”并选择“设置”，
+再在浏览器扩展页（开发者模式 -> 加载已解压的扩展程序）加载 ...\browser-companion\extension。
+它只读取 claude.ai 用量页上的 5 小时与每周已用百分比、重置时间和读取时间（支持英文或中文界面），
+从不读取或发送密码、Cookie、令牌、对话或页面文字。在 Claude 设置中选择“移除伴侣”，再在浏览器扩展页移除扩展即可卸载。
+"@
+[IO.File]::WriteAllText((Join-Path $target 'README.txt'), ($readme -replace "`r?`n", "`r`n"), (New-Object Text.UTF8Encoding $true))
 [ordered]@{ BrowserCompanion = $target; ExtensionId = $extensionId; CompanionVersion = $version; CompanionBuild = $Build; RuntimeGenerationID = $RuntimeGenerationId;
     HostBytes = (Get-Item -LiteralPath (Join-Path $target 'host\AUV.BrowserHost.exe')).Length } | ConvertTo-Json

@@ -57,7 +57,7 @@ reg delete "HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.silkrd.auv.cla
 | The browser companion is not answering | Reload the extension, or restart the browser. |
 | Claude's Usage page layout is not recognized | claude.ai changed its page. No figure is shown rather than a wrong one; an AUV update is needed. |
 
-Claude's Usage page must be in English for the reader to recognize its labels.
+The reader recognizes claude.ai's Usage page in English and in Chinese (简体中文). In another interface language it reads nothing and says so; switch claude.ai to English or Chinese.
 
 ---
 
@@ -116,4 +116,4 @@ reg delete "HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.silkrd.auv.cla
 | 浏览器伴侣没有响应 | 重新加载扩展，或重启浏览器。 |
 | 无法识别 Claude 用量页的布局 | claude.ai 改版了页面。AUV 宁可不显示也不显示错误数字，需要等 AUV 更新。 |
 
-Claude 用量页需要是英文界面，读取程序才能识别其中的标签。
+读取程序能识别英文和简体中文的 claude.ai 用量页。其他界面语言下读不到数据，AUV 会显示原因；请把 claude.ai 切换为英文或中文。
