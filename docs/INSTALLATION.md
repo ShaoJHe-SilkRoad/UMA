@@ -1,6 +1,6 @@
 # Install AUV / 安装 AUV
 
-[English](#english-installation-guide) · [中文](#中文安装指南) · [Mac 0.17.4](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.4/AUV_Mac_0.17.4_Universal.zip) · [Windows 0.18.5](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.5-win/AUV_Win_0.18.5.zip)
+[English](#english-installation-guide) · [中文](#中文安装指南) · [Mac 0.17.4](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.4/AUV_Mac_0.17.4_Universal.zip) · [Windows 0.18.6](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.6-win/AUV_Win_0.18.6.zip)
 
 ## English installation guide
 
@@ -58,35 +58,35 @@ Expected SHA-256:
 
 <a id="windows-installation-guide"></a>
 
-### Windows 0.18.5
+### Windows 0.18.6
 
-**Windows 11 · x64 · portable ZIP · unsigned** — build **20261108.1**.
+**Windows 11 · x64 · portable ZIP · unsigned** — build **20261111.1**.
 
-1. [Download for Windows · v0.18.5](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.5-win/AUV_Win_0.18.5.zip). Choose the application ZIP, not GitHub's source archive.
+1. [Download for Windows · v0.18.6](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.6-win/AUV_Win_0.18.6.zip). Choose the application ZIP, not GitHub's source archive.
 2. Right-click the ZIP in File Explorer → **Extract All**. Keep the complete extracted folder, including every DLL and runtime file.
-3. Run **AUV.exe** from that folder as your normal Windows user. Confirm **AUV 0.18.5** in Properties → Details → Product version, or in the window title.
+3. Run **AUV.exe** from that folder as your normal Windows user. Confirm **AUV 0.18.6** in Properties → Details → Product version, or in the window title.
 4. The top bar has AUV and Sectorium. ThreadOS opens from **Codex Settings… → ThreadOS → Open**; **Back to Codex** returns. **Refresh All** (or F5) refreshes every agent. Drag agents in the list to arrange them.
 5. **Settings** has six panes: General (language, appearance), Refresh (automatic refresh every 5–60 minutes), Agents (order), System Tray, Desktop Wizard, and Privacy & Data. The AUV tray icon opens the usage/CPU/RAM panel (Windows may put it in the tray overflow).
 6. Use **Quit** in the tray or **Ctrl+Shift+Q** to exit completely. Closing the main window can keep the tray running.
-7. Optional, for Claude: open the Claude agent's **Settings…**, tick **Sync Claude through the browser companion** and choose **Set Up**. Then, in Chrome or Edge, open the extensions page, turn on **Developer mode**, choose **Load unpacked** and select the folder AUV shows. Stay signed in to claude.ai in that browser. See the [browser companion guide](../windows/docs/claude-browser-companion.md) for what it reads, updates and removal.
+7. Optional, for Claude: on the Claude page choose **Connect Claude** and confirm. A three-step checklist follows. Choose **Load in Chrome** or **Load in Edge**: AUV copies the path of `BrowserCompanion\extension` inside the AUV folder and opens the extensions page; turn on **Developer mode**, choose **Load unpacked** and paste the path. Then choose **Open claude.ai** and sign in there yourself. The checklist ticks itself and folds into one line once connected. Keep AUV in a folder you can write to, not under Program Files. See the [browser companion guide](../windows/docs/claude-browser-companion.md) for what it reads, updates and removal.
 
 The **.NET 10 desktop runtime is included**; the portable app does not require a separate .NET SDK/runtime installation. Optional WorkBuddy connection additionally needs **Microsoft Edge WebView2 Runtime**, which is not bundled. Codex data requires the installed Codex client and its existing login. No new provider login is required simply to open AUV.
 
 This Windows build is **not digitally signed** and may trigger Windows or organization security controls. Check the official package checksum; keep protections enabled and [report the exact message](https://github.com/ShaoJHe-SilkRoad/UMA/issues) if blocked. No warning-free or clean-machine certification is claimed.
 
-**Upgrade:** quit the old copy, extract the new package into a separate folder and run its AUV.exe. Preserve **%LOCALAPPDATA%\AUV.Windows.UI.Preview**: it contains settings.v1.json, the separate workbuddy-web-* browser profile and, once set up, the browser-companion folder. 0.18.5 reads 0.18.4 and 0.16.x settings unchanged; new settings start at their defaults, and Claude browser sync starts off. After updating AUV, choose **Update** in Claude settings if offered, then reload the extension in each browser. Do not delete settings or assume rollback compatibility. Mac preferences are separate.
+**Upgrade:** quit the old copy, extract the new package into a separate folder and run its AUV.exe. Preserve **%LOCALAPPDATA%\AUV.Windows.UI.Preview**: it contains settings.v1.json and the separate workbuddy-web-* browser profile. 0.18.6 reads 0.18.5, 0.18.4 and 0.16.x settings unchanged; new settings start at their defaults, and Claude browser sync stays off until you connect it. The browser companion now stays in `BrowserCompanion\` inside the AUV folder: after moving to a new AUV folder, load `BrowserCompanion\extension` from there once (AUV shows the step again). Coming from 0.18.5, AUV offers to delete its old copy in this folder. Do not delete settings or assume rollback compatibility. Mac preferences are separate.
 
 **Scope:** Codex read-only usage is connected; WorkBuddy Credit sync is experimental. Claude's 5-hour and weekly limits come from claude.ai's Usage page (English or Chinese) through the browser companion, loaded in Developer mode (not from a browser store); its helper is registered for your Windows account only. Claude Code's local estimate and Antigravity have no reading on Windows. Only current readings appear; verified zero stays visible. The Local Cost Estimate is off by default. ThreadOS generates and copies instructions without dispatching work or applying settings. Sectorium is UI only with storage actions disabled. ARM64, installer, signing reputation, receiving-client execution and Windows storage qualification are not included.
 
 Verify in PowerShell:
 
 ```powershell
-Get-FileHash -Algorithm SHA256 "$env:USERPROFILE\Downloads\AUV_Win_0.18.5.zip"
+Get-FileHash -Algorithm SHA256 "$env:USERPROFILE\Downloads\AUV_Win_0.18.6.zip"
 ```
 
-Expected SHA-256: **663ad6bc4706b4ba0aef5317f5d3d5c207c303228d0f37c6a75105390c40474c**.
+Expected SHA-256: **8f8d54c6f910cb9392b2c3ae05749f70d7ac87ac7a4108f0bb95c88e0645f2c3**.
 
-[Windows release notes](releases/AUV_Win_0.18.5.md) · [Checksums](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.5-win/HASHES.txt) · [Release manifest](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.5-win/RELEASE-MANIFEST.json) · [Report a problem](https://github.com/ShaoJHe-SilkRoad/UMA/issues)
+[Windows release notes](releases/AUV_Win_0.18.6.md) · [Checksums](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.6-win/HASHES.txt) · [Release manifest](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.6-win/RELEASE-MANIFEST.json) · [Report a problem](https://github.com/ShaoJHe-SilkRoad/UMA/issues)
 
 ## 中文安装指南
 
@@ -144,26 +144,26 @@ SHA-256 应为：
 
 <a id="windows-中文安装指南"></a>
 
-### Windows 0.18.5
+### Windows 0.18.6
 
-**Windows 11 · x64 · 便携 ZIP · 未签名**，构建号 **20261108.1**。
+**Windows 11 · x64 · 便携 ZIP · 未签名**，构建号 **20261111.1**。
 
-1. [下载 Windows 版 · v0.18.5](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.5-win/AUV_Win_0.18.5.zip)。请选择应用 ZIP，不要选 GitHub 的源码压缩包。
+1. [下载 Windows 版 · v0.18.6](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.6-win/AUV_Win_0.18.6.zip)。请选择应用 ZIP，不要选 GitHub 的源码压缩包。
 2. 在文件资源管理器右键 ZIP → **全部解压**。保留完整文件夹，包含所有 DLL 和运行时文件。
-3. 以普通用户运行其中的 **AUV.exe**，在文件属性 → 详细信息或窗口标题中确认 **0.18.5**。
+3. 以普通用户运行其中的 **AUV.exe**，在文件属性 → 详细信息或窗口标题中确认 **0.18.6**。
 4. 顶部有 AUV 和分区工。线程工从 **Codex 设置… → 线程工 → 打开** 进入，用 **返回 Codex** 回来。**全部刷新**（或 F5）会刷新所有智能体；在列表中拖动智能体即可排序。
 5. **设置**分为六个分区：通用（语言、外观）、刷新（每 5–60 分钟自动刷新）、智能体（顺序）、系统托盘、桌面浮窗、隐私与数据。AUV 托盘图标可展开用量与 CPU/内存；图标可能位于托盘折叠菜单。
 6. 用托盘 **退出** 或 **Ctrl+Shift+Q** 完全退出；只关闭主窗口可能仍保留托盘。
-7. 可选（Claude）：打开 Claude 智能体的 **设置…**，勾选 **通过浏览器伴侣同步 Claude** 并选择 **设置**。然后在 Chrome 或 Edge 中打开扩展页，开启 **开发者模式**，选择 **加载已解压的扩展程序**，选中 AUV 显示的文件夹，并保持该浏览器已登录 claude.ai。读取内容、更新与移除方法见[浏览器伴侣使用说明](../windows/docs/claude-browser-companion.md#中文)。
+7. 可选（Claude）：在 Claude 页面选择 **连接 Claude** 并确认，之后会出现三步清单。选择 **在 Chrome 中加载** 或 **在 Edge 中加载**：AUV 会复制 AUV 文件夹中 `BrowserCompanion\extension` 的路径并打开扩展页；开启 **开发者模式**，选择 **加载已解压的扩展程序** 并粘贴该路径。再选择 **打开 claude.ai**，由你自己登录。清单会自动打勾，连接完成后收起为一行。请把 AUV 放在可写的文件夹中，不要放在 Program Files 下。读取内容、更新与移除方法见[浏览器伴侣使用说明](../windows/docs/claude-browser-companion.md#中文)。
 
 **已包含 .NET 10 桌面运行时**，便携包无需另外安装 .NET SDK/运行时。可选 WorkBuddy 连接另需 **Microsoft Edge WebView2 Runtime**，本包不附带。Codex 需已安装的客户端及其现有登录；仅打开 AUV 无需新增代理登录。
 
 Windows 包**未进行数字签名**，可能受到 Windows 或组织安全策略拦截。请核对官方文件校验值，保持安全防护开启；若受阻，请[反馈具体提示](https://github.com/ShaoJHe-SilkRoad/UMA/issues)。不承诺无安全提示，也不宣称通过干净机器认证。
 
-**升级：**先正常退出旧版，将新包全部解压到独立文件夹，再运行新版 AUV.exe。保留 **%LOCALAPPDATA%\AUV.Windows.UI.Preview**，其中含 settings.v1.json、独立的 workbuddy-web-* 浏览器配置，以及设置后才有的 browser-companion 文件夹。0.18.5 原样读取 0.18.4 和 0.16.x 的设置，新增设置取默认值，Claude 浏览器同步默认关闭。更新 AUV 后，如果 Claude 设置提示有更新，请选择“更新”，再在每个浏览器中重新加载扩展。不要删除设置，也不保证回退兼容。Mac 偏好单独保存。
+**升级：**先正常退出旧版，将新包全部解压到独立文件夹，再运行新版 AUV.exe。保留 **%LOCALAPPDATA%\AUV.Windows.UI.Preview**，其中含 settings.v1.json 和独立的 workbuddy-web-* 浏览器配置。0.18.6 原样读取 0.18.5、0.18.4 和 0.16.x 的设置，新增设置取默认值，Claude 浏览器同步在你连接之前保持关闭。浏览器伴侣现在留在 AUV 文件夹中的 `BrowserCompanion\`：换用新的 AUV 文件夹后，需要从新文件夹再加载一次 `BrowserCompanion\extension`（AUV 会重新显示这一步）。从 0.18.5 升级时，AUV 会询问是否删除该文件夹中的旧副本。不要删除设置，也不保证回退兼容。Mac 偏好单独保存。
 
 **范围：**Codex 只读用量已接入；WorkBuddy Credit 同步为试验功能。Claude 的 5 小时与每周额度由浏览器伴侣从 claude.ai 用量页读取（支持英文或中文界面），扩展以开发者模式加载（未上架浏览器商店），辅助程序只为你的 Windows 账户注册。Claude Code 本地估算和 Antigravity 在 Windows 上没有读数。只显示当前读数，已确认的零仍显示。本地费用估算默认关闭。线程工生成、复制指令，不代发任务或应用设置。分区工仅为界面，磁盘操作禁用。ARM64、安装器、签名信誉、接收端执行与 Windows 存储认证不在本版范围内。
 
-PowerShell 校验方法同上，SHA-256 应为 **663ad6bc4706b4ba0aef5317f5d3d5c207c303228d0f37c6a75105390c40474c**。
+PowerShell 校验方法同上，SHA-256 应为 **8f8d54c6f910cb9392b2c3ae05749f70d7ac87ac7a4108f0bb95c88e0645f2c3**。
 
-[Windows 更新说明](releases/AUV_Win_0.18.5.md#中文) · [校验值](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.5-win/HASHES.txt) · [发布清单](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.5-win/RELEASE-MANIFEST.json) · [反馈问题](https://github.com/ShaoJHe-SilkRoad/UMA/issues)
+[Windows 更新说明](releases/AUV_Win_0.18.6.md#中文) · [校验值](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.6-win/HASHES.txt) · [发布清单](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.6-win/RELEASE-MANIFEST.json) · [反馈问题](https://github.com/ShaoJHe-SilkRoad/UMA/issues)
