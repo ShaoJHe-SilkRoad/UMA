@@ -237,13 +237,17 @@ Upgrade: quit the old copy, extract this package separately and run its AUV.exe.
 Existing settings in %LOCALAPPDATA%\AUV.Windows.UI.Preview are kept and still read.
 
 New in ${Version}:
-- Claude's exact plan limits through the AUV Browser Companion for Chrome or Edge (off until you
-  turn it on in Claude settings). The companion reads only the 5-hour and weekly used percentages
-  and reset times from claude.ai's official Usage page, in English or Chinese; your sign-in stays in
-  the browser. Set it up from Claude settings; see BrowserCompanion\README.txt.
-- Everything from 0.18.4: Refresh All and automatic refresh, the most recently changed quota window,
-  your agent order, the six-pane Settings, English and Chinese, ThreadOS from Codex settings and the
-  optional Codex Local Cost Estimate.
+- Connecting Claude is simpler: one Connect button on the Claude page, then a three-step checklist
+  that ticks itself (registered, extension loaded, signed in) with Load in Chrome/Edge and
+  Open claude.ai buttons. Browser and placement options move under Advanced.
+- Claude's bars use the same green/red colours as Codex.
+- The browser companion now lives in this folder (BrowserCompanion\); load
+  BrowserCompanion\extension once in Chrome or Edge. Each new AUV folder needs one more load.
+  Coming from 0.18.5, AUV offers to delete its old copy in %LOCALAPPDATA%.
+- A cleaner look with restrained motion; off when Windows "Show animations" is off.
+  Quota bars and the Desktop Wizard look the same.
+- Still here: Refresh All and automatic refresh, your agent order, English and Chinese,
+  ThreadOS from Codex settings and the optional Codex Local Cost Estimate.
 
 Codex reads the installed client's existing login through a read-only usage interface.
 WorkBuddy Credit sync is experimental and uses AUV's separate official-site browser session.
