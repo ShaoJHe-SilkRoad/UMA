@@ -6,13 +6,20 @@ using Microsoft.Win32;
 namespace AUV.Windows.App;
 
 public enum CompanionInstallState { NotPackaged, NotInstalled, Installed, UpdateAvailable, RegistrationMissing }
+/// <param name="ForeignRegistrations">Browsers whose registration belongs to another program; replaced only after asking.</param>
+/// <param name="AuvRegistrationsElsewhere">0.18.6: browsers whose registration is an AUV companion in another folder (an earlier copy or
+/// another preference profile); Set Up replaces these without asking.</param>
 public sealed record CompanionStatus(CompanionInstallState State, ClaudeCompanionManifest? Packaged, ClaudeCompanionManifest? Installed,
-    IReadOnlyList<string> RegisteredBrowsers, IReadOnlyList<string> ForeignRegistrations);
+    IReadOnlyList<string> RegisteredBrowsers, IReadOnlyList<string> ForeignRegistrations, IReadOnlyList<string> AuvRegistrationsElsewhere)
+{
+    public bool Registered => RegisteredBrowsers.Count > 0;
+}
 
 /// <summary>
 /// Installs, updates and removes the companion's files and its per-user native messaging registration (HKCU only).
 /// Nothing is overwritten that AUV did not create: an older extension folder is kept as a backup, an older host build
-/// keeps its own folder, and a registry value pointing somewhere else is reported instead of replaced.
+/// keeps its own folder, and a registry value pointing to another program is reported instead of replaced. A value that
+/// points to AUV's own companion in another folder (0.18.6) is replaced, since it is the same companion.
 /// </summary>
 public sealed class ClaudeBrowserSetup(string installRoot, string packageRoot, string pipeName, RegistryKey? hive = null, string registryBase = "Software")
 {
@@ -32,19 +39,62 @@ public sealed class ClaudeBrowserSetup(string installRoot, string packageRoot, s
     {
         var packaged = ClaudeBrowserPaths.LoadManifest(packageRoot);
         var installed = ClaudeBrowserPaths.LoadManifest(installRoot);
-        var registered = new List<string>(); var foreign = new List<string>();
+        var registered = new List<string>(); var foreign = new List<string>(); var elsewhere = new List<string>();
         foreach (var (browser, path) in Browsers)
         {
             var value = RegisteredValue(path);
             if (value == null) continue;
             if (Ours(value) && installed != null && Path.GetFullPath(value).Equals(Path.GetFullPath(HostManifestPath(installed)), StringComparison.OrdinalIgnoreCase) && File.Exists(value)) registered.Add(browser);
-            else if (!Ours(value)) foreign.Add(browser);
+            else if (!Ours(value)) (IsAuvCompanion(value) ? elsewhere : foreign).Add(browser);
         }
         var state = packaged == null && installed == null ? CompanionInstallState.NotPackaged
             : installed == null ? CompanionInstallState.NotInstalled
             : packaged != null && packaged != installed ? CompanionInstallState.UpdateAvailable
             : registered.Count == 0 ? CompanionInstallState.RegistrationMissing : CompanionInstallState.Installed;
-        return new(state, packaged, installed, registered, foreign);
+        return new(state, packaged, installed, registered, foreign, elsewhere);
+    }
+
+    /// <summary>
+    /// 0.18.6: a registration is AUV's own companion when its host manifest is named com.silkrd.auv.claude_browser and its
+    /// folder holds AUV.BrowserHost.exe and a well-formed host-config.json. Only small files are read; nothing is run.
+    /// </summary>
+    public static bool IsAuvCompanion(string? hostManifestPath)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(hostManifestPath) || !Path.IsPathFullyQualified(hostManifestPath)) return false;
+            var manifest = new FileInfo(hostManifestPath);
+            if (!manifest.Exists || manifest.Length is 0 or > 4096) return false;
+            using (var document = JsonDocument.Parse(File.ReadAllBytes(manifest.FullName)))
+                if (document.RootElement.ValueKind != JsonValueKind.Object || !document.RootElement.TryGetProperty("name", out var name) ||
+                    name.ValueKind != JsonValueKind.String || name.GetString() != ClaudeBrowserContract.NativeHostName) return false;
+            var folder = manifest.DirectoryName!;
+            var config = new FileInfo(Path.Combine(folder, ClaudeHostConfig.FileName));
+            if (!File.Exists(Path.Combine(folder, HostExecutable)) || !config.Exists || config.Length is 0 or > 4096) return false;
+            ClaudeHostConfig.Parse(File.ReadAllBytes(config.FullName));
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidDataException or ArgumentException or NotSupportedException or System.Security.SecurityException) { return false; }
+    }
+
+    /// <summary>True when the packaged companion's build number is higher than the installed one (both are decimal digits).</summary>
+    public static bool IsNewer(ClaudeCompanionManifest packaged, ClaudeCompanionManifest installed)
+    {
+        static string Trim(string digits) => digits.TrimStart('0') is { Length: > 0 } t ? t : "0";
+        var (a, b) = (Trim(packaged.CompanionBuild), Trim(installed.CompanionBuild));
+        return a.Length != b.Length ? a.Length > b.Length : string.CompareOrdinal(a, b) > 0;
+    }
+
+    /// <summary>
+    /// 0.18.6 start-up update: when a companion is installed and this AUV carries a newer build, install it (AUV's own files
+    /// and registration only). Returns the new manifest, or null when there was nothing to do. Throws as <see cref="Install"/> does,
+    /// including <see cref="ForeignRegistrationException"/> when another program now holds the registration.
+    /// </summary>
+    public ClaudeCompanionManifest? UpdateIfNewer()
+    {
+        var status = Status();
+        if (status.Installed is not { } installed || status.Packaged is not { } packaged || !IsNewer(packaged, installed)) return null;
+        return Install(false);
     }
 
     /// <summary>Copies the packaged companion and registers the host for Chrome and Edge. Returns the installed manifest.</summary>
@@ -63,7 +113,7 @@ public sealed class ClaudeBrowserSetup(string installRoot, string packageRoot, s
             if (Directory.Exists(hostFolder)) Directory.Move(hostFolder, hostFolder + ".incomplete-" + DateTime.Now.ToString("yyyyMMddHHmmss"));
             Directory.Move(staging, hostFolder);
         }
-        WriteJson(Path.Combine(hostFolder, "host-config.json"), w =>
+        WriteJson(Path.Combine(hostFolder, ClaudeHostConfig.FileName), w =>
         {
             w.WriteNumber("schemaVersion", 1); w.WriteString("pipeName", pipeName); w.WriteString("allowedOrigin", packaged.ExtensionOrigin);
             w.WriteString("runtimeGenerationID", packaged.RuntimeGenerationId); w.WriteString("hostVersion", packaged.CompanionVersion); w.WriteString("hostBuild", packaged.CompanionBuild);

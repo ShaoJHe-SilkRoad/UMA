@@ -38,6 +38,7 @@ public sealed class ClaudeBrowserPipeServer : IClaudeCompanionLink, IDisposable
     private readonly ClaudeCompanionManifest expected;
     private readonly Func<int, bool> trustedClient;
     private readonly Func<string> selectedBrowser;
+    private readonly CompanionReloadThrottle? reloads;
     private readonly CancellationTokenSource lifetime = new();
     private readonly object gate = new();
     private Connection? active;
@@ -51,8 +52,9 @@ public sealed class ClaudeBrowserPipeServer : IClaudeCompanionLink, IDisposable
     public event Action<CompanionMessage>? Received;
     public event Action? StateChanged;
 
-    public ClaudeBrowserPipeServer(string pipeName, ClaudeCompanionManifest expected, Func<int, bool> trustedClient, Func<string> selectedBrowser)
-    { this.pipeName = pipeName; this.expected = expected; this.trustedClient = trustedClient; this.selectedBrowser = selectedBrowser; }
+    /// <param name="reloads">0.18.6: when given, a host refused for another build is followed by one request for its extension to reload itself.</param>
+    public ClaudeBrowserPipeServer(string pipeName, ClaudeCompanionManifest expected, Func<int, bool> trustedClient, Func<string> selectedBrowser, CompanionReloadThrottle? reloads = null)
+    { this.pipeName = pipeName; this.expected = expected; this.trustedClient = trustedClient; this.selectedBrowser = selectedBrowser; this.reloads = reloads; }
 
     public void Start() { lock (gate) acceptLoop ??= Task.Run(() => AcceptAsync(lifetime.Token)); }
 
@@ -108,6 +110,11 @@ public sealed class ClaudeBrowserPipeServer : IClaudeCompanionLink, IDisposable
                     bool idle; lock (gate) idle = active == null;
                     RejectedHost = hello;
                     if (idle) SetState(CompanionLinkState.Rejected, reason);
+                    // The host keeps its connection to the extension from before an update. The extension loads from the
+                    // folder AUV installs into, so asking it to reload brings in the installed build (hosts from 0.18.6 on relay this).
+                    if (reloads?.TryRequest(hello.BrowserProduct) == true)
+                        await CompanionFraming.WriteAsync(stream, CompanionMessageCodec.Encode(new CompanionCommand(ClaudeBrowserContract.ReloadCommand, ClaudeBrowserContract.NewRequestId())),
+                            ClaudeBrowserContract.MaximumPipeFrameBytes, cancellationToken);
                 }
                 return;
             }

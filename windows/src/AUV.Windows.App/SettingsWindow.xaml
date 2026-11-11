@@ -117,29 +117,33 @@
      </StackPanel>
      <StackPanel x:Name="ClaudePanel" Visibility="Collapsed">
       <TextBlock Text="{local:Tr 'Exact figures from claude.ai', 来自 claude.ai 的精确读数}" Style="{StaticResource Group}"/>
-      <TextBlock Text="{local:Tr 'AUV’s companion extension in Chrome or Edge reads Claude’s plan-limit percentages and reset times from the official claude.ai Usage page, in a background tab it opens and closes for each sync. Your sign-in stays in the browser; AUV never sees passwords, cookies or conversations.', AUV 的伴侣扩展在 Chrome 或 Edge 中从 claude.ai 官方用量页读取 Claude 的套餐额度百分比和重置时间，每次同步时打开一个后台标签页，读完即关闭。登录状态留在浏览器中，AUV 不会接触密码、Cookie 或对话。}" Style="{StaticResource Muted}" TextWrapping="Wrap"/>
-      <CheckBox Content="{local:Tr 'Sync Claude through the browser companion', 通过浏览器伴侣同步 Claude}" IsChecked="{Binding Providers.ClaudeBrowserEnabled, Mode=TwoWay}" Margin="0,10" AutomationProperties.AutomationId="auv.claude.enabled"/>
+      <TextBlock Text="{local:Tr 'AUV’s companion extension in Chrome or Edge reads Claude’s plan-limit percentages and reset times from the official claude.ai Usage page, in a background tab it opens and closes for each sync. Your sign-in stays in the browser; AUV never sees passwords, cookies or conversations.', AUV 的伴侣扩展在 Chrome 或 Edge 中从 claude.ai 官方用量页读取 Claude 的套餐额度百分比和重置时间，每次同步时打开一个后台标签页，读完即关闭。登录状态留在浏览器中，AUV 不会接触密码、Cookie 或对话。}" Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,0,0,12"/>
+      <!-- 0.18.6: the same Connect card and checklist as the Claude page, then the connection as AUV sees it. -->
       <Border Style="{StaticResource Card}"><StackPanel>
-       <TextBlock Text="{Binding Providers.ClaudeLinkText}" TextWrapping="Wrap" AutomationProperties.AutomationId="auv.claude.link"/>
-       <TextBlock x:Name="ClaudeSetupStatus" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,4,0,0" AutomationProperties.AutomationId="auv.claude.setup-status"/>
+       <local:ClaudeConnectPanel/>
+       <TextBlock Text="{Binding Providers.ClaudeLinkText}" Visibility="{Binding Providers.ClaudeShowLinkText, Converter={StaticResource Visible}}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,12,0,0" AutomationProperties.AutomationId="auv.claude.link"/>
        <TextBlock Text="{Binding Providers.ClaudeLastResult}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,4,0,0" AutomationProperties.AutomationId="auv.claude.last-result"/>
       </StackPanel></Border>
-      <TextBlock Text="{local:Tr 'Set Up', 设置步骤}" Style="{StaticResource Group}"/>
-      <TextBlock Text="{local:Tr '1. Choose Set Up. AUV copies the companion into its own folder and registers it for Chrome and Edge, for your Windows account only.&#x0a;2. In the browser, open the extensions page, turn on Developer mode, choose Load unpacked and select the folder below.&#x0a;3. Sign in to claude.ai in that browser if you have not already.', 1. 选择“设置”。AUV 会把伴侣复制到自己的文件夹，并只为你的 Windows 账户在 Chrome 和 Edge 中注册。&#x0a;2. 在浏览器中打开扩展页，开启“开发者模式”，选择“加载已解压的扩展程序”，然后选择下面的文件夹。&#x0a;3. 如果还没有登录，请在该浏览器中登录 claude.ai。}" TextWrapping="Wrap" Margin="0,0,0,8"/>
-      <TextBox x:Name="ClaudeFolder" IsReadOnly="True" Margin="0,0,0,8" AutomationProperties.Name="Companion extension folder" AutomationProperties.AutomationId="auv.claude.folder"/>
-      <WrapPanel Margin="0,0,0,12">
-       <Button x:Name="ClaudeSetupButton" Content="{local:Tr 'Set Up', 设置}" Click="ClaudeSetup_Click" Margin="0,0,8,6" AutomationProperties.AutomationId="auv.claude.setup"/>
-       <Button Content="{local:Tr 'Copy folder path', 复制文件夹路径}" Click="ClaudeCopyFolder_Click" Margin="0,0,8,6"/>
-       <Button Content="{local:Tr 'Open folder', 打开文件夹}" Click="ClaudeOpenFolder_Click" Margin="0,0,8,6"/>
-       <Button Content="{local:Tr 'Chrome extensions page', Chrome 扩展页}" Tag="chrome" Click="ClaudeExtensionsPage_Click" Margin="0,0,8,6"/>
-       <Button Content="{local:Tr 'Edge extensions page', Edge 扩展页}" Tag="edge" Click="ClaudeExtensionsPage_Click" Margin="0,0,8,6"/>
-      </WrapPanel>
-      <TextBlock Text="{local:Tr Options, 选项}" Style="{StaticResource Group}"/>
-      <StackPanel Orientation="Horizontal" Margin="0,0,0,6"><TextBlock Text="{local:Tr Browser, 浏览器}" VerticalAlignment="Center" MinWidth="130"/><ComboBox x:Name="ClaudeBrowserChoice" MinWidth="200" SelectionChanged="ClaudeBrowserChoice_Changed" AutomationProperties.Name="Claude companion browser" AutomationProperties.AutomationId="auv.claude.browser"/></StackPanel>
-      <StackPanel Orientation="Horizontal" Margin="0,0,0,6"><TextBlock Text="{local:Tr 'Read in', 读取位置}" VerticalAlignment="Center" MinWidth="130"/><ComboBox x:Name="ClaudePlacementChoice" MinWidth="200" SelectionChanged="ClaudePlacementChoice_Changed" AutomationProperties.Name="Where the Usage page opens" AutomationProperties.AutomationId="auv.claude.placement"/></StackPanel>
-      <CheckBox Content="{local:Tr 'Ask to open the browser when it is not running', 浏览器未运行时询问是否打开}" IsChecked="{Binding Providers.ClaudeAskToOpenBrowser, Mode=TwoWay}" Margin="0,6" AutomationProperties.AutomationId="auv.claude.ask-open"/>
-      <WrapPanel Margin="0,10,0,6"><Button Content="{local:Tr 'Sync Claude now', 立即同步 Claude}" Click="ClaudeSync_Click" Margin="0,0,8,6" AutomationProperties.AutomationId="auv.claude.sync"/><Button Content="{local:Tr 'Remove companion', 移除伴侣}" Click="ClaudeRemove_Click" Margin="0,0,8,6" AutomationProperties.AutomationId="auv.claude.remove"/></WrapPanel>
-      <TextBlock Text="{local:Tr 'Remove deletes AUV’s browser registration and, if you agree, its companion folder. Remove the extension itself on the browser’s extensions page. If the companion stops answering, reload it there or restart the browser.', “移除”会删除 AUV 的浏览器注册；如果你同意，还会删除伴侣文件夹。扩展本身请在浏览器的扩展页中移除。如果伴侣没有响应，请在扩展页重新加载它或重启浏览器。}" Style="{StaticResource Caption}" TextWrapping="Wrap"/>
+      <WrapPanel Margin="0,0,0,6"><Button Content="{local:Tr 'Sync now', 立即同步}" Click="ClaudeSync_Click" IsEnabled="{Binding Providers.ClaudeCanSync}" Margin="0,0,8,6" AutomationProperties.AutomationId="auv.claude.sync"/><Button Content="{local:Tr 'Remove companion', 移除伴侣}" Click="ClaudeRemove_Click" Margin="0,0,8,6" AutomationProperties.AutomationId="auv.claude.remove"/></WrapPanel>
+      <TextBlock Text="{local:Tr 'Remove deletes AUV’s browser registration and, if you agree, its companion folder. Remove the extension itself on the browser’s extensions page.', “移除”会删除 AUV 的浏览器注册；如果你同意，还会删除伴侣文件夹。扩展本身请在浏览器的扩展页中移除。}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,12"/>
+      <Expander x:Name="ClaudeAdvanced" Header="{local:Tr Advanced, 高级}" IsExpanded="False" Foreground="{DynamicResource TextBrush}" AutomationProperties.AutomationId="auv.claude.advanced">
+       <StackPanel Margin="0,10,0,0">
+        <CheckBox Content="{local:Tr 'Sync Claude through the browser companion', 通过浏览器伴侣同步 Claude}" IsChecked="{Binding Providers.ClaudeBrowserEnabled, Mode=TwoWay}" Margin="0,0,0,10" AutomationProperties.AutomationId="auv.claude.enabled"/>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,6"><TextBlock Text="{local:Tr Browser, 浏览器}" VerticalAlignment="Center" MinWidth="130"/><ComboBox x:Name="ClaudeBrowserChoice" MinWidth="200" SelectionChanged="ClaudeBrowserChoice_Changed" AutomationProperties.Name="Claude companion browser" AutomationProperties.AutomationId="auv.claude.browser"/></StackPanel>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,6"><TextBlock Text="{local:Tr 'Read in', 读取位置}" VerticalAlignment="Center" MinWidth="130"/><ComboBox x:Name="ClaudePlacementChoice" MinWidth="200" SelectionChanged="ClaudePlacementChoice_Changed" AutomationProperties.Name="Where the Usage page opens" AutomationProperties.AutomationId="auv.claude.placement"/></StackPanel>
+        <CheckBox Content="{local:Tr 'Ask to open the browser when it is not running', 浏览器未运行时询问是否打开}" IsChecked="{Binding Providers.ClaudeAskToOpenBrowser, Mode=TwoWay}" Margin="0,6,0,12" AutomationProperties.AutomationId="auv.claude.ask-open"/>
+        <TextBlock Text="{local:Tr 'Companion files', 伴侣文件}" FontWeight="SemiBold" Margin="0,0,0,4"/>
+        <TextBlock x:Name="ClaudeSetupStatus" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,8" AutomationProperties.AutomationId="auv.claude.setup-status"/>
+        <TextBox x:Name="ClaudeFolder" IsReadOnly="True" Margin="0,0,0,8" AutomationProperties.Name="Companion extension folder" AutomationProperties.AutomationId="auv.claude.folder"/>
+        <WrapPanel Margin="0,0,0,6">
+         <Button x:Name="ClaudeSetupButton" Content="{local:Tr 'Set Up again', 重新设置}" Click="ClaudeSetup_Click" Margin="0,0,8,6" AutomationProperties.AutomationId="auv.claude.setup"/>
+         <Button Content="{local:Tr 'Copy folder path', 复制文件夹路径}" Click="ClaudeCopyFolder_Click" Margin="0,0,8,6"/>
+         <Button Content="{local:Tr 'Open folder', 打开文件夹}" Click="ClaudeOpenFolder_Click" Margin="0,0,8,6"/>
+         <Button Content="{local:Tr 'Chrome extensions page', Chrome 扩展页}" Tag="chrome" Click="ClaudeExtensionsPage_Click" Margin="0,0,8,6"/>
+         <Button Content="{local:Tr 'Edge extensions page', Edge 扩展页}" Tag="edge" Click="ClaudeExtensionsPage_Click" Margin="0,0,8,6"/>
+        </WrapPanel>
+       </StackPanel>
+      </Expander>
      </StackPanel>
      <TextBlock x:Name="OtherProviderNote" Style="{StaticResource Muted}" Visibility="Collapsed"/>
     </StackPanel>

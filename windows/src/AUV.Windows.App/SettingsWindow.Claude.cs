@@ -25,24 +25,30 @@ public partial class SettingsWindow
         foreach (var choice in providers.ClaudePlacements) ClaudePlacementChoice.Items.Add(new ComboBoxItem { Content = PlacementLabel(choice), Tag = choice });
         ClaudeBrowserChoice.SelectedIndex = Array.IndexOf(providers.ClaudeBrowsers, providers.ClaudeBrowser);
         ClaudePlacementChoice.SelectedIndex = Array.IndexOf(providers.ClaudePlacements, providers.ClaudePlacement);
+        providers.ClaudeChanged();
         UpdateClaudeSetup();
+        // The Connect card and the checklist act on their own; keep the Advanced file status in step with them.
+        void Follow(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        { if (e.PropertyName == nameof(ProviderController.ClaudeShowConnect)) Dispatcher.BeginInvoke(UpdateClaudeSetup); }
+        providers.PropertyChanged += Follow;
+        Closed += (_, _) => providers.PropertyChanged -= Follow;
     }
 
     private void UpdateClaudeSetup()
     {
-        var setup = app.Providers.ClaudeSetup;
+        var providers = app.Providers;
+        var setup = providers.ClaudeSetup;
         ClaudeFolder.Text = setup.ExtensionFolder;
-        CompanionStatus status;
-        try { status = setup.Status(); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException) { ClaudeSetupStatus.Text = Loc.T("The companion's status could not be read.", "无法读取伴侣状态。"); return; }
-        var browsers = string.Join(", ", status.RegisteredBrowsers.Select(b => b == "edge" ? "Edge" : "Chrome"));
+
+        if (providers.ClaudeInstallStatus is not { } status) { ClaudeSetupStatus.Text = Loc.T("The companion's status could not be read.", "无法读取伴侣状态。"); return; }
+        var browsers = string.Join(", ", status.RegisteredBrowsers.Select(Core.ClaudeBrowserPresentation.BrowserName));
         ClaudeSetupStatus.Text = status.State switch
         {
-            CompanionInstallState.NotPackaged => Loc.T("This copy of AUV has no browser companion package.", "这份 AUV 不含浏览器伴侣安装包。"),
-            CompanionInstallState.NotInstalled => Loc.T("Companion not set up.", "伴侣尚未设置。"),
-            CompanionInstallState.UpdateAvailable => Loc.T($"An updated companion (build {status.Packaged!.CompanionBuild}) is available. Choose Update, then reload the extension on the browser's extensions page.",
-                $"有更新的伴侣（构建 {status.Packaged!.CompanionBuild}）。请选择“更新”，然后在浏览器扩展页重新加载扩展。"),
-            CompanionInstallState.RegistrationMissing => Loc.T("The companion's files are in place, but its browser registration is missing. Choose Set Up again.", "伴侣文件已就位，但浏览器注册缺失。请再次选择“设置”。"),
+            CompanionInstallState.NotPackaged => Core.ClaudeBrowserPresentation.NotPackaged,
+            CompanionInstallState.NotInstalled => Loc.T("Companion not set up. Choose Connect above.", "伴侣尚未设置。请选择上方的“连接”。"),
+            CompanionInstallState.UpdateAvailable => Loc.T($"This AUV carries companion build {status.Packaged!.CompanionBuild}; build {status.Installed!.CompanionBuild} is set up. AUV updates a newer build by itself at start-up; choose Update to install this one now.",
+                $"这份 AUV 带有伴侣构建 {status.Packaged!.CompanionBuild}；当前设置的是构建 {status.Installed!.CompanionBuild}。较新的构建会在 AUV 启动时自动更新；选择“更新”可立即安装这一构建。"),
+            CompanionInstallState.RegistrationMissing => Loc.T("The companion's files are in place, but its browser registration is missing. Choose Repair above.", "伴侣文件已就位，但浏览器注册缺失。请选择上方的“修复”。"),
             _ => Loc.T($"Companion set up · build {status.Installed!.CompanionBuild} · registered for {browsers}", $"伴侣已设置 · 构建 {status.Installed!.CompanionBuild} · 已为 {browsers} 注册")
         } + (status.ForeignRegistrations.Count > 0 ? Loc.T(" Another program uses the same registration name.", " 另有程序使用了同一个注册名称。") : "");
         ClaudeSetupButton.Content = status.State switch
@@ -57,29 +63,7 @@ public partial class SettingsWindow
 
     private void ClaudeSetup_Click(object sender, RoutedEventArgs e)
     {
-        var setup = app.Providers.ClaudeSetup;
-        var consent = MessageBox.Show(this, Loc.T(
-            $"AUV will:\n\n• copy the companion extension and its helper to\n  {setup.InstallRoot}\n• register the helper for Chrome and Edge under your Windows account (HKEY_CURRENT_USER), no administrator rights needed.\n\nAn earlier copy is kept as a backup. Continue?",
-            $"AUV 将会：\n\n• 把伴侣扩展及其辅助程序复制到\n  {setup.InstallRoot}\n• 在你的 Windows 账户下（HKEY_CURRENT_USER）为 Chrome 和 Edge 注册该辅助程序，不需要管理员权限。\n\n之前的副本会保留为备份。是否继续？"),
-            "AUV", MessageBoxButton.OKCancel, MessageBoxImage.Question, MessageBoxResult.Cancel);
-        if (consent != MessageBoxResult.OK) return;
-        try
-        {
-            Core.ClaudeCompanionManifest manifest;
-            try { manifest = setup.Install(false); }
-            catch (ForeignRegistrationException foreign)
-            {
-                var names = string.Join(", ", foreign.Browsers.Select(b => b == "edge" ? "Edge" : "Chrome"));
-                if (MessageBox.Show(this, Loc.T($"Another program registered the same companion name for {names}. Replace that registration with AUV's? The other program's files are not touched.",
-                        $"另有程序在 {names} 中注册了同一个伴侣名称。是否用 AUV 的注册替换它？对方的文件不会被改动。"), "AUV", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
-                manifest = setup.Install(true);
-            }
-            app.Settings.ClaudeBrowser.InstalledBuild = manifest.CompanionBuild; main.Persist();
-            app.Providers.RestartClaudeLink();
-            SaveStatus.Text = Loc.T("Companion set up. Now load the folder above on the browser's extensions page (Developer mode → Load unpacked).", "伴侣已设置。现在请在浏览器扩展页加载上面的文件夹（开发者模式 → 加载已解压的扩展程序）。");
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException or System.Security.SecurityException)
-        { SaveStatus.Text = Loc.T("Set up did not complete: ", "设置未完成：") + error.Message; }
+        if (app.Providers.ConnectClaude(this)) SaveStatus.Text = app.Providers.ClaudeHint;
         UpdateClaudeSetup();
     }
 
@@ -131,7 +115,7 @@ public partial class SettingsWindow
         {
             app.Providers.ClaudeBrowserEnabled = false;
             setup.Remove(deleteFiles);
-            app.Settings.ClaudeBrowser.InstalledBuild = null; main.Persist();
+            app.Settings.ClaudeBrowser.InstalledBuild = null; main.Persist(); app.Providers.ForgetClaudeChecklist();
             SaveStatus.Text = Loc.T("Registration removed. Remove the extension on the browser's extensions page.", "已删除注册。请在浏览器扩展页中移除扩展。")
                 + (deleteFiles ? Loc.T(" The companion folder was deleted.", " 伴侣文件夹已删除。") : "");
         }

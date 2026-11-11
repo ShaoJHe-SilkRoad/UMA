@@ -43,11 +43,11 @@ $companion = [ordered]@{ schemaVersion = 1; extensionId = $extensionId; runtimeG
 $readme = @"
 AUV Browser Companion for Claude $version (build $Build) - Chrome / Edge
 
-Do not load this folder directly. In AUV, open Claude settings, tick "Sync Claude through the browser
-companion" and choose Set Up: AUV copies the companion to
+Do not load this folder directly. In AUV, select Claude and choose Connect: AUV copies the companion to
 %LOCALAPPDATA%\AUV.Windows.UI.Preview\browser-companion\ and registers its helper for Chrome and Edge
-under your Windows account. Then load ...\browser-companion\extension on the browser's extensions page
-(Developer mode -> Load unpacked). Extension ID: $extensionId
+under your Windows account. Then choose "Load in Chrome" (or Edge) in AUV's checklist: it copies the
+folder path and opens the extensions page (Developer mode -> Load unpacked -> Ctrl+V). Later AUV
+versions update the companion by themselves. Extension ID: $extensionId
 
 It reads only Claude's 5-hour and weekly used percentages, their reset times and when they were read,
 from https://claude.ai/new#settings/usage (English or Chinese interface). Passwords, cookies, tokens,

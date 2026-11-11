@@ -461,6 +461,55 @@
       return (request && Object.keys(request).sort().join(",") === "kind,requestID,schemaVersion" && request.kind === "auvCompanionSyncRequest") || { request };
     });
 
+    // 0.18.6: AUV asks a companion from another build to reload itself from its folder.
+    await check("AUV's reload request reloads the companion at most once per 10 minutes", async () => {
+      const world = await startWorker();
+      sendCommand(world, "umaClaudeReloadCompanion");
+      await flush();
+      const first = world.reloads === 1;
+      sendCommand(world, "umaClaudeReloadCompanion");
+      await advance(9 * 60_000 + 59_000);
+      sendCommand(world, "umaClaudeReloadCompanion");
+      await flush();
+      const spaced = world.reloads === 1;
+      await advance(1_000);
+      sendCommand(world, "umaClaudeReloadCompanion");
+      await flush();
+      const again = world.reloads === 2;
+      // Nothing is sent back: the reloaded companion reconnects and answers AUV's next handshake.
+      const replies = world.nativePorts.flatMap((p) => p.inbox).filter((m) => m.kind !== "auvCompanionPing");
+      return (first && spaced && again && replies.length === 0) || { reloads: world.reloads, replies };
+    });
+
+    await check("a reload request never interrupts a read in progress", async () => {
+      const world = await startWorker();
+      const id = sendCommand(world, "umaClaudeAutomaticRefresh");
+      await flush();
+      const tab = world.created.at(-1);
+      openPage(world, tab.id, "silent");
+      await advance(300);
+      sendCommand(world, "umaClaudeReloadCompanion");
+      await flush();
+      const duringRead = world.reloads;
+      await advance(31_000);
+      const finished = Boolean(terminalFor(world, id));
+      // Once the read is over, the next request (AUV repeats it after its spacing) reloads.
+      sendCommand(world, "umaClaudeReloadCompanion");
+      await flush();
+      return (duringRead === 0 && finished && world.reloads === 1) || { duringRead, finished, reloads: world.reloads };
+    });
+
+    await check("a reload request with any extra field is ignored", async () => {
+      const world = await startWorker();
+      const port = host(world);
+      port.onMessage.fire({ kind: "auvCompanionCommand", schemaVersion: 1, command: "umaClaudeReloadCompanion", requestID: crypto.randomUUID(), placement: "backgroundTab" });
+      port.onMessage.fire({ kind: "auvCompanionCommand", schemaVersion: 1, command: "umaClaudeReloadCompanion", requestID: crypto.randomUUID(), url: "https://example.com" });
+      port.onMessage.fire({ kind: "auvCompanionCommand", schemaVersion: 2, command: "umaClaudeReloadCompanion", requestID: crypto.randomUUID() });
+      port.onMessage.fire({ kind: "auvCompanionCommand", schemaVersion: 1, command: "umaClaudeReloadCompanion", requestID: "not-a-uuid" });
+      await flush();
+      return world.reloads === 0 || { reloads: world.reloads };
+    });
+
     await check("only allowlisted fields leave the worker", async () => {
       const world = await startWorker();
       const id = sendCommand(world, "umaClaudeAutomaticRefresh");

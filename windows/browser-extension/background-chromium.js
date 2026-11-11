@@ -54,6 +54,10 @@
   const livenessMissesBeforeReload = 2;
   const hostIdleRenewalMilliseconds = 5 * 60_000;
   const selfReloadMinimumSpacingMilliseconds = 30 * 60_000;
+  // 0.18.6: AUV asks a companion from another build to reload itself, which loads the build
+  // AUV installed into the same folder. Spaced like AUV's own request, at least 10 minutes.
+  const updateReloadStampKey = "auvCompanionLastUpdateReload";
+  const updateReloadMinimumSpacingMilliseconds = 10 * 60_000;
   const handledCommandLimit = 64;
   const v2PortName = "umaClaudeOwnedProviderV2";
 
@@ -179,6 +183,22 @@
       return;
     }
     livenessMisses = 0;
+    api.runtime.reload();
+  }
+
+  // A read in progress is never interrupted; AUV asks again after its own spacing.
+  async function reloadForUpdate() {
+    if (automaticRead || typeof api.runtime.reload !== "function" || !api.storage?.local) return;
+    try {
+      const stored = await api.storage.local.get(updateReloadStampKey);
+      const last = Number(stored?.[updateReloadStampKey]);
+      const elapsed = Date.now() - last;
+      if (last > 0 && elapsed >= 0 && elapsed < updateReloadMinimumSpacingMilliseconds) return;
+      if (automaticRead) return;
+      await api.storage.local.set({ [updateReloadStampKey]: Date.now() });
+    } catch (_) {
+      return;
+    }
     api.runtime.reload();
   }
 
@@ -1073,7 +1093,7 @@
     if (value.command === "umaClaudeAutomaticRefresh" && Object.prototype.hasOwnProperty.call(value, "placement")) {
       return exactKeys(value, [...base, "placement"]) && placements.includes(value.placement) ? value : null;
     }
-    return ["umaClaudeWakeBridge", "umaClaudeRuntimeQualification", "umaClaudeAutomaticRefresh"].includes(value.command)
+    return ["umaClaudeWakeBridge", "umaClaudeRuntimeQualification", "umaClaudeAutomaticRefresh", "umaClaudeReloadCompanion"].includes(value.command)
       && exactKeys(value, base) ? value : null;
   }
 
@@ -1106,6 +1126,8 @@
       retainRuntimeOperation(beginAutomaticRead(command.requestID, command.placement));
     } else if (command.command === "umaClaudeCloseOwnedUsageTab") {
       retainRuntimeOperation(closeOwnedRead(command.requestID, command.targetRequestID));
+    } else if (command.command === "umaClaudeReloadCompanion") {
+      retainRuntimeOperation(reloadForUpdate());
     }
   }
 

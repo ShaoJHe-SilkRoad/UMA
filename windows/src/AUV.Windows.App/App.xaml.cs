@@ -77,6 +77,9 @@ public partial class App : Application, System.ComponentModel.INotifyPropertyCha
             var companionIndex = Array.IndexOf(e.Args, "--companion-check-dir");
             if (companionIndex >= 0 && companionIndex + 1 < e.Args.Length)
                 await CompanionVerification.Run(Path.GetFullPath(e.Args[companionIndex + 1]));
+            var claudeIndex = Array.IndexOf(e.Args, "--claude-check-dir");
+            if (claudeIndex >= 0 && claudeIndex + 1 < e.Args.Length && e.Args.Contains("--offline"))
+                await ClaudeVerification.Run(this, window, Path.GetFullPath(e.Args[claudeIndex + 1]), e.Args.Contains("--claude-check-before") ? "before" : "after");
             if (!e.Args.Contains("--offline")) Providers.Start();
             var refreshIndex = Array.IndexOf(e.Args, "--refresh-check-dir");
             if (refreshIndex >= 0 && refreshIndex + 1 < e.Args.Length)

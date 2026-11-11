@@ -92,11 +92,13 @@ public sealed class MainViewModel : Observable
     }
     public string NoQuotaText => Shell.SelectedAgent.Id switch
     {
-        "claude" => Loc.T("No current Claude reading. Turn on browser sync in Claude settings, or Refresh All once the companion is connected. AUV shows no estimate in its place.", "没有当前的 Claude 读数。请在 Claude 设置中开启浏览器同步，或在伴侣连接后全部刷新。AUV 不会用估算值代替。"),
+        "claude" => Loc.T("No current Claude reading. AUV shows no estimate in its place.", "没有当前的 Claude 读数。AUV 不会用估算值代替。"),
         "antigravity" => Loc.T("Not available on Windows yet. AUV shows no estimate in its place.", "Windows 上暂不可用，AUV 不会用估算值代替。"),
         "workbuddy" => Loc.T("Connect WorkBuddy in its settings, then Sync Credits on the official page.", "请在 WorkBuddy 设置中连接，然后在官方页面同步 Credits。"),
         _ => Loc.T("No quota reading. Check that Codex is installed and signed in, then Refresh All.", "无额度读数。请确认 Codex 已安装并登录，然后全部刷新。")
     };
+    /// <summary>0.18.6: the Claude page carries the Connect card and checklist (not in demo mode).</summary>
+    public bool IsClaude => !Demo && Shell.SelectedAgent.Id == "claude";
     public string ChartHeading => Loc.T("Daily tokens", "每日令牌");
     public string ChartSummary => Shell.SelectedAgent.TokenSource ?? (Shell.SelectedAgent.IsDemo ? "Local tokens · independent sample source" : Loc.T("No token data available", "没有令牌数据"));
     public string Activity => Shell.SelectedAgent.IsDemo ? "Development fixture loaded. No local sessions were read." : Loc.T("Only admitted allowance and aggregate account data are displayed. No conversation content is read.", "只显示允许范围内的额度和账户汇总数据，不读取任何对话内容。");
@@ -112,7 +114,7 @@ public sealed class MainViewModel : Observable
     public RelayCommand GenerateCommand { get; }
     public RelayCommand CopyCommand { get; }
     public Action<string>? CopyText { get; set; }
-    private static readonly string[] SelectionBound = [nameof(SelectedCard), nameof(PrimaryValue), nameof(DataState), nameof(WeeklyRemaining), nameof(ShortRemaining), nameof(SecondaryLabel), nameof(WeeklyValue), nameof(ShortValue), nameof(HasUsage), nameof(HasPlan), nameof(HasPercentBar), nameof(HasSecondary), nameof(HasWeekTokens), nameof(HasLifetimeTokens), nameof(HasTokenMetrics), nameof(HasLocalCost), nameof(HasData), nameof(RemainingLabel), nameof(WeekTokens), nameof(LifetimeTokens), nameof(LocalCost), nameof(LifetimeCost), nameof(CostCoverage), nameof(CostHasNoPricedModels), nameof(Source), nameof(Updated), nameof(ConnectionText), nameof(FreshnessText), nameof(UpdatedText), nameof(ConnectionRows), nameof(UsageRows), nameof(NoQuotaText), nameof(SettingsButton), nameof(ChartSummary), nameof(ChartHeading), nameof(Activity), nameof(Bars), nameof(HasChart)];
+    private static readonly string[] SelectionBound = [nameof(SelectedCard), nameof(PrimaryValue), nameof(DataState), nameof(WeeklyRemaining), nameof(ShortRemaining), nameof(SecondaryLabel), nameof(WeeklyValue), nameof(ShortValue), nameof(HasUsage), nameof(HasPlan), nameof(HasPercentBar), nameof(HasSecondary), nameof(HasWeekTokens), nameof(HasLifetimeTokens), nameof(HasTokenMetrics), nameof(HasLocalCost), nameof(HasData), nameof(RemainingLabel), nameof(WeekTokens), nameof(LifetimeTokens), nameof(LocalCost), nameof(LifetimeCost), nameof(CostCoverage), nameof(CostHasNoPricedModels), nameof(Source), nameof(Updated), nameof(ConnectionText), nameof(FreshnessText), nameof(UpdatedText), nameof(ConnectionRows), nameof(UsageRows), nameof(NoQuotaText), nameof(IsClaude), nameof(SettingsButton), nameof(ChartSummary), nameof(ChartHeading), nameof(Activity), nameof(Bars), nameof(HasChart)];
     private void CostChanged() { foreach (var name in new[] { nameof(HasLocalCost), nameof(HasData), nameof(LocalCost), nameof(LifetimeCost), nameof(CostCoverage), nameof(CostHasNoPricedModels) }) Changed(name); }
     /// <summary>Re-evaluates every computed binding, e.g. after the display language changes.</summary>
     public void RefreshText() { Changed(string.Empty); }

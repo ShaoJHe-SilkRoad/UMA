@@ -81,6 +81,7 @@
        <StackPanel>
         <TextBlock Text="{local:Tr Usage, 用量}" Style="{StaticResource CardTitle}"/>
         <TextBlock Text="{Binding NoQuotaText}" Style="{StaticResource Muted}" Visibility="{Binding HasUsage, Converter={StaticResource InverseVisible}}"/>
+        <local:ClaudeConnectPanel Margin="0,10,0,4" Visibility="{Binding IsClaude, Converter={StaticResource Visible}}"/>
         <ItemsControl ItemsSource="{Binding UsageRows}" Visibility="{Binding HasUsage, Converter={StaticResource Visible}}" AutomationProperties.Name="Quota windows">
          <ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,0,0,12" ToolTip="{Binding Card.Description}">
           <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="{Binding Label}" Style="{StaticResource Muted}" VerticalAlignment="Bottom"/><TextBlock Grid.Column="1" Text="{Binding Value}" Style="{StaticResource Metric}"/></Grid>

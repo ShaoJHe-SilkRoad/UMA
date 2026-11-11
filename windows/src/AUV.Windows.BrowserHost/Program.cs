@@ -18,7 +18,7 @@ internal static class Program
 
     private static async Task<int> Main(string[] args)
     {
-        HostConfig config;
+        ClaudeHostConfig config;
         try { config = HostConfig.Load(Path.Combine(AppContext.BaseDirectory, "host-config.json")); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidDataException or KeyNotFoundException)
         { Log("config-unavailable"); return 3; }
@@ -35,29 +35,17 @@ internal static class Program
     }
 }
 
-internal sealed record HostConfig(string PipeName, string AllowedOrigin, string RuntimeGenerationId, string HostVersion, string HostBuild)
+internal static class HostConfig
 {
-    public static HostConfig Load(string path)
+    public static ClaudeHostConfig Load(string path)
     {
         var info = new FileInfo(path);
         if (!info.Exists || info.Length is 0 or > 4096) throw new InvalidDataException();
-        using var document = JsonDocument.Parse(File.ReadAllBytes(path));
-        var root = document.RootElement;
-        string[] keys = ["schemaVersion", "pipeName", "allowedOrigin", "runtimeGenerationID", "hostVersion", "hostBuild"];
-        if (root.ValueKind != JsonValueKind.Object || !root.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal).SequenceEqual(keys.Order(StringComparer.Ordinal)))
-            throw new InvalidDataException();
-        if (root.GetProperty("schemaVersion").GetInt32() != 1) throw new InvalidDataException();
-        var config = new HostConfig(root.GetProperty("pipeName").GetString()!, root.GetProperty("allowedOrigin").GetString()!,
-            root.GetProperty("runtimeGenerationID").GetString()!, root.GetProperty("hostVersion").GetString()!, root.GetProperty("hostBuild").GetString()!);
-        if (!System.Text.RegularExpressions.Regex.IsMatch(config.PipeName, "^AUV\\.Windows\\.Preview\\.[0-9A-F]{24}\\.ClaudeBrowser$") ||
-            !ClaudeBrowserContract.IsUuid(config.RuntimeGenerationId) ||
-            config.AllowedOrigin.Length != "chrome-extension://".Length + 33 || !ClaudeBrowserContract.IsExtensionId(config.AllowedOrigin["chrome-extension://".Length..^1]))
-            throw new InvalidDataException();
-        return config;
+        return ClaudeHostConfig.Parse(File.ReadAllBytes(path));
     }
 }
 
-internal sealed class Relay(HostConfig config, string browserProduct)
+internal sealed class Relay(ClaudeHostConfig config, string browserProduct)
 {
     private readonly Stream stdin = Console.OpenStandardInput();
     private readonly Stream stdout = Console.OpenStandardOutput();
@@ -107,6 +95,17 @@ internal sealed class Relay(HostConfig config, string browserProduct)
         }
     }
 
+    private async Task RelayReloadRequestAsync(NamedPipeClientStream client, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var frame = await CompanionFraming.ReadAsync(client, ClaudeBrowserContract.MaximumPipeFrameBytes, cancellationToken).WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
+            if (frame != null && CompanionMessageCodec.DecodeFromApp(frame) is CompanionCommand { Command: ClaudeBrowserContract.ReloadCommand } reload)
+            { Program.Log("reload-requested"); await ToExtensionAsync(reload); }
+        }
+        catch (Exception e) when (e is IOException or TimeoutException or CompanionProtocolException or ObjectDisposedException) { }
+    }
+
     /// <summary>Connects to AUV's pipe and keeps reconnecting while the browser keeps this host running.</summary>
     private async Task MaintainPipeAsync(CancellationToken cancellationToken)
     {
@@ -122,7 +121,13 @@ internal sealed class Relay(HostConfig config, string browserProduct)
                 var welcomeFrame = await CompanionFraming.ReadAsync(client, ClaudeBrowserContract.MaximumPipeFrameBytes, cancellationToken)
                     .WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
                 if (welcomeFrame == null || CompanionMessageCodec.DecodeFromApp(welcomeFrame) is not HostWelcome welcome) throw new IOException();
-                if (!welcome.Accepted) { Program.Log("welcome-" + welcome.Reason); delay = Program.RejectedDelay; }
+                if (!welcome.Accepted)
+                {
+                    Program.Log("welcome-" + welcome.Reason); delay = Program.RejectedDelay;
+                    // 0.18.6: AUV refuses a host from another build, and may follow the refusal with one request for the
+                    // extension to reload itself from its folder (which then holds the build AUV installed). Nothing else is relayed.
+                    if (welcome.Reason == "generationMismatch") await RelayReloadRequestAsync(client, cancellationToken);
+                }
                 else pipe = client;
                 if (pipe == client) await ToExtensionAsync(new HostStatus(true));
                 while (pipe == client && !cancellationToken.IsCancellationRequested)

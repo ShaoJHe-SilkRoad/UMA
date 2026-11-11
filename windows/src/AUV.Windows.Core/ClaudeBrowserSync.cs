@@ -13,10 +13,15 @@ public sealed class ClaudeBrowserPreferences
     public string Placement { get; set; } = "auto";
     public bool AskToOpenBrowser { get; set; } = true;
     public string? InstalledBuild { get; set; }
+    /// <summary>0.18.6 checklist step 2: browsers whose companion has passed a handshake ("chrome", "edge"). Missing before 0.18.6: empty.</summary>
+    public List<string> LoadedBrowsers { get; set; } = [];
+    /// <summary>0.18.6 checklist step 3: an exact reading has been accepted at least once. Missing before 0.18.6: false.</summary>
+    public bool ExactReadingSeen { get; set; }
     public void Normalize()
     {
         if (!Browsers.Contains(Browser)) Browser = "auto";
         if (!PlacementChoices.Contains(Placement)) Placement = "auto";
+        LoadedBrowsers = (LoadedBrowsers ?? []).Where(b => b is "chrome" or "edge" or "unknown").Distinct().Order(StringComparer.Ordinal).ToList();
         if (InstalledBuild != null && (InstalledBuild.Length is 0 or > 32 || !InstalledBuild.All(char.IsAsciiDigit))) InstalledBuild = null;
     }
     /// <summary>The placement sent with a read; "auto" lets the extension choose from the browser's windows (D7).</summary>
@@ -72,6 +77,8 @@ public interface IClaudeCompanionLink
 public enum ClaudeSyncOutcome { Success, NotConnected, UpdateRequired, CompanionSilent, PermissionRequired, SignInRequired, PageUnreadable, LayoutUnsupported, PageTimedOut, TabLost, Busy }
 public sealed record ClaudeSyncResult(ClaudeSyncOutcome Outcome, CompanionObservation? Observation = null, string? ProviderFailureReason = null, int Attempts = 0, string? BrowserProduct = null)
 {
+    /// <summary>AUV asked the extension to reload itself (an identity from another build was seen).</summary>
+    public bool ReloadRequested { get; init; }
     public bool Retryable => Outcome is ClaudeSyncOutcome.PageTimedOut or ClaudeSyncOutcome.PageUnreadable or ClaudeSyncOutcome.TabLost or ClaudeSyncOutcome.Busy;
 }
 
@@ -79,6 +86,30 @@ public sealed record ClaudeSyncResult(ClaudeSyncOutcome Outcome, CompanionObserv
 public sealed record CompanionTimings(TimeSpan Handshake, TimeSpan Read, TimeSpan RetryAfter, TimeSpan MaximumObservationAge, TimeSpan MaximumFutureSkew)
 {
     public static CompanionTimings Default { get; } = new(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(35), TimeSpan.FromSeconds(20), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(30));
+}
+
+/// <summary>
+/// 0.18.6: how often AUV may ask one browser's extension to reload itself. Shared by the pipe (a host from another build)
+/// and the coordinator (a connected extension reporting another build), so a browser is asked at most once per spacing.
+/// The extension keeps its own spacing as well.
+/// </summary>
+public sealed class CompanionReloadThrottle(TimeSpan? spacing = null, Func<DateTimeOffset>? now = null)
+{
+    public static readonly TimeSpan DefaultSpacing = TimeSpan.FromMinutes(10);
+    private readonly TimeSpan spacing = spacing ?? DefaultSpacing;
+    private readonly Func<DateTimeOffset> now = now ?? (() => DateTimeOffset.UtcNow);
+    private readonly Dictionary<string, DateTimeOffset> last = new(StringComparer.Ordinal);
+    public int Requests { get; private set; }
+    public bool TryRequest(string? browserProduct)
+    {
+        var key = browserProduct ?? "unknown"; var at = now();
+        lock (last)
+        {
+            if (last.TryGetValue(key, out var previous) && at - previous < spacing && at >= previous) return false;
+            last[key] = at; Requests++;
+            return true;
+        }
+    }
 }
 
 /// <summary>
@@ -100,9 +131,13 @@ public sealed class ClaudeCompanionCoordinator : IDisposable
     public int AcceptedObservations { get; private set; }
     public string? LastTrace { get; private set; }
     public event Action<CompanionSyncRequest>? SyncRequested;
-    public ClaudeCompanionCoordinator(IClaudeCompanionLink link, ClaudeCompanionManifest expected, CompanionTimings? timings = null, Func<DateTimeOffset>? now = null)
+    /// <summary>A browser's companion passed the handshake with the expected identity (checklist step 2). Carries the browser product.</summary>
+    public event Action<string?>? Qualified;
+    private readonly CompanionReloadThrottle reloads;
+    public ClaudeCompanionCoordinator(IClaudeCompanionLink link, ClaudeCompanionManifest expected, CompanionTimings? timings = null, Func<DateTimeOffset>? now = null, CompanionReloadThrottle? reloads = null)
     {
         this.link = link; this.expected = expected; this.timings = timings ?? CompanionTimings.Default; this.now = now ?? (() => DateTimeOffset.UtcNow);
+        this.reloads = reloads ?? new CompanionReloadThrottle(now: this.now);
         link.Received += OnReceived;
     }
     public ClaudeCompanionManifest Expected => expected;
@@ -165,12 +200,23 @@ public sealed class ClaudeCompanionCoordinator : IDisposable
         var id = ClaudeBrowserContract.NewRequestId();
         var ready = await ExchangeAsync(new(ClaudeBrowserContract.WakeCommand, id), m => m is CompanionEvent { Status: "extensionBackgroundReady" } e && e.RequestId == id, timings.Handshake, cancellationToken);
         if (ready is not CompanionEvent { Identity: { } identity }) return Silent();
-        if (!Matches(identity)) return new(ClaudeSyncOutcome.UpdateRequired);
+        if (!Matches(identity)) return await OtherBuildAsync();
         var bridge = await ExchangeAsync(new(ClaudeBrowserContract.QualifyCommand, id), m => m is CompanionEvent { Status: "bridgeReady" } e && e.RequestId == id, timings.Handshake, cancellationToken);
         if (bridge is not CompanionEvent { Identity: { } confirmed }) return Silent();
-        if (!Matches(confirmed)) return new(ClaudeSyncOutcome.UpdateRequired);
+        if (!Matches(confirmed)) return await OtherBuildAsync();
         ConsecutiveSilent = 0; SilentSince = null;
+        Qualified?.Invoke(link.Host?.BrowserProduct);
         return null;
+    }
+    /// <summary>
+    /// 0.18.6: the channel works but the extension is from another build. It loads from the folder AUV installs into, so a
+    /// reload brings in the installed build. Extensions before 0.18.6 ignore the request; those are reloaded once by hand.
+    /// </summary>
+    private async Task<ClaudeSyncResult> OtherBuildAsync()
+    {
+        var requested = reloads.TryRequest(link.Host?.BrowserProduct) &&
+            await link.SendAsync(new CompanionCommand(ClaudeBrowserContract.ReloadCommand, ClaudeBrowserContract.NewRequestId()), CancellationToken.None);
+        return new(ClaudeSyncOutcome.UpdateRequired) { ReloadRequested = requested };
     }
     private ClaudeSyncResult Silent() { ConsecutiveSilent++; SilentSince ??= now(); return new(ClaudeSyncOutcome.CompanionSilent); }
     private bool Matches(CompanionIdentity identity) =>
@@ -217,6 +263,37 @@ public sealed class ClaudeCompanionCoordinator : IDisposable
     }
 }
 
+public enum ClaudeRemedy { None, OpenClaude, OpenExtensions, OpenBrowser }
+
+/// <summary>
+/// 0.18.6: the three-step checklist on the Claude page and in Claude settings. ① registered for Chrome and Edge;
+/// ② the extension passed a handshake in a browser; ③ an exact reading was accepted (the person is signed in).
+/// </summary>
+public sealed record ClaudeChecklist(bool Registered, IReadOnlyList<string> LoadedBrowsers, bool SignedIn, string? Browser, DateTimeOffset? LastReading)
+{
+    public bool ExtensionLoaded => LoadedBrowsers.Count > 0;
+    public bool Complete => Registered && ExtensionLoaded && SignedIn;
+    public bool LoadedIn(string product) => LoadedBrowsers.Contains(product);
+    /// <param name="connectedBrowser">The browser connected right now, if any; otherwise the first one that passed a handshake is named.</param>
+    public static ClaudeChecklist Derive(bool registered, IEnumerable<string> loadedBrowsers, bool exactReadingSeen, string? connectedBrowser, DateTimeOffset? lastReading)
+    {
+        var loaded = loadedBrowsers.Where(b => b is "chrome" or "edge" or "unknown").Distinct().Order(StringComparer.Ordinal).ToArray();
+        var browser = connectedBrowser is "chrome" or "edge" ? connectedBrowser : loaded.FirstOrDefault();
+        return new(registered, loaded, exactReadingSeen, browser, lastReading);
+    }
+    /// <summary>The one line shown once all three steps are done: "Connected · Chrome · last reading 14:05".</summary>
+    public string Summary
+    {
+        get
+        {
+            var browser = ClaudeBrowserPresentation.BrowserName(Browser);
+            return LastReading is { } at
+                ? UiText.T($"Connected · {browser} · last reading {at.ToLocalTime():HH:mm}", $"已连接 · {browser} · 上次读数 {at.ToLocalTime():HH:mm}")
+                : UiText.T($"Connected · {browser}", $"已连接 · {browser}");
+        }
+    }
+}
+
 public static class ClaudeBrowserPresentation
 {
     public static string BrowserName(string? product) => product switch { "edge" => "Edge", "chrome" => "Chrome", _ => UiText.T("browser", "浏览器") };
@@ -248,8 +325,9 @@ public static class ClaudeBrowserPresentation
         return outcome switch
         {
             ClaudeSyncOutcome.NotConnected => UiText.T("Waiting for Chrome or Edge with the AUV companion. Open the browser to sync Claude.", "正在等待装有 AUV 伴侣的 Chrome 或 Edge。打开浏览器后即可同步 Claude。"),
-            // Found live: after Update, the remedy is to reload the extension in that browser, not to choose Update again.
-            ClaudeSyncOutcome.UpdateRequired => UiText.T($"The AUV extension in {browser} is from a different build than the companion AUV set up. Reload it on {browser}'s extensions page. If Claude settings offer an Update, choose that first.", $"{browser} 中的 AUV 扩展与 AUV 设置的伴侣不是同一构建。请在 {browser} 的扩展页重新加载它；如果 Claude 设置中提示有更新，请先选择“更新”。"),
+            // 0.18.6: AUV updates its own files at start-up and asks the extension to reload itself. Extensions from 0.18.5
+            // do not know that request, so the first upgrade still needs one reload by hand.
+            ClaudeSyncOutcome.UpdateRequired => UiText.T($"The AUV extension in {browser} is from a different build. AUV asks it to reload itself; if this stays, reload it once on {browser}'s extensions page (needed once after upgrading from AUV 0.18.5).", $"{browser} 中的 AUV 扩展来自不同的构建。AUV 会请它自行重新加载；如果此提示一直存在，请在 {browser} 的扩展页手动重新加载一次（从 AUV 0.18.5 升级后需要这样做一次）。"),
             ClaudeSyncOutcome.CompanionSilent => UiText.T($"The browser companion is not answering. Reload it on {browser}'s extensions page, or restart {browser}.", $"浏览器伴侣没有响应。请在 {browser} 的扩展页重新加载它，或重启 {browser}。"),
             ClaudeSyncOutcome.PermissionRequired => UiText.T($"The companion needs access to claude.ai. Allow site access for AUV Companion in {browser}'s extension settings, then refresh.", $"伴侣需要访问 claude.ai。请在 {browser} 的扩展设置中允许 AUV 伴侣访问该网站，然后刷新。"),
             ClaudeSyncOutcome.SignInRequired => UiText.T($"Sign in to claude.ai in {browser}, then refresh.", $"请在 {browser} 中登录 claude.ai，然后刷新。"),
@@ -268,8 +346,24 @@ public static class ClaudeBrowserPresentation
             _ => ConnectionState.Failed
         });
 
-    public static string Disabled => UiText.T("Browser sync is off. Turn it on in Claude settings to read Claude's exact figures from claude.ai.", "浏览器同步已关闭。在 Claude 设置中开启后，可从 claude.ai 读取 Claude 的精确读数。");
-    public static string NotSetUp => UiText.T("Set up the browser companion in Claude settings to read Claude's exact figures.", "请在 Claude 设置中设置浏览器伴侣，以读取 Claude 的精确读数。");
+    /// <summary>0.18.6: the action button that goes with a failure reason on the Claude card.</summary>
+    public static ClaudeRemedy Remedy(ClaudeSyncOutcome outcome) => outcome switch
+    {
+        ClaudeSyncOutcome.SignInRequired => ClaudeRemedy.OpenClaude,
+        ClaudeSyncOutcome.PermissionRequired or ClaudeSyncOutcome.UpdateRequired or ClaudeSyncOutcome.CompanionSilent => ClaudeRemedy.OpenExtensions,
+        ClaudeSyncOutcome.NotConnected => ClaudeRemedy.OpenBrowser,
+        _ => ClaudeRemedy.None
+    };
+    public static string RemedyLabel(ClaudeRemedy remedy, string? browserProduct) => remedy switch
+    {
+        ClaudeRemedy.OpenClaude => UiText.T("Open claude.ai", "打开 claude.ai"),
+        ClaudeRemedy.OpenExtensions => UiText.T($"Open {BrowserName(browserProduct ?? "chrome")} extensions page", $"打开 {BrowserName(browserProduct ?? "chrome")} 扩展页"),
+        ClaudeRemedy.OpenBrowser => UiText.T($"Open {BrowserName(browserProduct ?? "chrome")}", $"打开 {BrowserName(browserProduct ?? "chrome")}"),
+        _ => ""
+    };
+
+    public static string Disabled => UiText.T("Claude is not connected. Choose Connect on the Claude page to read Claude's exact figures from claude.ai.", "Claude 尚未连接。在 Claude 页选择“连接”后，可从 claude.ai 读取 Claude 的精确读数。");
+    public static string NotSetUp => UiText.T("The browser companion is not set up. Choose Connect on the Claude page to read Claude's exact figures.", "浏览器伴侣尚未设置。在 Claude 页选择“连接”即可读取 Claude 的精确读数。");
     public static string NotPackaged => UiText.T("This copy of AUV has no browser companion package.", "这份 AUV 不含浏览器伴侣安装包。");
     public static string Syncing => UiText.T("Syncing exact figures…", "正在同步精确读数…");
 }

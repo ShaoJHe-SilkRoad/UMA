@@ -90,6 +90,99 @@ public class ClaudeBrowserBridgeTests : IDisposable
         setup.Remove(true); Assert.False(Directory.Exists(install));
     }
 
+    // ---- 0.18.6: AUV's own companion elsewhere, and the start-up update ----
+
+    [Fact] public void AuvsOwnCompanionFromAnotherFolderIsReplacedWithoutAsking()
+    {
+        // An earlier copy or another preference profile registered AUV's companion from its own folder.
+        var earlier = Path.Combine(temp, "earlier", "browser-companion");
+        new ClaudeBrowserSetup(earlier, Package("2026110801"), PipeName, Registry.CurrentUser, registryBase).Install(false);
+        var install = Path.Combine(temp, "browser-companion");
+        var setup = new ClaudeBrowserSetup(install, Package("2026110902", "7a0c2d3e-8a41-4b7c-9d2e-1f3a4b5c6d7e"), PipeName, Registry.CurrentUser, registryBase);
+        var status = setup.Status();
+        Assert.Empty(status.ForeignRegistrations); Assert.Equal(["chrome", "edge"], status.AuvRegistrationsElsewhere);
+        var manifest = setup.Install(false); // no ForeignRegistrationException: nothing to ask
+        foreach (var (_, path) in ClaudeBrowserSetup.Browsers) Assert.Equal(setup.HostManifestPath(manifest), Value(path));
+        Assert.Equal(["chrome", "edge"], setup.Status().RegisteredBrowsers);
+        // The earlier copy's files are left as they were.
+        Assert.True(File.Exists(Path.Combine(earlier, "host", "2026110801", ClaudeBrowserSetup.HostExecutable)));
+    }
+
+    [Fact] public void OnlyAWellFormedAuvHostCountsAsAuvsOwn()
+    {
+        var other = Path.Combine(temp, "lookalike"); Directory.CreateDirectory(other);
+        var manifestPath = Path.Combine(other, ClaudeBrowserContract.NativeHostName + ".json");
+        File.WriteAllText(manifestPath, $$"""{"name":"{{ClaudeBrowserContract.NativeHostName}}","path":"AUV.BrowserHost.exe","type":"stdio","allowed_origins":[]}""");
+        Assert.False(ClaudeBrowserSetup.IsAuvCompanion(manifestPath)); // no host, no host-config.json
+        File.WriteAllText(Path.Combine(other, ClaudeBrowserSetup.HostExecutable), "stand-in");
+        Assert.False(ClaudeBrowserSetup.IsAuvCompanion(manifestPath));
+        File.WriteAllText(Path.Combine(other, "host-config.json"), """{"schemaVersion":1,"pipeName":"Other"}""");
+        Assert.False(ClaudeBrowserSetup.IsAuvCompanion(manifestPath)); // malformed config
+        File.WriteAllText(Path.Combine(other, "host-config.json"), $$"""{"schemaVersion":1,"pipeName":"{{PipeName}}","allowedOrigin":"{{ClaudeBrowserTests.Manifest.ExtensionOrigin}}","runtimeGenerationID":"{{ClaudeBrowserTests.Generation}}","hostVersion":"1.0.0","hostBuild":"2026110801"}""");
+        Assert.True(ClaudeBrowserSetup.IsAuvCompanion(manifestPath));
+        File.WriteAllText(manifestPath, """{"name":"com.example.other","path":"AUV.BrowserHost.exe","type":"stdio","allowed_origins":[]}""");
+        Assert.False(ClaudeBrowserSetup.IsAuvCompanion(manifestPath)); // another host name
+        Assert.False(ClaudeBrowserSetup.IsAuvCompanion(@"relative\host.json")); Assert.False(ClaudeBrowserSetup.IsAuvCompanion(null));
+        // A real third-party registration is still reported, and Install still asks.
+        using (var key = Registry.CurrentUser.CreateSubKey(registryBase + @"\" + ClaudeBrowserSetup.Browsers[1].Path)) key.SetValue(null, manifestPath);
+        var setup = new ClaudeBrowserSetup(Path.Combine(temp, "browser-companion"), Package("2026110801"), PipeName, Registry.CurrentUser, registryBase);
+        Assert.Equal(["edge"], setup.Status().ForeignRegistrations); Assert.Empty(setup.Status().AuvRegistrationsElsewhere);
+        Assert.Throws<ForeignRegistrationException>(() => setup.Install(false));
+    }
+
+    [Fact] public void StartupUpdateInstallsOnlyANewerPackagedBuild()
+    {
+        var install = Path.Combine(temp, "browser-companion");
+        // Nothing set up yet: nothing is installed at start-up.
+        Assert.Null(new ClaudeBrowserSetup(install, Package("2026110902"), PipeName, Registry.CurrentUser, registryBase).UpdateIfNewer());
+        Assert.False(Directory.Exists(install));
+        new ClaudeBrowserSetup(install, Package("2026110801"), PipeName, Registry.CurrentUser, registryBase).Install(false);
+        // The same build: nothing to do.
+        Assert.Null(new ClaudeBrowserSetup(install, Package("2026110801"), PipeName, Registry.CurrentUser, registryBase).UpdateIfNewer());
+        // An older AUV never downgrades the companion.
+        Assert.Null(new ClaudeBrowserSetup(install, Package("2026010101", "8a0c2d3e-8a41-4b7c-9d2e-1f3a4b5c6d7e"), PipeName, Registry.CurrentUser, registryBase).UpdateIfNewer());
+        Assert.Equal("2026110801", ClaudeBrowserPaths.LoadManifest(install)!.CompanionBuild);
+        // A newer build is installed and registered without asking.
+        var newer = new ClaudeBrowserSetup(install, Package("2026110902", "7a0c2d3e-8a41-4b7c-9d2e-1f3a4b5c6d7e"), PipeName, Registry.CurrentUser, registryBase);
+        Assert.Equal("2026110902", newer.UpdateIfNewer()!.CompanionBuild);
+        Assert.Equal(CompanionInstallState.Installed, newer.Status().State);
+        foreach (var (_, path) in ClaudeBrowserSetup.Browsers) Assert.Equal(newer.HostManifestPath(ClaudeBrowserPaths.LoadManifest(install)!), Value(path));
+        // A third-party registration that appeared meanwhile stops the update; the person decides with Retry.
+        var newest = new ClaudeBrowserSetup(install, Package("2026120101", "9a0c2d3e-8a41-4b7c-9d2e-1f3a4b5c6d7e"), PipeName, Registry.CurrentUser, registryBase);
+        using (var key = Registry.CurrentUser.CreateSubKey(registryBase + @"\" + ClaudeBrowserSetup.Browsers[0].Path)) key.SetValue(null, @"C:\Other\host.json");
+        Assert.Throws<ForeignRegistrationException>(() => newest.UpdateIfNewer());
+        Assert.Equal("2026110902", ClaudeBrowserPaths.LoadManifest(install)!.CompanionBuild);
+    }
+
+    [Theory]
+    [InlineData("2026110902", "2026110801", true)] [InlineData("2026110801", "2026110801", false)] [InlineData("2026010101", "2026110801", false)]
+    [InlineData("10", "9", true)] [InlineData("009", "10", false)] [InlineData("20261109021", "2026110902", true)]
+    public void BuildNumbersCompareAsNumbers(string packaged, string installed, bool newer) =>
+        Assert.Equal(newer, ClaudeBrowserSetup.IsNewer(ClaudeBrowserTests.Manifest with { CompanionBuild = packaged }, ClaudeBrowserTests.Manifest with { CompanionBuild = installed }));
+
+    [Fact] public async Task RefusedHostFromAnotherBuildCarriesOneReloadRequestPerTenMinutes()
+    {
+        var pipeName = "AUV.Windows.Preview." + Convert.ToHexString(Guid.NewGuid().ToByteArray())[..24] + ".ClaudeBrowser";
+        var newer = ClaudeBrowserTests.Manifest with { RuntimeGenerationId = "9b0c2d3e-8a41-4b7c-9d2e-1f3a4b5c6d7e" };
+        var throttle = new CompanionReloadThrottle();
+        using var server = new ClaudeBrowserPipeServer(pipeName, newer, _ => true, () => "auto", throttle);
+        server.Start();
+        async Task<CompanionMessage?> AfterWelcome()
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var client = new System.IO.Pipes.NamedPipeClientStream(".", pipeName, System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous | System.IO.Pipes.PipeOptions.CurrentUserOnly);
+            await client.ConnectAsync(5000, deadline.Token);
+            await CompanionFraming.WriteAsync(client, CompanionMessageCodec.Encode(new HostHello("1.0.0", "2026110801", ClaudeBrowserTests.Manifest.ExtensionOrigin, "chrome", ClaudeBrowserTests.Generation)), 8192, deadline.Token);
+            Assert.Equal(new HostWelcome(false, "generationMismatch"), CompanionMessageCodec.DecodeFromApp((await CompanionFraming.ReadAsync(client, 8192, deadline.Token))!));
+            var next = await CompanionFraming.ReadAsync(client, 8192, deadline.Token);
+            return next == null ? null : CompanionMessageCodec.DecodeFromApp(next);
+        }
+        var first = Assert.IsType<CompanionCommand>(await AfterWelcome());
+        Assert.Equal(ClaudeBrowserContract.ReloadCommand, first.Command);
+        Assert.Null(await AfterWelcome()); // within ten minutes: the refusal only
+        Assert.Equal(1, throttle.Requests);
+    }
+
     // ---- The real host process between a stand-in browser (stdio) and AUV's pipe ----
 
     private static string HostBuildOutput()
@@ -151,6 +244,27 @@ public class ClaudeBrowserBridgeTests : IDisposable
             Assert.True(host.WaitForExit(15000)); Assert.Equal(0, host.ExitCode);
             for (var i = 0; i < 50 && server.State == CompanionLinkState.Connected; i++) await Task.Delay(100);
             Assert.Equal(CompanionLinkState.NoBrowser, server.State);
+        }
+        finally { if (!host.HasExited) host.Kill(); host.Dispose(); }
+    }
+
+    [Fact] public async Task HostRelaysAuvsReloadRequestAfterARefusal()
+    {
+        // After an update, the browser still runs the host and extension from before: AUV refuses the host and asks the
+        // extension, through it, to reload itself. Nothing else crosses a refused connection.
+        var install = Path.Combine(temp, "browser-companion");
+        var pipeName = "AUV.Windows.Preview." + Convert.ToHexString(Guid.NewGuid().ToByteArray())[..24] + ".ClaudeBrowser";
+        var newer = ClaudeBrowserTests.Manifest with { RuntimeGenerationId = "9b0c2d3e-8a41-4b7c-9d2e-1f3a4b5c6d7e" };
+        using var server = new ClaudeBrowserPipeServer(pipeName, newer, ClaudeBrowserPipeServer.InstalledHostOnly(install), () => "auto", new CompanionReloadThrottle());
+        server.Start();
+        var (host, input, output) = StartHost(install, pipeName, ClaudeBrowserTests.Manifest.ExtensionOrigin);
+        try
+        {
+            var reload = Assert.IsType<CompanionCommand>(await NextForExtension(output));
+            Assert.Equal(ClaudeBrowserContract.ReloadCommand, reload.Command); Assert.Null(reload.Placement); Assert.Null(reload.TargetRequestId);
+            Assert.Equal(CompanionLinkState.Rejected, server.State);
+            input.Close();
+            Assert.True(host.WaitForExit(15000));
         }
         finally { if (!host.HasExited) host.Kill(); host.Dispose(); }
     }
@@ -254,7 +368,7 @@ public class ClaudeBrowserBridgeTests : IDisposable
             Assert.Equal(ClaudeSyncOutcome.UpdateRequired, result.Outcome); Assert.Equal("edge", result.BrowserProduct);
             using var _ = UiText.Override(UiLanguage.English);
             var message = ClaudeBrowserPresentation.Message(result.Outcome, result.BrowserProduct);
-            Assert.Contains("Reload it on Edge's extensions page", message);
+            Assert.Contains("reload it once on Edge's extensions page", message);
         }
     }
 

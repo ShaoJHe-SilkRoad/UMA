@@ -75,6 +75,7 @@ public sealed partial class ProviderController : Observable, IDisposable
         freshnessTimer.Tick += (_, _) => EnforceFreshness(DateTimeOffset.UtcNow);
         UiText.Changed += Relocalize;
         SystemEvents.PowerModeChanged += PowerModeChanged;
+        RefreshClaudeStatus();
     }
     public void Start()
     {
@@ -203,7 +204,7 @@ public sealed partial class ProviderController : Observable, IDisposable
             Changed(nameof(RefreshLabel)); Changed(nameof(ResolvedCodex));
             if (app.Demo) { main.Model.Shell.ReplaceAdmittedPresentation(AgentOrdering.Apply(AgentPresentation.Create(true), a => a.Id, app.Settings.AgentOrder.Count > 0 ? app.Settings.AgentOrder : AgentCatalog.DefaultOrder).ToArray()); return; }
             foreach (var pair in rebuild.ToArray()) if (pair.Key != "codex" || !CodexEnabled) Admit(pair.Key, pair.Value);
-            Changed(nameof(RefreshLabel)); Changed(nameof(ResolvedCodex));
+            Changed(nameof(RefreshLabel)); Changed(nameof(ResolvedCodex)); ClaudeChanged();
             // Codex text is produced at decode time; read again so labels follow the new language.
             if (CodexEnabled) _ = RefreshCodexAsync();
         });

@@ -27,6 +27,8 @@ public static class ClaudeBrowserContract
     public const string QualifyCommand = "umaClaudeRuntimeQualification";
     public const string RefreshCommand = "umaClaudeAutomaticRefresh";
     public const string CloseCommand = "umaClaudeCloseOwnedUsageTab";
+    /// <summary>0.18.6: AUV asks an extension from another build to reload itself from its folder (spaced at least 10 minutes apart).</summary>
+    public const string ReloadCommand = "umaClaudeReloadCompanion";
     public static readonly string[] Placements = ["backgroundTab", "minimizedWindow"];
     public static readonly string[] FailureStatuses =
         ["permissionRequired", "signInRequired", "routeRejected", "usageUnavailable", "tabUnavailable", "ownedTabClosed", "ownedTabOwnershipLost"];
@@ -358,7 +360,7 @@ public static class CompanionMessageCodec
         {
             ClaudeBrowserContract.CloseCommand => ["kind", "schemaVersion", "command", "requestID", "targetRequestID"],
             ClaudeBrowserContract.RefreshCommand when e.TryGetProperty("placement", out _) => ["kind", "schemaVersion", "command", "requestID", "placement"],
-            ClaudeBrowserContract.WakeCommand or ClaudeBrowserContract.QualifyCommand or ClaudeBrowserContract.RefreshCommand => ["kind", "schemaVersion", "command", "requestID"],
+            ClaudeBrowserContract.WakeCommand or ClaudeBrowserContract.QualifyCommand or ClaudeBrowserContract.RefreshCommand or ClaudeBrowserContract.ReloadCommand => ["kind", "schemaVersion", "command", "requestID"],
             _ => throw new CompanionProtocolException("invalid-contract")
         };
         Keys(e, keys, keys); Windows(e, "auvCompanionCommand");
@@ -385,6 +387,37 @@ public static class CompanionMessageCodec
         if (accepted.ValueKind is not (JsonValueKind.True or JsonValueKind.False) || !WelcomeReasons.Contains(reason) || accepted.GetBoolean() != (reason == "accepted"))
             throw new CompanionProtocolException("invalid-contract");
         return new(accepted.GetBoolean(), reason);
+    }
+}
+
+/// <summary>
+/// The native host's host-config.json, written by AUV beside AUV.BrowserHost.exe. Exactly these keys; it holds no secret.
+/// AUV also reads it to recognise its own companion registered from another folder (0.18.6).
+/// </summary>
+public sealed record ClaudeHostConfig(string PipeName, string AllowedOrigin, string RuntimeGenerationId, string HostVersion, string HostBuild)
+{
+    public const string FileName = "host-config.json";
+    private static readonly Regex PipePattern = new("^AUV\\.Windows\\.Preview\\.[0-9A-F]{24}\\.ClaudeBrowser$", RegexOptions.CultureInvariant);
+    public static ClaudeHostConfig Parse(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length is 0 or > 4096) throw new InvalidDataException();
+        JsonDocument document;
+        try { document = JsonDocument.Parse(bytes.ToArray()); } catch (JsonException) { throw new InvalidDataException(); }
+        using (document)
+        {
+            var root = document.RootElement;
+            string[] keys = ["schemaVersion", "pipeName", "allowedOrigin", "runtimeGenerationID", "hostVersion", "hostBuild"];
+            if (root.ValueKind != JsonValueKind.Object || !root.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal).SequenceEqual(keys.Order(StringComparer.Ordinal)))
+                throw new InvalidDataException();
+            if (root.GetProperty("schemaVersion") is not { ValueKind: JsonValueKind.Number } schema || !schema.TryGetInt32(out var version) || version != 1) throw new InvalidDataException();
+            string Text(string key) => root.GetProperty(key) is { ValueKind: JsonValueKind.String } value ? value.GetString()! : throw new InvalidDataException();
+            var config = new ClaudeHostConfig(Text("pipeName"), Text("allowedOrigin"), Text("runtimeGenerationID"), Text("hostVersion"), Text("hostBuild"));
+            if (!PipePattern.IsMatch(config.PipeName) || !ClaudeBrowserContract.IsUuid(config.RuntimeGenerationId) ||
+                config.AllowedOrigin.Length != "chrome-extension://".Length + 33 || !config.AllowedOrigin.StartsWith("chrome-extension://", StringComparison.Ordinal) || !config.AllowedOrigin.EndsWith('/') ||
+                !ClaudeBrowserContract.IsExtensionId(config.AllowedOrigin["chrome-extension://".Length..^1]))
+                throw new InvalidDataException();
+            return config;
+        }
     }
 }
 

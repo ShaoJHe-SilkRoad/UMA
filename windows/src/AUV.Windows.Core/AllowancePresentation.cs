@@ -105,7 +105,13 @@ public static class LowRemainingPolicy
             return credits < 500 ? QuotaSeverity.Low : QuotaSeverity.Normal;
         if (kind is not (AllowanceKind.Percentage or AllowanceKind.Estimated) || UsageSnapshot.ValidRemaining(percent) == null) return QuotaSeverity.Neutral;
         double? threshold = (provider, plan?.Trim().ToLowerInvariant()) switch
-        { ("codex", "pro") or ("claude", "max") => 10, ("codex", "plus") or ("claude", "pro") => 20, _ => null };
+        {
+            ("codex", "pro") or ("claude", "max") => 10,
+            ("codex", "plus") or ("claude", "pro") => 20,
+            // 0.18.6: an exact Claude reading without a known plan (the browser companion's) uses Codex Plus's rule.
+            ("claude", _) when kind == AllowanceKind.Percentage => 20,
+            _ => null
+        };
         return threshold == null ? QuotaSeverity.Neutral : percent < threshold ? QuotaSeverity.Low : QuotaSeverity.Normal;
     }
 }

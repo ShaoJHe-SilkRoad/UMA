@@ -16,10 +16,32 @@ public sealed class AllowanceTests
     [InlineData("codex", "Plus", 19.9, QuotaSeverity.Low)] [InlineData("codex", "Plus", 20, QuotaSeverity.Normal)]
     [InlineData("claude", "Max", 9.9, QuotaSeverity.Low)] [InlineData("claude", "Max", 10, QuotaSeverity.Normal)]
     [InlineData("claude", "Pro", 19.9, QuotaSeverity.Low)] [InlineData("claude", "Pro", 20, QuotaSeverity.Normal)]
-    [InlineData("claude", "Unknown", 1, QuotaSeverity.Neutral)] [InlineData("other", "Pro", 1, QuotaSeverity.Neutral)]
+    [InlineData("claude", "Unknown", 1, QuotaSeverity.Low)] [InlineData("other", "Pro", 1, QuotaSeverity.Neutral)]
+    [InlineData("claude", "Unknown", 19.9, QuotaSeverity.Low)] [InlineData("claude", "Unknown", 20, QuotaSeverity.Normal)]
     [InlineData("codex.account", " PRO ", 10, QuotaSeverity.Normal)]
     public void PolicyUsesExactAdmittedPlansAndStrictBoundaries(string provider, string plan, double value, QuotaSeverity expected)
     { var card = Card(AllowanceKind.Percentage, value, id: provider, plan: plan); Assert.Equal(expected, card.Severity); Assert.Equal(ConnectionState.Connected, card.Connection); }
+    /// <summary>0.18.6: the browser companion's exact reading has no plan name, so it uses Codex Plus's 20% rule.</summary>
+    [Theory]
+    [InlineData(0, QuotaSeverity.Low)] [InlineData(19.9, QuotaSeverity.Low)] [InlineData(20, QuotaSeverity.Normal)] [InlineData(100, QuotaSeverity.Normal)]
+    public void ClaudeWithoutAPlanUsesCodexPlusRule(double value, QuotaSeverity expected)
+    {
+        Assert.Equal(expected, Card(AllowanceKind.Percentage, value, id: "claude", plan: null).Severity);
+        // Estimates, unavailable readings and other providers without a plan stay neutral.
+        Assert.Equal(QuotaSeverity.Neutral, Card(AllowanceKind.Estimated, value, id: "claude", plan: null).Severity);
+        Assert.Equal(QuotaSeverity.Neutral, Card(AllowanceKind.Unavailable, value, id: "claude", plan: null).Severity);
+        Assert.Equal(QuotaSeverity.Neutral, Card(AllowanceKind.Percentage, value, id: "codex", plan: null).Severity);
+    }
+    [Fact] public void BrowserReadingIsColouredLikeCodex()
+    {
+        var observation = new CompanionObservation(new(85, null), new(10, null), DateTimeOffset.UtcNow);
+        var presentation = ClaudeBrowserPresentation.Success(observation, "chrome", DateTimeOffset.UtcNow, null);
+        Assert.Null(presentation.Card.Plan);
+        // 15% left in the 5-hour window is red; 90% left in the week is green.
+        Assert.Equal(QuotaSeverity.Low, LowRemainingPolicy.Resolve("claude", null, 15, null, AllowanceKind.Percentage));
+        Assert.Equal(QuotaSeverity.Normal, LowRemainingPolicy.Resolve("claude", null, 90, null, AllowanceKind.Percentage));
+        Assert.NotEqual(QuotaSeverity.Neutral, presentation.Card.Severity);
+    }
     [Fact] public void NativeCreditsNeverGetAPercentDenominator()
     {
         var below = Card(AllowanceKind.Credits, 100, 499, "workbuddy"); var boundary = Card(AllowanceKind.Credits, 0, 500, "workbuddy");
