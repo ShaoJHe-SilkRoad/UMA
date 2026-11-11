@@ -15,7 +15,9 @@ AUV for Windows reads Claude's exact plan limits through a small companion exten
 
 ### Set up
 
-1. In AUV, select **Claude** and choose **Connect** on the *Connect Claude* card (also in Claude settings). Confirm once. AUV copies the companion to `%LOCALAPPDATA%\AUV.Windows.UI.Preview\browser-companion\`, registers its helper, `AUV.BrowserHost.exe`, for Chrome and Edge under your Windows account (`HKEY_CURRENT_USER`) and turns Claude sync on. No administrator rights are needed. If the registration belongs to AUV's own companion in another folder (an earlier copy), it is replaced without asking; only another program's registration makes AUV ask first.
+1. In AUV, select **Claude** and choose **Connect** on the *Connect Claude* card (also in Claude settings). Confirm once. The companion stays where it is, inside the AUV folder: the extension is `<AUV folder>\BrowserCompanion\extension` and its helper is `<AUV folder>\BrowserCompanion\host\AUV.BrowserHost.exe`. AUV writes two small setup files beside the helper, registers it for Chrome and Edge under your Windows account (`HKEY_CURRENT_USER`) and turns Claude sync on. Nothing is copied elsewhere and no administrator rights are needed; your settings stay in `%LOCALAPPDATA%\AUV.Windows.UI.Preview`. If the registration belongs to AUV's own companion in another folder (another AUV version, or the 0.18.5 copy), it is replaced without asking; only another program's registration makes AUV ask first.
+   - The AUV folder must be one you can write to. Under `C:\Program Files` (or a read-only share) Connect stops and says so: move the AUV folder to Documents or another drive and choose Connect again.
+   - If AUV 0.18.5 had copied the companion to `%LOCALAPPDATA%\AUV.Windows.UI.Preview\browser-companion\`, AUV asks once, after Connect succeeds, whether to delete that copy (default **No**; keep it while you still run 0.18.5).
 2. A checklist follows the next steps and ticks each one when AUV sees it happen:
    - ① **Registered for Chrome and Edge**: ticked by Connect.
    - ② **Load the extension**: choose **Load in Chrome** (or **Load in Edge**). AUV copies the extension folder's path, opens the browser's extensions page and shows what to do: turn on **Developer mode** → **Load unpacked** → press **Ctrl+V** in the folder window's address bar → **Select Folder**. Ticked when that browser's companion answers AUV.
@@ -37,13 +39,13 @@ The extension's ID is `jnbjegolfmhehndgimjidefmggpnagji`. The browser may remind
 
 ### Update
 
-AUV updates the companion by itself when it starts: if it carries a newer companion than the one set up, it copies the new files and registration (AUV's own only). Then it asks the extension in each browser to reload itself, at most once every 10 minutes, so the browser loads the new build from the same folder. Only a failed update is shown, with **Retry**. The previous extension folder is kept as `extension.backup-<build>-<time>`, and older helper builds keep their own folders.
+Each AUV version comes in its own folder, and the companion is used from there. When you start a new AUV with Claude sync on, it moves the browsers' registration to its own folder by itself (AUV's own registration, so it does not ask; only a failure is shown, with **Retry**). The previous AUV folder is never changed.
 
-Extensions from AUV 0.18.5 do not know that request yet. After upgrading from 0.18.5, reload the extension once by hand on each browser's extensions page; later updates need nothing.
+The browser, however, still runs the extension from the previous folder. Asking it to reload (AUV does that for an extension from another build, at most once every 10 minutes) cannot help here, because a reload reads the same old folder. So the checklist shows step 2 again: choose **Load in Chrome** (or Edge) once to load the extension from the new folder. If the browser still lists the previous AUV extension, remove it there. The reload request only helps when a new build is put into the same folder.
 
 ### Remove
 
-1. In Claude settings choose **Remove companion**. AUV deletes its two registry keys (only keys that point into its own folder), turns browser sync off and, if you agree, deletes `browser-companion\`.
+1. In Claude settings choose **Remove companion**. AUV deletes its two registry keys (only keys that point into its own folder) and the two setup files it wrote, and turns browser sync off. The companion files inside the AUV folder stay; they go when you delete the AUV folder. If the 0.18.5 copy under `%LOCALAPPDATA%` still exists, AUV offers to delete it too (default No).
 2. Remove the extension on the browser's extensions page; AUV cannot do that for you.
 
 To remove the registration by hand:
@@ -61,6 +63,7 @@ reg delete "HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.silkrd.auv.cla
 | The companion needs access to claude.ai | On the extension's details page, set *Site access* to allow `claude.ai`. |
 | Sign in to claude.ai | Sign in to claude.ai in that browser, then refresh. |
 | The AUV extension in Chrome (or Edge) is from a different build | AUV asks the extension to reload itself; the message goes away once it has. If it stays (always the case right after upgrading from AUV 0.18.5), choose **Open Chrome extensions page** beside it and reload the extension once. |
+| The AUV extension in Chrome (or Edge) still comes from your previous AUV folder | You started a new AUV (a new folder). Choose **Load in Chrome** (or Edge) in step 2 to load the extension from this AUV's folder; reloading the old one does not help. |
 | The browser companion is not answering | Reload the extension, or restart the browser. |
 | Claude's Usage page layout is not recognized | claude.ai changed its page. No figure is shown rather than a wrong one; an AUV update is needed. |
 
@@ -81,7 +84,9 @@ AUV Windows 版通过 Chrome 或 Edge 中的一个小型伴侣扩展读取 Claud
 
 ### 设置
 
-1. 在 AUV 中选择 **Claude**，在“连接 Claude”卡片上选择**连接**（Claude 设置中也有），确认一次即可。AUV 会把伴侣复制到 `%LOCALAPPDATA%\AUV.Windows.UI.Preview\browser-companion\`，在你的 Windows 账户下（`HKEY_CURRENT_USER`）为 Chrome 和 Edge 注册辅助程序 `AUV.BrowserHost.exe`，并开启 Claude 同步。不需要管理员权限。如果已有的注册是 AUV 自己在其他文件夹中的伴侣（较早的副本），会直接替换，不再询问；只有其他程序的注册才会先询问你。
+1. 在 AUV 中选择 **Claude**，在“连接 Claude”卡片上选择**连接**（Claude 设置中也有），确认一次即可。伴侣就留在 AUV 文件夹里使用：扩展是 `<AUV 文件夹>\BrowserCompanion\extension`，辅助程序是 `<AUV 文件夹>\BrowserCompanion\host\AUV.BrowserHost.exe`。AUV 在辅助程序旁写入两个小的设置文件，在你的 Windows 账户下（`HKEY_CURRENT_USER`）为 Chrome 和 Edge 注册它，并开启 Claude 同步。不会复制到其他位置，也不需要管理员权限；你的设置仍在 `%LOCALAPPDATA%\AUV.Windows.UI.Preview`。如果已有的注册是 AUV 自己在其他文件夹中的伴侣（另一版本的 AUV，或 0.18.5 的副本），会直接替换，不再询问；只有其他程序的注册才会先询问你。
+   - AUV 文件夹必须可写。如果放在 `C:\Program Files`（或只读共享）下，“连接”会停止并说明原因：请把 AUV 文件夹移到“文档”或其他磁盘，再选择“连接”。
+   - 如果 AUV 0.18.5 曾把伴侣复制到 `%LOCALAPPDATA%\AUV.Windows.UI.Preview\browser-companion\`，“连接”成功后 AUV 会询问一次是否删除该副本（默认**否**；如果还在运行 0.18.5，请保留）。
 2. 接下来的步骤显示为一份清单，AUV 看到某一步完成时会自动打勾：
    - ① **已为 Chrome 和 Edge 注册**：选择“连接”后打勾。
    - ② **加载扩展**：选择**在 Chrome 中加载**（或**在 Edge 中加载**）。AUV 会复制扩展文件夹的路径，打开浏览器的扩展页，并提示操作：开启**开发者模式** → **加载已解压的扩展程序** → 在文件夹窗口的地址栏按 **Ctrl+V** 粘贴路径 → **选择文件夹**。该浏览器中的伴侣回应 AUV 后打勾。
@@ -103,13 +108,13 @@ AUV Windows 版通过 Chrome 或 Edge 中的一个小型伴侣扩展读取 Claud
 
 ### 更新
 
-AUV 启动时会自动更新伴侣：如果它带有的伴侣比已设置的新，就复制新文件并更新注册（只涉及 AUV 自己的文件和注册）。随后它会请各浏览器中的扩展自行重新加载（每个浏览器最多每 10 分钟一次），浏览器会从同一文件夹载入新构建。只有更新失败时才会显示原因和**重试**按钮。之前的扩展文件夹会保留为 `extension.backup-<构建号>-<时间>`，旧版辅助程序也各自保留在原来的文件夹中。
+每个版本的 AUV 都在自己的文件夹里，伴侣也从那里使用。开启 Claude 同步时启动新版 AUV，它会自动把浏览器注册改为指向自己的文件夹（这是 AUV 自己的注册，所以不询问；只有失败时才显示原因和**重试**按钮）。上一份 AUV 的文件夹从不改动。
 
-AUV 0.18.5 的扩展还不认识这个请求。从 0.18.5 升级后，请在每个浏览器的扩展页手动重新加载一次扩展；之后的更新无需任何操作。
+但浏览器中运行的仍是上一个文件夹里的扩展。让它“重新加载”（AUV 会对来自其他构建的扩展这样请求，每个浏览器最多每 10 分钟一次）在这里没有用，因为重新加载读的还是原来的旧文件夹。所以清单会重新显示第 2 步：选择一次**在 Chrome 中加载**（或 Edge），从新文件夹加载扩展；如果浏览器里还列着旧的 AUV 扩展，请把它移除。“重新加载”请求只在新构建放进同一文件夹时才有用。
 
 ### 移除
 
-1. 在 Claude 设置中选择**移除伴侣**。AUV 会删除它的两个注册表项（只删除指向它自己文件夹的项），并关闭浏览器同步；如果你同意，还会删除 `browser-companion\`。
+1. 在 Claude 设置中选择**移除伴侣**。AUV 会删除它的两个注册表项（只删除指向它自己文件夹的项）和它写入的两个设置文件，并关闭浏览器同步。AUV 文件夹中的伴侣文件会保留，删除 AUV 文件夹时一并删除。如果 `%LOCALAPPDATA%` 下 0.18.5 的副本还在，AUV 也会询问是否删除（默认“否”）。
 2. 在浏览器扩展页中移除扩展；AUV 无法替你移除。
 
 手动删除注册：
@@ -127,6 +132,7 @@ reg delete "HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.silkrd.auv.cla
 | 伴侣需要访问 claude.ai | 在扩展详情页把“网站访问权限”设为允许 `claude.ai`。 |
 | 请在浏览器中登录 claude.ai | 在该浏览器中登录 claude.ai，然后刷新。 |
 | Chrome（或 Edge）中的 AUV 扩展来自不同的构建 | AUV 会请扩展自行重新加载，完成后提示就会消失。如果提示一直存在（从 AUV 0.18.5 升级后必然如此），请选择旁边的**打开 Chrome 扩展页**，手动重新加载一次扩展。 |
+| Chrome（或 Edge）中的 AUV 扩展仍来自上一份 AUV 的文件夹 | 你启动的是新的 AUV（新文件夹）。请在第 2 步选择**在 Chrome 中加载**（或 Edge），从这份 AUV 的文件夹加载扩展；对旧扩展“重新加载”没有用。 |
 | 浏览器伴侣没有响应 | 重新加载扩展，或重启浏览器。 |
 | 无法识别 Claude 用量页的布局 | claude.ai 改版了页面。AUV 宁可不显示也不显示错误数字，需要等 AUV 更新。 |
 

@@ -125,7 +125,7 @@
        <TextBlock Text="{Binding Providers.ClaudeLastResult}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,4,0,0" AutomationProperties.AutomationId="auv.claude.last-result"/>
       </StackPanel></Border>
       <WrapPanel Margin="0,0,0,6"><Button Content="{local:Tr 'Sync now', 立即同步}" Click="ClaudeSync_Click" IsEnabled="{Binding Providers.ClaudeCanSync}" Margin="0,0,8,6" AutomationProperties.AutomationId="auv.claude.sync"/><Button Content="{local:Tr 'Remove companion', 移除伴侣}" Click="ClaudeRemove_Click" Margin="0,0,8,6" AutomationProperties.AutomationId="auv.claude.remove"/></WrapPanel>
-      <TextBlock Text="{local:Tr 'Remove deletes AUV’s browser registration and, if you agree, its companion folder. Remove the extension itself on the browser’s extensions page.', “移除”会删除 AUV 的浏览器注册；如果你同意，还会删除伴侣文件夹。扩展本身请在浏览器的扩展页中移除。}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,12"/>
+      <TextBlock Text="{local:Tr 'Remove deletes AUV’s browser registration; the companion files inside this AUV folder stay. Remove the extension itself on the browser’s extensions page.', “移除”会删除 AUV 的浏览器注册；这份 AUV 文件夹中的伴侣文件会保留。扩展本身请在浏览器的扩展页中移除。}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,12"/>
       <Expander x:Name="ClaudeAdvanced" Header="{local:Tr Advanced, 高级}" IsExpanded="False" Foreground="{DynamicResource TextBrush}" AutomationProperties.AutomationId="auv.claude.advanced">
        <StackPanel Margin="0,10,0,0">
         <CheckBox Content="{local:Tr 'Sync Claude through the browser companion', 通过浏览器伴侣同步 Claude}" IsChecked="{Binding Providers.ClaudeBrowserEnabled, Mode=TwoWay}" Margin="0,0,0,10" AutomationProperties.AutomationId="auv.claude.enabled"/>

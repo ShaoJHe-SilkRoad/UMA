@@ -568,7 +568,7 @@ reg delete "HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.silkrd.auv.cla
 | D3 | 同时支持 Chrome 与 Edge |
 | D4 | 首发用开发者模式加载；上架商店以后再议 |
 | D5 | 为 Windows 新生成 key，manifest 只放公钥，私钥不保存 |
-| D6 | 文件放在 `%LOCALAPPDATA%\AUV.Windows.UI.Preview\browser-companion\` |
+| D6 | ~~文件放在 `%LOCALAPPDATA%\AUV.Windows.UI.Preview\browser-companion\`~~ —— 2026-11-11 已被 D6a 取代（见文末“决策更新”） |
 | D7 | 自动：有普通窗口用后台标签页，否则用最小化小窗口 |
 | D8 | 沿用 Windows 规则：间隔 + 2 分钟后隐藏 |
 | D9 | 允许 AUV 先询问再打开浏览器；自动刷新一轮只问一次，可勾选不再询问 |
@@ -640,3 +640,19 @@ D16 要求这 4 个共享脚本与 Mac 原件逐字节一致。中文支持做�
 
 - 需要新的构建号：伴侣扩展内容变了，所以 `generation` 会变。你需要在 AUV 中点一次“更新”，然后在 Chrome 扩展页“重新加载”扩展。
 - 工作量约半天。
+
+---
+
+## 决策更新（2026-11-11）
+
+| 编号 | 决定 |
+|---|---|
+| D6a（取代 D6） | 用户原话：“Inside AUV install folder”。伴侣直接使用 AUV 安装文件夹里打包好的文件：扩展 = `<AUV.exe 所在文件夹>\BrowserCompanion\extension`，辅助程序 = `<AUV.exe 所在文件夹>\BrowserCompanion\host\AUV.BrowserHost.exe`。不再复制到 `%LOCALAPPDATA%`。“设置”只在辅助程序旁写入 `host-config.json` 和原生主机清单，并让两个 HKCU 键指向那里。设置文件 `settings.v1.json` 仍在 `%LOCALAPPDATA%\AUV.Windows.UI.Preview`。 |
+
+随之而来的规则（已在 0.18.6 实现）：
+
+- **管道信任：**只接受正在运行的这份 AUV 自己的 `BrowserCompanion\host\AUV.BrowserHost.exe`（完整路径相同）；其他安装文件夹或 0.18.5 副本中的辅助程序都不接受。
+- **文件夹不可写**（例如在 Program Files 下）：“设置”失败，并用中英文说明请把 AUV 移到可写的位置；不会悄悄改写到别处。
+- **从 0.18.5 迁移：**指向 `%LOCALAPPDATA%\…\browser-companion` 的注册属于 AUV 自己，直接替换。在新位置设置成功后，如果那个旧文件夹存在且确实是 AUV 0.18.5 创建的副本，只询问一次（一个对话框，默认“否”）是否删除；没有“是”就不删除。
+- **升级：**每个新版本都有新的安装文件夹，扩展路径随之改变。AUV 启动时如果注册指向另一份 AUV 的 `BrowserCompanion`，会自动改为指向自己（AUV 自己的注册，不询问），清单第 2 步重新出现，“在 Chrome/Edge 中加载”会复制新文件夹的路径并打开扩展页。`umaClaudeReloadCompanion` 只能让扩展从原文件夹重新加载，跨文件夹没有用，界面文字和用户指南都写明了这一点。旧的安装文件夹从不改动。
+- 同一个安装文件夹只能为一个偏好配置文件（一个管道）设置；后设置的会覆盖 `host-config.json`，另一配置会显示为“尚未从此文件夹注册”。

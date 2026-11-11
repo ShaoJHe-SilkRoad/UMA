@@ -68,7 +68,7 @@ internal static class ClaudeVerification
         var registryBase = @"Software\AUV-Test-" + Guid.NewGuid().ToString("N");
         try
         {
-            Require(!File.Exists(Path.Combine(ClaudeBrowserPaths.InstallRoot(app.Store.PathName), "companion.json")), "The isolated profile has no companion yet");
+            Require(!ClaudeBrowserSetup.IsLegacyCopy(ClaudeBrowserPaths.LegacyInstallRoot(app.Store.PathName)), "The isolated profile has no 0.18.5 companion copy");
             providers.ClaudePackageRootOverride = StagePackage(stage); providers.ClaudeRegistryBaseOverride = registryBase;
             providers.ClaudeChanged();
             Require(providers.ClaudeShowConnect && providers.ClaudeConnectAvailable && !providers.ClaudeShowChecklist, "Off: the Claude page shows the Connect card");
@@ -77,11 +77,11 @@ internal static class ClaudeVerification
             // Connect, after its one confirmation (the dialog itself is not shown here).
             var manifest = providers.InstallAndEnableClaude(false);
             var status = providers.ClaudeSetup.Status();
-            Require(status.State == CompanionInstallState.Installed && status.RegisteredBrowsers.SequenceEqual(["chrome", "edge"]), "Connect copies and registers for Chrome and Edge");
+            Require(status.State == CompanionInstallState.Installed && status.RegisteredBrowsers.SequenceEqual(["chrome", "edge"]) && File.Exists(Path.Combine(stage, "host", "host-config.json")) && !Directory.Exists(ClaudeBrowserPaths.LegacyInstallRoot(app.Store.PathName)), "Connect registers the companion inside the (staged) AUV folder for Chrome and Edge, copying nothing");
             Require(providers.ClaudeBrowserEnabled && app.Settings.ClaudeBrowser.InstalledBuild == manifest.CompanionBuild, "Connect turns Claude sync on");
             Require(!providers.ClaudeShowConnect && providers.ClaudeShowChecklist && providers.ClaudeStep1Done && !providers.ClaudeStep2Done && !providers.ClaudeStep3Done, "Checklist: step 1 ticked");
             using (var key = Registry.CurrentUser.OpenSubKey(registryBase + @"\" + ClaudeBrowserSetup.Browsers[0].Path))
-                Require(key?.GetValue(null) as string == providers.ClaudeSetup.HostManifestPath(manifest), "Registration went to the throwaway key only");
+                Require(key?.GetValue(null) as string == providers.ClaudeSetup.HostManifestPath, "Registration went to the throwaway key only");
 
             // Step 2: a browser's companion passed the handshake. Then a sync that needs sign-in shows its action.
             providers.MarkClaudeLoaded("chrome");
@@ -104,7 +104,7 @@ internal static class ClaudeVerification
             try
             {
                 providers.ClaudeBrowserEnabled = false;
-                if (providers.ClaudeRegistryBaseOverride == registryBase) providers.ClaudeSetup.Remove(true);
+                if (providers.ClaudeRegistryBaseOverride == registryBase) providers.ClaudeSetup.Remove();
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
             Registry.CurrentUser.DeleteSubKeyTree(registryBase, false);

@@ -42,18 +42,17 @@ public partial class SettingsWindow
 
         if (providers.ClaudeInstallStatus is not { } status) { ClaudeSetupStatus.Text = Loc.T("The companion's status could not be read.", "无法读取伴侣状态。"); return; }
         var browsers = string.Join(", ", status.RegisteredBrowsers.Select(Core.ClaudeBrowserPresentation.BrowserName));
-        ClaudeSetupStatus.Text = status.State switch
+        var elsewhere = status.AuvRegistrationsElsewhere.Count > 0
+            ? Loc.T(" The browsers' registration still points to another AUV folder; AUV moves it here when you choose Repair or restart it with sync on.", " 浏览器注册仍指向另一份 AUV 的文件夹；选择“修复”或在开启同步时重启 AUV，会改为指向这里。") : "";
+        ClaudeSetupStatus.Text = Loc.T($"Companion folder (inside this AUV): {setup.PackageRoot}\n", $"伴侣文件夹（在这份 AUV 内）：{setup.PackageRoot}\n") + status.State switch
         {
             CompanionInstallState.NotPackaged => Core.ClaudeBrowserPresentation.NotPackaged,
-            CompanionInstallState.NotInstalled => Loc.T("Companion not set up. Choose Connect above.", "伴侣尚未设置。请选择上方的“连接”。"),
-            CompanionInstallState.UpdateAvailable => Loc.T($"This AUV carries companion build {status.Packaged!.CompanionBuild}; build {status.Installed!.CompanionBuild} is set up. AUV updates a newer build by itself at start-up; choose Update to install this one now.",
-                $"这份 AUV 带有伴侣构建 {status.Packaged!.CompanionBuild}；当前设置的是构建 {status.Installed!.CompanionBuild}。较新的构建会在 AUV 启动时自动更新；选择“更新”可立即安装这一构建。"),
-            CompanionInstallState.RegistrationMissing => Loc.T("The companion's files are in place, but its browser registration is missing. Choose Repair above.", "伴侣文件已就位，但浏览器注册缺失。请选择上方的“修复”。"),
-            _ => Loc.T($"Companion set up · build {status.Installed!.CompanionBuild} · registered for {browsers}", $"伴侣已设置 · 构建 {status.Installed!.CompanionBuild} · 已为 {browsers} 注册")
-        } + (status.ForeignRegistrations.Count > 0 ? Loc.T(" Another program uses the same registration name.", " 另有程序使用了同一个注册名称。") : "");
+            CompanionInstallState.NotInstalled => Loc.T("Not registered from this folder yet. Choose Connect above.", "尚未从此文件夹注册。请选择上方的“连接”。"),
+            CompanionInstallState.RegistrationMissing => Loc.T("Set up here, but the browsers' registration does not point to this folder. Choose Repair above.", "已在此设置，但浏览器注册没有指向此文件夹。请选择上方的“修复”。"),
+            _ => Loc.T($"Registered from this folder · build {status.Installed!.CompanionBuild} · for {browsers}", $"已从此文件夹注册 · 构建 {status.Installed!.CompanionBuild} · 用于 {browsers}")
+        } + elsewhere + (status.ForeignRegistrations.Count > 0 ? Loc.T(" Another program uses the same registration name.", " 另有程序使用了同一个注册名称。") : "");
         ClaudeSetupButton.Content = status.State switch
         {
-            CompanionInstallState.UpdateAvailable => Loc.T("Update", "更新"),
             CompanionInstallState.RegistrationMissing => Loc.T("Repair", "修复"),
             CompanionInstallState.Installed => Loc.T("Set Up again", "重新设置"),
             _ => Loc.T("Set Up", "设置")
@@ -76,7 +75,7 @@ public partial class SettingsWindow
     private void ClaudeOpenFolder_Click(object sender, RoutedEventArgs e)
     {
         var folder = ClaudeFolder.Text;
-        if (!Directory.Exists(folder)) { SaveStatus.Text = Loc.T("Choose Set Up first.", "请先选择“设置”。"); return; }
+        if (!Directory.Exists(folder)) { SaveStatus.Text = Core.ClaudeBrowserPresentation.NotPackaged; return; }
         try { Process.Start(new ProcessStartInfo("explorer.exe") { ArgumentList = { folder }, UseShellExecute = false })?.Dispose(); }
         catch (Exception error) when (error is System.ComponentModel.Win32Exception or InvalidOperationException) { SaveStatus.Text = Loc.T("Could not open the folder.", "无法打开该文件夹。"); }
     }
@@ -106,18 +105,21 @@ public partial class SettingsWindow
     private void ClaudeRemove_Click(object sender, RoutedEventArgs e)
     {
         var setup = app.Providers.ClaudeSetup;
-        if (MessageBox.Show(this, Loc.T("Remove AUV's browser companion registration for Chrome and Edge, and turn Claude browser sync off?", "要删除 AUV 在 Chrome 和 Edge 中的浏览器伴侣注册，并关闭 Claude 浏览器同步吗？"),
+        if (MessageBox.Show(this, Loc.T("Remove AUV's browser companion registration for Chrome and Edge, and turn Claude browser sync off? The companion files inside this AUV folder stay.", "要删除 AUV 在 Chrome 和 Edge 中的浏览器伴侣注册，并关闭 Claude 浏览器同步吗？这份 AUV 文件夹中的伴侣文件会保留。"),
                 "AUV", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
-        var deleteFiles = Directory.Exists(setup.InstallRoot) && MessageBox.Show(this, Loc.T(
-            $"Also delete AUV's companion folder, including its backups? This cannot be undone.\n\n{setup.InstallRoot}",
-            $"同时删除 AUV 的伴侣文件夹（包括其中的备份）吗？此操作无法撤销。\n\n{setup.InstallRoot}"), "AUV", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
+        // The copy AUV 0.18.5 made under %LOCALAPPDATA% is offered for deletion separately; this AUV's own folder is never deleted.
+        var legacy = ClaudeBrowserPaths.LegacyInstallRoot(app.Store.PathName);
+        var deleteLegacy = ClaudeBrowserSetup.IsLegacyCopy(legacy) && MessageBox.Show(this, Loc.T(
+            $"Also delete the companion copy AUV 0.18.5 made? AUV 0.18.5 uses it; keep it if you still run 0.18.5. This cannot be undone.\n\n{legacy}",
+            $"同时删除 AUV 0.18.5 创建的伴侣副本吗？AUV 0.18.5 仍在使用它；如果你还在运行 0.18.5，请保留。此操作无法撤销。\n\n{legacy}"), "AUV", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
         try
         {
             app.Providers.ClaudeBrowserEnabled = false;
-            setup.Remove(deleteFiles);
+            setup.Remove();
+            if (deleteLegacy) ClaudeBrowserSetup.DeleteLegacyCopy(legacy);
             app.Settings.ClaudeBrowser.InstalledBuild = null; main.Persist(); app.Providers.ForgetClaudeChecklist();
             SaveStatus.Text = Loc.T("Registration removed. Remove the extension on the browser's extensions page.", "已删除注册。请在浏览器扩展页中移除扩展。")
-                + (deleteFiles ? Loc.T(" The companion folder was deleted.", " 伴侣文件夹已删除。") : "");
+                + (deleteLegacy ? Loc.T(" The 0.18.5 companion copy was deleted.", " 0.18.5 的伴侣副本已删除。") : "");
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         { SaveStatus.Text = Loc.T("Removal did not complete: ", "移除未完成：") + error.Message; }

@@ -32,7 +32,8 @@ public sealed partial class ProviderController
     internal string? ClaudePackageRootOverride { get; set; }
     internal string? ClaudeRegistryBaseOverride { get; set; }
 
-    public ClaudeBrowserSetup ClaudeSetup => new(ClaudeBrowserPaths.InstallRoot(app.Store.PathName), ClaudePackageRootOverride ?? ClaudeBrowserPaths.PackageRoot,
+    /// <summary>The companion inside this AUV install folder (2026-11-11). Settings stay in %LOCALAPPDATA%\AUV.Windows.UI.Preview.</summary>
+    public ClaudeBrowserSetup ClaudeSetup => new(ClaudePackageRootOverride ?? ClaudeBrowserPaths.PackageRoot,
         ClaudeBrowserPaths.PipeName(app.Store.PathName), null, ClaudeRegistryBaseOverride ?? "Software");
     public string[] ClaudeBrowsers => ClaudeBrowserPreferences.Browsers;
     public string[] ClaudePlacements => ClaudeBrowserPreferences.PlacementChoices;
@@ -84,7 +85,13 @@ public sealed partial class ProviderController
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException) { claudeStatus = null; }
     }
     private bool ClaudeInstalledAndRegistered => claudeStatus is { Installed: not null, Registered: true };
-    public ClaudeChecklist ClaudeChecklist => ClaudeChecklist.Derive(claudeStatus?.Registered == true, app.Settings.ClaudeBrowser.LoadedBrowsers,
+    /// <summary>
+    /// Step 2 was ticked for another AUV folder (each install has its own). The browser still runs the extension from that
+    /// folder; reloading it cannot help, it has to be loaded from this one.
+    /// </summary>
+    public bool ClaudeFolderChanged => app.Settings.ClaudeBrowser.LoadedElsewhere(ClaudeSetup.ExtensionFolder);
+    private IReadOnlyList<string> LoadedHere => app.Settings.ClaudeBrowser.LoadedIn(ClaudeSetup.ExtensionFolder);
+    public ClaudeChecklist ClaudeChecklist => ClaudeChecklist.Derive(claudeStatus?.Registered == true, LoadedHere,
         app.Settings.ClaudeBrowser.ExactReadingSeen, claudeLink?.State == CompanionLinkState.Connected ? claudeLink.Host?.BrowserProduct : null,
         main.Model.Shell.Agents.FirstOrDefault(a => a.Id == "claude")?.Card is { HasDisplayableQuota: true } card ? card.ObservedAt : null);
     /// <summary>The Connect card: shown until Claude sync is on and the companion is installed and registered.</summary>
@@ -101,7 +108,10 @@ public sealed partial class ProviderController
     public bool ClaudeStep3Done => ClaudeChecklist.SignedIn;
     public string ClaudeStep2Text => ClaudeChecklist.ExtensionLoaded
         ? Loc.T($"Extension loaded in {string.Join(" and ", ClaudeChecklist.LoadedBrowsers.Select(ClaudeBrowserPresentation.BrowserName))}", $"已在 {string.Join(" 和 ", ClaudeChecklist.LoadedBrowsers.Select(ClaudeBrowserPresentation.BrowserName))} 中加载扩展")
-        : Loc.T("Load the extension in Chrome or Edge", "在 Chrome 或 Edge 中加载扩展");
+        : ClaudeFolderChanged
+            ? Loc.T("Load the extension again from this AUV's folder. The browser still has the one from your previous AUV folder; reloading that one does not help.",
+                "请从这份 AUV 的文件夹重新加载扩展。浏览器中仍是上一份 AUV 文件夹里的扩展，对它“重新加载”没有用。")
+            : Loc.T("Load the extension in Chrome or Edge", "在 Chrome 或 Edge 中加载扩展");
     public string ClaudeStep3Text => ClaudeChecklist.SignedIn ? Loc.T("Signed in to claude.ai", "已登录 claude.ai") : Loc.T("Sign in to claude.ai", "登录 claude.ai");
     public string ClaudeHint => claudeHint;
     public bool HasClaudeHint => claudeHint.Length > 0;
@@ -109,7 +119,7 @@ public sealed partial class ProviderController
     public bool HasClaudeUpdateFailure => claudeUpdateFailure != null && !app.Demo;
     /// <summary>The reason the last sync failed, shown with a matching action while Claude has no current reading.</summary>
     public bool HasClaudeFailure => !app.Demo && ClaudeBrowserEnabled && !ClaudeShowConnect && claudeLastOutcome is { } outcome && outcome != ClaudeSyncOutcome.Success && !CurrentClaudeReading();
-    public string ClaudeFailureText => claudeLastOutcome is { } outcome ? ClaudeBrowserPresentation.Message(outcome, claudeLastProduct) : "";
+    public string ClaudeFailureText => claudeLastOutcome is { } outcome ? ClaudeBrowserPresentation.Message(outcome, claudeLastProduct, ClaudeFolderChanged) : "";
     public ClaudeRemedy ClaudeRemedy => claudeLastOutcome is { } outcome ? ClaudeBrowserPresentation.Remedy(outcome) : ClaudeRemedy.None;
     // While the checklist is shown its step-3 button already opens claude.ai.
     public bool HasClaudeRemedy => HasClaudeFailure && ClaudeRemedy != ClaudeRemedy.None && !(ClaudeRemedy == ClaudeRemedy.OpenClaude && ClaudeShowChecklist);
@@ -124,22 +134,22 @@ public sealed partial class ProviderController
         nameof(ClaudeLinkText), nameof(ClaudeLastResult), nameof(ClaudeChecklist), nameof(ClaudeShowConnect), nameof(ClaudeConnectAvailable), nameof(ClaudeConnectLabel),
         nameof(ClaudeConnectText), nameof(ClaudeShowChecklist), nameof(ClaudeShowSummary), nameof(ClaudeSummary), nameof(ClaudeStep1Done), nameof(ClaudeStep2Done),
         nameof(ClaudeStep3Done), nameof(ClaudeStep2Text), nameof(ClaudeStep3Text), nameof(ClaudeHint), nameof(HasClaudeHint), nameof(ClaudeUpdateFailure),
-        nameof(HasClaudeUpdateFailure), nameof(HasClaudeFailure), nameof(ClaudeFailureText), nameof(ClaudeRemedy), nameof(HasClaudeRemedy), nameof(ClaudeRemedyLabel), nameof(ClaudeShowLinkText), nameof(ClaudeCanSync)
+        nameof(HasClaudeUpdateFailure), nameof(HasClaudeFailure), nameof(ClaudeFailureText), nameof(ClaudeRemedy), nameof(HasClaudeRemedy), nameof(ClaudeRemedyLabel), nameof(ClaudeShowLinkText), nameof(ClaudeCanSync), nameof(ClaudeFolderChanged)
     ];
     internal void ClaudeChanged() { RefreshClaudeStatus(); foreach (var name in ClaudeBound) Changed(name); }
     private void SetClaudeHint(string text) { claudeHint = text; Changed(nameof(ClaudeHint)); Changed(nameof(HasClaudeHint)); }
 
     internal void MarkClaudeLoaded(string? product)
     {
-        var browsers = app.Settings.ClaudeBrowser.LoadedBrowsers;
-        if (product is not ("chrome" or "edge" or "unknown") || browsers.Contains(product)) return;
-        browsers.Add(product); browsers.Sort(StringComparer.Ordinal); main.Persist();
+        // A handshake with this build means the extension now loads from this AUV's folder: earlier ticks were for another folder.
+        if (!app.Settings.ClaudeBrowser.MarkLoaded(product, ClaudeSetup.ExtensionFolder)) return;
+        main.Persist();
         // The "load the extension" hint has done its job.
         SetClaudeHint("");
     }
 
     /// <summary>
-    /// Connect (or Repair): copy the packaged companion, register it for Chrome and Edge (HKCU), then turn Claude sync on.
+    /// Connect (or Repair): register the companion inside this AUV folder for Chrome and Edge (HKCU), then turn Claude sync on.
     /// AUV's own companion registered from another folder is replaced without asking; another program's registration is
     /// replaced only when <paramref name="replaceForeign"/> is true. Throws <see cref="ForeignRegistrationException"/> otherwise.
     /// </summary>
@@ -162,8 +172,8 @@ public sealed partial class ProviderController
     {
         var setup = ClaudeSetup;
         var consent = MessageBox.Show(owner ?? main, Loc.T(
-            $"Connect Claude?\n\nAUV will:\n\n• copy the companion extension and its helper to\n  {setup.InstallRoot}\n• register the helper for Chrome and Edge under your Windows account (HKEY_CURRENT_USER), no administrator rights needed.\n\nAn earlier copy is kept as a backup.",
-            $"连接 Claude？\n\nAUV 将会：\n\n• 把伴侣扩展及其辅助程序复制到\n  {setup.InstallRoot}\n• 在你的 Windows 账户下（HKEY_CURRENT_USER）为 Chrome 和 Edge 注册该辅助程序，不需要管理员权限。\n\n之前的副本会保留为备份。"),
+            $"Connect Claude?\n\nThe companion stays inside this AUV folder:\n  {setup.PackageRoot}\n\nAUV will:\n\n• write two small setup files beside its helper there\n• register the helper for Chrome and Edge under your Windows account (HKEY_CURRENT_USER), no administrator rights needed.\n\nNothing is copied elsewhere.",
+            $"连接 Claude？\n\n伴侣就放在这份 AUV 的文件夹里：\n  {setup.PackageRoot}\n\nAUV 将会：\n\n• 在其中的辅助程序旁写入两个小的设置文件\n• 在你的 Windows 账户下（HKEY_CURRENT_USER）为 Chrome 和 Edge 注册该辅助程序，不需要管理员权限。\n\n不会复制到其他位置。"),
             "AUV", MessageBoxButton.OKCancel, MessageBoxImage.Question, MessageBoxResult.Cancel);
         return consent == MessageBoxResult.OK && InstallInteractively(owner);
     }
@@ -182,6 +192,7 @@ public sealed partial class ProviderController
                 { SetClaudeHint(Loc.T("Nothing was changed.", "未做任何更改。")); return false; }
                 InstallAndEnableClaude(true);
             }
+            OfferLegacyCleanup(owner);
             return true;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException or System.Security.SecurityException)
@@ -234,36 +245,56 @@ public sealed partial class ProviderController
     }
 
     /// <summary>
-    /// 0.18.6 start-up: a companion that is set up is brought up to this AUV's packaged build without asking (AUV's own files
-    /// and registration only). Only a failure is shown, with Retry.
+    /// Start-up after an upgrade: each AUV version has its own install folder, so the registration may still point to the
+    /// previous one (or to the 0.18.5 copy). It is AUV's own, so this folder is registered instead without asking; the
+    /// checklist then asks for the extension to be loaded from this folder. Only a failure is shown, with Retry.
     /// </summary>
-    private void UpdateClaudeAtStartup()
+    private void ReRegisterClaudeAtStartup()
     {
         try
         {
-            if (ClaudeSetup.UpdateIfNewer() is not { } manifest) return;
-            app.Settings.ClaudeBrowser.InstalledBuild = manifest.CompanionBuild; main.Persist();
+            if (!ClaudeSetup.ReRegisterIfMoved()) return;
+            var manifest = ClaudeBrowserPaths.LoadManifest(ClaudeSetup.PackageRoot);
+            app.Settings.ClaudeBrowser.InstalledBuild = manifest?.CompanionBuild; main.Persist();
             claudeUpdateFailure = null;
-            main.Model.Status = Loc.T($"Claude browser companion updated to build {manifest.CompanionBuild}.", $"Claude 浏览器伴侣已更新到构建 {manifest.CompanionBuild}。");
+            main.Model.Status = Loc.T("The Claude browser companion is now registered from this AUV's folder. Load the extension from it once (Claude page, step 2).",
+                "Claude 浏览器伴侣已改为从这份 AUV 的文件夹注册。请从该文件夹加载一次扩展（Claude 页第 2 步）。");
+            main.Dispatcher.BeginInvoke(() => OfferLegacyCleanup(null), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
         }
         catch (ForeignRegistrationException)
-        { claudeUpdateFailure = Loc.T("The browser companion could not be updated: another program now uses the same registration name. Choose Retry to decide what to do.", "浏览器伴侣未能更新：另有程序正在使用同一个注册名称。请选择“重试”来决定如何处理。"); }
+        { claudeUpdateFailure = Loc.T("The browser companion could not be registered for this AUV: another program now uses the same registration name. Choose Retry to decide what to do.", "无法为这份 AUV 注册浏览器伴侣：另有程序正在使用同一个注册名称。请选择“重试”来决定如何处理。"); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or System.Security.SecurityException)
-        { claudeUpdateFailure = Loc.T("The browser companion could not be updated: ", "浏览器伴侣未能更新：") + e.Message; }
+        { claudeUpdateFailure = Loc.T("The browser companion could not be registered for this AUV: ", "无法为这份 AUV 注册浏览器伴侣：") + e.Message; }
     }
-    internal void RetryClaudeUpdate(Window? owner) { if (InstallInteractively(owner)) main.Model.Status = Loc.T("Claude browser companion updated.", "Claude 浏览器伴侣已更新。"); }
+    internal void RetryClaudeUpdate(Window? owner) { if (InstallInteractively(owner)) main.Model.Status = Loc.T("Claude browser companion registered.", "Claude 浏览器伴侣已注册。"); }
+
+    /// <summary>
+    /// After a successful Set Up here, offer once to delete the copy AUV 0.18.5 made under %LOCALAPPDATA%. One question,
+    /// default No; nothing is deleted without a yes, and only a folder that is that copy.
+    /// </summary>
+    internal void OfferLegacyCleanup(Window? owner)
+    {
+        if (disposed || app.Demo) return;
+        var legacy = ClaudeBrowserPaths.LegacyInstallRoot(app.Store.PathName);
+        var result = LegacyCleanup.Offer(app.Settings.ClaudeBrowser, legacy, () => MessageBox.Show(owner ?? main, Loc.T(
+                $"AUV no longer needs its earlier companion copy:\n\n{legacy}\n\nDelete that folder? AUV 0.18.5 uses it; keep it if you still run 0.18.5. This cannot be undone.",
+                $"AUV 已不再需要之前的伴侣副本：\n\n{legacy}\n\n要删除该文件夹吗？AUV 0.18.5 仍在使用它；如果你还在运行 0.18.5，请保留。此操作无法撤销。"),
+            "AUV", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes, () => main.Persist());
+        if (result == LegacyCleanupResult.Deleted) SetClaudeHint(Loc.T("The earlier companion copy was deleted.", "之前的伴侣副本已删除。"));
+        else if (result == LegacyCleanupResult.Failed) SetClaudeHint(Loc.T("The earlier companion copy could not be deleted; you can delete it yourself: ", "无法删除之前的伴侣副本，你可以自行删除：") + legacy);
+    }
 
     /// <summary>Remove forgets the checklist, so a later Connect starts from step 1.</summary>
     internal void ForgetClaudeChecklist()
     {
-        app.Settings.ClaudeBrowser.LoadedBrowsers = []; app.Settings.ClaudeBrowser.ExactReadingSeen = false; main.Persist();
+        app.Settings.ClaudeBrowser.LoadedBrowsers = []; app.Settings.ClaudeBrowser.LoadedFolder = null; app.Settings.ClaudeBrowser.ExactReadingSeen = false; main.Persist();
         claudeLastOutcome = null; claudeHint = ""; ClaudeChanged();
     }
 
     private void StartClaude()
     {
         if (!ClaudeBrowserEnabled) { Admit("claude", () => ProviderData.Unavailable("claude", ClaudeBrowserPresentation.Disabled, ConnectionState.Disconnected)); ClaudeChanged(); return; }
-        if (!app.Demo) UpdateClaudeAtStartup();
+        if (!app.Demo) ReRegisterClaudeAtStartup();
         claudeSyncOnConnect = true; StartClaudeLink();
     }
 
@@ -271,8 +302,10 @@ public sealed partial class ProviderController
     private void StartClaudeLink()
     {
         if (disposed || app.Demo || claudeLink != null) return;
-        var root = ClaudeBrowserPaths.InstallRoot(app.Store.PathName);
-        var installed = ClaudeBrowserPaths.LoadManifest(root);
+        var setup = ClaudeSetup; var root = setup.PackageRoot;
+        ClaudeCompanionManifest? installed;
+        try { installed = setup.Status().Installed; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException) { installed = null; }
         if (installed == null)
         {
             Admit("claude", () => ProviderData.Unavailable("claude", ClaudeBrowserPresentation.NotSetUp, ConnectionState.Disconnected));
@@ -362,12 +395,13 @@ public sealed partial class ProviderController
         }
         else
         {
-            var message = ClaudeBrowserPresentation.Message(result.Outcome, result.BrowserProduct);
+            var moved = ClaudeFolderChanged;
+            var message = ClaudeBrowserPresentation.Message(result.Outcome, result.BrowserProduct, moved);
             // A failed sync does not withdraw a reading that is still current; it goes out of date on the usual schedule.
-            if (!CurrentClaudeReading()) Admit("claude", () => ClaudeBrowserPresentation.Failure(result.Outcome, result.BrowserProduct));
+            if (!CurrentClaudeReading()) Admit("claude", () => ClaudeBrowserPresentation.Failure(result.Outcome, result.BrowserProduct, moved));
             var details = ClaudeDetails(result);
             // Rebuilt in the current language each time it is shown.
-            claudeLastResult = () => Loc.T("Last sync: ", "上次同步：") + ClaudeBrowserPresentation.Message(result.Outcome, result.BrowserProduct) + details;
+            claudeLastResult = () => Loc.T("Last sync: ", "上次同步：") + ClaudeBrowserPresentation.Message(result.Outcome, result.BrowserProduct, moved) + details;
             main.Model.Status = "Claude: " + message;
             claudeLastOutcome = result.Outcome; claudeLastProduct = result.BrowserProduct;
             // The extension was asked to reload itself (0.18.6): read again as soon as it reconnects.

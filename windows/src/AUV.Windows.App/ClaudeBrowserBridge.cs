@@ -13,8 +13,10 @@ public static class ClaudeBrowserPaths
     /// <summary>The same per-profile key PreviewInstance uses, so each preference profile has its own pipe.</summary>
     public static string Key(string settingsPath) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(settingsPath).ToUpperInvariant())))[..24];
     public static string PipeName(string settingsPath) => $"AUV.Windows.Preview.{Key(settingsPath)}.ClaudeBrowser";
-    /// <summary>D6: %LOCALAPPDATA%\AUV.Windows.UI.Preview\browser-companion, beside settings.v1.json.</summary>
-    public static string InstallRoot(string settingsPath) => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(settingsPath))!, "browser-companion");
+    /// <summary>Where AUV 0.18.5 copied the companion (D6, superseded 2026-11-11): beside settings.v1.json. Only read to offer its removal.</summary>
+    public static string LegacyInstallRoot(string settingsPath) => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(settingsPath))!, "browser-companion");
+    /// <summary>Decision 2026-11-11: the companion lives inside this AUV install folder and is used where it is.</summary>
+    /// <summary>Decision 2026-11-11: the companion lives inside this AUV install folder and is used where it is.</summary>
     public static string PackageRoot => Path.Combine(AppContext.BaseDirectory, "BrowserCompanion");
     public static ClaudeCompanionManifest? LoadManifest(string root)
     {
@@ -190,13 +192,15 @@ public sealed class ClaudeBrowserPipeServer : IClaudeCompanionLink, IDisposable
         }
         finally { CloseHandle(handle); }
     }
-    /// <summary>The default trust rule: the client is AUV.BrowserHost.exe inside the installed companion's host folder.</summary>
-    public static Func<int, bool> InstalledHostOnly(string installRoot) => pid =>
+    /// <summary>
+    /// The trust rule (2026-11-11): the client is exactly &lt;packageRoot&gt;\host\AUV.BrowserHost.exe, the host inside the running
+    /// AUV's own BrowserCompanion folder. A host from another AUV install, or from the 0.18.5 copy, is not accepted.
+    /// </summary>
+    public static Func<int, bool> InstalledHostOnly(string packageRoot) => pid => IsOwnHost(ImagePath(pid), packageRoot);
+    public static bool IsOwnHost(string? imagePath, string packageRoot)
     {
-        var path = ImagePath(pid);
-        if (path == null) return false;
-        var hostRoot = Path.GetFullPath(Path.Combine(installRoot, "host")) + Path.DirectorySeparatorChar;
-        return Path.GetFullPath(path).StartsWith(hostRoot, StringComparison.OrdinalIgnoreCase) &&
-               string.Equals(Path.GetFileName(path), "AUV.BrowserHost.exe", StringComparison.OrdinalIgnoreCase);
-    };
+        if (imagePath == null) return false;
+        try { return string.Equals(Path.GetFullPath(imagePath), Path.GetFullPath(Path.Combine(packageRoot, "host", "AUV.BrowserHost.exe")), StringComparison.OrdinalIgnoreCase); }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
+    }
 }

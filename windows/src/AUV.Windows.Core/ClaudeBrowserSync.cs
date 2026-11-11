@@ -17,8 +17,32 @@ public sealed class ClaudeBrowserPreferences
     public List<string> LoadedBrowsers { get; set; } = [];
     /// <summary>0.18.6 checklist step 3: an exact reading has been accepted at least once. Missing before 0.18.6: false.</summary>
     public bool ExactReadingSeen { get; set; }
+    /// <summary>The extension folder the checklist's step 2 was ticked for. Each AUV install has its own folder, so a new one starts step 2 again. Default: null.</summary>
+    public string? LoadedFolder { get; set; }
+    /// <summary>The one-time question about deleting the 0.18.5 copy under %LOCALAPPDATA% has been asked (whatever the answer). Default: false.</summary>
+    public bool LegacyCleanupAsked { get; set; }
+    /// <summary>Step 2 was ticked for another AUV folder than <paramref name="currentFolder"/> (or for an unknown one): load the extension again from this one.</summary>
+    public bool LoadedElsewhere(string currentFolder)
+    {
+        if (LoadedBrowsers.Count == 0) return false;
+        if (LoadedFolder is not { } folder) return true;
+        try { return !string.Equals(Path.GetFullPath(folder), Path.GetFullPath(currentFolder), StringComparison.OrdinalIgnoreCase); }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { return true; }
+    }
+    /// <summary>The browsers step 2 counts for <paramref name="currentFolder"/>.</summary>
+    public IReadOnlyList<string> LoadedIn(string currentFolder) => LoadedElsewhere(currentFolder) ? [] : LoadedBrowsers;
+    /// <summary>A browser passed the handshake with this AUV's build, so it now loads the extension from <paramref name="currentFolder"/>. Returns true when something changed.</summary>
+    public bool MarkLoaded(string? product, string currentFolder)
+    {
+        if (product is not ("chrome" or "edge" or "unknown")) return false;
+        var changed = false;
+        if (LoadedElsewhere(currentFolder) || LoadedFolder == null) { LoadedBrowsers = []; LoadedFolder = currentFolder; changed = true; }
+        if (!LoadedBrowsers.Contains(product)) { LoadedBrowsers.Add(product); LoadedBrowsers.Sort(StringComparer.Ordinal); changed = true; }
+        return changed;
+    }
     public void Normalize()
     {
+        if (LoadedFolder is { Length: 0 or > 1024 }) LoadedFolder = null;
         if (!Browsers.Contains(Browser)) Browser = "auto";
         if (!PlacementChoices.Contains(Placement)) Placement = "auto";
         LoadedBrowsers = (LoadedBrowsers ?? []).Where(b => b is "chrome" or "edge" or "unknown").Distinct().Order(StringComparer.Ordinal).ToList();
@@ -319,14 +343,17 @@ public static class ClaudeBrowserPresentation
         { Selection = new(selectedId, windows), Windows = windows };
     }
 
-    public static string Message(ClaudeSyncOutcome outcome, string? browserProduct)
+    /// <param name="movedFolder">The extension in the browser was loaded from another AUV install folder (each version has its own): reloading cannot help.</param>
+    public static string Message(ClaudeSyncOutcome outcome, string? browserProduct, bool movedFolder = false)
     {
         var browser = BrowserName(browserProduct);
         return outcome switch
         {
             ClaudeSyncOutcome.NotConnected => UiText.T("Waiting for Chrome or Edge with the AUV companion. Open the browser to sync Claude.", "正在等待装有 AUV 伴侣的 Chrome 或 Edge。打开浏览器后即可同步 Claude。"),
-            // 0.18.6: AUV updates its own files at start-up and asks the extension to reload itself. Extensions from 0.18.5
-            // do not know that request, so the first upgrade still needs one reload by hand.
+            // 2026-11-11: the companion lives in each AUV install folder, so a new AUV folder means loading the extension from
+            // it again; the reload request only helps when the folder stayed the same.
+            ClaudeSyncOutcome.UpdateRequired when movedFolder => UiText.T($"The AUV extension in {browser} still comes from your previous AUV folder. Load it from this AUV's folder: Claude page → step 2 → Load in {browser}. Reloading the old one does not help.",
+                $"{browser} 中的 AUV 扩展仍来自上一份 AUV 的文件夹。请从这份 AUV 的文件夹加载：Claude 页 → 第 2 步 →“在 {browser} 中加载”。对旧扩展“重新加载”没有用。"),
             ClaudeSyncOutcome.UpdateRequired => UiText.T($"The AUV extension in {browser} is from a different build. AUV asks it to reload itself; if this stays, reload it once on {browser}'s extensions page (needed once after upgrading from AUV 0.18.5).", $"{browser} 中的 AUV 扩展来自不同的构建。AUV 会请它自行重新加载；如果此提示一直存在，请在 {browser} 的扩展页手动重新加载一次（从 AUV 0.18.5 升级后需要这样做一次）。"),
             ClaudeSyncOutcome.CompanionSilent => UiText.T($"The browser companion is not answering. Reload it on {browser}'s extensions page, or restart {browser}.", $"浏览器伴侣没有响应。请在 {browser} 的扩展页重新加载它，或重启 {browser}。"),
             ClaudeSyncOutcome.PermissionRequired => UiText.T($"The companion needs access to claude.ai. Allow site access for AUV Companion in {browser}'s extension settings, then refresh.", $"伴侣需要访问 claude.ai。请在 {browser} 的扩展设置中允许 AUV 伴侣访问该网站，然后刷新。"),
@@ -338,8 +365,8 @@ public static class ClaudeBrowserPresentation
         };
     }
 
-    public static AgentPresentation Failure(ClaudeSyncOutcome outcome, string? browserProduct) =>
-        ProviderData.Unavailable("claude", Message(outcome, browserProduct), outcome switch
+    public static AgentPresentation Failure(ClaudeSyncOutcome outcome, string? browserProduct, bool movedFolder = false) =>
+        ProviderData.Unavailable("claude", Message(outcome, browserProduct, movedFolder), outcome switch
         {
             ClaudeSyncOutcome.NotConnected or ClaudeSyncOutcome.UpdateRequired or ClaudeSyncOutcome.SignInRequired or ClaudeSyncOutcome.PermissionRequired => ConnectionState.Disconnected,
             ClaudeSyncOutcome.CompanionSilent => ConnectionState.Reconnecting,

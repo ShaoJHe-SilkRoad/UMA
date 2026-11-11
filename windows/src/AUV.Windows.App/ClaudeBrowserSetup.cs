@@ -5,10 +5,11 @@ using Microsoft.Win32;
 
 namespace AUV.Windows.App;
 
-public enum CompanionInstallState { NotPackaged, NotInstalled, Installed, UpdateAvailable, RegistrationMissing }
+public enum CompanionInstallState { NotPackaged, NotInstalled, Installed, RegistrationMissing }
+/// <param name="Installed">The companion set up in this AUV's folder for this preference profile (its host-config.json names this profile's pipe), or null.</param>
 /// <param name="ForeignRegistrations">Browsers whose registration belongs to another program; replaced only after asking.</param>
-/// <param name="AuvRegistrationsElsewhere">0.18.6: browsers whose registration is an AUV companion in another folder (an earlier copy or
-/// another preference profile); Set Up replaces these without asking.</param>
+/// <param name="AuvRegistrationsElsewhere">Browsers whose registration is AUV's own companion in another folder (another AUV install,
+/// or the 0.18.5 copy under %LOCALAPPDATA%); Set Up replaces these without asking.</param>
 public sealed record CompanionStatus(CompanionInstallState State, ClaudeCompanionManifest? Packaged, ClaudeCompanionManifest? Installed,
     IReadOnlyList<string> RegisteredBrowsers, IReadOnlyList<string> ForeignRegistrations, IReadOnlyList<string> AuvRegistrationsElsewhere)
 {
@@ -16,47 +17,67 @@ public sealed record CompanionStatus(CompanionInstallState State, ClaudeCompanio
 }
 
 /// <summary>
-/// Installs, updates and removes the companion's files and its per-user native messaging registration (HKCU only).
-/// Nothing is overwritten that AUV did not create: an older extension folder is kept as a backup, an older host build
-/// keeps its own folder, and a registry value pointing to another program is reported instead of replaced. A value that
-/// points to AUV's own companion in another folder (0.18.6) is replaced, since it is the same companion.
+/// The companion lives inside the AUV install folder (decision 2026-11-11, replacing D6): the browser loads
+/// &lt;AUV folder&gt;\BrowserCompanion\extension and runs &lt;AUV folder&gt;\BrowserCompanion\host\AUV.BrowserHost.exe. Nothing is copied.
+/// Set Up writes only host-config.json and the native-host manifest beside the host, and points the per-user (HKCU)
+/// Chrome and Edge keys at that manifest. A registry value pointing to another program is reported instead of replaced;
+/// one pointing to AUV's own companion in another folder is replaced, since it is the same companion. Other AUV
+/// folders are never modified.
 /// </summary>
-public sealed class ClaudeBrowserSetup(string installRoot, string packageRoot, string pipeName, RegistryKey? hive = null, string registryBase = "Software")
+public sealed class ClaudeBrowserSetup(string packageRoot, string pipeName, RegistryKey? hive = null, string registryBase = "Software")
 {
     public const string HostExecutable = "AUV.BrowserHost.exe";
     private readonly RegistryKey hive = hive ?? Registry.CurrentUser;
-    public string InstallRoot => installRoot;
-    public string ExtensionFolder => Path.Combine(installRoot, "extension");
+    public string PackageRoot => packageRoot;
+    public string ExtensionFolder => Path.Combine(packageRoot, "extension");
+    public string HostFolder => Path.Combine(packageRoot, "host");
+    public string HostManifestPath => Path.Combine(HostFolder, ClaudeBrowserContract.NativeHostName + ".json");
+    private string HostConfigPath => Path.Combine(HostFolder, ClaudeHostConfig.FileName);
     public static readonly (string Browser, string Path)[] Browsers =
         [("chrome", @"Google\Chrome\NativeMessagingHosts\" + ClaudeBrowserContract.NativeHostName), ("edge", @"Microsoft\Edge\NativeMessagingHosts\" + ClaudeBrowserContract.NativeHostName)];
     private string KeyPath(string relative) => registryBase + @"\" + relative;
-    private string HostFolder(ClaudeCompanionManifest manifest) => Path.Combine(installRoot, "host", manifest.CompanionBuild);
-    public string HostManifestPath(ClaudeCompanionManifest manifest) => Path.Combine(HostFolder(manifest), ClaudeBrowserContract.NativeHostName + ".json");
-    private bool Ours(string? value) => value != null && Path.GetFullPath(value).StartsWith(Path.GetFullPath(installRoot) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    private static bool Same(string a, string b) => string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
+    private bool Ours(string? value)
+    {
+        try { return value != null && Path.IsPathFullyQualified(value) && Path.GetFullPath(value).StartsWith(Path.GetFullPath(packageRoot) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase); }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
+    }
     private string? RegisteredValue(string relative) { using var key = hive.OpenSubKey(KeyPath(relative)); return key?.GetValue(null) as string; }
+
+    /// <summary>The host-config.json in this folder, when it is well formed and written for this preference profile.</summary>
+    private ClaudeHostConfig? OwnConfig()
+    {
+        try
+        {
+            var info = new FileInfo(HostConfigPath);
+            if (!info.Exists || info.Length is 0 or > 4096) return null;
+            var config = ClaudeHostConfig.Parse(File.ReadAllBytes(info.FullName));
+            return config.PipeName == pipeName ? config : null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException) { return null; }
+    }
 
     public CompanionStatus Status()
     {
         var packaged = ClaudeBrowserPaths.LoadManifest(packageRoot);
-        var installed = ClaudeBrowserPaths.LoadManifest(installRoot);
+        var installed = packaged != null && OwnConfig() is { } config && config.RuntimeGenerationId == packaged.RuntimeGenerationId && File.Exists(HostManifestPath) ? packaged : null;
         var registered = new List<string>(); var foreign = new List<string>(); var elsewhere = new List<string>();
         foreach (var (browser, path) in Browsers)
         {
             var value = RegisteredValue(path);
             if (value == null) continue;
-            if (Ours(value) && installed != null && Path.GetFullPath(value).Equals(Path.GetFullPath(HostManifestPath(installed)), StringComparison.OrdinalIgnoreCase) && File.Exists(value)) registered.Add(browser);
-            else if (!Ours(value)) (IsAuvCompanion(value) ? elsewhere : foreign).Add(browser);
+            if (Ours(value)) { if (installed != null && Same(value, HostManifestPath)) registered.Add(browser); }
+            else (IsAuvCompanion(value) ? elsewhere : foreign).Add(browser);
         }
-        var state = packaged == null && installed == null ? CompanionInstallState.NotPackaged
+        var state = packaged == null ? CompanionInstallState.NotPackaged
             : installed == null ? CompanionInstallState.NotInstalled
-            : packaged != null && packaged != installed ? CompanionInstallState.UpdateAvailable
             : registered.Count == 0 ? CompanionInstallState.RegistrationMissing : CompanionInstallState.Installed;
         return new(state, packaged, installed, registered, foreign, elsewhere);
     }
 
     /// <summary>
-    /// 0.18.6: a registration is AUV's own companion when its host manifest is named com.silkrd.auv.claude_browser and its
-    /// folder holds AUV.BrowserHost.exe and a well-formed host-config.json. Only small files are read; nothing is run.
+    /// A registration is AUV's own companion when its host manifest is named com.silkrd.auv.claude_browser and its folder holds
+    /// AUV.BrowserHost.exe and a well-formed host-config.json. Only small files are read; nothing is run.
     /// </summary>
     public static bool IsAuvCompanion(string? hostManifestPath)
     {
@@ -77,89 +98,89 @@ public sealed class ClaudeBrowserSetup(string installRoot, string packageRoot, s
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidDataException or ArgumentException or NotSupportedException or System.Security.SecurityException) { return false; }
     }
 
-    /// <summary>True when the packaged companion's build number is higher than the installed one (both are decimal digits).</summary>
-    public static bool IsNewer(ClaudeCompanionManifest packaged, ClaudeCompanionManifest installed)
-    {
-        static string Trim(string digits) => digits.TrimStart('0') is { Length: > 0 } t ? t : "0";
-        var (a, b) = (Trim(packaged.CompanionBuild), Trim(installed.CompanionBuild));
-        return a.Length != b.Length ? a.Length > b.Length : string.CompareOrdinal(a, b) > 0;
-    }
-
     /// <summary>
-    /// 0.18.6 start-up update: when a companion is installed and this AUV carries a newer build, install it (AUV's own files
-    /// and registration only). Returns the new manifest, or null when there was nothing to do. Throws as <see cref="Install"/> does,
-    /// including <see cref="ForeignRegistrationException"/> when another program now holds the registration.
+    /// Start-up after an upgrade: the registration still points to another AUV install (or the 0.18.5 copy). Register this
+    /// folder instead, without asking, since it is AUV's own. Returns true when it re-registered. Throws as <see cref="Install"/> does,
+    /// including <see cref="ForeignRegistrationException"/> when another program holds a key.
     /// </summary>
-    public ClaudeCompanionManifest? UpdateIfNewer()
+    public bool ReRegisterIfMoved()
     {
         var status = Status();
-        if (status.Installed is not { } installed || status.Packaged is not { } packaged || !IsNewer(packaged, installed)) return null;
-        return Install(false);
+        if (status.State == CompanionInstallState.NotPackaged || status.RegisteredBrowsers.Count == Browsers.Length) return false;
+        Install(false);
+        return true;
     }
 
-    /// <summary>Copies the packaged companion and registers the host for Chrome and Edge. Returns the installed manifest.</summary>
+    /// <summary>Fails when this AUV's folder cannot be written (for example under Program Files). Nothing is written elsewhere instead.</summary>
+    public void EnsureWritable()
+    {
+        var probe = Path.Combine(HostFolder, ".auv-write-check-" + Guid.NewGuid().ToString("N"));
+        try { using (File.Create(probe, 1, FileOptions.DeleteOnClose)) { } }
+        catch (Exception e) when (e is UnauthorizedAccessException or IOException or System.Security.SecurityException) { throw new CompanionFolderNotWritableException(packageRoot, e); }
+    }
+
+    /// <summary>Registers this folder's host for Chrome and Edge. Returns the packaged manifest.</summary>
     public ClaudeCompanionManifest Install(bool replaceForeignRegistrations)
     {
         var packaged = ClaudeBrowserPaths.LoadManifest(packageRoot) ?? throw new InvalidOperationException("This copy of AUV has no browser companion package.");
+        if (!File.Exists(Path.Combine(HostFolder, HostExecutable)) || !Directory.Exists(ExtensionFolder)) throw new InvalidOperationException("The browser companion package is incomplete.");
         var status = Status();
         if (status.ForeignRegistrations.Count > 0 && !replaceForeignRegistrations) throw new ForeignRegistrationException(status.ForeignRegistrations);
-        Directory.CreateDirectory(installRoot);
-        // Host: one folder per build. An existing folder for this build is left as it is unless it is incomplete.
-        var hostFolder = HostFolder(packaged);
-        if (!File.Exists(Path.Combine(hostFolder, HostExecutable)))
+        EnsureWritable();
+        try
         {
-            var staging = hostFolder + ".installing-" + Guid.NewGuid().ToString("N")[..8];
-            CopyTree(Path.Combine(packageRoot, "host"), staging);
-            if (Directory.Exists(hostFolder)) Directory.Move(hostFolder, hostFolder + ".incomplete-" + DateTime.Now.ToString("yyyyMMddHHmmss"));
-            Directory.Move(staging, hostFolder);
+            WriteJson(HostConfigPath, w =>
+            {
+                w.WriteNumber("schemaVersion", 1); w.WriteString("pipeName", pipeName); w.WriteString("allowedOrigin", packaged.ExtensionOrigin);
+                w.WriteString("runtimeGenerationID", packaged.RuntimeGenerationId); w.WriteString("hostVersion", packaged.CompanionVersion); w.WriteString("hostBuild", packaged.CompanionBuild);
+            });
+            WriteJson(HostManifestPath, w =>
+            {
+                w.WriteString("name", ClaudeBrowserContract.NativeHostName); w.WriteString("description", "AUV Browser Companion for Claude");
+                w.WriteString("path", HostExecutable); w.WriteString("type", "stdio");
+                w.WriteStartArray("allowed_origins"); w.WriteStringValue(packaged.ExtensionOrigin); w.WriteEndArray();
+            });
         }
-        WriteJson(Path.Combine(hostFolder, ClaudeHostConfig.FileName), w =>
-        {
-            w.WriteNumber("schemaVersion", 1); w.WriteString("pipeName", pipeName); w.WriteString("allowedOrigin", packaged.ExtensionOrigin);
-            w.WriteString("runtimeGenerationID", packaged.RuntimeGenerationId); w.WriteString("hostVersion", packaged.CompanionVersion); w.WriteString("hostBuild", packaged.CompanionBuild);
-        });
-        WriteJson(HostManifestPath(packaged), w =>
-        {
-            w.WriteString("name", ClaudeBrowserContract.NativeHostName); w.WriteString("description", "AUV Browser Companion for Claude");
-            w.WriteString("path", HostExecutable); w.WriteString("type", "stdio");
-            w.WriteStartArray("allowed_origins"); w.WriteStringValue(packaged.ExtensionOrigin); w.WriteEndArray();
-        });
-        // Extension: a fixed folder, because the browser remembers the folder it loaded. The previous copy is kept as a backup.
-        var extension = ExtensionFolder;
-        var stagingExtension = extension + ".installing-" + Guid.NewGuid().ToString("N")[..8];
-        CopyTree(Path.Combine(packageRoot, "extension"), stagingExtension);
-        if (Directory.Exists(extension))
-        {
-            var previous = ClaudeBrowserPaths.LoadManifest(installRoot)?.CompanionBuild ?? "unknown";
-            Directory.Move(extension, extension + ".backup-" + previous + "-" + DateTime.Now.ToString("yyyyMMddHHmmss"));
-        }
-        Directory.Move(stagingExtension, extension);
-        File.WriteAllBytes(Path.Combine(installRoot, "companion.json"), packaged.ToJson());
+        catch (Exception e) when (e is UnauthorizedAccessException) { throw new CompanionFolderNotWritableException(packageRoot, e); }
         foreach (var (_, path) in Browsers)
         {
             using var key = hive.CreateSubKey(KeyPath(path), true);
-            key.SetValue(null, HostManifestPath(packaged), RegistryValueKind.String);
+            key.SetValue(null, HostManifestPath, RegistryValueKind.String);
         }
         return packaged;
     }
 
-    /// <summary>Removes AUV's registry values (only those pointing into its own folder) and, if asked, the folder AUV created.</summary>
-    public void Remove(bool deleteFiles)
+    /// <summary>Removes AUV's registry values that point into this folder, and the two files Set Up wrote here. The package itself stays.</summary>
+    public void Remove()
     {
         foreach (var (_, path) in Browsers)
             if (Ours(RegisteredValue(path))) hive.DeleteSubKey(KeyPath(path), false);
-        if (deleteFiles && Directory.Exists(installRoot)) Directory.Delete(installRoot, true);
+        foreach (var file in new[] { HostConfigPath, HostManifestPath })
+            try { if (File.Exists(file)) File.Delete(file); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 
-    private static void CopyTree(string source, string destination)
+    // ---- The 0.18.5 copy under %LOCALAPPDATA%\AUV.Windows.UI.Preview\browser-companion ----
+
+    /// <summary>True when the folder exists and is the companion copy AUV 0.18.5 created (its companion.json, or a host build folder with AUV.BrowserHost.exe).</summary>
+    public static bool IsLegacyCopy(string legacyRoot)
     {
-        if (!Directory.Exists(source)) throw new DirectoryNotFoundException("The browser companion package is incomplete.");
-        Directory.CreateDirectory(destination);
-        foreach (var directory in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
-            Directory.CreateDirectory(Path.Combine(destination, Path.GetRelativePath(source, directory)));
-        foreach (var file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
-            File.Copy(file, Path.Combine(destination, Path.GetRelativePath(source, file)), false);
+        try
+        {
+            if (!Directory.Exists(legacyRoot)) return false;
+            if (ClaudeBrowserPaths.LoadManifest(legacyRoot) != null) return true;
+            var host = Path.Combine(legacyRoot, "host");
+            return Directory.Exists(host) && Directory.EnumerateDirectories(host).Any(d => File.Exists(Path.Combine(d, HostExecutable)));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException) { return false; }
     }
+    /// <summary>Deletes the 0.18.5 copy, only when it is one (see <see cref="IsLegacyCopy"/>). Called only after the person says yes.</summary>
+    public static bool DeleteLegacyCopy(string legacyRoot)
+    {
+        if (!IsLegacyCopy(legacyRoot)) return false;
+        Directory.Delete(legacyRoot, true);
+        return true;
+    }
+
     private static void WriteJson(string path, Action<Utf8JsonWriter> body)
     {
         var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -172,4 +193,31 @@ public sealed class ClaudeBrowserSetup(string installRoot, string packageRoot, s
 public sealed class ForeignRegistrationException(IReadOnlyList<string> browsers) : Exception("Another program registered the same native messaging host name.")
 {
     public IReadOnlyList<string> Browsers { get; } = browsers;
+}
+
+/// <summary>Set Up writes into the AUV folder; when it cannot (Program Files, a read-only share), it stops and says so.</summary>
+public sealed class CompanionFolderNotWritableException(string folder, Exception inner)
+    : IOException(UiText.T($"AUV cannot write to its own folder ({folder}), so the browser companion cannot be set up there. Move the AUV folder to a place you can write to, such as Documents or another drive, start AUV from there and choose Connect again.",
+        $"AUV 无法写入自己的文件夹（{folder}），因此无法在那里设置浏览器伴侣。请把 AUV 文件夹移到你有写入权限的位置（例如“文档”或其他磁盘），从那里启动 AUV 后再选择“连接”。"), inner)
+{
+    public string Folder { get; } = folder;
+}
+
+public enum LegacyCleanupResult { NotNeeded, AlreadyAsked, Declined, Deleted, Failed }
+
+/// <summary>
+/// The one-time offer to delete the copy AUV 0.18.5 made under %LOCALAPPDATA%. It is asked at most once per preference
+/// profile (whatever the answer), only when that folder exists and is AUV's copy, and nothing is deleted without a yes.
+/// </summary>
+public static class LegacyCleanup
+{
+    public static LegacyCleanupResult Offer(ClaudeBrowserPreferences preferences, string legacyRoot, Func<bool> askDelete, Action persist)
+    {
+        if (preferences.LegacyCleanupAsked) return LegacyCleanupResult.AlreadyAsked;
+        if (!ClaudeBrowserSetup.IsLegacyCopy(legacyRoot)) return LegacyCleanupResult.NotNeeded;
+        preferences.LegacyCleanupAsked = true; persist();
+        if (!askDelete()) return LegacyCleanupResult.Declined;
+        try { return ClaudeBrowserSetup.DeleteLegacyCopy(legacyRoot) ? LegacyCleanupResult.Deleted : LegacyCleanupResult.NotNeeded; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return LegacyCleanupResult.Failed; }
+    }
 }

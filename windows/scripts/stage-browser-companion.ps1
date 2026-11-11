@@ -43,11 +43,12 @@ $companion = [ordered]@{ schemaVersion = 1; extensionId = $extensionId; runtimeG
 $readme = @"
 AUV Browser Companion for Claude $version (build $Build) - Chrome / Edge
 
-Do not load this folder directly. In AUV, select Claude and choose Connect: AUV copies the companion to
-%LOCALAPPDATA%\AUV.Windows.UI.Preview\browser-companion\ and registers its helper for Chrome and Edge
-under your Windows account. Then choose "Load in Chrome" (or Edge) in AUV's checklist: it copies the
-folder path and opens the extensions page (Developer mode -> Load unpacked -> Ctrl+V). Later AUV
-versions update the companion by themselves. Extension ID: $extensionId
+This folder is used where it is: keep it inside the AUV folder. In AUV, select Claude and choose Connect:
+AUV registers BrowserCompanion\host\AUV.BrowserHost.exe for Chrome and Edge under your Windows account
+(nothing is copied; the AUV folder must be writable). Then choose "Load in Chrome" (or Edge) in AUV's
+checklist: it copies the path of BrowserCompanion\extension and opens the extensions page
+(Developer mode -> Load unpacked -> Ctrl+V). A new AUV version is a new folder: load the extension
+from it once (the checklist shows that step again). Extension ID: $extensionId
 
 It reads only Claude's 5-hour and weekly used percentages, their reset times and when they were read,
 from https://claude.ai/new#settings/usage (English or Chinese interface). Passwords, cookies, tokens,
@@ -56,8 +57,9 @@ then remove the extension on the browser's extensions page. To remove the regist
   reg delete "HKCU\Software\Google\Chrome\NativeMessagingHosts\com.silkrd.auv.claude_browser" /f
   reg delete "HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.silkrd.auv.claude_browser" /f
 
-AUV 浏览器伴侣（Claude）：请勿直接加载本文件夹。在 AUV 的 Claude 设置中勾选“通过浏览器伴侣同步 Claude”并选择“设置”，
-再在浏览器扩展页（开发者模式 -> 加载已解压的扩展程序）加载 ...\browser-companion\extension。
+AUV 浏览器伴侣（Claude）：本文件夹就地使用，请保留在 AUV 文件夹内。在 AUV 中选择 Claude 并选择“连接”，AUV 会为 Chrome 和 Edge
+注册 BrowserCompanion\host\AUV.BrowserHost.exe（不复制文件；AUV 文件夹需可写）。然后在清单中选择“在 Chrome 中加载”（或 Edge），
+它会复制 BrowserCompanion\extension 的路径并打开扩展页（开发者模式 -> 加载已解压的扩展程序 -> Ctrl+V）。新版本的 AUV 是新文件夹，需要从中加载一次扩展。
 它只读取 claude.ai 用量页上的 5 小时与每周已用百分比、重置时间和读取时间（支持英文或中文界面），
 从不读取或发送密码、Cookie、令牌、对话或页面文字。在 Claude 设置中选择“移除伴侣”，再在浏览器扩展页移除扩展即可卸载。
 "@

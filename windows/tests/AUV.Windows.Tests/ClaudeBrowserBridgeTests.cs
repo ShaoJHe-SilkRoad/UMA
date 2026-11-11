@@ -19,9 +19,10 @@ public class ClaudeBrowserBridgeTests : IDisposable
         try { Directory.Delete(temp, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
-    private string Package(string build, string generation = ClaudeBrowserTests.Generation)
+    /// <summary>A stand-in AUV install: &lt;temp&gt;\&lt;name&gt;\BrowserCompanion with companion.json, host\AUV.BrowserHost.exe and extension\.</summary>
+    private string Package(string build, string generation = ClaudeBrowserTests.Generation, string? name = null)
     {
-        var root = Path.Combine(temp, "package-" + build);
+        var root = Path.Combine(temp, name ?? "AUV_Win_" + build, "BrowserCompanion");
         Directory.CreateDirectory(Path.Combine(root, "host")); Directory.CreateDirectory(Path.Combine(root, "extension", "Shared"));
         File.WriteAllBytes(Path.Combine(root, "companion.json"), (ClaudeBrowserTests.Manifest with { CompanionBuild = build, RuntimeGenerationId = generation }).ToJson());
         File.WriteAllText(Path.Combine(root, "host", ClaudeBrowserSetup.HostExecutable), "stand-in " + build);
@@ -29,83 +30,117 @@ public class ClaudeBrowserBridgeTests : IDisposable
         File.WriteAllText(Path.Combine(root, "extension", "Shared", "x.js"), "//");
         return root;
     }
+    private static string[] Tree(string root) => Directory.GetFiles(root, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(root, f)).Order(StringComparer.Ordinal).ToArray();
     private string? Value(string browserPath) { using var key = Registry.CurrentUser.OpenSubKey(registryBase + @"\" + browserPath); return key?.GetValue(null) as string; }
     private const string PipeName = "AUV.Windows.Preview.0123456789ABCDEF01234567.ClaudeBrowser";
+    private ClaudeBrowserSetup Setup(string package) => new(package, PipeName, Registry.CurrentUser, registryBase);
+    private string[] TopFolders() => Directory.GetDirectories(temp).Select(d => Path.GetFileName(d)!).Order(StringComparer.Ordinal).ToArray();
 
-    [Fact] public void InstallRegistersBothBrowsersAndWritesAStrictHostManifest()
+    // ---- 2026-11-11: the companion is used where it is, inside the AUV install folder ----
+
+    [Fact] public void SetUpRegistersTheFolderInsideAuvAndCopiesNothing()
     {
-        var install = Path.Combine(temp, "browser-companion");
-        var setup = new ClaudeBrowserSetup(install, Package("2026110801"), PipeName, Registry.CurrentUser, registryBase);
+        var package = Package("2026110801"); var before = Tree(package);
+        var setup = Setup(package);
         Assert.Equal(CompanionInstallState.NotInstalled, setup.Status().State);
         var manifest = setup.Install(false);
         var status = setup.Status();
-        Assert.Equal(CompanionInstallState.Installed, status.State); Assert.Equal(["chrome", "edge"], status.RegisteredBrowsers);
-        foreach (var (_, path) in ClaudeBrowserSetup.Browsers) Assert.Equal(setup.HostManifestPath(manifest), Value(path));
-        using var host = JsonDocument.Parse(File.ReadAllText(setup.HostManifestPath(manifest)));
+        Assert.Equal(CompanionInstallState.Installed, status.State); Assert.Equal(["chrome", "edge"], status.RegisteredBrowsers); Assert.Equal(manifest, status.Installed);
+        Assert.Equal(Path.Combine(package, "extension"), setup.ExtensionFolder);
+        Assert.Equal(Path.Combine(package, "host", ClaudeBrowserContract.NativeHostName + ".json"), setup.HostManifestPath);
+        foreach (var (_, path) in ClaudeBrowserSetup.Browsers) Assert.Equal(setup.HostManifestPath, Value(path));
+        // Only the two setup files were added, beside the host; nothing else changed and nothing went anywhere else.
+        Assert.Equal(before.Concat([Path.Combine("host", "com.silkrd.auv.claude_browser.json"), Path.Combine("host", "host-config.json")]).Order(StringComparer.Ordinal), Tree(package));
+        Assert.Equal(["AUV_Win_2026110801"], TopFolders());
+        using var host = JsonDocument.Parse(File.ReadAllText(setup.HostManifestPath));
         Assert.Equal(["name", "description", "path", "type", "allowed_origins"], host.RootElement.EnumerateObject().Select(p => p.Name));
-        Assert.Equal(ClaudeBrowserContract.NativeHostName, host.RootElement.GetProperty("name").GetString());
         Assert.Equal("AUV.BrowserHost.exe", host.RootElement.GetProperty("path").GetString());
         Assert.Equal([ClaudeBrowserTests.Manifest.ExtensionOrigin], host.RootElement.GetProperty("allowed_origins").EnumerateArray().Select(e => e.GetString()));
-        using var config = JsonDocument.Parse(File.ReadAllText(Path.Combine(Path.GetDirectoryName(setup.HostManifestPath(manifest))!, "host-config.json")));
-        Assert.Equal(PipeName, config.RootElement.GetProperty("pipeName").GetString());
-        // Nothing secret is written: the files hold names, paths, the extension origin and the build identity only.
-        var written = string.Join("\n", Directory.GetFiles(install, "*.json", SearchOption.AllDirectories).Select(File.ReadAllText));
+        var config = ClaudeHostConfig.Parse(File.ReadAllBytes(Path.Combine(package, "host", "host-config.json")));
+        Assert.Equal(PipeName, config.PipeName); Assert.Equal(ClaudeBrowserTests.Generation, config.RuntimeGenerationId);
+        var written = string.Join("\n", Directory.GetFiles(package, "*.json", SearchOption.AllDirectories).Select(File.ReadAllText));
         Assert.DoesNotContain("token", written, StringComparison.OrdinalIgnoreCase); Assert.DoesNotContain("cookie", written, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact] public void ForeignRegistrationIsReportedNotReplacedOrRemoved()
     {
-        var install = Path.Combine(temp, "browser-companion");
         using (var key = Registry.CurrentUser.CreateSubKey(registryBase + @"\" + ClaudeBrowserSetup.Browsers[0].Path)) key.SetValue(null, @"C:\Other\host.json");
-        var setup = new ClaudeBrowserSetup(install, Package("2026110801"), PipeName, Registry.CurrentUser, registryBase);
+        var package = Package("2026110801"); var before = Tree(package);
+        var setup = Setup(package);
         Assert.Equal(["chrome"], setup.Status().ForeignRegistrations);
         Assert.Equal(["chrome"], Assert.Throws<ForeignRegistrationException>(() => setup.Install(false)).Browsers);
-        Assert.False(Directory.Exists(install));
-        setup.Remove(false);
+        Assert.Equal(before, Tree(package));
+        setup.Remove();
         Assert.Equal(@"C:\Other\host.json", Value(ClaudeBrowserSetup.Browsers[0].Path));
     }
 
-    [Fact] public void UpdateKeepsTheOldHostFolderAndBacksUpTheExtension()
+    [Fact] public void RemoveDeletesOnlyAuvsKeysAndItsTwoSetupFiles()
     {
-        var install = Path.Combine(temp, "browser-companion");
-        new ClaudeBrowserSetup(install, Package("2026110801"), PipeName, Registry.CurrentUser, registryBase).Install(false);
-        var newer = new ClaudeBrowserSetup(install, Package("2026110902", "7a0c2d3e-8a41-4b7c-9d2e-1f3a4b5c6d7e"), PipeName, Registry.CurrentUser, registryBase);
-        Assert.Equal(CompanionInstallState.UpdateAvailable, newer.Status().State);
-        newer.Install(false);
-        Assert.Equal(CompanionInstallState.Installed, newer.Status().State);
-        Assert.True(File.Exists(Path.Combine(install, "host", "2026110801", ClaudeBrowserSetup.HostExecutable)));
-        Assert.True(File.Exists(Path.Combine(install, "host", "2026110902", ClaudeBrowserSetup.HostExecutable)));
-        var backup = Assert.Single(Directory.GetDirectories(install, "extension.backup-2026110801-*"));
-        Assert.Contains("2026110801", File.ReadAllText(Path.Combine(backup, "manifest.json")));
-        Assert.Contains("2026110902", File.ReadAllText(Path.Combine(install, "extension", "manifest.json")));
-    }
-
-    [Fact] public void RemoveDeletesOnlyAuvsKeysAndOnlyDeletesFilesWhenAsked()
-    {
-        var install = Path.Combine(temp, "browser-companion");
-        var setup = new ClaudeBrowserSetup(install, Package("2026110801"), PipeName, Registry.CurrentUser, registryBase);
-        setup.Install(false); setup.Remove(false);
+        var package = Package("2026110801"); var before = Tree(package);
+        var setup = Setup(package);
+        setup.Install(false); setup.Remove();
         foreach (var (_, path) in ClaudeBrowserSetup.Browsers) Assert.Null(Value(path));
-        Assert.True(Directory.Exists(install));
-        setup.Remove(true); Assert.False(Directory.Exists(install));
+        Assert.Equal(before, Tree(package)); // the package itself stays
     }
 
-    // ---- 0.18.6: AUV's own companion elsewhere, and the start-up update ----
-
-    [Fact] public void AuvsOwnCompanionFromAnotherFolderIsReplacedWithoutAsking()
+    [Fact] public void ANonWritableAuvFolderFailsWithAClearMessageAndNoFallback()
     {
-        // An earlier copy or another preference profile registered AUV's companion from its own folder.
-        var earlier = Path.Combine(temp, "earlier", "browser-companion");
-        new ClaudeBrowserSetup(earlier, Package("2026110801"), PipeName, Registry.CurrentUser, registryBase).Install(false);
-        var install = Path.Combine(temp, "browser-companion");
-        var setup = new ClaudeBrowserSetup(install, Package("2026110902", "7a0c2d3e-8a41-4b7c-9d2e-1f3a4b5c6d7e"), PipeName, Registry.CurrentUser, registryBase);
+        var package = Package("2026110801"); var hostFolder = Path.Combine(package, "host");
+        var info = new DirectoryInfo(hostFolder);
+        var security = info.GetAccessControl();
+        var me = System.Security.Principal.WindowsIdentity.GetCurrent().User!;
+        var deny = new System.Security.AccessControl.FileSystemAccessRule(me, System.Security.AccessControl.FileSystemRights.CreateFiles | System.Security.AccessControl.FileSystemRights.WriteData,
+            System.Security.AccessControl.AccessControlType.Deny);
+        security.AddAccessRule(deny); info.SetAccessControl(security);
+        try
+        {
+            var setup = Setup(package);
+            var error = Assert.Throws<CompanionFolderNotWritableException>(() => setup.Install(false));
+            Assert.Equal(package, error.Folder);
+            using (UiText.Override(UiLanguage.English)) Assert.Contains("Move the AUV folder", new CompanionFolderNotWritableException(package, error).Message);
+            using (UiText.Override(UiLanguage.Chinese)) Assert.Contains("移到你有写入权限的位置", new CompanionFolderNotWritableException(package, error).Message);
+            // Nothing was registered and nothing was written anywhere else.
+            foreach (var (_, path) in ClaudeBrowserSetup.Browsers) Assert.Null(Value(path));
+            Assert.Equal(["AUV_Win_2026110801"], TopFolders());
+        }
+        finally { security.RemoveAccessRule(deny); info.SetAccessControl(security); }
+    }
+
+    // ---- Upgrades: each AUV version has its own folder ----
+
+    [Fact] public void StartupMovesTheRegistrationFromAnotherAuvInstallWithoutTouchingIt()
+    {
+        var previous = Package("2026110801", name: "AUV_Win_0.18.6");
+        Setup(previous).Install(false);
+        var previousTree = Tree(previous);
+        var current = Package("2026112001", "7a0c2d3e-8a41-4b7c-9d2e-1f3a4b5c6d7e", name: "AUV_Win_0.18.7");
+        var setup = Setup(current);
         var status = setup.Status();
-        Assert.Empty(status.ForeignRegistrations); Assert.Equal(["chrome", "edge"], status.AuvRegistrationsElsewhere);
-        var manifest = setup.Install(false); // no ForeignRegistrationException: nothing to ask
-        foreach (var (_, path) in ClaudeBrowserSetup.Browsers) Assert.Equal(setup.HostManifestPath(manifest), Value(path));
-        Assert.Equal(["chrome", "edge"], setup.Status().RegisteredBrowsers);
-        // The earlier copy's files are left as they were.
-        Assert.True(File.Exists(Path.Combine(earlier, "host", "2026110801", ClaudeBrowserSetup.HostExecutable)));
+        Assert.Equal(CompanionInstallState.NotInstalled, status.State); Assert.Empty(status.ForeignRegistrations); Assert.Equal(["chrome", "edge"], status.AuvRegistrationsElsewhere);
+        Assert.True(setup.ReRegisterIfMoved());
+        foreach (var (_, path) in ClaudeBrowserSetup.Browsers) Assert.Equal(setup.HostManifestPath, Value(path));
+        Assert.Equal(CompanionInstallState.Installed, setup.Status().State);
+        Assert.False(setup.ReRegisterIfMoved()); // nothing more to do
+        Assert.Equal(previousTree, Tree(previous)); // the previous install folder is never touched
+        Assert.Equal(["chrome", "edge"], Setup(previous).Status().AuvRegistrationsElsewhere);
+    }
+
+    [Fact] public void StartupMovesTheRegistrationFromThe0185Copy()
+    {
+        // AUV 0.18.5 copied the companion to %LOCALAPPDATA%\…\browser-companion\host\<build>.
+        var legacy = Path.Combine(temp, "AUV.Windows.UI.Preview", "browser-companion");
+        var legacyHost = Path.Combine(legacy, "host", "2026111101"); Directory.CreateDirectory(legacyHost);
+        File.WriteAllText(Path.Combine(legacyHost, ClaudeBrowserSetup.HostExecutable), "0.18.5 host");
+        File.WriteAllText(Path.Combine(legacyHost, "host-config.json"), $$"""{"schemaVersion":1,"pipeName":"{{PipeName}}","allowedOrigin":"{{ClaudeBrowserTests.Manifest.ExtensionOrigin}}","runtimeGenerationID":"{{ClaudeBrowserTests.Generation}}","hostVersion":"1.0.0","hostBuild":"2026111101"}""");
+        var legacyManifest = Path.Combine(legacyHost, ClaudeBrowserContract.NativeHostName + ".json");
+        File.WriteAllText(legacyManifest, $$"""{"name":"{{ClaudeBrowserContract.NativeHostName}}","description":"AUV","path":"AUV.BrowserHost.exe","type":"stdio","allowed_origins":[]}""");
+        foreach (var (_, path) in ClaudeBrowserSetup.Browsers) using (var key = Registry.CurrentUser.CreateSubKey(registryBase + @"\" + path)) key.SetValue(null, legacyManifest);
+        var setup = Setup(Package("2026112001"));
+        Assert.Equal(["chrome", "edge"], setup.Status().AuvRegistrationsElsewhere);
+        Assert.True(setup.ReRegisterIfMoved());
+        foreach (var (_, path) in ClaudeBrowserSetup.Browsers) Assert.Equal(setup.HostManifestPath, Value(path));
+        Assert.True(File.Exists(Path.Combine(legacyHost, ClaudeBrowserSetup.HostExecutable))); // not deleted without a yes
+        Assert.True(ClaudeBrowserSetup.IsLegacyCopy(legacy));
     }
 
     [Fact] public void OnlyAWellFormedAuvHostCountsAsAuvsOwn()
@@ -123,42 +158,76 @@ public class ClaudeBrowserBridgeTests : IDisposable
         File.WriteAllText(manifestPath, """{"name":"com.example.other","path":"AUV.BrowserHost.exe","type":"stdio","allowed_origins":[]}""");
         Assert.False(ClaudeBrowserSetup.IsAuvCompanion(manifestPath)); // another host name
         Assert.False(ClaudeBrowserSetup.IsAuvCompanion(@"relative\host.json")); Assert.False(ClaudeBrowserSetup.IsAuvCompanion(null));
-        // A real third-party registration is still reported, and Install still asks.
+        // A real third-party registration is still reported, and Install and the start-up move still stop.
         using (var key = Registry.CurrentUser.CreateSubKey(registryBase + @"\" + ClaudeBrowserSetup.Browsers[1].Path)) key.SetValue(null, manifestPath);
-        var setup = new ClaudeBrowserSetup(Path.Combine(temp, "browser-companion"), Package("2026110801"), PipeName, Registry.CurrentUser, registryBase);
+        var setup = Setup(Package("2026110801"));
         Assert.Equal(["edge"], setup.Status().ForeignRegistrations); Assert.Empty(setup.Status().AuvRegistrationsElsewhere);
         Assert.Throws<ForeignRegistrationException>(() => setup.Install(false));
+        Assert.Throws<ForeignRegistrationException>(() => setup.ReRegisterIfMoved());
     }
 
-    [Fact] public void StartupUpdateInstallsOnlyANewerPackagedBuild()
+    [Fact] public void TwoProfilesInOneFolderEachSeeOnlyTheirOwnSetUp()
     {
-        var install = Path.Combine(temp, "browser-companion");
-        // Nothing set up yet: nothing is installed at start-up.
-        Assert.Null(new ClaudeBrowserSetup(install, Package("2026110902"), PipeName, Registry.CurrentUser, registryBase).UpdateIfNewer());
-        Assert.False(Directory.Exists(install));
-        new ClaudeBrowserSetup(install, Package("2026110801"), PipeName, Registry.CurrentUser, registryBase).Install(false);
-        // The same build: nothing to do.
-        Assert.Null(new ClaudeBrowserSetup(install, Package("2026110801"), PipeName, Registry.CurrentUser, registryBase).UpdateIfNewer());
-        // An older AUV never downgrades the companion.
-        Assert.Null(new ClaudeBrowserSetup(install, Package("2026010101", "8a0c2d3e-8a41-4b7c-9d2e-1f3a4b5c6d7e"), PipeName, Registry.CurrentUser, registryBase).UpdateIfNewer());
-        Assert.Equal("2026110801", ClaudeBrowserPaths.LoadManifest(install)!.CompanionBuild);
-        // A newer build is installed and registered without asking.
-        var newer = new ClaudeBrowserSetup(install, Package("2026110902", "7a0c2d3e-8a41-4b7c-9d2e-1f3a4b5c6d7e"), PipeName, Registry.CurrentUser, registryBase);
-        Assert.Equal("2026110902", newer.UpdateIfNewer()!.CompanionBuild);
-        Assert.Equal(CompanionInstallState.Installed, newer.Status().State);
-        foreach (var (_, path) in ClaudeBrowserSetup.Browsers) Assert.Equal(newer.HostManifestPath(ClaudeBrowserPaths.LoadManifest(install)!), Value(path));
-        // A third-party registration that appeared meanwhile stops the update; the person decides with Retry.
-        var newest = new ClaudeBrowserSetup(install, Package("2026120101", "9a0c2d3e-8a41-4b7c-9d2e-1f3a4b5c6d7e"), PipeName, Registry.CurrentUser, registryBase);
-        using (var key = Registry.CurrentUser.CreateSubKey(registryBase + @"\" + ClaudeBrowserSetup.Browsers[0].Path)) key.SetValue(null, @"C:\Other\host.json");
-        Assert.Throws<ForeignRegistrationException>(() => newest.UpdateIfNewer());
-        Assert.Equal("2026110902", ClaudeBrowserPaths.LoadManifest(install)!.CompanionBuild);
+        var package = Package("2026110801");
+        Setup(package).Install(false);
+        var other = new ClaudeBrowserSetup(package, "AUV.Windows.Preview.FEDCBA9876543210FEDCBA98.ClaudeBrowser", Registry.CurrentUser, registryBase);
+        Assert.Equal(CompanionInstallState.NotInstalled, other.Status().State); // host-config names the first profile's pipe
     }
 
-    [Theory]
-    [InlineData("2026110902", "2026110801", true)] [InlineData("2026110801", "2026110801", false)] [InlineData("2026010101", "2026110801", false)]
-    [InlineData("10", "9", true)] [InlineData("009", "10", false)] [InlineData("20261109021", "2026110902", true)]
-    public void BuildNumbersCompareAsNumbers(string packaged, string installed, bool newer) =>
-        Assert.Equal(newer, ClaudeBrowserSetup.IsNewer(ClaudeBrowserTests.Manifest with { CompanionBuild = packaged }, ClaudeBrowserTests.Manifest with { CompanionBuild = installed }));
+    // ---- The 0.18.5 copy under %LOCALAPPDATA%: asked once, deleted only on yes ----
+
+    private string LegacyCopy()
+    {
+        var legacy = Path.Combine(temp, "AUV.Windows.UI.Preview", "browser-companion");
+        Directory.CreateDirectory(Path.Combine(legacy, "extension"));
+        File.WriteAllBytes(Path.Combine(legacy, "companion.json"), ClaudeBrowserTests.Manifest.ToJson());
+        return legacy;
+    }
+
+    [Fact] public void LegacyCopyIsOfferedOnceAndKeptOnNo()
+    {
+        var legacy = LegacyCopy(); var prefs = new ClaudeBrowserPreferences(); var asked = 0; var saved = 0;
+        Assert.Equal(LegacyCleanupResult.Declined, LegacyCleanup.Offer(prefs, legacy, () => { asked++; return false; }, () => saved++));
+        Assert.True(Directory.Exists(legacy)); Assert.True(prefs.LegacyCleanupAsked); Assert.Equal(1, saved);
+        // Never asked again, whatever happens later.
+        Assert.Equal(LegacyCleanupResult.AlreadyAsked, LegacyCleanup.Offer(prefs, legacy, () => { asked++; return true; }, () => saved++));
+        Assert.Equal(1, asked); Assert.True(Directory.Exists(legacy));
+    }
+
+    [Fact] public void LegacyCopyIsDeletedOnlyOnYes()
+    {
+        var legacy = LegacyCopy(); var prefs = new ClaudeBrowserPreferences();
+        Assert.Equal(LegacyCleanupResult.Deleted, LegacyCleanup.Offer(prefs, legacy, () => true, () => { }));
+        Assert.False(Directory.Exists(legacy));
+        Assert.True(Directory.Exists(Path.GetDirectoryName(legacy))); // the preferences folder itself stays
+    }
+
+    [Fact] public void NoQuestionWithoutAnAuvLegacyCopy()
+    {
+        var prefs = new ClaudeBrowserPreferences();
+        var missing = Path.Combine(temp, "nothing-here");
+        Assert.Equal(LegacyCleanupResult.NotNeeded, LegacyCleanup.Offer(prefs, missing, () => throw new InvalidOperationException("asked"), () => { }));
+        // A folder of that name that AUV did not make is neither offered nor deleted.
+        var strange = Path.Combine(temp, "x", "browser-companion"); Directory.CreateDirectory(strange); File.WriteAllText(Path.Combine(strange, "notes.txt"), "mine");
+        Assert.Equal(LegacyCleanupResult.NotNeeded, LegacyCleanup.Offer(prefs, strange, () => throw new InvalidOperationException("asked"), () => { }));
+        Assert.False(ClaudeBrowserSetup.DeleteLegacyCopy(strange)); Assert.True(File.Exists(Path.Combine(strange, "notes.txt")));
+        Assert.False(prefs.LegacyCleanupAsked);
+    }
+
+    // ---- Trust: only the host inside the running AUV's own BrowserCompanion\host ----
+
+    [Fact] public void PipeTrustsOnlyThisAuvsOwnHost()
+    {
+        var package = Path.Combine(temp, "AUV_Win_0.18.6", "BrowserCompanion");
+        Assert.True(ClaudeBrowserPipeServer.IsOwnHost(Path.Combine(package, "host", "AUV.BrowserHost.exe"), package));
+        Assert.True(ClaudeBrowserPipeServer.IsOwnHost(Path.Combine(package, "host", "auv.browserhost.EXE"), package));
+        Assert.False(ClaudeBrowserPipeServer.IsOwnHost(Path.Combine(temp, "AUV_Win_0.18.5", "BrowserCompanion", "host", "AUV.BrowserHost.exe"), package)); // another install
+        Assert.False(ClaudeBrowserPipeServer.IsOwnHost(Path.Combine(temp, "AUV.Windows.UI.Preview", "browser-companion", "host", "2026111101", "AUV.BrowserHost.exe"), package)); // the 0.18.5 copy
+        Assert.False(ClaudeBrowserPipeServer.IsOwnHost(Path.Combine(package, "host", "sub", "AUV.BrowserHost.exe"), package));
+        Assert.False(ClaudeBrowserPipeServer.IsOwnHost(Path.Combine(package, "host", "Other.exe"), package));
+        Assert.False(ClaudeBrowserPipeServer.IsOwnHost(Path.Combine(package, "host", "..", "..", "evil", "AUV.BrowserHost.exe"), package));
+        Assert.False(ClaudeBrowserPipeServer.IsOwnHost(null, package));
+    }
 
     [Fact] public async Task RefusedHostFromAnotherBuildCarriesOneReloadRequestPerTenMinutes()
     {
@@ -195,7 +264,7 @@ public class ClaudeBrowserBridgeTests : IDisposable
 
     private (Process Host, Stream Input, Stream Output) StartHost(string install, string pipeName, string origin)
     {
-        var folder = Path.Combine(install, "host", "2026110801");
+        var folder = Path.Combine(install, "host");
         Directory.CreateDirectory(folder);
         foreach (var file in Directory.GetFiles(HostBuildOutput())) File.Copy(file, Path.Combine(folder, Path.GetFileName(file)), true);
         File.WriteAllText(Path.Combine(folder, "host-config.json"), $$"""{"schemaVersion":1,"pipeName":"{{pipeName}}","allowedOrigin":"{{ClaudeBrowserTests.Manifest.ExtensionOrigin}}","runtimeGenerationID":"{{ClaudeBrowserTests.Generation}}","hostVersion":"1.0.0","hostBuild":"2026110801"}""");
@@ -377,6 +446,6 @@ public class ClaudeBrowserBridgeTests : IDisposable
         var name = ClaudeBrowserPaths.PipeName(@"C:\Users\x\AppData\Local\AUV.Windows.UI.Preview\settings.v1.json");
         Assert.Matches("^AUV\\.Windows\\.Preview\\.[0-9A-F]{24}\\.ClaudeBrowser$", name);
         Assert.Equal(name, ClaudeBrowserPaths.PipeName(@"c:\users\x\appdata\local\AUV.Windows.UI.Preview\settings.v1.json"));
-        Assert.Equal(@"C:\Users\x\AppData\Local\AUV.Windows.UI.Preview\browser-companion", ClaudeBrowserPaths.InstallRoot(@"C:\Users\x\AppData\Local\AUV.Windows.UI.Preview\settings.v1.json"));
+        Assert.Equal(@"C:\Users\x\AppData\Local\AUV.Windows.UI.Preview\browser-companion", ClaudeBrowserPaths.LegacyInstallRoot(@"C:\Users\x\AppData\Local\AUV.Windows.UI.Preview\settings.v1.json"));
     }
 }

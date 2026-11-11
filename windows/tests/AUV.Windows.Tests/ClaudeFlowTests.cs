@@ -153,6 +153,7 @@ public class ClaudeFlowTests
             Assert.Null(store.LastError);
             Assert.True(settings.ClaudeBrowser.Enabled); Assert.Equal("edge", settings.ClaudeBrowser.Browser); Assert.Equal("2026111101", settings.ClaudeBrowser.InstalledBuild);
             Assert.Empty(settings.ClaudeBrowser.LoadedBrowsers); Assert.False(settings.ClaudeBrowser.ExactReadingSeen);
+            Assert.Null(settings.ClaudeBrowser.LoadedFolder); Assert.False(settings.ClaudeBrowser.LegacyCleanupAsked);
             settings.ClaudeBrowser.LoadedBrowsers = ["edge", "firefox", "chrome", "edge"]; settings.ClaudeBrowser.ExactReadingSeen = true;
             Assert.True(store.Save(settings));
             var again = store.Load(new ModelCatalog());
@@ -160,6 +161,38 @@ public class ClaudeFlowTests
             Assert.False(again.ClaudeBrowser.AskToOpenBrowser);
         }
         finally { Directory.Delete(directory, true); }
+    }
+
+    // ---- 2026-11-11: each AUV install has its own extension folder ----
+
+    [Fact] public void Step2StartsAgainForANewAuvFolder()
+    {
+        const string first = @"D:\Apps\AUV_Win_0.18.6\BrowserCompanion\extension", next = @"D:\Apps\AUV_Win_0.18.7\BrowserCompanion\extension";
+        var prefs = new ClaudeBrowserPreferences();
+        Assert.False(prefs.LoadedElsewhere(first)); Assert.Empty(prefs.LoadedIn(first));
+        Assert.True(prefs.MarkLoaded("chrome", first)); Assert.False(prefs.MarkLoaded("chrome", first));
+        Assert.Equal(["chrome"], prefs.LoadedIn(first)); Assert.Equal(first, prefs.LoadedFolder);
+        Assert.Equal(["chrome"], prefs.LoadedIn(first.ToLowerInvariant())); // the same folder, whatever the case
+        // The next AUV is a new folder: step 2 is not ticked there until its own build answers.
+        Assert.True(prefs.LoadedElsewhere(next)); Assert.Empty(prefs.LoadedIn(next));
+        Assert.False(prefs.MarkLoaded("firefox", next));
+        Assert.True(prefs.MarkLoaded("edge", next));
+        Assert.Equal(["edge"], prefs.LoadedIn(next)); Assert.Equal(next, prefs.LoadedFolder); Assert.True(prefs.LoadedElsewhere(first));
+        // Ticks from before 0.18.6 named no folder: they count as another folder.
+        Assert.True(new ClaudeBrowserPreferences { LoadedBrowsers = ["chrome"] }.LoadedElsewhere(first));
+    }
+
+    [Fact] public void MovedFolderMessageSaysReloadingDoesNotHelp()
+    {
+        using (UiText.Override(UiLanguage.English))
+        {
+            var moved = ClaudeBrowserPresentation.Message(ClaudeSyncOutcome.UpdateRequired, "chrome", movedFolder: true);
+            Assert.Contains("previous AUV folder", moved); Assert.Contains("Reloading the old one does not help", moved); Assert.Contains("Load in Chrome", moved);
+            Assert.DoesNotContain("previous AUV folder", ClaudeBrowserPresentation.Message(ClaudeSyncOutcome.UpdateRequired, "chrome"));
+            Assert.Equal(moved, ClaudeBrowserPresentation.Failure(ClaudeSyncOutcome.UpdateRequired, "chrome", true).Card.Source);
+        }
+        using (UiText.Override(UiLanguage.Chinese))
+            Assert.Contains("“重新加载”没有用", ClaudeBrowserPresentation.Message(ClaudeSyncOutcome.UpdateRequired, "edge", movedFolder: true));
     }
 
     // ---- host-config.json ----
