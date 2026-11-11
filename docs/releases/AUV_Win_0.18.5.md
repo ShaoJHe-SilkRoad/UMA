@@ -1,7 +1,5 @@
 # AUV Windows 0.18.5
 
-> DRAFT, not published. Size, SHA-256 and check counts are from the packaged build (2026-11-11). Move to `docs/releases/AUV_Win_0.18.5.md` only with the user's go-ahead.
-
 **Windows stable · version 0.18.5 · build 20261108.1 · Windows 11 x64 · portable ZIP · unsigned.**
 
 [Download AUV_Win_0.18.5.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.5-win/AUV_Win_0.18.5.zip) · [Install or upgrade](../INSTALLATION.md#windows-installation-guide) · [Claude browser companion guide](../../windows/docs/claude-browser-companion.md)
@@ -49,7 +47,7 @@ Not tried live: a claude.ai sign-out, site access set to "on click", syncing rig
 663ad6bc4706b4ba0aef5317f5d3d5c207c303228d0f37c6a75105390c40474c
 ```
 
-AUV for Mac stays at [0.18.4](AUV_Mac_0.18.4.md). A patch that adds the same Chinese reading to the Mac is in [windows/docs/extractor-zh-patch-for-mac.md](../../windows/docs/extractor-zh-patch-for-mac.md).
+See also `HASHES.txt` and `RELEASE-MANIFEST.json` on the release. AUV for Mac stays at [0.18.4](AUV_Mac_0.18.4.md). A patch that adds the same Chinese reading to the Mac is in [windows/docs/extractor-zh-patch-for-mac.md](../../windows/docs/extractor-zh-patch-for-mac.md).
 
 [Report a problem](https://github.com/ShaoJHe-SilkRoad/UMA/issues)
 
@@ -102,6 +100,6 @@ Claude 在 Windows 上有了精确读数：Chrome 或 Edge 中的一个小型伴
 663ad6bc4706b4ba0aef5317f5d3d5c207c303228d0f37c6a75105390c40474c
 ```
 
-Mac 版保持 [0.18.4](AUV_Mac_0.18.4.md#中文)。为 Mac 加入同样中文读取能力的补丁见 [windows/docs/extractor-zh-patch-for-mac.md](../../windows/docs/extractor-zh-patch-for-mac.md)。
+另见 Release 中的 `HASHES.txt` 和 `RELEASE-MANIFEST.json`。Mac 版保持 [0.18.4](AUV_Mac_0.18.4.md#中文)。为 Mac 加入同样中文读取能力的补丁见 [windows/docs/extractor-zh-patch-for-mac.md](../../windows/docs/extractor-zh-patch-for-mac.md)。
 
 [反馈问题](https://github.com/ShaoJHe-SilkRoad/UMA/issues)
