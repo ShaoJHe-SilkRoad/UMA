@@ -236,7 +236,7 @@ Optional WorkBuddy connection needs Microsoft Edge WebView2 Runtime (not bundled
 Upgrade: quit the old copy, extract this package separately and run its AUV.exe.
 Existing settings in %LOCALAPPDATA%\AUV.Windows.UI.Preview are kept and still read.
 
-New in $Version:
+New in ${Version}:
 - Claude's exact plan limits through the AUV Browser Companion for Chrome or Edge (off until you
   turn it on in Claude settings). The companion reads only the 5-hour and weekly used percentages
   and reset times from claude.ai's official Usage page, in English or Chinese; your sign-in stays in
