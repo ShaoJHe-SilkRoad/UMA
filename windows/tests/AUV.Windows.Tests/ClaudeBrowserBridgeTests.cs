@@ -210,8 +210,120 @@ public class ClaudeBrowserBridgeTests : IDisposable
         // A folder of that name that AUV did not make is neither offered nor deleted.
         var strange = Path.Combine(temp, "x", "browser-companion"); Directory.CreateDirectory(strange); File.WriteAllText(Path.Combine(strange, "notes.txt"), "mine");
         Assert.Equal(LegacyCleanupResult.NotNeeded, LegacyCleanup.Offer(prefs, strange, () => throw new InvalidOperationException("asked"), () => { }));
-        Assert.False(ClaudeBrowserSetup.DeleteLegacyCopy(strange)); Assert.True(File.Exists(Path.Combine(strange, "notes.txt")));
+        Assert.Equal(LegacyDeleteOutcome.NotACopy, ClaudeBrowserSetup.DeleteLegacyCopy(strange).Outcome); Assert.True(File.Exists(Path.Combine(strange, "notes.txt")));
         Assert.False(prefs.LegacyCleanupAsked);
+    }
+
+    /// <summary>The 0.18.5 layout: companion.json, README, extension\…, host\&lt;build&gt;\{AUV.BrowserHost.exe, host-config.json, manifest}.</summary>
+    private string FullLegacyCopy()
+    {
+        var legacy = LegacyCopy();
+        Directory.CreateDirectory(Path.Combine(legacy, "extension", "Shared"));
+        File.WriteAllText(Path.Combine(legacy, "extension", "background.js"), "//"); File.WriteAllText(Path.Combine(legacy, "extension", "Shared", "x.js"), "//");
+        File.WriteAllText(Path.Combine(legacy, "README.txt"), "0.18.5");
+        var host = Path.Combine(legacy, "host", "202611111505"); Directory.CreateDirectory(host);
+        File.WriteAllText(Path.Combine(host, ClaudeBrowserSetup.HostExecutable), "0.18.5 host");
+        File.WriteAllText(Path.Combine(host, "host-config.json"), "{}"); File.WriteAllText(Path.Combine(host, ClaudeBrowserContract.NativeHostName + ".json"), "{}");
+        File.SetAttributes(Path.Combine(legacy, "README.txt"), FileAttributes.ReadOnly);
+        return legacy;
+    }
+
+    [Fact] public void ALockedHelperIsLeftSaidAndRemovedOnRetry()
+    {
+        var legacy = FullLegacyCopy(); var prefs = new ClaudeBrowserPreferences(); var saved = 0;
+        var exe = Path.Combine(legacy, "host", "202611111505", ClaudeBrowserSetup.HostExecutable);
+        using (new FileStream(exe, FileMode.Open, FileAccess.Read, FileShare.Read)) // like a running helper: no delete sharing
+        {
+            Assert.Equal(LegacyCleanupResult.Pending, LegacyCleanup.Offer(prefs, legacy, () => true, () => saved++));
+            Assert.True(prefs.LegacyCleanupPending); Assert.True(saved >= 2); // asked, then pending, both saved
+            Assert.Equal([Path.Combine("host", "202611111505", ClaudeBrowserSetup.HostExecutable)], Tree(legacy)); // everything else went
+            Assert.True(ClaudeBrowserSetup.IsLegacyCopy(legacy)); // what is left is still recognisably AUV's copy
+            Assert.Equal(LegacyCleanupResult.Pending, LegacyCleanup.Retry(prefs, legacy, () => { })); // still in use
+        }
+        Assert.Equal(LegacyCleanupResult.Deleted, LegacyCleanup.Retry(prefs, legacy, () => saved++));
+        Assert.False(Directory.Exists(legacy)); Assert.False(prefs.LegacyCleanupPending);
+        Assert.Equal(LegacyCleanupResult.NotNeeded, LegacyCleanup.Retry(prefs, legacy, () => throw new InvalidOperationException("nothing to save")));
+    }
+
+    [Fact] public void WithAnotherFileLockedTheMarkersStayUntilTheRestIsGone()
+    {
+        var legacy = FullLegacyCopy(); var prefs = new ClaudeBrowserPreferences();
+        using (new FileStream(Path.Combine(legacy, "extension", "Shared", "x.js"), FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            var result = ClaudeBrowserSetup.DeleteLegacyCopy(legacy);
+            Assert.Equal(new LegacyDeleteResult(LegacyDeleteOutcome.Partial, 1), result);
+            Assert.Equal(["companion.json", Path.Combine("extension", "Shared", "x.js"), Path.Combine("host", "202611111505", ClaudeBrowserSetup.HostExecutable)], Tree(legacy));
+            Assert.True(ClaudeBrowserSetup.IsLegacyCopy(legacy));
+        }
+        prefs.LegacyCleanupPending = true;
+        Assert.Equal(LegacyCleanupResult.Deleted, LegacyCleanup.Retry(prefs, legacy, () => { }));
+        Assert.False(Directory.Exists(legacy)); Assert.True(Directory.Exists(Path.GetDirectoryName(legacy)));
+    }
+
+    [Fact] public void APendingCleanUpNeverTouchesAFolderThatIsNoLongerAuvsCopy()
+    {
+        var prefs = new ClaudeBrowserPreferences { LegacyCleanupPending = true }; var saved = 0;
+        var strange = Path.Combine(temp, "AUV.Windows.UI.Preview", "browser-companion"); Directory.CreateDirectory(strange);
+        File.WriteAllText(Path.Combine(strange, "notes.txt"), "mine");
+        Assert.Equal(LegacyCleanupResult.NotNeeded, LegacyCleanup.Retry(prefs, strange, () => saved++));
+        Assert.True(File.Exists(Path.Combine(strange, "notes.txt"))); Assert.False(prefs.LegacyCleanupPending); Assert.Equal(1, saved);
+        // Without a yes on record nothing is deleted, even from AUV's copy.
+        var legacy = FullLegacyCopy();
+        Assert.Equal(LegacyCleanupResult.NotNeeded, LegacyCleanup.Retry(new ClaudeBrowserPreferences(), legacy, () => { }));
+        Assert.True(File.Exists(Path.Combine(legacy, "companion.json")));
+    }
+
+    [Fact] public void AFolderLinkInsideTheCopyIsNotFollowed()
+    {
+        var legacy = FullLegacyCopy();
+        var outside = Path.Combine(temp, "outside"); Directory.CreateDirectory(outside); File.WriteAllText(Path.Combine(outside, "keep.txt"), "keep");
+        var link = Path.Combine(legacy, "extension", "linked");
+        try { Directory.CreateSymbolicLink(link, outside); } catch (IOException) { return; } catch (UnauthorizedAccessException) { return; } // needs Developer Mode
+        Assert.Equal(LegacyDeleteOutcome.Partial, ClaudeBrowserSetup.DeleteLegacyCopy(legacy).Outcome);
+        Assert.True(File.Exists(Path.Combine(outside, "keep.txt")));
+    }
+
+    [Fact] public void LegacyHostPathsAreRecognisedExactly()
+    {
+        var legacy = Path.Combine(temp, "AUV.Windows.UI.Preview", "browser-companion");
+        Assert.True(LegacyCleanup.IsLegacyHost(Path.Combine(legacy, "host", "202611111505", "AUV.BrowserHost.exe"), legacy));
+        Assert.True(LegacyCleanup.IsLegacyHost(Path.Combine(legacy, "HOST", "1", "auv.browserhost.EXE"), legacy));
+        Assert.False(LegacyCleanup.IsLegacyHost(Path.Combine(legacy, "host", "AUV.BrowserHost.exe"), legacy));
+        Assert.False(LegacyCleanup.IsLegacyHost(Path.Combine(legacy, "host", "1", "2", "AUV.BrowserHost.exe"), legacy));
+        Assert.False(LegacyCleanup.IsLegacyHost(Path.Combine(temp, "AUV_Win_0.18.6", "BrowserCompanion", "host", "AUV.BrowserHost.exe"), legacy));
+        Assert.False(LegacyCleanup.IsLegacyHost(Path.Combine(legacy, "..", "host", "1", "AUV.BrowserHost.exe"), legacy));
+        Assert.False(LegacyCleanup.IsLegacyHost(null, legacy));
+    }
+
+    /// <summary>The live case: a browser keeps the old helper running, so its exe cannot be deleted until the helper exits.</summary>
+    [Fact] public async Task ARunningOldHelperIsWaitedForAndThenRemoved()
+    {
+        var legacy = LegacyCopy(); var prefs = new ClaudeBrowserPreferences();
+        // No AUV pipe listens on this name: the helper keeps retrying and runs until its stdin (the browser) closes.
+        var (host, input, _) = StartHostIn(Path.Combine(legacy, "host", "202611111505"), "AUV.Windows.Preview." + Convert.ToHexString(Guid.NewGuid().ToByteArray())[..24] + ".ClaudeBrowser", ClaudeBrowserTests.Manifest.ExtensionOrigin);
+        try
+        {
+            Assert.Equal(LegacyCleanupResult.Pending, LegacyCleanup.Offer(prefs, legacy, () => true, () => { }));
+            Assert.True(prefs.LegacyCleanupPending);
+            Assert.Equal([Path.Combine("host", "202611111505", ClaudeBrowserSetup.HostExecutable)], Tree(legacy).Where(f => f.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)));
+            var exited = new TaskCompletionSource();
+            using var watcher = new LegacyHostWatcher(legacy, () => exited.TrySetResult());
+            Assert.Equal(1, watcher.Start());
+            Assert.False(exited.Task.IsCompleted);
+            input.Dispose(); // the browser closes
+            await exited.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            var result = LegacyCleanup.Retry(prefs, legacy, () => { });
+            for (var i = 0; i < 20 && result == LegacyCleanupResult.Pending; i++) { await Task.Delay(250); result = LegacyCleanup.Retry(prefs, legacy, () => { }); } // the image is released just after exit
+            Assert.Equal(LegacyCleanupResult.Deleted, result);
+            Assert.False(Directory.Exists(legacy)); Assert.False(prefs.LegacyCleanupPending);
+        }
+        finally { if (!host.HasExited) host.Kill(); host.Dispose(); }
+    }
+
+    [Fact] public void TheWatcherIgnoresHelpersOutsideTheOldCopy()
+    {
+        using var watcher = new LegacyHostWatcher(Path.Combine(temp, "AUV.Windows.UI.Preview", "browser-companion"), () => throw new InvalidOperationException("called"));
+        Assert.Equal(0, watcher.Start());
     }
 
     // ---- Trust: only the host inside the running AUV's own BrowserCompanion\host ----
@@ -262,9 +374,9 @@ public class ClaudeBrowserBridgeTests : IDisposable
         return Path.Combine(windows, "src", "AUV.Windows.BrowserHost", "bin", configuration, "net10.0", "win-x64");
     }
 
-    private (Process Host, Stream Input, Stream Output) StartHost(string install, string pipeName, string origin)
+    private (Process Host, Stream Input, Stream Output) StartHost(string install, string pipeName, string origin) => StartHostIn(Path.Combine(install, "host"), pipeName, origin);
+    private static (Process Host, Stream Input, Stream Output) StartHostIn(string folder, string pipeName, string origin)
     {
-        var folder = Path.Combine(install, "host");
         Directory.CreateDirectory(folder);
         foreach (var file in Directory.GetFiles(HostBuildOutput())) File.Copy(file, Path.Combine(folder, Path.GetFileName(file)), true);
         File.WriteAllText(Path.Combine(folder, "host-config.json"), $$"""{"schemaVersion":1,"pipeName":"{{pipeName}}","allowedOrigin":"{{ClaudeBrowserTests.Manifest.ExtensionOrigin}}","runtimeGenerationID":"{{ClaudeBrowserTests.Generation}}","hostVersion":"1.0.0","hostBuild":"2026110801"}""");

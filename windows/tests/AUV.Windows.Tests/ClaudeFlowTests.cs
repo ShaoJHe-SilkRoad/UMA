@@ -153,7 +153,7 @@ public class ClaudeFlowTests
             Assert.Null(store.LastError);
             Assert.True(settings.ClaudeBrowser.Enabled); Assert.Equal("edge", settings.ClaudeBrowser.Browser); Assert.Equal("2026111101", settings.ClaudeBrowser.InstalledBuild);
             Assert.Empty(settings.ClaudeBrowser.LoadedBrowsers); Assert.False(settings.ClaudeBrowser.ExactReadingSeen);
-            Assert.Null(settings.ClaudeBrowser.LoadedFolder); Assert.False(settings.ClaudeBrowser.LegacyCleanupAsked);
+            Assert.Null(settings.ClaudeBrowser.LoadedFolder); Assert.False(settings.ClaudeBrowser.LegacyCleanupAsked); Assert.False(settings.ClaudeBrowser.LegacyCleanupPending);
             settings.ClaudeBrowser.LoadedBrowsers = ["edge", "firefox", "chrome", "edge"]; settings.ClaudeBrowser.ExactReadingSeen = true;
             Assert.True(store.Save(settings));
             var again = store.Load(new ModelCatalog());

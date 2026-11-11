@@ -173,12 +173,64 @@ public sealed class ClaudeBrowserSetup(string packageRoot, string pipeName, Regi
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException) { return false; }
     }
-    /// <summary>Deletes the 0.18.5 copy, only when it is one (see <see cref="IsLegacyCopy"/>). Called only after the person says yes.</summary>
-    public static bool DeleteLegacyCopy(string legacyRoot)
+    /// <summary>
+    /// Deletes the 0.18.5 copy, only when it is one (see <see cref="IsLegacyCopy"/>). Called only after the person says yes.
+    /// Whatever can be deleted is; a file in use (a browser still running the old helper locks its AUV.BrowserHost.exe) is
+    /// left and counted. The files that make the folder recognisable as AUV's copy (companion.json and host\&lt;build&gt;\
+    /// AUV.BrowserHost.exe) go last, so a later retry still recognises what is left and never deletes anything else.
+    /// Folder links (junctions) inside are not followed.
+    /// </summary>
+    public static LegacyDeleteResult DeleteLegacyCopy(string legacyRoot)
     {
-        if (!IsLegacyCopy(legacyRoot)) return false;
-        Directory.Delete(legacyRoot, true);
-        return true;
+        if (!IsLegacyCopy(legacyRoot)) return new(LegacyDeleteOutcome.NotACopy, 0);
+        try
+        {
+            var root = new DirectoryInfo(Path.GetFullPath(legacyRoot));
+            var markers = new List<FileInfo>(); var folders = new List<DirectoryInfo>();
+            var remaining = DeleteFiles(root, root, markers, folders);
+            // With nothing else left, the markers go too; one that is in use then still marks the folder as AUV's copy.
+            if (remaining == 0) foreach (var marker in markers) if (!TryDelete(marker)) remaining++;
+            foreach (var folder in folders.Append(root)) // deepest first, root last; only empty ones go
+                try { folder.Refresh(); if (folder.Exists && !folder.EnumerateFileSystemInfos().Any()) folder.Delete(false); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            return remaining == 0 && !Directory.Exists(root.FullName) ? new(LegacyDeleteOutcome.Deleted, 0) : new(LegacyDeleteOutcome.Partial, Math.Max(remaining, 1));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        { return new(LegacyDeleteOutcome.Partial, 1); }
+    }
+    private static int DeleteFiles(DirectoryInfo root, DirectoryInfo folder, List<FileInfo> markers, List<DirectoryInfo> folders)
+    {
+        var remaining = 0;
+        foreach (var entry in folder.EnumerateFileSystemInfos())
+        {
+            if (entry is DirectoryInfo sub)
+            {
+                if (sub.Attributes.HasFlag(FileAttributes.ReparsePoint)) { remaining++; continue; } // never follow a link out of the copy
+                remaining += DeleteFiles(root, sub, markers, folders);
+                folders.Add(sub);
+            }
+            else if (entry is FileInfo file)
+            {
+                if (IsMarker(root, file)) markers.Add(file);
+                else if (!TryDelete(file)) remaining++;
+            }
+        }
+        return remaining;
+    }
+    private static bool IsMarker(DirectoryInfo root, FileInfo file)
+    {
+        var relative = Path.GetRelativePath(root.FullName, file.FullName).Split(Path.DirectorySeparatorChar);
+        return relative is [var name] && name.Equals("companion.json", StringComparison.OrdinalIgnoreCase)
+            || relative is [var host, _, var exe] && host.Equals("host", StringComparison.OrdinalIgnoreCase) && exe.Equals(HostExecutable, StringComparison.OrdinalIgnoreCase);
+    }
+    private static bool TryDelete(FileInfo file)
+    {
+        try
+        {
+            if (file.Attributes.HasFlag(FileAttributes.ReadOnly)) file.Attributes &= ~FileAttributes.ReadOnly;
+            file.Delete(); return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
     }
 
     private static void WriteJson(string path, Action<Utf8JsonWriter> body)
@@ -203,11 +255,18 @@ public sealed class CompanionFolderNotWritableException(string folder, Exception
     public string Folder { get; } = folder;
 }
 
-public enum LegacyCleanupResult { NotNeeded, AlreadyAsked, Declined, Deleted, Failed }
+public enum LegacyDeleteOutcome { NotACopy, Deleted, Partial }
+/// <param name="Remaining">Files (or folder links) left because they were in use; 0 unless <see cref="LegacyDeleteOutcome.Partial"/>.</param>
+public readonly record struct LegacyDeleteResult(LegacyDeleteOutcome Outcome, int Remaining);
+
+/// <summary><see cref="Pending"/>: part of the copy was in use and is deleted later (after the browser closes, or at the next start).</summary>
+public enum LegacyCleanupResult { NotNeeded, AlreadyAsked, Declined, Deleted, Pending }
 
 /// <summary>
 /// The one-time offer to delete the copy AUV 0.18.5 made under %LOCALAPPDATA%. It is asked at most once per preference
 /// profile (whatever the answer), only when that folder exists and is AUV's copy, and nothing is deleted without a yes.
+/// After a yes, what was in use is remembered (<see cref="ClaudeBrowserPreferences.LegacyCleanupPending"/>) and retried
+/// with <see cref="Retry"/>, which again touches only that folder and only while it is still AUV's copy.
 /// </summary>
 public static class LegacyCleanup
 {
@@ -217,7 +276,74 @@ public static class LegacyCleanup
         if (!ClaudeBrowserSetup.IsLegacyCopy(legacyRoot)) return LegacyCleanupResult.NotNeeded;
         preferences.LegacyCleanupAsked = true; persist();
         if (!askDelete()) return LegacyCleanupResult.Declined;
-        try { return ClaudeBrowserSetup.DeleteLegacyCopy(legacyRoot) ? LegacyCleanupResult.Deleted : LegacyCleanupResult.NotNeeded; }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return LegacyCleanupResult.Failed; }
+        return Delete(preferences, legacyRoot, persist);
+    }
+
+    /// <summary>Deletes after a yes given now (the offer, or Remove in Claude settings) and remembers whatever is left.</summary>
+    public static LegacyCleanupResult Delete(ClaudeBrowserPreferences preferences, string legacyRoot, Action persist)
+    {
+        var result = ClaudeBrowserSetup.DeleteLegacyCopy(legacyRoot);
+        var pending = result.Outcome == LegacyDeleteOutcome.Partial;
+        if (preferences.LegacyCleanupPending != pending) { preferences.LegacyCleanupPending = pending; persist(); }
+        return result.Outcome switch { LegacyDeleteOutcome.Deleted => LegacyCleanupResult.Deleted, LegacyDeleteOutcome.Partial => LegacyCleanupResult.Pending, _ => LegacyCleanupResult.NotNeeded };
+    }
+
+    /// <summary>
+    /// Finishes a clean-up the person already said yes to. Nothing happens unless one is pending; a folder that is gone or
+    /// is no longer recognisably AUV's copy is left alone and the pending clean-up is forgotten.
+    /// </summary>
+    public static LegacyCleanupResult Retry(ClaudeBrowserPreferences preferences, string legacyRoot, Action persist)
+        => preferences.LegacyCleanupPending ? Delete(preferences, legacyRoot, persist) : LegacyCleanupResult.NotNeeded;
+
+    /// <summary>True when <paramref name="imagePath"/> is a helper inside the 0.18.5 copy (host\&lt;build&gt;\AUV.BrowserHost.exe).</summary>
+    public static bool IsLegacyHost(string? imagePath, string legacyRoot)
+    {
+        if (imagePath == null) return false;
+        try
+        {
+            var relative = Path.GetRelativePath(Path.GetFullPath(legacyRoot), Path.GetFullPath(imagePath)).Split(Path.DirectorySeparatorChar);
+            return relative is [var host, var build, var exe] && host.Equals("host", StringComparison.OrdinalIgnoreCase) && build != ".."
+                && exe.Equals(ClaudeBrowserSetup.HostExecutable, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
+    }
+}
+
+/// <summary>
+/// Waits for the old helpers still running from the 0.18.5 copy (a browser keeps one running while it is open) and calls
+/// back once all of them have exited, so a pending clean-up can be retried then. Only AUV.BrowserHost processes whose
+/// image is inside that copy are watched; nothing is ever stopped.
+/// </summary>
+public sealed class LegacyHostWatcher(string legacyRoot, Action allExited) : IDisposable
+{
+    private readonly List<System.Diagnostics.Process> watched = [];
+    private int left, fired, disposed;
+
+    /// <summary>Starts watching; returns how many old helpers are running. With none, nothing is called back.</summary>
+    public int Start()
+    {
+        foreach (var process in System.Diagnostics.Process.GetProcessesByName(Path.GetFileNameWithoutExtension(ClaudeBrowserSetup.HostExecutable)))
+        {
+            if (!LegacyCleanup.IsLegacyHost(ClaudeBrowserPipeServer.ImagePath(process.Id), legacyRoot)) { process.Dispose(); continue; }
+            try { process.EnableRaisingEvents = true; }
+            catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { process.Dispose(); continue; }
+            watched.Add(process);
+        }
+        left = watched.Count;
+        foreach (var process in watched)
+        {
+            var counted = 0;
+            void Exited() { if (Interlocked.Exchange(ref counted, 1) == 0 && Interlocked.Decrement(ref left) == 0 && Volatile.Read(ref disposed) == 0 && Interlocked.Exchange(ref fired, 1) == 0) allExited(); }
+            process.Exited += (_, _) => Exited();
+            try { if (process.HasExited) Exited(); } catch (InvalidOperationException) { Exited(); }
+        }
+        return watched.Count;
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+        foreach (var process in watched) process.Dispose();
+        watched.Clear();
     }
 }

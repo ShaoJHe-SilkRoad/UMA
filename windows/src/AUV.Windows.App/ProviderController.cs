@@ -83,6 +83,8 @@ public sealed partial class ProviderController : Observable, IDisposable
         started = true;
         foreach (var plan in PreparedConnections.Plans) { var id = plan.ProviderId; Admit(id, () => ProviderData.Unavailable(id, plan.UserStatus)); }
         StartClaude();
+        // A clean-up of the 0.18.5 copy the person said yes to, left unfinished because a file was in use (whether or not Claude is on).
+        if (app.Settings.ClaudeBrowser.LegacyCleanupPending) main.Dispatcher.BeginInvoke(() => RetryLegacyCleanup(), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
         freshnessTimer.Start(); Reschedule();
         _ = RefreshAllAsync(automatic: false);
     }
@@ -247,7 +249,7 @@ public sealed partial class ProviderController : Observable, IDisposable
     }
     public void Dispose()
     {
-        if (disposed) return; disposed = true; refreshTimer.Stop(); freshnessTimer.Stop(); generation++; lifetime.Cancel(); codex.Dispose(); workBuddy?.Close(); StopClaudeLink(); lifetime.Dispose();
+        if (disposed) return; disposed = true; refreshTimer.Stop(); freshnessTimer.Stop(); generation++; lifetime.Cancel(); codex.Dispose(); workBuddy?.Close(); StopClaudeLink(); StopLegacyCleanupWatch(); lifetime.Dispose();
         UiText.Changed -= Relocalize; SystemEvents.PowerModeChanged -= PowerModeChanged;
     }
 }

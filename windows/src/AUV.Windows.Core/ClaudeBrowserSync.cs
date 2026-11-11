@@ -21,6 +21,8 @@ public sealed class ClaudeBrowserPreferences
     public string? LoadedFolder { get; set; }
     /// <summary>The one-time question about deleting the 0.18.5 copy under %LOCALAPPDATA% has been asked (whatever the answer). Default: false.</summary>
     public bool LegacyCleanupAsked { get; set; }
+    /// <summary>The person said yes to deleting the 0.18.5 copy but some of it was in use (a browser still ran its helper); the rest is retried at start-up and when that helper exits. Default: false.</summary>
+    public bool LegacyCleanupPending { get; set; }
     /// <summary>Step 2 was ticked for another AUV folder than <paramref name="currentFolder"/> (or for an unknown one): load the extension again from this one.</summary>
     public bool LoadedElsewhere(string currentFolder)
     {

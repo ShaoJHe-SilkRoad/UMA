@@ -116,10 +116,12 @@ public partial class SettingsWindow
         {
             app.Providers.ClaudeBrowserEnabled = false;
             setup.Remove();
-            if (deleteLegacy) ClaudeBrowserSetup.DeleteLegacyCopy(legacy);
+            var legacyResult = deleteLegacy ? LegacyCleanup.Delete(app.Settings.ClaudeBrowser, legacy, () => main.Persist()) : LegacyCleanupResult.NotNeeded;
             app.Settings.ClaudeBrowser.InstalledBuild = null; main.Persist(); app.Providers.ForgetClaudeChecklist();
             SaveStatus.Text = Loc.T("Registration removed. Remove the extension on the browser's extensions page.", "已删除注册。请在浏览器扩展页中移除扩展。")
-                + (deleteLegacy ? Loc.T(" The 0.18.5 companion copy was deleted.", " 0.18.5 的伴侣副本已删除。") : "");
+                + (legacyResult == LegacyCleanupResult.Deleted ? Loc.T(" The 0.18.5 companion copy was deleted.", " 0.18.5 的伴侣副本已删除。") : "")
+                + (legacyResult == LegacyCleanupResult.Pending ? " " + ProviderController.LegacyPendingText(legacy) : "");
+            if (legacyResult == LegacyCleanupResult.Pending) app.Providers.LegacyCleanupLeft(legacy);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         { SaveStatus.Text = Loc.T("Removal did not complete: ", "移除未完成：") + error.Message; }

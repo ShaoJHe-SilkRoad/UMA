@@ -281,8 +281,56 @@ public sealed partial class ProviderController
                 $"AUV 已不再需要之前的伴侣副本：\n\n{legacy}\n\n要删除该文件夹吗？AUV 0.18.5 仍在使用它；如果你还在运行 0.18.5，请保留。此操作无法撤销。"),
             "AUV", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes, () => main.Persist());
         if (result == LegacyCleanupResult.Deleted) SetClaudeHint(Loc.T("The earlier companion copy was deleted.", "之前的伴侣副本已删除。"));
-        else if (result == LegacyCleanupResult.Failed) SetClaudeHint(Loc.T("The earlier companion copy could not be deleted; you can delete it yourself: ", "无法删除之前的伴侣副本，你可以自行删除：") + legacy);
+        else if (result == LegacyCleanupResult.Pending) LegacyCleanupLeft(legacy);
     }
+
+    /// <summary>Bilingual note for a clean-up that could not finish because part of the 0.18.5 copy was in use.</summary>
+    internal static string LegacyPendingText(string legacy) => UiText.T(
+        $"Part of the earlier companion copy is still in use, probably by a browser that is still running its old helper. It will be removed after the browser closes, or when AUV next starts: {legacy}",
+        $"之前的伴侣副本有一部分仍在使用中，可能是浏览器仍在运行旧的辅助程序。它将在浏览器关闭后删除，或在下次启动 AUV 时删除：{legacy}");
+
+    /// <summary>Says what was left and waits for the old helpers to exit, then retries (see <see cref="RetryLegacyCleanup"/>).</summary>
+    internal void LegacyCleanupLeft(string legacy)
+    {
+        SetClaudeHint(LegacyPendingText(legacy));
+        WatchLegacyHosts(legacy);
+    }
+
+    private LegacyHostWatcher? legacyWatcher;
+    private System.Windows.Threading.DispatcherTimer? legacyRetryTimer;
+    private void WatchLegacyHosts(string legacy)
+    {
+        legacyWatcher?.Dispose();
+        // Exited arrives on a pool thread; retry on the UI thread a moment later, once the image file is released.
+        legacyWatcher = new LegacyHostWatcher(legacy, () => main.Dispatcher.BeginInvoke(() =>
+        {
+            if (disposed) return;
+            legacyRetryTimer ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+            legacyRetryTimer.Stop(); legacyRetryTimer.Tick -= LegacyRetryTick; legacyRetryTimer.Tick += LegacyRetryTick; legacyRetryTimer.Start();
+        }));
+        try { legacyWatcher.Start(); }
+        catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { } // retried at the next start
+    }
+    private void LegacyRetryTick(object? sender, EventArgs e) { legacyRetryTimer?.Stop(); RetryLegacyCleanup(); }
+
+    /// <summary>
+    /// Finishes a clean-up the person already said yes to: at start-up and when the old helpers have exited. Touches only
+    /// the 0.18.5 copy, and only while it is still recognisably that copy. Quiet unless it finishes.
+    /// </summary>
+    internal void RetryLegacyCleanup()
+    {
+        if (disposed || app.Demo || !app.Settings.ClaudeBrowser.LegacyCleanupPending) return;
+        var legacy = ClaudeBrowserPaths.LegacyInstallRoot(app.Store.PathName);
+        var pendingHint = claudeHint == LegacyPendingText(legacy);
+        var result = LegacyCleanup.Retry(app.Settings.ClaudeBrowser, legacy, () => main.Persist());
+        if (result == LegacyCleanupResult.Pending) { WatchLegacyHosts(legacy); return; }
+        legacyWatcher?.Dispose(); legacyWatcher = null;
+        if (result != LegacyCleanupResult.Deleted) { if (pendingHint) SetClaudeHint(""); return; }
+        var done = Loc.T("The rest of the earlier companion copy has now been deleted.", "之前的伴侣副本剩余部分现已删除。");
+        main.Model.Status = done;
+        if (pendingHint) SetClaudeHint(done);
+    }
+    private void StopLegacyCleanupWatch() { legacyWatcher?.Dispose(); legacyWatcher = null; legacyRetryTimer?.Stop(); }
 
     /// <summary>Remove forgets the checklist, so a later Connect starts from step 1.</summary>
     internal void ForgetClaudeChecklist()
