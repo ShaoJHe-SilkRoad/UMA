@@ -24,6 +24,8 @@ public partial class App : Application, System.ComponentModel.INotifyPropertyCha
     {
         base.OnStartup(e);
         Demo = e.Args.Contains("--demo");
+        // 0.18.6: behave as if Windows "Show animations" were off (used to check that every surface reaches its end state).
+        Motion.ForcedOff = e.Args.Contains("--no-animations");
         DesktopAutomation = e.Args.Contains("--desktop-automation");
         var index = Array.IndexOf(e.Args, "--settings-path");
         var path = index >= 0 && index + 1 < e.Args.Length ? Path.GetFullPath(e.Args[index + 1]) :
@@ -77,6 +79,13 @@ public partial class App : Application, System.ComponentModel.INotifyPropertyCha
             var companionIndex = Array.IndexOf(e.Args, "--companion-check-dir");
             if (companionIndex >= 0 && companionIndex + 1 < e.Args.Length)
                 await CompanionVerification.Run(Path.GetFullPath(e.Args[companionIndex + 1]));
+            var uiIndex = Array.IndexOf(e.Args, "--ui-check-dir");
+            if (uiIndex >= 0 && uiIndex + 1 < e.Args.Length && Demo && e.Args.Contains("--offline"))
+            {
+                var idleIndex = Array.IndexOf(e.Args, "--idle-seconds");
+                await UiPolishVerification.Run(this, window, Path.GetFullPath(e.Args[uiIndex + 1]),
+                    idleIndex >= 0 && idleIndex + 1 < e.Args.Length && int.TryParse(e.Args[idleIndex + 1], out var idle) ? Math.Clamp(idle, 0, 600) : 0);
+            }
             var claudeIndex = Array.IndexOf(e.Args, "--claude-check-dir");
             if (claudeIndex >= 0 && claudeIndex + 1 < e.Args.Length && e.Args.Contains("--offline"))
                 await ClaudeVerification.Run(this, window, Path.GetFullPath(e.Args[claudeIndex + 1]), e.Args.Contains("--claude-check-before") ? "before" : "after");
@@ -143,8 +152,27 @@ public partial class App : Application, System.ComponentModel.INotifyPropertyCha
         Resources["QuotaNormalBrush"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString(light ? "#12865A" : "#42DFA0"));
         Resources["QuotaNeutralBrush"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString(light ? "#2563EB" : "#60A5FA"));
         Resources["ChartBrush"] = Resources["QuotaNeutralBrush"];
+        // 0.18.6: hover tint and card depth. Light cards get a soft shadow; dark cards rely on their outline.
+        Resources["HoverBrush"] = new SolidColorBrush(light ? Color.FromArgb(0x10, 0, 0, 0) : Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF));
+        if (light && !SystemParameters.HighContrast)
+        {
+            var shadow = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 12, Opacity = .08, Direction = 270, ShadowDepth = 2, Color = Colors.Black, RenderingBias = System.Windows.Media.Effects.RenderingBias.Performance };
+            shadow.Freeze(); Resources["CardEffect"] = shadow;
+        }
+        else Resources.Remove("CardEffect");
+        // Keyboard focus looks the same on every control: a 2px accent ring, shown for keyboard navigation only.
+        foreach (var type in new[] { typeof(CheckBox), typeof(RadioButton), typeof(System.Windows.Controls.Expander), typeof(ComboBox) })
+        {
+            var current = Resources[type] as Style;
+            if (type != typeof(ComboBox)) { Resources.Remove(type); current = new Style(type, TryFindResource(type) as Style); }
+            else { current = new Style(type, current); }
+            current.Setters.Add(new Setter(FrameworkElement.FocusVisualStyleProperty, Resources["AccentFocusVisual"]));
+            Resources[type] = current;
+        }
         if (SystemParameters.HighContrast)
         {
+            // No decoration in high contrast: no hover tint, no shadow.
+            Resources["HoverBrush"] = Brushes.Transparent;
             foreach (var key in new[] { "CanvasBrush", "SurfaceBrush", "RaisedBrush" }) Resources[key] = SystemColors.WindowBrush;
             foreach (var key in new[] { "TextBrush", "MutedBrush", "BorderBrush", "QuotaLowBrush", "QuotaNormalBrush", "QuotaNeutralBrush", "ChartBrush", "WarningBrush" }) Resources[key] = SystemColors.WindowTextBrush;
             Resources["AccentBrush"] = SystemColors.HighlightBrush;

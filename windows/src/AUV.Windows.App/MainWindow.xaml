@@ -2,13 +2,13 @@
  <shell:WindowChrome.WindowChrome><shell:WindowChrome CaptionHeight="46" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False"/></shell:WindowChrome.WindowChrome>
  <Window.Resources><local:SectionConverter x:Key="Section"/><BooleanToVisibilityConverter x:Key="Visible"/><local:InverseVisibilityConverter x:Key="InverseVisible"/><local:EffortLabelConverter x:Key="EffortLabel"/>
   <Style x:Key="CaptionButton" TargetType="Button">
-   <Setter Property="shell:WindowChrome.IsHitTestVisibleInChrome" Value="True"/>
+   <Setter Property="shell:WindowChrome.IsHitTestVisibleInChrome" Value="True"/><Setter Property="FocusVisualStyle" Value="{StaticResource AccentFocusVisualInset}"/>
    <Setter Property="Width" Value="46"/><Setter Property="Height" Value="52"/><Setter Property="MinHeight" Value="0"/><Setter Property="Padding" Value="0"/>
    <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
-   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="Body" Background="{TemplateBinding Background}" BorderBrush="Transparent" BorderThickness="1"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Body" Property="Background" Value="{DynamicResource RaisedBrush}"/></Trigger><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Body" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="Body" Property="Opacity" Value="0.6"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="Body" Background="{TemplateBinding Background}" BorderBrush="Transparent" BorderThickness="1"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Body" Property="Background" Value="{DynamicResource RaisedBrush}"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="Body" Property="Opacity" Value="0.6"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
   </Style>
   <Style x:Key="CloseCaptionButton" TargetType="Button" BasedOn="{StaticResource CaptionButton}">
-   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="Body" Background="{TemplateBinding Background}" BorderBrush="Transparent" BorderThickness="1"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Body" Property="Background" Value="#C42B1C"/><Setter Property="Foreground" Value="White"/></Trigger><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Body" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="Body" Property="Opacity" Value="0.6"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="Body" Background="{TemplateBinding Background}" BorderBrush="Transparent" BorderThickness="1"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Body" Property="Background" Value="#C42B1C"/><Setter Property="Foreground" Value="White"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="Body" Property="Opacity" Value="0.6"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
   </Style>
   <Style x:Key="MaximizeCaptionButton" TargetType="Button" BasedOn="{StaticResource CaptionButton}">
    <Setter Property="ToolTip" Value="Maximize"/><Setter Property="AutomationProperties.Name" Value="Maximize"/>
@@ -16,10 +16,10 @@
   </Style>
   <Style x:Key="CaptionGlyph" TargetType="Path"><Setter Property="Stroke" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/><Setter Property="StrokeThickness" Value="1"/><Setter Property="Width" Value="10"/><Setter Property="Height" Value="10"/><Setter Property="Stretch" Value="Uniform"/></Style>
   <Style x:Key="FooterButton" TargetType="Button">
-   <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/><Setter Property="BorderBrush" Value="Transparent"/>
+   <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="FocusVisualStyle" Value="{StaticResource AccentFocusVisualInset}"/>
    <Setter Property="Width" Value="30"/><Setter Property="Height" Value="28"/><Setter Property="MinHeight" Value="28"/><Setter Property="Padding" Value="6"/><Setter Property="Cursor" Value="Hand"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="5"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border></ControlTemplate></Setter.Value></Setter>
-   <Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource RaisedBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Trigger><Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter Property="Opacity" Value="0.65"/></Trigger></Style.Triggers>
+   <Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource RaisedBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter Property="Opacity" Value="0.65"/></Trigger></Style.Triggers>
   </Style>
   <Style x:Key="FooterWizardButton" TargetType="Button" BasedOn="{StaticResource FooterButton}"><Style.Triggers><DataTrigger Binding="{Binding Desktop.WidgetRequested, Source={x:Static Application.Current}}" Value="True"><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/><Setter Property="Background" Value="{DynamicResource RaisedBrush}"/></DataTrigger></Style.Triggers></Style>
   <Style x:Key="FooterGlyph" TargetType="Path"><Setter Property="Stroke" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/><Setter Property="StrokeThickness" Value="1.4"/><Setter Property="StrokeStartLineCap" Value="Round"/><Setter Property="StrokeEndLineCap" Value="Round"/><Setter Property="StrokeLineJoin" Value="Round"/><Setter Property="Width" Value="16"/><Setter Property="Height" Value="16"/><Setter Property="Stretch" Value="Uniform"/></Style>
@@ -33,7 +33,7 @@
      <Button x:Name="BackToCodex" Content="{local:Tr '‹  Back to Codex', '‹  返回 Codex'}" Click="BackToCodex_Click" Margin="12,0,0,0" Visibility="{Binding Shell.Section, Converter={StaticResource Section}, ConverterParameter=ThreadOS}" AutomationProperties.AutomationId="auv.threados.back"/>
     </StackPanel>
     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0" shell:WindowChrome.IsHitTestVisibleInChrome="True">
-     <Button Content="{Binding Providers.RefreshLabel, Source={x:Static Application.Current}}" Click="RefreshAll_Click" ToolTip="{local:Tr 'Refresh every agent · F5', '刷新所有智能体 · F5'}" AutomationProperties.AutomationId="auv.refresh.all"/>
+     <Button Click="RefreshAll_Click" AutomationProperties.Name="{Binding Providers.RefreshLabel, Source={x:Static Application.Current}}" ToolTip="{local:Tr 'Refresh every agent · F5', '刷新所有智能体 · F5'}" AutomationProperties.AutomationId="auv.refresh.all"><StackPanel Orientation="Horizontal"><Path x:Name="RefreshGlyph" Data="M13,5 A6,6 0 1 0 14,10 M13,1 L13,5 9,5" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Width="14" Height="14" Stretch="Uniform" Margin="0,0,8,0" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5"><Path.RenderTransform><RotateTransform x:Name="RefreshSpin"/></Path.RenderTransform></Path><TextBlock Text="{Binding Providers.RefreshLabel, Source={x:Static Application.Current}}" VerticalAlignment="Center" TextWrapping="NoWrap"/></StackPanel></Button>
      <Button Content="{local:Tr Settings, 设置}" Click="GlobalSettings_Click" Margin="8,0,0,0" ToolTip="Ctrl+," AutomationProperties.AutomationId="auv.settings"/>
     </StackPanel>
     <StackPanel Grid.Column="2" Orientation="Horizontal">
@@ -45,11 +45,11 @@
   </Border>
   <Border DockPanel.Dock="Bottom" Background="{DynamicResource CanvasBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="16,4">
    <Grid MinHeight="30"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-    <TextBlock Text="{Binding Status}" ToolTip="{Binding Status}" Style="{StaticResource Muted}" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,16,0" AutomationProperties.LiveSetting="Polite"/>
+    <TextBlock x:Name="StatusText" ToolTip="{Binding Status}" Style="{StaticResource Muted}" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,16,0" AutomationProperties.LiveSetting="Polite"/>
     <StackPanel Grid.Column="1" Orientation="Horizontal">
      <Button Style="{StaticResource FooterButton}" Click="UsagePopup_Click" ToolTip="{local:Tr 'Tray usage panel · Ctrl+Shift+U', '托盘用量面板 · Ctrl+Shift+U'}" AutomationProperties.Name="Usage popup" AutomationProperties.AutomationId="auv.desktop.usage"><Path Style="{StaticResource FooterGlyph}" Data="M2,13 L2,9 M7,13 L7,5 M12,13 L12,1 M0,15 L15,15"/></Button>
      <Button Style="{StaticResource FooterWizardButton}" Click="Widget_Click" ToolTip="{local:Tr 'Desktop Wizard · Ctrl+Shift+W', '桌面浮窗 · Ctrl+Shift+W'}" AutomationProperties.Name="Desktop Wizard" AutomationProperties.AutomationId="auv.desktop.toggle"><Path Style="{StaticResource FooterGlyph}" Data="M2,2 L14,2 14,11 2,11 Z M6,11 L6,14 M10,11 L10,14 M4,14 L12,14"/></Button>
-     <Button Style="{StaticResource FooterButton}" Click="RefreshAll_Click" ToolTip="{local:Tr 'Refresh All · F5', '全部刷新 · F5'}" AutomationProperties.Name="Refresh All" AutomationProperties.AutomationId="auv.usage.refresh"><Path Style="{StaticResource FooterGlyph}" Data="M13,5 A6,6 0 1 0 14,10 M13,1 L13,5 9,5"/></Button>
+     <Button Style="{StaticResource FooterButton}" Click="RefreshAll_Click" ToolTip="{local:Tr 'Refresh All · F5', '全部刷新 · F5'}" AutomationProperties.Name="Refresh All" AutomationProperties.AutomationId="auv.usage.refresh"><Path Style="{StaticResource FooterGlyph}" Data="M13,5 A6,6 0 1 0 14,10 M13,1 L13,5 9,5" RenderTransformOrigin="0.5,0.5"><Path.RenderTransform><RotateTransform x:Name="FooterRefreshSpin"/></Path.RenderTransform></Path></Button>
      <Border Width="1" Height="16" Background="{DynamicResource BorderBrush}" Margin="6,0"/>
      <Button Style="{StaticResource FooterButton}" Click="MoreActions_Click" ToolTip="{local:Tr 'More actions', '更多操作'}" AutomationProperties.Name="More actions" AutomationProperties.AutomationId="auv.desktop.more">
       <Button.ContextMenu><ContextMenu Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource TextBrush}"><MenuItem Header="{local:Tr 'Hide to system tray', '隐藏到系统托盘'}" Click="HideToTray_Click" AutomationProperties.AutomationId="auv.desktop.hide"/><Separator/><MenuItem Header="{local:Tr 'Quit AUV', '退出 AUV'}" Click="Exit_Click" AutomationProperties.AutomationId="auv.desktop.exit"/></ContextMenu></Button.ContextMenu>
@@ -63,22 +63,25 @@
    <Grid Visibility="{Binding Shell.Section, Converter={StaticResource Section}, ConverterParameter=AUV}">
     <Grid.ColumnDefinitions><ColumnDefinition Width="204"/><ColumnDefinition/></Grid.ColumnDefinitions>
     <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Background="{DynamicResource SurfaceBrush}">
-     <DockPanel Margin="8,12">
+     <Grid><DockPanel Margin="8,12">
       <StackPanel DockPanel.Dock="Top" Margin="6,0,4,10"><TextBlock Text="{local:Tr Agents, 智能体}" Style="{StaticResource CardTitle}" Margin="0"/><TextBlock Text="{local:Tr 'Drag to arrange · Alt+↑/↓', '拖动排序 · Alt+↑/↓'}" Style="{StaticResource Caption}" Margin="0,2,0,0"/></StackPanel>
       <ListBox x:Name="AgentRail" ItemsSource="{Binding Shell.Agents}" SelectedItem="{Binding Shell.SelectedAgent, Mode=TwoWay}" AllowDrop="True" PreviewMouseLeftButtonDown="Rail_PreviewMouseLeftButtonDown" PreviewMouseMove="Rail_PreviewMouseMove" DragOver="Rail_DragOver" Drop="Rail_Drop" PreviewKeyDown="Rail_PreviewKeyDown" AutomationProperties.Name="Agents" AutomationProperties.AutomationId="auv.agents" KeyboardNavigation.TabNavigation="Once">
        <ListBox.ItemTemplate><DataTemplate><local:AllowanceRow x:Name="ProviderRow" ShowFill="{Binding Desktop.ShowFill, Source={x:Static Application.Current}}" ShowStatus="{Binding Desktop.ShowStatus, Source={x:Static Application.Current}}" Card="{Binding Card}" MinHeight="0"><local:AllowanceRow.Style><Style TargetType="{x:Type local:AllowanceRow}"><Setter Property="Height" Value="64"/><Style.Triggers><DataTrigger Binding="{Binding Card.HasDisplayableQuota}" Value="False"><Setter Property="Height" Value="36"/></DataTrigger></Style.Triggers></Style></local:AllowanceRow.Style></local:AllowanceRow></DataTemplate></ListBox.ItemTemplate>
       </ListBox>
      </DockPanel>
+     <!-- 0.18.6: one 3px accent bar beside the selected agent; it slides to the newly selected row (160 ms). The 8px margin holds it, so rows keep their width. -->
+     <Canvas IsHitTestVisible="False" ClipToBounds="True"><Rectangle x:Name="RailIndicator" Width="3" RadiusX="1.5" RadiusY="1.5" Fill="{DynamicResource AccentBrush}" Canvas.Left="2" Visibility="Collapsed"><Rectangle.RenderTransform><TranslateTransform x:Name="RailIndicatorOffset"/></Rectangle.RenderTransform></Rectangle>
+      <Border x:Name="RailDropLine" Height="2" CornerRadius="1" Background="{DynamicResource AccentBrush}" Canvas.Left="8" Visibility="Collapsed"/></Canvas></Grid>
     </Border>
-    <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="20,14,20,16">
-     <StackPanel MaxWidth="900" HorizontalAlignment="Stretch">
+    <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="24">
+     <StackPanel x:Name="DetailPage" MaxWidth="900" HorizontalAlignment="Stretch">
       <Grid Margin="0,0,0,14"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
        <StackPanel><TextBlock Text="{Binding Shell.SelectedAgent.Name}" Style="{StaticResource PageTitle}"/><TextBlock Text="{Binding SelectedCard.Plan}" Visibility="{Binding HasPlan, Converter={StaticResource Visible}}" Style="{StaticResource Caption}" Margin="0,3,0,0"/></StackPanel>
        <Button Grid.Column="1" Content="{Binding SettingsButton}" Click="AgentSettings_Click" VerticalAlignment="Center" AutomationProperties.AutomationId="auv.detail.settings"/>
       </Grid>
       <!-- Usage -->
       <Border Style="{StaticResource Card}" AutomationProperties.AutomationId="auv.card.usage">
-       <StackPanel>
+       <StackPanel x:Name="UsageContent">
         <TextBlock Text="{local:Tr Usage, 用量}" Style="{StaticResource CardTitle}"/>
         <TextBlock Text="{Binding NoQuotaText}" Style="{StaticResource Muted}" Visibility="{Binding HasUsage, Converter={StaticResource InverseVisible}}"/>
         <local:ClaudeConnectPanel Margin="0,10,0,4" Visibility="{Binding IsClaude, Converter={StaticResource Visible}}"/>

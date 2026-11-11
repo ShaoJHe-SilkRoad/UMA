@@ -68,6 +68,7 @@ public partial class MainWindow : Window
             AppBrandIcon.Apply(this, Host.IsDark);
         };
         Closing += (_, _) => Persist();
+        SetUpMotion();
         Model.CopyText = text =>
         {
             try { Clipboard.SetText(text); Model.InstructionStatus = Loc.T("Instruction copied. Paste it to your receiving Leader; no setting has been applied.", "指令已复制。请粘贴给接收端 Leader；没有应用任何设置。"); }
@@ -85,6 +86,72 @@ public partial class MainWindow : Window
         if (!success) Model.Status = Host.Store.LastError!;
         return success;
     }
+    // ---- 0.18.6 motion (see Motion: off when Windows "Show animations" is off) ----
+
+    private string? shownAgentId; private AllowanceCard? shownCard;
+    private void SetUpMotion()
+    {
+        StatusText.Text = Model.Status;
+        Model.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(MainViewModel.Status)) ShowStatus(Model.Status);
+            else if (e.PropertyName == nameof(MainViewModel.SelectedCard)) DetailChanged();
+            else if (string.IsNullOrEmpty(e.PropertyName)) { ShowStatus(Model.Status); DetailChanged(); }
+        };
+        shownAgentId = Model.Shell.SelectedAgent.Id; shownCard = Model.SelectedCard;
+        AgentRail.LayoutUpdated += (_, _) => PlaceRailIndicator();
+        AgentRail.SelectionChanged += (_, _) => railSlide = true;
+        Loaded += (_, _) =>
+        {
+            Motion.Enter((UIElement)Content, 0, .98, 160);
+            if (Host.Providers is { } providers)
+                providers.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ProviderController.Busy)) SpinRefresh(providers.Busy); };
+        };
+    }
+    /// <summary>A new page fades in rising 8px (180 ms); new figures on the same page pulse the Usage card once (150 ms).</summary>
+    private void DetailChanged()
+    {
+        var agent = Model.Shell.SelectedAgent.Id; var card = Model.SelectedCard;
+        if (agent != shownAgentId) Motion.Enter(DetailPage, 8, 1, 180);
+        else if (!ReferenceEquals(card, shownCard) && card.HasDisplayableQuota && card.ObservedAt != shownCard?.ObservedAt) Motion.Pulse(UsageContent);
+        shownAgentId = agent; shownCard = card;
+    }
+    /// <summary>Status line: the old message fades out (90 ms), the new one fades in (120 ms).</summary>
+    private string pendingStatus = ""; private bool statusFading;
+    private void ShowStatus(string text)
+    {
+        pendingStatus = text;
+        if (statusFading || StatusText.Text == text) return; // a running fade picks up the latest message
+        statusFading = true;
+        Motion.FadeOut(StatusText, 90, () =>
+        {
+            statusFading = false; StatusText.Text = pendingStatus;
+            Motion.Enter(StatusText, 0, 1, 120);
+        });
+    }
+    private bool spinning;
+    private void SpinRefresh(bool busy)
+    {
+        if (busy == spinning) return;
+        spinning = busy; Motion.Spin(RefreshSpin, busy); Motion.Spin(FooterRefreshSpin, busy);
+    }
+    /// <summary>Keeps the rail's accent bar beside the selected row: it slides after a selection change and follows instantly on scroll, resize or reorder.</summary>
+    private bool railSlide; private double railY = double.NaN, railHeight;
+    private void PlaceRailIndicator()
+    {
+        if (AgentRail.ItemContainerGenerator.ContainerFromItem(Model.Shell.SelectedAgent) is not ListBoxItem { IsVisible: true } item || RailIndicator.Parent is not Canvas canvas || !item.IsDescendantOf(AgentRail))
+        { RailIndicator.Visibility = Visibility.Collapsed; return; }
+        var top = item.TransformToVisual(canvas).Transform(new Point(0, 0)).Y;
+        var height = Math.Max(0, item.ActualHeight - 16);
+        var y = top + 8;
+        if (y == railY && height == railHeight && RailIndicator.Visibility == Visibility.Visible) return;
+        var first = double.IsNaN(railY);
+        railY = y; railHeight = height;
+        RailIndicator.Height = height; RailIndicator.Visibility = Visibility.Visible;
+        Motion.SlideTo(RailIndicatorOffset, y, railSlide && !first);
+        railSlide = false;
+    }
+
     private void GlobalSettings_Click(object sender, RoutedEventArgs e) => OpenSettings(null);
     /// <summary>Global settings (null) or one agent's own settings, opened from its page.</summary>
     internal void OpenSettings(string? agentId) => new SettingsWindow(this, agentId).ShowDialog();
@@ -111,12 +178,26 @@ public partial class MainWindow : Window
         var delta = e.GetPosition(AgentRail) - start;
         if (Math.Abs(delta.Y) < SystemParameters.MinimumVerticalDragDistance && Math.Abs(delta.X) < SystemParameters.MinimumHorizontalDragDistance) return;
         var agent = dragAgent; dragStart = null; dragAgent = null;
-        DragDrop.DoDragDrop(AgentRail, new DataObject(typeof(AgentPresentation), agent), DragDropEffects.Move);
+        // 0.18.6: the dragged row turns half transparent and a 2px accent line marks where it will land.
+        var dragged = AgentRail.ItemContainerGenerator.ContainerFromItem(agent) as ListBoxItem;
+        if (dragged != null) dragged.Opacity = .5;
+        try { DragDrop.DoDragDrop(AgentRail, new DataObject(typeof(AgentPresentation), agent), DragDropEffects.Move); }
+        finally { if (dragged != null) dragged.Opacity = 1; RailDropLine.Visibility = Visibility.Collapsed; }
     }
     private void Rail_DragOver(object sender, DragEventArgs e)
-    { e.Effects = e.Data.GetDataPresent(typeof(AgentPresentation)) ? DragDropEffects.Move : DragDropEffects.None; e.Handled = true; }
+    {
+        e.Effects = e.Data.GetDataPresent(typeof(AgentPresentation)) ? DragDropEffects.Move : DragDropEffects.None; e.Handled = true;
+        if (e.Data.GetData(typeof(AgentPresentation)) is not AgentPresentation moved || RailDropLine.Parent is not Canvas canvas) return;
+        var target = Ancestor<ListBoxItem>(e.OriginalSource as DependencyObject);
+        if (target?.DataContext is not AgentPresentation over || over == moved || !target.IsDescendantOf(AgentRail)) { RailDropLine.Visibility = Visibility.Collapsed; return; }
+        // Moving down lands after the target row; moving up lands before it (MoveAgent takes the target's index).
+        var below = Array.IndexOf(Model.Shell.Agents, over) > Array.IndexOf(Model.Shell.Agents, moved);
+        var top = target.TransformToVisual(canvas).Transform(new Point(0, below ? target.ActualHeight + 1.5 : -3.5)).Y;
+        Canvas.SetTop(RailDropLine, top); RailDropLine.Width = Math.Max(0, target.ActualWidth); RailDropLine.Visibility = Visibility.Visible;
+    }
     private void Rail_Drop(object sender, DragEventArgs e)
     {
+        RailDropLine.Visibility = Visibility.Collapsed;
         if (e.Data.GetData(typeof(AgentPresentation)) is not AgentPresentation moved) return;
         var target = Ancestor<ListBoxItem>(e.OriginalSource as DependencyObject)?.DataContext as AgentPresentation;
         var index = target == null ? Model.Shell.Agents.Length - 1 : Array.IndexOf(Model.Shell.Agents, target);

@@ -52,12 +52,21 @@ public partial class SettingsWindow : Window
         PreferencePath.Text = app.Store.PathName;
         Icon = AppBrandIcon.Create(!app.IsDark);
         SourceInitialized += (_, _) => { NativeAppearance.Apply(this, app.IsDark); AppBrandIcon.Apply(this, app.IsDark); };
-        Loaded += (_, _) => AppBrandIcon.Apply(this, app.IsDark);
+        Loaded += (_, _) => { AppBrandIcon.Apply(this, app.IsDark); Motion.Enter(SettingsRoot, 0, .98, 160); };
         ready = true;
     }
     private IEnumerable<FrameworkElement> AllPanes() => [GeneralPane, RefreshPane, AgentsPane, TrayPane, DesktopPane, PrivacyPane];
     private void PaneList_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    { var tag = SelectedPane; foreach (var panel in AllPanes()) panel.Visibility = Equals(panel.Tag, tag) ? Visibility.Visible : Visibility.Collapsed; }
+    {
+        var tag = SelectedPane;
+        foreach (var panel in AllPanes())
+        {
+            var show = Equals(panel.Tag, tag);
+            panel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            // 0.18.6: the new section fades in rising 6px (150 ms).
+            if (show && ready) Motion.Enter(panel, 6, 1, 150);
+        }
+    }
     /// <summary>Opens a pane by its tag (general, refresh, agents, tray, desktop, privacy).</summary>
     public void ShowPane(string tag) => PaneList.SelectedIndex = Math.Max(0, Array.IndexOf(Panes, tag));
     private void DesktopChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)

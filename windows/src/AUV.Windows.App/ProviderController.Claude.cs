@@ -475,9 +475,13 @@ internal sealed class ClaudeBrowserPrompt : Window
             $"AUV 通过 {browser} 中的伴侣读取 Claude 读数，但 {browser} 当前没有运行。{browser} 会以最小化方式打开，随后 AUV 在后台标签页中读取 claude.ai 用量页并关闭该标签页。"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0) });
         if (showDontAsk) body.Children.Add(dontAsk);
         body.Children.Add(buttons);
-        Content = body;
+        // 0.18.6: the prompt is an AUV card: themed surface, rounded outline, and it opens with a short fade and grow.
+        var card = new System.Windows.Controls.Border { Child = body, Margin = new Thickness(12), CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(1), Padding = new Thickness(8, 4, 8, 4) };
+        card.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "SurfaceBrush"); card.SetResourceReference(System.Windows.Controls.Border.BorderBrushProperty, "BorderBrush");
+        card.SetResourceReference(EffectProperty, "CardEffect");
+        Content = card;
         Background = (System.Windows.Media.Brush)app.Resources["CanvasBrush"]; Foreground = (System.Windows.Media.Brush)app.Resources["TextBrush"];
         SourceInitialized += (_, _) => { NativeAppearance.Apply(this, app.IsDark); AppBrandIcon.Apply(this, app.IsDark); };
-        Loaded += async (_, _) => { await Task.Delay(1000); accept.IsEnabled = true; };
+        Loaded += async (_, _) => { Motion.Enter(card, 0, .98, 160); await Task.Delay(1000); accept.IsEnabled = true; };
     }
 }

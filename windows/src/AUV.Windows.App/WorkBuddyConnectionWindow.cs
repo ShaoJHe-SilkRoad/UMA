@@ -39,7 +39,7 @@ public sealed class WorkBuddyConnectionWindow : Window
         controls.Children.Add(buttons); controls.Children.Add(address); controls.Children.Add(status); root.Children.Add(controls); root.Children.Add(browser); Content = root;
         var app = (App)Application.Current; Icon = AppBrandIcon.Create(!app.IsDark);
         SourceInitialized += (_, _) => { NativeAppearance.Apply(this, app.IsDark); AppBrandIcon.Apply(this, app.IsDark); };
-        Loaded += (_, _) => AppBrandIcon.Apply(this, app.IsDark);
+        Loaded += (_, _) => { AppBrandIcon.Apply(this, app.IsDark); Motion.Enter(root, 0, .98, 160); };
         Loaded += async (_, _) => await Initialize();
         Closed += (_, _) => { closed = true; pageGeneration++; foreach (var popup in popups.ToArray()) popup.Dispose(); browser.Dispose(); };
     }
