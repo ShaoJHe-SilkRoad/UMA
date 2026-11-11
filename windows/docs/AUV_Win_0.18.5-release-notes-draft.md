@@ -1,6 +1,6 @@
 # AUV Windows 0.18.5
 
-> DRAFT, not published. Download size, SHA-256 and the final check counts are filled in from the packaged build. Move to `docs/releases/AUV_Win_0.18.5.md` only with the user's go-ahead.
+> DRAFT, not published. Size, SHA-256 and check counts are from the packaged build (2026-11-11). Move to `docs/releases/AUV_Win_0.18.5.md` only with the user's go-ahead.
 
 **Windows stable · version 0.18.5 · build 20261108.1 · Windows 11 x64 · portable ZIP · unsigned.**
 
@@ -32,8 +32,8 @@ Claude gets exact readings on Windows. A small companion extension for Chrome or
 Developer checks on one Windows 11 x64 machine, Chrome 157 and Edge 157, against this package's binaries:
 
 - **256 automated tests passed**, 0 failed.
-- **Companion checks in WebView2:** __COMPANION__ passed. They cover the Mac's Usage page samples and reset wordings, Chinese samples, the extension's background logic in 20 scenarios, and that three shared scripts are identical to the Mac originals.
-- **Native checks:** __NATIVE__
+- **Companion checks in WebView2:** 83 of 83 passed. They cover the Mac's Usage page samples and reset wordings, Chinese samples, the extension's background logic in 20 scenarios, and that three shared scripts are identical to the Mac originals.
+- **Native checks:** 138 product checks, 47 refinement checks and 31 feature checks passed; 12 layout cases / 48 captures and the desktop render check completed. With the installed Codex client, all 10 live provider checks passed, also from the final package extracted to a new folder, whose binaries matched the tested ones.
 - **Live, on a Chinese claude.ai account:** the readings matched the Usage page exactly. In one hour at the 5-minute interval, 13 of 13 automatic syncs read on the first attempt. The 10- and 30-minute intervals fired on time. Killing the helper recovered in about 2 seconds. Edge-only syncs, minimized-window reads in both browsers, two browsers at once (one is used), the open-browser prompt and Remove companion worked.
 - **Found and fixed during live testing:** the helper could reach a stale connection after Update; a browser change synced too early; the browser quit when the read closed its last window; an outdated extension in one browser hid a working one. Each has a test; the last fix was checked by its test only, not again live.
 
@@ -42,11 +42,11 @@ Not tried live: a claude.ai sign-out, site access set to "on click", syncing rig
 ## Download identity
 
 - File: `AUV_Win_0.18.5.zip`
-- Size: **__BYTES__ bytes**
+- Size: **71,629,804 bytes**
 - SHA-256:
 
 ```text
-__SHA256__
+663ad6bc4706b4ba0aef5317f5d3d5c207c303228d0f37c6a75105390c40474c
 ```
 
 AUV for Mac stays at [0.18.4](AUV_Mac_0.18.4.md). A patch that adds the same Chinese reading to the Mac is in [windows/docs/extractor-zh-patch-for-mac.md](../../windows/docs/extractor-zh-patch-for-mac.md).
@@ -85,8 +85,8 @@ Claude 在 Windows 上有了精确读数：Chrome 或 Edge 中的一个小型伴
 在一台 Windows 11 x64 电脑（Chrome 157、Edge 157）上，针对本安装包内的二进制完成的开发者自查：
 
 - **256 项自动测试全部通过**，0 项失败。
-- **WebView2 中的伴侣检查：** __COMPANION__ 通过。覆盖 Mac 的用量页样例与重置写法、中文样例、扩展后台逻辑的 20 个场景，以及三个共享脚本与 Mac 原件一致。
-- **原生检查：** __NATIVE_ZH__
+- **WebView2 中的伴侣检查：** 83 of 83 通过。覆盖 Mac 的用量页样例与重置写法、中文样例、扩展后台逻辑的 20 个场景，以及三个共享脚本与 Mac 原件一致。
+- **原生检查：** 138 项产品检查、47 项界面检查、31 项功能检查全部通过；12 组布局 / 48 张渲染检查和桌面渲染检查完成。使用已安装的 Codex 客户端，10 项实时 provider 检查全部通过；最终安装包解压到新文件夹后，二进制与受测版本一致，同样通过了这 10 项检查。
 - **实机（中文 claude.ai 账户）：** 读数与用量页完全一致。5 分钟间隔连续运行 1 小时，13 次自动同步全部一次成功；10 分钟和 30 分钟间隔按时触发。结束辅助程序后约 2 秒恢复。只用 Edge 同步、两个浏览器的最小化窗口读取、两个浏览器同时连接（只用一个）、询问是否打开浏览器和移除伴侣都正常。
 - **实测中发现并已修复：** 更新后辅助程序可能连到旧连接；切换浏览器时同步过早；读取关闭最后一个窗口时浏览器随之退出；一个浏览器中的旧扩展掩盖了另一个正常的浏览器。每一项都有对应测试；最后一项只经测试验证，未再次实机复测。
 
@@ -95,11 +95,11 @@ Claude 在 Windows 上有了精确读数：Chrome 或 Edge 中的一个小型伴
 ### 下载文件
 
 - 文件：`AUV_Win_0.18.5.zip`
-- 大小：**__BYTES__ 字节**
+- 大小：**71,629,804 字节**
 - SHA-256：
 
 ```text
-__SHA256__
+663ad6bc4706b4ba0aef5317f5d3d5c207c303228d0f37c6a75105390c40474c
 ```
 
 Mac 版保持 [0.18.4](AUV_Mac_0.18.4.md#中文)。为 Mac 加入同样中文读取能力的补丁见 [windows/docs/extractor-zh-patch-for-mac.md](../../windows/docs/extractor-zh-patch-for-mac.md)。
