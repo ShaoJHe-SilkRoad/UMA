@@ -54,7 +54,7 @@ reg delete "HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.silkrd.auv.cla
 | Waiting for Chrome or Edge with the AUV companion | Open the browser where you loaded the extension. Check that the extension is on in its extensions page. |
 | The companion needs access to claude.ai | On the extension's details page, set *Site access* to allow `claude.ai`. |
 | Sign in to claude.ai | Sign in to claude.ai in that browser, then refresh. |
-| The browser companion needs an update | Choose **Update** in Claude settings, then reload the extension. |
+| The AUV extension in Chrome (or Edge) is from a different build | Reload the extension on that browser's extensions page. Do this in every browser where it is loaded after each Update. If Claude settings offer an Update, choose that first. |
 | The browser companion is not answering | Reload the extension, or restart the browser. |
 | Claude's Usage page layout is not recognized | claude.ai changed its page. No figure is shown rather than a wrong one; an AUV update is needed. |
 
@@ -114,7 +114,7 @@ reg delete "HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.silkrd.auv.cla
 | 正在等待装有 AUV 伴侣的 Chrome 或 Edge | 打开你加载扩展的那个浏览器，并在扩展页确认扩展已开启。 |
 | 伴侣需要访问 claude.ai | 在扩展详情页把“网站访问权限”设为允许 `claude.ai`。 |
 | 请在浏览器中登录 claude.ai | 在该浏览器中登录 claude.ai，然后刷新。 |
-| 浏览器伴侣需要更新 | 在 Claude 设置中选择**更新**，然后重新加载扩展。 |
+| Chrome（或 Edge）中的 AUV 扩展与 AUV 设置的伴侣不是同一构建 | 在该浏览器的扩展页重新加载扩展。每次“更新”后，凡是加载了扩展的浏览器都要重新加载一次。如果 Claude 设置中提示有更新，请先选择“更新”。 |
 | 浏览器伴侣没有响应 | 重新加载扩展，或重启浏览器。 |
 | 无法识别 Claude 用量页的布局 | claude.ai 改版了页面。AUV 宁可不显示也不显示错误数字，需要等 AUV 更新。 |
 

@@ -214,6 +214,50 @@ public class ClaudeBrowserBridgeTests : IDisposable
         }
     }
 
+    [Fact] public async Task AnOutdatedBrowserDoesNotHideAConnectedOne()
+    {
+        // Found live (issue A): after Update, Edge still ran the older extension and its host retried every 30 seconds;
+        // each refusal set the whole link to "needs update" although Chrome was connected and current.
+        var pipeName = "AUV.Windows.Preview." + Convert.ToHexString(Guid.NewGuid().ToByteArray())[..24] + ".ClaudeBrowser";
+        using var server = new ClaudeBrowserPipeServer(pipeName, ClaudeBrowserTests.Manifest, _ => true, () => "auto");
+        server.Start();
+        async Task<(System.IO.Pipes.NamedPipeClientStream Client, HostWelcome Welcome)> Hello(string product, string generation)
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var client = new System.IO.Pipes.NamedPipeClientStream(".", pipeName, System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous | System.IO.Pipes.PipeOptions.CurrentUserOnly);
+            await client.ConnectAsync(5000, deadline.Token);
+            await CompanionFraming.WriteAsync(client, CompanionMessageCodec.Encode(new HostHello("1.0.0", "2026110801", ClaudeBrowserTests.Manifest.ExtensionOrigin, product, generation)), 8192, deadline.Token);
+            return (client, (HostWelcome)CompanionMessageCodec.DecodeFromApp((await CompanionFraming.ReadAsync(client, 8192, deadline.Token))!));
+        }
+        const string older = "9b0c2d3e-8a41-4b7c-9d2e-1f3a4b5c6d7e";
+        var (chrome, chromeWelcome) = await Hello("chrome", ClaudeBrowserTests.Generation);
+        using (chrome)
+        {
+            Assert.True(chromeWelcome.Accepted);
+            for (var i = 0; i < 50 && server.State != CompanionLinkState.Connected; i++) await Task.Delay(50);
+            var (edge, edgeWelcome) = await Hello("edge", older);
+            using (edge) Assert.Equal(new HostWelcome(false, "generationMismatch"), edgeWelcome);
+            await Task.Delay(300);
+            Assert.Equal(CompanionLinkState.Connected, server.State);
+            Assert.Equal("chrome", server.Host!.BrowserProduct);
+            Assert.Equal("edge", server.RejectedHost!.BrowserProduct);
+        }
+        // With no browser connected, the refusal is what AUV reports, naming the browser to reload.
+        for (var i = 0; i < 50 && server.State == CompanionLinkState.Connected; i++) await Task.Delay(100);
+        var (again, _) = await Hello("edge", older);
+        using (again)
+        {
+            for (var i = 0; i < 50 && server.State != CompanionLinkState.Rejected; i++) await Task.Delay(50);
+            Assert.Equal(CompanionLinkState.Rejected, server.State);
+            using var coordinator = new ClaudeCompanionCoordinator(server, ClaudeBrowserTests.Manifest);
+            var result = await coordinator.SyncAsync(null, CancellationToken.None);
+            Assert.Equal(ClaudeSyncOutcome.UpdateRequired, result.Outcome); Assert.Equal("edge", result.BrowserProduct);
+            using var _ = UiText.Override(UiLanguage.English);
+            var message = ClaudeBrowserPresentation.Message(result.Outcome, result.BrowserProduct);
+            Assert.Contains("Reload it on Edge's extensions page", message);
+        }
+    }
+
     [Fact] public void PipeNameFollowsTheProfileKey()
     {
         var name = ClaudeBrowserPaths.PipeName(@"C:\Users\x\AppData\Local\AUV.Windows.UI.Preview\settings.v1.json");

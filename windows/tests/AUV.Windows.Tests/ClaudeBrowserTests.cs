@@ -134,6 +134,7 @@ public class ClaudeBrowserTests
         public CompanionLinkState State { get; set; } = CompanionLinkState.Connected;
         public HostHello? Host { get; set; } = new("1.0.0", "2026110801", ClaudeBrowserContract.ExtensionOrigin(ExtensionId), "chrome", Generation);
         public string? RejectionReason { get; set; }
+        public HostHello? RejectedHost { get; set; }
         public event Action<CompanionMessage>? Received;
         public event Action? StateChanged;
         public List<CompanionCommand> Sent { get; } = [];

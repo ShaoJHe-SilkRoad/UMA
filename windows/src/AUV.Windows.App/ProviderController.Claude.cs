@@ -59,7 +59,7 @@ public sealed partial class ProviderController
         {
             CompanionLinkState.Connected => Loc.T($"Connected · {ClaudeBrowserPresentation.BrowserName(claudeLink.Host?.BrowserProduct)} · companion {claudeLink.Host?.HostVersion} (build {claudeLink.Host?.HostBuild})",
                 $"已连接 · {ClaudeBrowserPresentation.BrowserName(claudeLink.Host?.BrowserProduct)} · 伴侣 {claudeLink.Host?.HostVersion}（构建 {claudeLink.Host?.HostBuild}）"),
-            CompanionLinkState.Rejected => ClaudeBrowserPresentation.Message(ClaudeSyncOutcome.UpdateRequired, null),
+            CompanionLinkState.Rejected => ClaudeBrowserPresentation.Message(ClaudeSyncOutcome.UpdateRequired, claudeLink.RejectedHost?.BrowserProduct),
             _ => Loc.T("Waiting for Chrome or Edge with the AUV companion.", "正在等待装有 AUV 伴侣的 Chrome 或 Edge。")
         };
     public string ClaudeLastResult => claudeLastResult;

@@ -46,6 +46,8 @@ public sealed class ClaudeBrowserPipeServer : IClaudeCompanionLink, IDisposable
     public CompanionLinkState State { get; private set; } = CompanionLinkState.NoBrowser;
     public HostHello? Host => active?.Hello;
     public string? RejectionReason { get; private set; }
+    /// <summary>The last host refused for an earlier build: its browser is the one whose extension needs a reload.</summary>
+    public HostHello? RejectedHost { get; private set; }
     public event Action<CompanionMessage>? Received;
     public event Action? StateChanged;
 
@@ -99,7 +101,14 @@ public sealed class ClaudeBrowserPipeServer : IClaudeCompanionLink, IDisposable
             await CompanionFraming.WriteAsync(stream, CompanionMessageCodec.Encode(new HostWelcome(reason == "accepted", reason)), ClaudeBrowserContract.MaximumPipeFrameBytes, cancellationToken);
             if (reason != "accepted")
             {
-                if (reason == "generationMismatch") SetState(CompanionLinkState.Rejected, reason);
+                // A browser still running an extension from an earlier build is refused. That changes the overall state only
+                // while no browser is connected: found live, an outdated Edge retrying every 30 seconds hid a working Chrome.
+                if (reason == "generationMismatch")
+                {
+                    bool idle; lock (gate) idle = active == null;
+                    RejectedHost = hello;
+                    if (idle) SetState(CompanionLinkState.Rejected, reason);
+                }
                 return;
             }
             connection = new(stream, hello);

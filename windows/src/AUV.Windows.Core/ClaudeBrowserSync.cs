@@ -63,6 +63,7 @@ public interface IClaudeCompanionLink
     CompanionLinkState State { get; }
     HostHello? Host { get; }
     string? RejectionReason { get; }
+    HostHello? RejectedHost { get; }
     event Action<CompanionMessage>? Received;
     event Action? StateChanged;
     Task<bool> SendAsync(CompanionMessage message, CancellationToken cancellationToken);
@@ -146,7 +147,7 @@ public sealed class ClaudeCompanionCoordinator : IDisposable
     {
         var started = now();
         var product = link.Host?.BrowserProduct;
-        if (link.State == CompanionLinkState.Rejected) return new(link.RejectionReason == "generationMismatch" ? ClaudeSyncOutcome.UpdateRequired : ClaudeSyncOutcome.NotConnected, BrowserProduct: product);
+        if (link.State == CompanionLinkState.Rejected) return new(link.RejectionReason == "generationMismatch" ? ClaudeSyncOutcome.UpdateRequired : ClaudeSyncOutcome.NotConnected, BrowserProduct: link.RejectedHost?.BrowserProduct ?? product);
         if (link.State != CompanionLinkState.Connected) return new(ClaudeSyncOutcome.NotConnected);
         var handshake = await HandshakeAsync(cancellationToken);
         if (handshake != null) return handshake with { BrowserProduct = product };
@@ -247,7 +248,8 @@ public static class ClaudeBrowserPresentation
         return outcome switch
         {
             ClaudeSyncOutcome.NotConnected => UiText.T("Waiting for Chrome or Edge with the AUV companion. Open the browser to sync Claude.", "正在等待装有 AUV 伴侣的 Chrome 或 Edge。打开浏览器后即可同步 Claude。"),
-            ClaudeSyncOutcome.UpdateRequired => UiText.T("The browser companion needs an update. Open Claude settings to update it.", "浏览器伴侣需要更新，请在 Claude 设置中更新。"),
+            // Found live: after Update, the remedy is to reload the extension in that browser, not to choose Update again.
+            ClaudeSyncOutcome.UpdateRequired => UiText.T($"The AUV extension in {browser} is from a different build than the companion AUV set up. Reload it on {browser}'s extensions page. If Claude settings offer an Update, choose that first.", $"{browser} 中的 AUV 扩展与 AUV 设置的伴侣不是同一构建。请在 {browser} 的扩展页重新加载它；如果 Claude 设置中提示有更新，请先选择“更新”。"),
             ClaudeSyncOutcome.CompanionSilent => UiText.T($"The browser companion is not answering. Reload it on {browser}'s extensions page, or restart {browser}.", $"浏览器伴侣没有响应。请在 {browser} 的扩展页重新加载它，或重启 {browser}。"),
             ClaudeSyncOutcome.PermissionRequired => UiText.T($"The companion needs access to claude.ai. Allow site access for AUV Companion in {browser}'s extension settings, then refresh.", $"伴侣需要访问 claude.ai。请在 {browser} 的扩展设置中允许 AUV 伴侣访问该网站，然后刷新。"),
             ClaudeSyncOutcome.SignInRequired => UiText.T($"Sign in to claude.ai in {browser}, then refresh.", $"请在 {browser} 中登录 claude.ai，然后刷新。"),
