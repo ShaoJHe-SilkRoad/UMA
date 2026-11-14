@@ -10,7 +10,8 @@ public partial class UsageFlyout : Window
     {
         this.desktop = desktop; InitializeComponent(); DataContext = desktop;
         ShowInTaskbar = ((App)Application.Current).DesktopAutomation;
-        Deactivated += (_, _) => { if (!exiting) { Hide(); desktop.FlyoutHidden(); } };
+        // 0.18.7: tell the controller when the panel closed itself, so the click that took its focus does not reopen it.
+        Deactivated += (_, _) => { if (exiting) return; var open = IsVisible; Hide(); if (open) desktop.FlyoutDismissed(); desktop.FlyoutHidden(); };
         Closing += (_, e) => { if (!exiting) { e.Cancel = true; Hide(); desktop.FlyoutHidden(); } };
         // 0.18.6: Windows 11 rounds the panel's corners like other flyouts (ignored on Windows 10).
         SourceInitialized += (_, _) => { var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle; var round = 2; _ = DwmSetWindowAttribute(handle, 33, ref round, sizeof(int)); };

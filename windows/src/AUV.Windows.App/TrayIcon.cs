@@ -18,6 +18,8 @@ internal sealed class TrayIcon : IDisposable
     public bool IsAdded { get; private set; }
     public event Action<bool>? Activated;
     public event Action? AvailabilityChanged;
+    /// <summary>0.18.7: the person clicked the tray notice.</summary>
+    public event Action? NoticeClicked;
     internal TrayIcon(Window window, string settingsPath, bool visible = true)
     {
         this.visible = visible;
@@ -59,6 +61,18 @@ internal sealed class TrayIcon : IDisposable
     }
     public void SetTooltip(string value)
     { data.Tip = value.Length <= 127 ? value : value[..127]; if (IsAdded) _ = Shell_NotifyIcon(1, ref data); }
+    /// <summary>0.18.7: one Windows notification from the tray icon. The extra flag is used for this call only, so later tooltip updates do not repeat it.</summary>
+    public bool ShowNotice(string title, string text)
+    {
+        if (disposed || !IsAdded) return false;
+        var notice = data;
+        notice.Flags |= 0x10; // NIF_INFO
+        notice.InfoTitle = title.Length <= 63 ? title : title[..63]; notice.Info = text.Length <= 255 ? text : text[..255];
+        notice.InfoFlags = 0x1 | 0x80; // NIIF_INFO | NIIF_RESPECT_QUIET_TIME
+        return Shell_NotifyIcon(1, ref notice);
+    }
+    /// <summary>Check harness only: delivers a tray callback exactly as the Shell posts it (version 4 layout).</summary>
+    internal void SimulateCallback(int code) => _ = SendMessage(data.Window, Callback, 0, (nint)((int)data.Id << 16 | code & 0xffff));
     public void UpdateAppearance()
     {
         if (disposed) return;
@@ -78,6 +92,7 @@ internal sealed class TrayIcon : IDisposable
             var code = (int)((long)lParam & 0xffff);
             if (code is 0x400 or 0x401) Activated?.Invoke(false); // NIN_SELECT / NIN_KEYSELECT
             else if (code == 0x7B) Activated?.Invoke(true); // WM_CONTEXTMENU
+            else if (code == 0x405) NoticeClicked?.Invoke(); // NIN_BALLOONUSERCLICK
             handled = true;
         }
         return 0;

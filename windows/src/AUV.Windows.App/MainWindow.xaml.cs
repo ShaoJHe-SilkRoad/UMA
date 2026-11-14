@@ -38,12 +38,14 @@ public partial class MainWindow : Window
     public MainViewModel Model { get; }
     private App Host => (App)Application.Current;
     private bool maximizeHovered, maximizePressed;
+    // 0.18.7: remembered while minimized, so saving in that state does not forget the window was maximized.
+    private bool maximizedBeforeMinimize;
     public MainWindow(MainViewModel model)
     {
         Model = model; InitializeComponent(); DataContext = model;
         Icon = AppBrandIcon.Create(!Host.IsDark);
         InputBindings.Add(new KeyBinding(new RelayCommand(() => Host.Desktop.ToggleWidgetCommand.Execute(null)), new KeyGesture(Key.W, ModifierKeys.Control | ModifierKeys.Shift)));
-        InputBindings.Add(new KeyBinding(new RelayCommand(() => Host.Desktop.ToggleFlyout()), new KeyGesture(Key.U, ModifierKeys.Control | ModifierKeys.Shift)));
+        InputBindings.Add(new KeyBinding(new RelayCommand(() => Host.Desktop.ToggleFlyoutFromInput()), new KeyGesture(Key.U, ModifierKeys.Control | ModifierKeys.Shift)));
         InputBindings.Add(new KeyBinding(new RelayCommand(() => OpenSettings(null)), new KeyGesture(Key.OemComma, ModifierKeys.Control)));
         InputBindings.Add(new KeyBinding(new RelayCommand(() => Host.Desktop.Quit()), new KeyGesture(Key.Q, ModifierKeys.Control | ModifierKeys.Shift)));
         InputBindings.Add(new KeyBinding(new RelayCommand(() => _ = RefreshAllSafely()), new KeyGesture(Key.F5)));
@@ -54,7 +56,7 @@ public partial class MainWindow : Window
         if (bounds.Left is double left && bounds.Top is double top)
         { WindowStartupLocation = WindowStartupLocation.Manual; Left = Math.Clamp(left, work.Left, Math.Max(work.Left, work.Right - Width)); Top = Math.Clamp(top, work.Top, Math.Max(work.Top, work.Bottom - Height)); }
         SourceInitialized += (_, _) => { NativeAppearance.Apply(this, Host.IsDark); AppBrandIcon.Apply(this, Host.IsDark); HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(DisplayMessage); };
-        StateChanged += (_, _) => Dispatcher.BeginInvoke(UpdateFrameInsets, System.Windows.Threading.DispatcherPriority.Loaded);
+        StateChanged += (_, _) => { if (WindowState != WindowState.Minimized) maximizedBeforeMinimize = WindowState == WindowState.Maximized; Dispatcher.BeginInvoke(UpdateFrameInsets, System.Windows.Threading.DispatcherPriority.Loaded); };
         var hasSavedGeometry = System.IO.File.Exists(Host.Store.PathName);
         Loaded += (_, _) =>
         {
@@ -63,7 +65,7 @@ public partial class MainWindow : Window
                 Width = Math.Min(1040 + ActualWidth - RootLayout.ActualWidth, work.Width);
                 Height = Math.Min(760 + ActualHeight - RootLayout.ActualHeight, work.Height);
             }
-            if (bounds.Maximized) WindowState = WindowState.Maximized;
+            if (bounds.Maximized) { WindowState = WindowState.Maximized; maximizedBeforeMinimize = true; }
             // WPF initializes its native icons while showing the first window.
             AppBrandIcon.Apply(this, Host.IsDark);
         };
@@ -81,7 +83,7 @@ public partial class MainWindow : Window
         settings.ActiveSection = Model.Shell.Section; settings.SelectedAgent = Model.Shell.SelectedAgent.Id;
         settings.Roles = Model.Roles.ToDictionary(r => r.Key, r => r.Selection);
         var rect = WindowState == WindowState.Normal ? new Rect(Left, Top, ActualWidth, ActualHeight) : RestoreBounds;
-        settings.Geometry = new() { Width = rect.Width, Height = rect.Height, Left = rect.Left, Top = rect.Top, Maximized = WindowState == WindowState.Maximized };
+        settings.Geometry = new() { Width = rect.Width, Height = rect.Height, Left = rect.Left, Top = rect.Top, Maximized = WindowStatePolicy.SaveAsMaximized(WindowState == WindowState.Maximized, WindowState == WindowState.Minimized, maximizedBeforeMinimize) };
         var success = Host.Store.Save(settings);
         if (!success) Model.Status = Host.Store.LastError!;
         return success;
@@ -218,7 +220,7 @@ public partial class MainWindow : Window
     }
     private void Close_Click(object sender, RoutedEventArgs e) => SystemCommands.CloseWindow(this);
     private void AgentSettings_Click(object sender, RoutedEventArgs e) => OpenSettings(Model.Shell.SelectedAgent.Id);
-    private void UsagePopup_Click(object sender, RoutedEventArgs e) => Host.Desktop.ToggleFlyout();
+    private void UsagePopup_Click(object sender, RoutedEventArgs e) => Host.Desktop.ToggleFlyoutFromInput();
     private void Widget_Click(object sender, RoutedEventArgs e) => Host.Desktop.ToggleWidgetCommand.Execute(null);
     private void HideToTray_Click(object sender, RoutedEventArgs e) => Host.Desktop.HideMain();
     private void Exit_Click(object sender, RoutedEventArgs e) => Host.Desktop.Quit();

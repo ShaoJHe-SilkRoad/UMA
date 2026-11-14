@@ -13,6 +13,8 @@ public partial class App : Application, System.ComponentModel.INotifyPropertyCha
     public PreviewSettings Settings { get; private set; } = null!;
     public bool Demo { get; private set; }
     public bool DesktopAutomation { get; private set; }
+    /// <summary>--show-widget: show the Desktop Wizard at start (turning it on if needed).</summary>
+    public bool ShowWidgetArgument { get; private set; }
     public DesktopController Desktop { get; private set; } = null!;
     public ProviderController Providers { get; private set; } = null!;
     private PreviewInstance? instance;
@@ -46,7 +48,7 @@ public partial class App : Application, System.ComponentModel.INotifyPropertyCha
         };
         TaskScheduler.UnobservedTaskException += (_, args) => args.SetObserved();
         UiText.Current = UiText.Resolve(Settings.Language);
-        if (e.Args.Contains("--show-widget")) Settings.Desktop.WidgetVisible = true;
+        ShowWidgetArgument = e.Args.Contains("--show-widget");
         ApplyTheme(Settings.Theme);
         SystemEvents.UserPreferenceChanged += SystemPreferenceChanged;
         SystemParameters.StaticPropertyChanged += SystemParameterChanged;
@@ -76,6 +78,9 @@ public partial class App : Application, System.ComponentModel.INotifyPropertyCha
             var featureIndex = Array.IndexOf(e.Args, "--feature-check-dir");
             if (featureIndex >= 0 && featureIndex + 1 < e.Args.Length)
                 await FeatureVerification.Run(this, window, Path.GetFullPath(e.Args[featureIndex + 1]));
+            var trayIndex = Array.IndexOf(e.Args, "--tray-check-dir");
+            if (trayIndex >= 0 && trayIndex + 1 < e.Args.Length)
+                await TrayVerification.Run(this, window, Path.GetFullPath(e.Args[trayIndex + 1]));
             var companionIndex = Array.IndexOf(e.Args, "--companion-check-dir");
             if (companionIndex >= 0 && companionIndex + 1 < e.Args.Length)
                 await CompanionVerification.Run(Path.GetFullPath(e.Args[companionIndex + 1]));

@@ -18,10 +18,12 @@ public sealed class DesktopController : Observable, IDisposable
     private UsageFlyout? flyout;
     private DesktopWidget? widget;
     private bool disposed, quitting, started;
+    // 0.18.7: see TrayPanelGate. A second click within the double-click time keeps the panel open; a click that just took the panel's focus leaves it closed.
+    private readonly TrayPanelGate panelGate = new(TimeSpan.FromMilliseconds(NativeDesktop.DoubleClickMilliseconds), TimeSpan.FromMilliseconds(400));
     public MainViewModel Main => window.Model;
     public PerformanceViewModel Performance { get; } = new();
     public bool WidgetVisible => widget?.IsVisible == true;
-    public bool WidgetRequested => app.Settings.Desktop.Enabled && app.Settings.Desktop.WidgetVisible;
+    public bool WidgetRequested => app.Settings.Desktop.WidgetRequested;
     public bool Enabled { get => app.Settings.Desktop.Enabled; set { app.Settings.Desktop.Enabled = value; RefreshWizard(); Changed(); window.Persist(); } }
     public WizardDensity Density { get => app.Settings.Desktop.Density; set { app.Settings.Desktop.Density = value; RefreshWizard(); Changed(); window.Persist(); } }
     public WizardDensity[] Densities => Enum.GetValues<WizardDensity>();
@@ -116,7 +118,8 @@ public sealed class DesktopController : Observable, IDisposable
         if (started) return;
         started = true;
         tray = new(window, app.Store.PathName, !HideTrayIcon);
-        tray.Activated += context => { if (context) ShowMenu(); else ToggleFlyout(); };
+        tray.Activated += context => { if (context) ShowMenu(); else Apply(panelGate.TrayClick(DateTimeOffset.UtcNow, flyout?.IsVisible == true)); };
+        tray.NoticeClicked += OpenMain;
         tray.AvailabilityChanged += () =>
         {
             Changed(nameof(TrayAvailable)); Changed(nameof(TrayStatus));
@@ -125,12 +128,24 @@ public sealed class DesktopController : Observable, IDisposable
         };
         UpdateTooltip(); Changed(nameof(TrayAvailable)); Changed(nameof(TrayStatus));
         if (!TrayAvailable) Main.Status = TrayStatus;
-        if (app.Settings.Desktop.WidgetVisible) SetWidgetVisible(true);
+        // Start-up shows the Wizard only if it was left enabled and visible; it never turns a disabled Wizard on by itself.
+        if (app.ShowWidgetArgument) SetWidgetVisible(true); else RefreshWizard();
     }
     private void SelectionChanged(object? sender, PropertyChangedEventArgs e)
     { if (e.PropertyName == nameof(ShellState.Agents)) { RefreshWizard(); Changed(nameof(OrderedIds)); Changed(nameof(TrayAgentDescription)); } }
     /// <summary>The tray tooltip follows the pinned agent, else the agent order (0.17.6 parity), not the selected page.</summary>
     internal void UpdateTooltip() { tray?.SetTooltip(TrayTooltip); Changed(nameof(TrayTooltip)); }
+    /// <summary>A person pressed the panel button, its shortcut or the tray menu item (programmatic callers use <see cref="ToggleFlyout"/>).</summary>
+    public void ToggleFlyoutFromInput() => Apply(panelGate.Toggle(DateTimeOffset.UtcNow, flyout?.IsVisible == true));
+    private void Apply(TrayPanelAction action)
+    {
+        if (disposed || action == TrayPanelAction.None) return;
+        var visible = flyout?.IsVisible == true;
+        if (action == TrayPanelAction.Show != visible) ToggleFlyout();
+    }
+    internal void FlyoutDismissed() => panelGate.Dismissed(DateTimeOffset.UtcNow);
+    /// <summary>Check harness only: the tray callbacks a left click produces.</summary>
+    internal void SimulateTrayClick() => tray?.SimulateCallback(0x400);
     public void ToggleFlyout()
     {
         if (flyout?.IsVisible == true) { flyout.Hide(); UpdateSampling(); return; }
@@ -144,15 +159,22 @@ public sealed class DesktopController : Observable, IDisposable
         }
         flyout.MaxHeight = SystemParameters.WorkArea.Height;
         flyout.Show(); NativeDesktop.Place(flyout, tray?.GetRectangle()); flyout.MaxHeight = NativeDesktop.WorkDips(flyout).Height;
-        NativeDesktop.Place(flyout, tray?.GetRectangle()); flyout.Activate(); UpdateSampling();
+        NativeDesktop.Place(flyout, tray?.GetRectangle()); flyout.Activate();
+        // 0.18.7: a panel that never became active would not close when the person clicks elsewhere.
+        if (!flyout.IsActive) NativeDesktop.BringToFront(flyout);
+        UpdateSampling();
     }
     internal void FlyoutHidden() => UpdateSampling();
     internal void UpdateAppearance() { tray?.UpdateAppearance(); RefreshWizard(); }
     public void SetWidgetVisible(bool value)
     {
         if (disposed) return;
-        app.Settings.Desktop.WidgetVisible = value;
+        // 0.18.7: "Show Desktop Wizard" also turns the Wizard on. Before, a disabled Wizard ignored every Show control without a word.
+        var enabled = app.Settings.Desktop.Enabled;
+        app.Settings.Desktop.RequestWidget(value);
+        if (enabled != app.Settings.Desktop.Enabled) Changed(nameof(Enabled));
         RefreshWizard(); window.Persist();
+        if (value && !WidgetVisible) Main.Status = Loc.T("Desktop Wizard is on. It appears as soon as an agent has a reading.", "桌面浮窗已开启；有智能体读数后就会显示。");
     }
     public void RefreshWizard()
     {
@@ -193,13 +215,24 @@ public sealed class DesktopController : Observable, IDisposable
     public void OpenMain()
     {
         flyout?.Hide(); window.Show();
-        if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
-        window.Activate(); UpdateSampling();
+        // 0.18.7: restore through Windows so a window minimized from maximized comes back maximized.
+        if (window.WindowState == WindowState.Minimized) NativeDesktop.Restore(window);
+        window.Activate();
+        if (!window.IsActive) NativeDesktop.BringToFront(window);
+        UpdateSampling();
     }
     public void HideMain()
     {
         if (!TrayAvailable) { Main.Status = HideTrayIcon ? Loc.T("Show the tray icon in Settings before hiding the main window.", "请先在设置中显示托盘图标，再隐藏主窗口。") : Loc.T("Cannot hide: the system tray is unavailable.", "无法隐藏：系统托盘不可用。"); return; }
         window.Persist(); window.Hide();
+        // 0.18.7: Windows keeps a new tray icon in the hidden-icons area, so the first hide says where AUV went.
+        if (!app.Demo && app.Settings.Desktop.TakeTrayHint())
+        {
+            window.Persist();
+            tray?.ShowNotice(Loc.T("AUV is still running", "AUV 仍在运行"),
+                Loc.T("AUV is hidden in the system tray. If you do not see its icon, open the hidden icons (^) on the taskbar; drag the icon onto the taskbar to keep it there.",
+                    "AUV 已隐藏到系统托盘。如果看不到图标，请点开任务栏上的隐藏图标（^）；把图标拖到任务栏上即可一直显示。"));
+        }
     }
     private void MainClosing(object? sender, CancelEventArgs e)
     { if (!quitting && CloseToTray && TrayAvailable) { e.Cancel = true; HideMain(); } }
@@ -209,7 +242,7 @@ public sealed class DesktopController : Observable, IDisposable
             Background = (System.Windows.Media.Brush)app.Resources["SurfaceBrush"], Foreground = (System.Windows.Media.Brush)app.Resources["TextBrush"] };
         menu.Items.Add(new MenuItem { Header = Loc.T("Open AUV", "打开 AUV"), Command = OpenCommand });
         menu.Items.Add(new MenuItem { Header = Loc.T("Refresh All", "全部刷新"), Command = RefreshAllCommand });
-        var usage = new MenuItem { Header = Loc.T("Usage panel", "用量面板") }; usage.Click += (_, _) => ToggleFlyout(); menu.Items.Add(usage);
+        var usage = new MenuItem { Header = Loc.T("Usage panel", "用量面板") }; usage.Click += (_, _) => ToggleFlyoutFromInput(); menu.Items.Add(usage);
         menu.Items.Add(new MenuItem { Header = WidgetButton, Command = ToggleWidgetCommand });
         menu.Items.Add(new MenuItem { Header = Loc.T("Desktop Wizard settings", "桌面浮窗设置"), Command = SettingsCommand });
         menu.Items.Add(new MenuItem { Header = Loc.T("Hide tray icon", "隐藏托盘图标"), Command = HideTrayCommand });

@@ -71,6 +71,16 @@ internal static class NativeDesktop
         var point = DesktopPlacement.Clamp(new(rect.Left, rect.Top), area, rect.Right - rect.Left, rect.Bottom - rect.Top);
         _ = SetWindowPos(handle, 0, (int)point.X, (int)point.Y, 0, 0, 0x0001 | 0x0004 | 0x0010);
     }
+    /// <summary>0.18.7: bring a minimized window back the way it was (maximized stays maximized).</summary>
+    public static void Restore(Window window) { var handle = new WindowInteropHelper(window).Handle; if (handle != 0) _ = ShowWindow(handle, 9); }
+    public static bool IsMinimized(Window window) { var handle = new WindowInteropHelper(window).Handle; return handle != 0 && IsIconic(handle); }
+    /// <summary>Ask Windows for the foreground. Allowed right after the person clicks the tray icon.</summary>
+    public static void BringToFront(Window window) { var handle = new WindowInteropHelper(window).Handle; if (handle != 0) _ = SetForegroundWindow(handle); }
+    public static int DoubleClickMilliseconds => (int)GetDoubleClickTime();
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ShowWindow(nint hwnd, int command);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsIconic(nint hwnd);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetForegroundWindow(nint hwnd);
+    [DllImport("user32.dll")] private static extern uint GetDoubleClickTime();
     public static bool IsTopmost(Window window) => (GetWindowLongPtr(new WindowInteropHelper(window).Handle, -20).ToInt64() & 8) != 0;
     [DllImport("user32.dll")] private static extern nint MonitorFromWindow(nint window, uint flags);
     [DllImport("user32.dll")] private static extern nint MonitorFromPoint(Point point, uint flags);
