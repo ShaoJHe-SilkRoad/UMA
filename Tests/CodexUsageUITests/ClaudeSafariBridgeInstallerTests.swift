@@ -250,3 +250,17 @@ extension ClaudeSafariBridgeQuarantine {
         }
     }
 }
+
+@Suite("SafariServices replies", .timeLimit(.minutes(1)))
+@MainActor
+struct ClaudeSafariServicesReplyTests {
+    /// Asked from the main actor, as the app asks after installing the Bridge.
+    /// SafariServices replies on its own XPC queue; builds 2026111502 and
+    /// 2026111503 trapped there. Whatever Safari answers here, the app must
+    /// get the answer back without quitting.
+    @Test("Asking Safari about the extension from the main actor returns instead of trapping")
+    func extensionStateReplyIsSafeOffMain() async {
+        let enabled = await ClaudeSafariBridgeProcess.extensionEnabled()
+        #expect(enabled == nil || enabled == true || enabled == false)
+    }
+}

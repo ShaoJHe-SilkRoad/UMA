@@ -197,26 +197,24 @@ enum ClaudeSafariBridgeProcess {
         _ = try? await NSWorkspace.shared.open([page], withApplicationAt: safari, configuration: .init())
     }
 
-    /// SafariServices answers on its own XPC queue. These two must not be
-    /// main-actor isolated: a main-actor reply closure there traps, which is
-    /// how 0.18.7 build 2026111502 quit right after updating the Bridge.
+    /// SafariServices declares these completion handlers main-actor isolated
+    /// but calls them on its own XPC queue, so any closure handed to them traps
+    /// (builds 2026111502 and 2026111503 quit that way). The async forms
+    /// resume a continuation instead, which carries no such check.
     nonisolated static func extensionEnabled() async -> Bool? {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Bool?, Never>) in
-            SFSafariExtensionManager.getStateOfSafariExtension(
-                withIdentifier: ClaudeSafariBridgeInstaller.extensionIdentifier
-            ) { @Sendable state, error in
-                continuation.resume(returning: error == nil ? state?.isEnabled : nil)
-            }
-        }
+        try? await SFSafariExtensionManager.stateOfSafariExtension(
+            withIdentifier: ClaudeSafariBridgeInstaller.extensionIdentifier
+        ).isEnabled
     }
 
     nonisolated static func showExtensionPreferences() async -> Bool {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-            SFSafariApplication.showPreferencesForExtension(
+        do {
+            try await SFSafariApplication.showPreferencesForExtension(
                 withIdentifier: ClaudeSafariBridgeInstaller.extensionIdentifier
-            ) { @Sendable error in
-                continuation.resume(returning: error == nil)
-            }
+            )
+            return true
+        } catch {
+            return false
         }
     }
 
