@@ -535,13 +535,16 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         guard let safariBridge, let safariBridgeAlerts, !actionInProgress else { return }
         actionInProgress = true
         activeAction = .connecting
+        // An update or a repair keeps the extension as Safari had it, so only
+        // a first install ends with the step that is left in Safari.
+        let firstInstall = safariBridgeStatus == .missing
         Task {
             do {
                 _ = try await safariBridge.install()
                 refreshSafariBridgeStatus()
                 actionInProgress = false
                 activeAction = nil
-                if safariBridgeAlerts.installed() {
+                if firstInstall, safariBridgeAlerts.installed() {
                     await safariBridge.openSafariExtensionSettings()
                 }
             } catch {

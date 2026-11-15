@@ -197,12 +197,25 @@ enum ClaudeSafariBridgeProcess {
         _ = try? await NSWorkspace.shared.open([page], withApplicationAt: safari, configuration: .init())
     }
 
-    static func extensionEnabled() async -> Bool? {
-        await withCheckedContinuation { continuation in
+    /// SafariServices answers on its own XPC queue. These two must not be
+    /// main-actor isolated: a main-actor reply closure there traps, which is
+    /// how 0.18.7 build 2026111502 quit right after updating the Bridge.
+    nonisolated static func extensionEnabled() async -> Bool? {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Bool?, Never>) in
             SFSafariExtensionManager.getStateOfSafariExtension(
                 withIdentifier: ClaudeSafariBridgeInstaller.extensionIdentifier
-            ) { state, error in
+            ) { @Sendable state, error in
                 continuation.resume(returning: error == nil ? state?.isEnabled : nil)
+            }
+        }
+    }
+
+    nonisolated static func showExtensionPreferences() async -> Bool {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            SFSafariApplication.showPreferencesForExtension(
+                withIdentifier: ClaudeSafariBridgeInstaller.extensionIdentifier
+            ) { @Sendable error in
+                continuation.resume(returning: error == nil)
             }
         }
     }
@@ -210,13 +223,7 @@ enum ClaudeSafariBridgeProcess {
     /// Opens Safari's Extensions settings at the companion. If Safari will not
     /// take the request, Safari is opened so the person can go there.
     static func openSafariExtensionSettings() async {
-        let shown = await withCheckedContinuation { continuation in
-            SFSafariApplication.showPreferencesForExtension(
-                withIdentifier: ClaudeSafariBridgeInstaller.extensionIdentifier
-            ) { error in
-                continuation.resume(returning: error == nil)
-            }
-        }
+        let shown = await showExtensionPreferences()
         guard !shown,
               let safari = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari")
         else { return }
