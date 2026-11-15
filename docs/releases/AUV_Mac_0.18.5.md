@@ -17,7 +17,7 @@ Claude's Accuracy Sync still needs **UMA Safari Bridge 0.14.3**.
 
 ## Verification and limits
 
-Package checks ran on macOS 27.2 on Apple silicon. AUV is Developer ID signed, Apple notarized and stapled, and passed Gatekeeper assessment. Opening it on a Mac that has never run AUV is being checked after release, through the website download. Physical Intel Macs and macOS 14/15 were not tested.
+Package checks ran on macOS 27.2 on Apple silicon. AUV is Developer ID signed, Apple notarized and stapled, and passed Gatekeeper assessment. It was also downloaded from shaotinghe.com and opened on a Mac that had never run AUV, where 0.18.4 could not be opened. Physical Intel Macs and macOS 14/15 were not tested.
 
 Sectorium is unchanged and was not retested. [Windows is at 0.18.6](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.18.6-win) and is released separately.
 
@@ -54,7 +54,7 @@ Claude 精确同步仍需要 **UMA Safari Bridge 0.14.3**。
 
 ### 验证范围与限制
 
-包验证在 macOS 27.2 的 Apple silicon Mac 上完成。AUV 已完成 Developer ID 签名、Apple 公证与票据装订，并通过 Gatekeeper 检查。在从未运行过 AUV 的 Mac 上通过网站下载并打开，会在发布后检查。尚未测试 Intel 实机或 macOS 14/15。
+包验证在 macOS 27.2 的 Apple silicon Mac 上完成。AUV 已完成 Developer ID 签名、Apple 公证与票据装订，并通过 Gatekeeper 检查。还在一台从未运行过 AUV 的 Mac 上，从 shaotinghe.com 下载并成功打开；0.18.4 在这台 Mac 上打不开。尚未测试 Intel 实机或 macOS 14/15。
 
 本版未改动分区工，也未重新测试。[Windows 版为 0.18.6](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.18.6-win)，单独发布。
 
