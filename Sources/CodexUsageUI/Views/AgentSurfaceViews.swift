@@ -1286,13 +1286,15 @@ public struct AgentWorkspaceSurface: View {
         return language.resetDescription(for: resetsAt, now: now)
     }
 
+    /// Every reset line keeps the same type size: a long line wraps instead of
+    /// shrinking (0.18.8 shrank Claude's 5H line next to its 7D line).
     private func resetText(_ text: String) -> some View {
         Label(text, systemImage: "arrow.clockwise")
             .labelStyle(.titleAndIcon)
             .font(AUVType.secondary)
             .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.85)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// `store.snapshot` is the primary provider's only, so a workspace that is

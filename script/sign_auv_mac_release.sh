@@ -34,6 +34,9 @@ done
 [[ -d "$rc/UMA.app" && -n "$version" && -n "$build" && -d "$bridge_dir/UMA Safari Bridge.app" && -f "$profile" && -f "$entitlements" ]] \
   || { echo "usage: see the top of this script" >&2; exit 2; }
 
+repo="$(cd "$(dirname "$0")/.." && pwd)"
+dmg_background="$repo/Configuration/DMG/background.tiff"
+[[ -f "$dmg_background" ]] || { echo "missing $dmg_background (script/make_dmg_background.swift)" >&2; exit 2; }
 plist() { /usr/libexec/PlistBuddy -c "Print :$2" "$1"; }
 out="$PACKAGES/auv-mac-$version-$build-signed"
 [[ ! -e "$out" ]] || { echo "$out already exists" >&2; exit 1; }
@@ -94,12 +97,49 @@ rm -rf "$check"
 
 # The DMG holds the stapled app and a shortcut to Applications. It is signed,
 # notarized and stapled itself, so it opens without a warning even offline.
+# Its window shows UMA.app on the left and Applications on the right, with an
+# arrow and a hint drawn on the background: Finder lays that out on a writable
+# copy, which is then compressed.
 dmg_name="AUV_Mac_${version}_Universal.dmg"
+volume="AUV $version"
+[[ ! -e "/Volumes/$volume" ]] || { echo "/Volumes/$volume is already mounted; eject it first" >&2; exit 1; }
 stage="$(mktemp -d)"
 ditto UMA.app "$stage/UMA.app"
 ln -s /Applications "$stage/Applications"
-hdiutil create -volname "AUV $version" -srcfolder "$stage" -fs HFS+ -format UDZO -ov "$dmg_name" >/dev/null
+mkdir "$stage/.background"
+cp "$dmg_background" "$stage/.background/background.tiff"
+app_mb=$(( $(du -sm "$stage" | cut -f1) + 20 ))
+hdiutil create -volname "$volume" -srcfolder "$stage" -fs HFS+ -format UDRW -size "${app_mb}m" -ov layout.dmg >/dev/null
 rm -rf "$stage"
+hdiutil attach -readwrite -noverify -noautoopen layout.dmg >/dev/null
+osascript <<APPLESCRIPT
+tell application "Finder"
+  tell disk "$volume"
+    open
+    set current view of container window to icon view
+    set toolbar visible of container window to false
+    set statusbar visible of container window to false
+    set the bounds of container window to {200, 120, 860, 548}
+    set viewOptions to the icon view options of container window
+    set arrangement of viewOptions to not arranged
+    set icon size of viewOptions to 128
+    set text size of viewOptions to 13
+    set background picture of viewOptions to file ".background:background.tiff"
+    set position of item "UMA.app" of container window to {165, 185}
+    set position of item "Applications" of container window to {495, 185}
+    close
+    open
+    update without registering applications
+    delay 2
+    close
+  end tell
+end tell
+APPLESCRIPT
+sync
+test -f "/Volumes/$volume/.DS_Store" || { echo "Finder did not save the window layout" >&2; exit 1; }
+hdiutil detach "/Volumes/$volume" >/dev/null
+hdiutil convert layout.dmg -format UDZO -imagekey zlib-level=9 -ov -o "$dmg_name" >/dev/null
+rm -f layout.dmg
 codesign --force --timestamp --sign "$IDENTITY" "$dmg_name"
 xcrun notarytool submit "$dmg_name" --keychain-profile "$NOTARY_PROFILE" --wait | tee dmg-notarization.txt
 grep -q "status: Accepted" dmg-notarization.txt || { echo "DMG notarization was not accepted" >&2; exit 1; }

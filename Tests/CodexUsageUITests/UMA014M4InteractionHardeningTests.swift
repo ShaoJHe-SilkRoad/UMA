@@ -143,6 +143,12 @@ struct UMA014M4InteractionHardeningTests {
             )
         }
 
+        // A reset line wraps rather than shrinking, so 5H and 7D match in size.
+        let resetView = try #require(surfaces.range(of: "private func resetText(_ text: String) -> some View {"))
+        let resetBody = String(surfaces[resetView.upperBound...].prefix(400))
+        #expect(!resetBody.contains("minimumScaleFactor"))
+        #expect(resetBody.contains(".fixedSize(horizontal: false, vertical: true)"))
+
         // The spoken label must read the same gate the body does.
         #expect(surfaces.contains("if let resetLine { label += \", \\(resetLine)\" }"))
         #expect(surfaces.contains("guard showsReset, let resetsAt = quota?.resetsAt else { return nil }"))
