@@ -104,9 +104,27 @@ public enum AUVInstallNoticePresenter {
         ) else { return }
 
         // Let the main window come up first, so the notice sits in front of it.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            show(notice, language: language(), defaults: defaults, versionKey: versionKey)
+        // A run-loop timer, not a main-queue block: the alert runs modally, and
+        // from inside a main-queue block it would hold back every main-actor
+        // task while it is open, and Quit would wait forever for the shutdown
+        // task (0.18.9 build 2026111507 hung that way).
+        let pending = Pending(notice: notice, language: language, defaults: defaults, versionKey: versionKey)
+        let timer = Timer(timeInterval: 0.8, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                show(pending.notice, language: pending.language(),
+                     defaults: pending.defaults, versionKey: pending.versionKey)
+            }
         }
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    /// Carried into the timer, which fires on the main run loop; nothing in it
+    /// is touched off the main thread.
+    private struct Pending: @unchecked Sendable {
+        let notice: AUVInstallNotice
+        let language: @MainActor () -> AppLanguage
+        let defaults: UserDefaults
+        let versionKey: String
     }
 
     private static func show(
@@ -144,7 +162,11 @@ public enum AUVInstallNoticePresenter {
                 try? NSWorkspace.shared.unmountAndEjectDevice(at: installer)
             }
         case .notInstalled:
-            if response == .alertFirstButtonReturn { NSApp.terminate(nil) }
+            // Quit from the run loop, never from inside this call, so the
+            // shutdown work AUV waits for on quitting can run.
+            if response == .alertFirstButtonReturn {
+                NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0)
+            }
         }
     }
 

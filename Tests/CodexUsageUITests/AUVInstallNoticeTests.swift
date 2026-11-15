@@ -48,4 +48,19 @@ struct AUVInstallNoticeTests {
         }
         #expect(AUVInstallNotice.installed(version: "0.18.9").title(.simplifiedChinese) == "AUV 0.18.9 已安装")
     }
+
+    @Test("The notice is shown from the run loop, and Quit goes through the run loop")
+    func presenterAvoidsMainQueueBlocks() throws {
+        // A modal alert inside a main-queue block deadlocked Quit in build
+        // 2026111507: termination waits for a main-actor task that cannot run.
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("Sources/CodexUsageUI/Services/AUVInstallNotice.swift"),
+            encoding: .utf8)
+        #expect(!source.contains("DispatchQueue.main"))
+        #expect(source.contains("RunLoop.main.add(timer, forMode: .common)"))
+        #expect(!source.contains("NSApp.terminate(nil)"))
+        #expect(source.contains("NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0)"))
+    }
 }
