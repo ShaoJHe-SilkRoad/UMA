@@ -100,8 +100,9 @@ struct M5G3ClaudeLiveAcceptanceTests {
               return observation !== null
                 && observation.fiveHour.usedPercentage === 44
                 && observation.weeklyAllModels === null
+                && observation.planLabel === null
                 && Object.keys(observation).sort().join(",")
-                  === "extractorSchemaVersion,fiveHour,modelSpecificWeekly,observedAt,sourceLayoutVersion,weeklyAllModels";
+                  === "extractorSchemaVersion,fiveHour,modelSpecificWeekly,observedAt,planLabel,sourceLayoutVersion,weeklyAllModels";
             })()
             """
         )?.toBool()

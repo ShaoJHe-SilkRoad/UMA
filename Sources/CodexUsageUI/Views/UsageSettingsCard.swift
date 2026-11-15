@@ -383,19 +383,40 @@ private struct AgentSettingsList: View {
 private struct ClaudePlanSelectionRow: View {
     let language: AppLanguage
     @AppStorage("claude.declaredPlan") private var declaredPlan = ""
+    /// Written by Accuracy Sync from claude.ai's Usage page.
+    @AppStorage("claude.detectedPlan") private var detectedPlan = ""
 
     private var title: String {
         language == .simplifiedChinese ? "Claude 方案" : "Claude plan"
     }
 
-    private var notStated: String {
-        language == .simplifiedChinese ? "未说明" : "Not stated"
+    private var detectedName: String? {
+        switch detectedPlan {
+        case "pro": "Pro"
+        case "max": "Max"
+        case "free": "Free"
+        case "team": "Team"
+        case "enterprise": "Enterprise"
+        default: nil
+        }
+    }
+
+    private var automatic: String {
+        let zh = language == .simplifiedChinese
+        guard let detectedName else { return zh ? "自动" : "Automatic" }
+        return zh ? "自动（\(detectedName)）" : "Automatic (\(detectedName))"
     }
 
     private var guidance: String {
-        language == .simplifiedChinese
-            ? "Claude 不报告方案。选择后，额度偏低时以颜色提醒。"
-            : "Claude does not report its plan. Choose one to get low-remaining colour warnings."
+        let zh = language == .simplifiedChinese
+        if detectedName != nil {
+            return zh
+                ? "精确同步时从 claude.ai 读取方案，额度偏低时以颜色提醒。只有方案不对时才需要手动选择。"
+                : "Read from claude.ai during Accuracy Sync and used for low-remaining colours. Choose one only if it's wrong."
+        }
+        return zh
+            ? "精确同步后会从 claude.ai 自动读取方案；也可以手动选择。额度偏低时以颜色提醒。"
+            : "Read from claude.ai after Accuracy Sync, or choose one yourself. It sets the low-remaining colours."
     }
 
     var body: some View {
@@ -406,7 +427,7 @@ private struct ClaudePlanSelectionRow: View {
                     .font(AppTypography.systemFont(13))
                 Spacer()
                 Picker(title, selection: $declaredPlan) {
-                    Text(notStated).tag("")
+                    Text(automatic).tag("")
                     Text("Pro").tag("pro")
                     Text("Max").tag("max")
                 }

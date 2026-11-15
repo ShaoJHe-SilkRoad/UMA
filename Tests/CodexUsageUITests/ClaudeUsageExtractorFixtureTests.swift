@@ -16,6 +16,7 @@ struct ClaudeUsageExtractorFixtureTests {
         var fiveHourReset: String?
         var weeklyReset: String?
         var modelSpecific: String?
+        var plan: String?
     }
 
     private static let usageLocation =
@@ -44,6 +45,27 @@ struct ClaudeUsageExtractorFixtureTests {
     /// A 5-hour reset can be at most five hours away. "Resets at 6:40 PM"
     /// read at 9 AM would be nearly ten hours ahead, so it is left unknown
     /// rather than shown as a wrong time.
+    @Test("The plan beside \"Your usage\" is read, lowercased, with the quota")
+    func readsPlanBadge() async throws {
+        let outcome = try await extract(fixture: "redesign-2026-11-plan")
+        #expect(outcome == Outcome(
+            status: "success",
+            fiveHour: 8,
+            weekly: 14,
+            fiveHourReset: Self.sessionReset,
+            weeklyReset: Self.weeklyReset,
+            plan: "max"
+        ))
+    }
+
+    @Test("Two plan badges, or none, read as no plan, and the quota still reads")
+    func ambiguousOrMissingPlanIsNil() async throws {
+        let two = try await extract(fixture: "negative-two-plan-badges")
+        #expect(two.status == "success" && two.fiveHour == 8 && two.plan == nil)
+        let none = try await extract(fixture: "redesign-2026-10")
+        #expect(none.status == "success" && none.plan == nil)
+    }
+
     @Test("A text reset beyond its window's length is not reported")
     func textResetBeyondWindowIsNotReported() async throws {
         let outcome = try await extract(
@@ -229,6 +251,7 @@ struct ClaudeUsageExtractorFixtureTests {
             fiveHourReset: o.fiveHour ? o.fiveHour.resetAt : null,
             weeklyReset: o.weeklyAllModels ? o.weeklyAllModels.resetAt : null,
             modelSpecific: o.modelSpecificWeekly ? o.modelSpecificWeekly.modelFamily : null,
+            plan: o.planLabel === undefined ? null : o.planLabel,
           };
         })())
         """
@@ -242,7 +265,8 @@ struct ClaudeUsageExtractorFixtureTests {
             weekly: object["weekly"] as? Double,
             fiveHourReset: object["fiveHourReset"] as? String,
             weeklyReset: object["weeklyReset"] as? String,
-            modelSpecific: object["modelSpecific"] as? String
+            modelSpecific: object["modelSpecific"] as? String,
+            plan: object["plan"] as? String
         )
     }
 }

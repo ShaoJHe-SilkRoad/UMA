@@ -82,6 +82,29 @@ struct ClaudeBrowserBridgeCoreTests {
         #expect(decoded.observation.modelSpecificWeekly?.window.usedPercentage == 35)
     }
 
+    @Test("an allowlisted plan crosses; none is fine; anything else fails closed")
+    func planLabel() throws {
+        func plan(_ label: String?) -> ClaudeBrowserObservationEnvelope {
+            ClaudeBrowserObservationEnvelope(browserFamily: .safari, observation: ClaudeBrowserObservation(
+                fiveHour: ClaudeBrowserQuotaWindow(usedPercentage: 5),
+                weeklyAllModels: nil,
+                planLabel: label,
+                observedAt: "2026-08-01T14:00:00Z"
+            ))
+        }
+        let decoded = try ClaudeBrowserMessageDecoder.decode(ClaudeBrowserMessageDecoder.encode(plan("max")))
+        #expect(decoded.observation.planLabel == "max")
+        try ClaudeBrowserMessageDecoder.validate(decoded)
+        let none = try ClaudeBrowserMessageDecoder.decode(ClaudeBrowserMessageDecoder.encode(plan(nil)))
+        #expect(none.observation.planLabel == nil)
+        try ClaudeBrowserMessageDecoder.validate(none)
+        for bad in ["Max", "max 20x", "someone@example.com", ""] {
+            #expect(throws: ClaudeBrowserBridgeError.invalidContract) {
+                try ClaudeBrowserMessageDecoder.validate(plan(bad))
+            }
+        }
+    }
+
     @Test("unknown page, identity, credential, and HTML fields cannot cross")
     func unexpectedFields() throws {
         let encoded = try ClaudeBrowserMessageDecoder.encode(envelope())

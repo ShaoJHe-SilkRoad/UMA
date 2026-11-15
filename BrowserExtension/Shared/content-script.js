@@ -203,6 +203,7 @@
       fiveHour: observation.fiveHour,
       weeklyAllModels: observation.weeklyAllModels,
       modelSpecificWeekly: observation.modelSpecificWeekly,
+      planLabel: observation.planLabel === undefined ? null : observation.planLabel,
       extractorSchemaVersion: observation.extractorSchemaVersion,
       sourceLayoutVersion: observation.sourceLayoutVersion,
     });

@@ -296,14 +296,20 @@ public struct ClaudeBrowserObservation: Codable, Equatable, Sendable {
     public let fiveHour: ClaudeBrowserQuotaWindow?
     public let weeklyAllModels: ClaudeBrowserQuotaWindow?
     public let modelSpecificWeekly: ClaudeBrowserModelWindow?
+    /// The plan claude.ai shows beside "Your usage", lowercased and
+    /// allowlisted. Absent from companions before 0.14.4.
+    public let planLabel: String?
     public let observedAt: String
     public let extractorSchemaVersion: Int
     public let sourceLayoutVersion: Int
+
+    public static let allowedPlanLabels: Set<String> = ["free", "pro", "max", "team", "enterprise"]
 
     public init(
         fiveHour: ClaudeBrowserQuotaWindow?,
         weeklyAllModels: ClaudeBrowserQuotaWindow?,
         modelSpecificWeekly: ClaudeBrowserModelWindow? = nil,
+        planLabel: String? = nil,
         observedAt: String,
         extractorSchemaVersion: Int = ClaudeBrowserBridgeContract.extractorSchemaVersion,
         sourceLayoutVersion: Int = ClaudeBrowserBridgeContract.sourceLayoutVersion
@@ -311,6 +317,7 @@ public struct ClaudeBrowserObservation: Codable, Equatable, Sendable {
         self.fiveHour = fiveHour
         self.weeklyAllModels = weeklyAllModels
         self.modelSpecificWeekly = modelSpecificWeekly
+        self.planLabel = planLabel
         self.observedAt = observedAt
         self.extractorSchemaVersion = extractorSchemaVersion
         self.sourceLayoutVersion = sourceLayoutVersion
