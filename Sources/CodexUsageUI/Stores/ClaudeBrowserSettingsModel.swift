@@ -166,6 +166,7 @@ final class ClaudeBrowserConsentStore {
         static let allowSafariLaunch = "ClaudeBrowserSyncAllowSafariLaunch.v1"
         static let periodicAccuracySync = "ClaudeBrowserPeriodicAccuracySync.v1"
         static let automaticSafariPromptsOff = "ClaudeSafariAutomaticPromptsOff.v1"
+        static let safariSetupFinished = "ClaudeSafariSetupFinished.v1"
     }
 
     private let defaults: UserDefaults
@@ -204,6 +205,14 @@ final class ClaudeBrowserConsentStore {
         set { defaults.set(newValue, forKey: Key.automaticSafariPromptsOff) }
     }
 
+    /// An exact reading has arrived since consent was given. After a restart
+    /// the last reading comes back as stale, which is not a reason to ask for
+    /// "sync once" again.
+    var safariSetupFinished: Bool {
+        get { defaults.bool(forKey: Key.safariSetupFinished) }
+        set { defaults.set(newValue, forKey: Key.safariSetupFinished) }
+    }
+
     func clearLegacyPeriodicAccuracySync() {
         defaults.removeObject(forKey: Key.periodicAccuracySync)
     }
@@ -228,6 +237,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     @Published private(set) var automaticAccuracySyncInterval: TimeInterval?
     @Published private(set) var estimateConfidence: String?
     @Published private(set) var lastExactAt: Date?
+    @Published private(set) var safariSetupFinished: Bool
     @Published private(set) var liveLinkStage: ClaudeLiveLinkStageReason?
     @Published private(set) var currentQuotaIncludesSafariAccuracy: Bool
     @Published private(set) var localSmartState: ClaudeLocalSmartState
@@ -308,7 +318,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     /// Where Claude's Safari setup stands. Only meaningful in the running app,
     /// which carries a Bridge; elsewhere it reads as done.
     public var safariSetup: ClaudeSafariSetup {
-        var exact = lastExactAt != nil
+        var exact = lastExactAt != nil || safariSetupFinished
         if case .exactAnchorAvailable = browserAccuracyState { exact = true }
         return ClaudeSafariSetup(
             bridge: safariBridge == nil ? .ready : safariBridgeStatus,
@@ -362,6 +372,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         automaticAccuracySyncInterval = nil
         estimateConfidence = nil
         lastExactAt = nil
+        safariSetupFinished = consentStore.safariSetupFinished
         liveLinkStage = nil
         currentQuotaIncludesSafariAccuracy = false
         localSmartState = .unavailable
@@ -879,6 +890,8 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
                 configurationRestoreFailure = nil
                 consentStore.consentGranted = false
                 consentGranted = false
+                consentStore.safariSetupFinished = false
+                safariSetupFinished = false
                 state = .disconnected
             } catch {
                 consentGranted = consentStore.consentGranted
@@ -941,6 +954,10 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         let account = snapshot.channels.first(where: { $0.id == .account })
         estimateConfidence = account?.sourceConfidence
         lastExactAt = account?.lastExactAt
+        if lastExactAt != nil, !safariSetupFinished {
+            consentStore.safariSetupFinished = true
+            safariSetupFinished = true
+        }
         liveLinkStage = diagnostics.lastLiveLinkStage
         currentQuotaIncludesSafariAccuracy = diagnostics.currentQuotaIncludesSafariAccuracy
         localSmartState = diagnostics.localSmartState

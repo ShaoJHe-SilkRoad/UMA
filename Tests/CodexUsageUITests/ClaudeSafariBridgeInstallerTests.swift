@@ -236,6 +236,23 @@ struct ClaudeSafariBridgeInstallerTests {
         #expect(shownInstalled == 1)
         // With the Bridge in place, the page moves on to the last step.
         #expect(model.agentControlState == .safariSetupIncomplete(.syncOnce))
+
+        // Once an exact reading has arrived, a restart that brings the reading
+        // back as stale does not ask to sync once again.
+        consent.safariSetupFinished = true
+        let restarted = ClaudeBrowserSettingsModel(
+            connector: fixture.connector(),
+            consentStore: consent,
+            safariIsRunning: { true }
+        )
+        restarted.connectWithConsent()
+        try await waitForClaudeValue(restarted.$actionInProgress, matching: { !$0 })
+        restarted.useSafariBridge(disk.installer(), alerts: ClaudeSafariBridgeAlerts(
+            installed: { false }, failed: { _ in }
+        ))
+        try await waitForClaudeValue(restarted.$safariBridgeStatus, matching: { $0 == .ready })
+        #expect(restarted.safariSetup.nextStep == .done)
+        #expect(restarted.agentControlState != .safariSetupIncomplete(.syncOnce))
     }
 }
 
