@@ -1,21 +1,23 @@
 # Install AUV / 安装 AUV
 
-[English](#english-installation-guide) · [中文](#中文安装指南) · [Mac 0.17.4](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.4/AUV_Mac_0.17.4_Universal.zip) · [Windows 0.18.6](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.6-win/AUV_Win_0.18.6.zip)
+[English](#english-installation-guide) · [中文](#中文安装指南) · [Mac 0.18.8](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.8/AUV_Mac_0.18.8_Universal.dmg) · [Windows 0.18.6](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.6-win/AUV_Win_0.18.6.zip)
 
 ## English installation guide
 
 <a id="mac-installation-guide"></a>
 
-### Mac 0.17.4
+### Mac 0.18.8
 
-**macOS 14+ · Apple silicon or Intel · Universal app · build 2026102102.** This package is Developer ID signed and Apple notarized. See [tested configurations](MAC_COMPATIBILITY.md) for the distinction between the build's requirements and real-device coverage.
+**macOS 14+ · Apple silicon or Intel · Universal app · build 2026111506.** This package is Developer ID signed and Apple notarized. See [tested configurations](MAC_COMPATIBILITY.md) for the distinction between the build's requirements and real-device coverage.
 
 #### Install
 
-1. [Download AUV_Mac_0.17.4_Universal.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.4/AUV_Mac_0.17.4_Universal.zip). Choose the application ZIP, not GitHub's source archive.
-2. Double-click the ZIP in Finder. It extracts **`UMA.app`**, which opens as **AUV**.
-3. Drag the app to **Applications** on your Mac's internal disk. Keeping it there lets Sectorium disconnect an external drive without ejecting the app itself.
-4. Open AUV and follow the normal macOS first-open prompt. The main window's lower-left corner shows **AUV 0.17.4**. Finder → Get Info shows the app version too.
+1. [Download AUV_Mac_0.18.8_Universal.dmg](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.8/AUV_Mac_0.18.8_Universal.dmg). Choose the application DMG, not GitHub's source archive.
+2. Double-click the DMG in Finder. A window opens with **`UMA.app`**, which opens as **AUV**, and an **Applications** shortcut.
+3. Drag **`UMA.app`** onto the **Applications** shortcut, so it goes to Applications on your Mac's internal disk. Keeping it there lets Sectorium disconnect an external drive without ejecting the app itself. Then eject the disk image in Finder.
+4. Open AUV from Applications and follow the normal macOS first-open prompt. Don't run it from the disk image. The main window's lower-left corner shows **AUV 0.18.8**. Finder → Get Info shows the app version too.
+
+Prefer a ZIP? [AUV_Mac_0.18.8_Universal.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.8/AUV_Mac_0.18.8_Universal.zip) holds the same app: double-click it, then move **`UMA.app`** to Applications.
 
 #### Upgrade
 
@@ -37,24 +39,24 @@ Codex is a separate download. AUV reads the allowance supplied by Codex; it does
 #### Troubleshooting
 
 - **The old version opens:** quit it, then open the copy in Applications instead of an older copy in Downloads.
-- **macOS blocks the app or reports damage:** download the official ZIP again and compare the checksum below. Keep macOS security enabled; [report the complete message](https://github.com/ShaoJHe-SilkRoad/UMA/issues) if it persists.
+- **macOS blocks the app or reports damage:** download the official DMG again and compare the checksum below. Keep macOS security enabled; [report the complete message](https://github.com/ShaoJHe-SilkRoad/UMA/issues) if it persists.
 - **Codex is connected but a statistic is missing:** some statistics are optional and depend on the Codex version and account. Missing token statistics do not invalidate an available account allowance.
 
 #### Optional download check
 
-For the ZIP in Downloads, run:
+For the DMG in Downloads, run:
 
 ```sh
-shasum -a 256 ~/Downloads/AUV_Mac_0.17.4_Universal.zip
+shasum -a 256 ~/Downloads/AUV_Mac_0.18.8_Universal.dmg
 ```
 
-Expected SHA-256:
+Expected SHA-256 (for the ZIP: `b6da0d2a72ac25873219c13cdc46f39101272f02e8db28f4cb5f0109d9c477e6`):
 
 ```text
-595be654c07527e16980ce28a20e33a9b49c6684655ed99017079720c95e04a7
+f949de12ff3b72362cef4f23383aae5dd5573e0644370685f6b4188b8ebfa5a6
 ```
 
-[Mac release notes](releases/AUV_Mac_0.17.4.md) · [Release downloads](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.17.4)
+[Mac release notes](releases/AUV_Mac_0.18.8.md) · [Release downloads](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.18.8)
 
 <a id="windows-installation-guide"></a>
 
@@ -92,16 +94,18 @@ Expected SHA-256: **8f8d54c6f910cb9392b2c3ae05749f70d7ac87ac7a4108f0bb95c88e0645
 
 <a id="mac-中文安装指南"></a>
 
-### Mac 0.17.4
+### Mac 0.18.8
 
-**macOS 14 及以上 · Apple silicon 或 Intel · 通用包 · 构建号 2026102102。** 本包已完成 Developer ID 签名和 Apple 公证。安装要求与实机测试范围有所区别，详见[已测试环境](MAC_COMPATIBILITY.md#中文)。
+**macOS 14 及以上 · Apple silicon 或 Intel · 通用包 · 构建号 2026111506。** 本包已完成 Developer ID 签名和 Apple 公证。安装要求与实机测试范围有所区别，详见[已测试环境](MAC_COMPATIBILITY.md#中文)。
 
 #### 安装
 
-1. [下载 AUV_Mac_0.17.4_Universal.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.17.4/AUV_Mac_0.17.4_Universal.zip)。请选择应用 ZIP，不要选 GitHub 的源码压缩包。
-2. 在 Finder 中双击解压，得到 **`UMA.app`**，打开后显示为 **AUV**。
-3. 将应用拖入 Mac 内置盘的**“应用程序”**文件夹。这样分区工弹出外接硬盘时，应用本身仍能正常运行。
-4. 打开 AUV，按 macOS 正常首次启动提示操作。主窗口左下角应显示 **AUV 0.17.4**，Finder →“显示简介”也可以查看版本。
+1. [下载 AUV_Mac_0.18.8_Universal.dmg](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.8/AUV_Mac_0.18.8_Universal.dmg)。请选择应用 DMG，不要选 GitHub 的源码压缩包。
+2. 在 Finder 中双击 DMG，打开的窗口里有 **`UMA.app`**（打开后显示为 **AUV**）和 **Applications** 快捷方式。
+3. 将 **`UMA.app`** 拖到 **Applications** 快捷方式上，即放入 Mac 内置盘的**“应用程序”**文件夹。这样分区工弹出外接硬盘时，应用本身仍能正常运行。然后在 Finder 中推出磁盘映像。
+4. 从“应用程序”打开 AUV，按 macOS 正常首次启动提示操作；不要直接从磁盘映像运行。主窗口左下角应显示 **AUV 0.18.8**，Finder →“显示简介”也可以查看版本。
+
+更习惯 ZIP？[AUV_Mac_0.18.8_Universal.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.8/AUV_Mac_0.18.8_Universal.zip) 内是同一个应用：双击解压，再把 **`UMA.app`** 移入“应用程序”。
 
 #### 升级
 
@@ -123,24 +127,24 @@ Codex 需单独安装。AUV 显示 Codex 返回的额度，不统计 ChatGPT 网
 #### 遇到问题
 
 - **打开的仍是旧版：**正常退出后，从“应用程序”打开新版，不要打开“下载”中的旧副本。
-- **macOS 阻止启动或提示损坏：**重新下载正式 ZIP，核对下方校验值。保持系统安全保护开启；仍有问题时请[反馈完整提示](https://github.com/ShaoJHe-SilkRoad/UMA/issues)。
+- **macOS 阻止启动或提示损坏：**重新下载正式 DMG，核对下方校验值。保持系统安全保护开启；仍有问题时请[反馈完整提示](https://github.com/ShaoJHe-SilkRoad/UMA/issues)。
 - **已连接 Codex，但缺少某项统计：**部分统计取决于 Codex 版本和账户。缺少 token 统计，不影响已经取得的账户额度。
 
 #### 可选：校验下载文件
 
-ZIP 位于“下载”文件夹时，在终端运行：
+DMG 位于“下载”文件夹时，在终端运行：
 
 ```sh
-shasum -a 256 ~/Downloads/AUV_Mac_0.17.4_Universal.zip
+shasum -a 256 ~/Downloads/AUV_Mac_0.18.8_Universal.dmg
 ```
 
-SHA-256 应为：
+SHA-256 应为（ZIP 为 `b6da0d2a72ac25873219c13cdc46f39101272f02e8db28f4cb5f0109d9c477e6`）：
 
 ```text
-595be654c07527e16980ce28a20e33a9b49c6684655ed99017079720c95e04a7
+f949de12ff3b72362cef4f23383aae5dd5573e0644370685f6b4188b8ebfa5a6
 ```
 
-[Mac 更新说明](releases/AUV_Mac_0.17.4.md#中文) · [发布下载页](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.17.4)
+[Mac 更新说明](releases/AUV_Mac_0.18.8.md#中文) · [发布下载页](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v0.18.8)
 
 <a id="windows-中文安装指南"></a>
 
