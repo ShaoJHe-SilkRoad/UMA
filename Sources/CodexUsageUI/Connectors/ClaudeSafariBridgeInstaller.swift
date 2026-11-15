@@ -15,6 +15,9 @@ public enum ClaudeSafariBridgeStatus: Equatable, Sendable {
     case missing
     /// A Bridge is installed, but not the build this AUV is pinned to.
     case outdated
+    /// The right build is installed but still carries the download flag, so
+    /// macOS runs it from a temporary copy that Safari will not talk to.
+    case needsRepair
     /// AUV is running from a quarantined download location; macOS gives it a
     /// temporary path there, so it must be moved to Applications first.
     case appNotInApplications
@@ -71,6 +74,8 @@ struct ClaudeSafariBridgeInstaller {
     var launch: @MainActor (URL) async -> Bool = { _ in true }
     var openSafariExtensionSettings: @MainActor () async -> Void = {}
     var fileManager: FileManager = .default
+    var isQuarantined: (URL) -> Bool = ClaudeSafariBridgeQuarantine.isQuarantined
+    var clearQuarantine: (URL) -> Void = ClaudeSafariBridgeQuarantine.clear
     /// Moves an old copy out of the way; the Trash, so nothing is lost.
     var discard: (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
 
@@ -85,7 +90,9 @@ struct ClaudeSafariBridgeInstaller {
 
     func status() -> ClaudeSafariBridgeStatus {
         let copies = installed
-        if copies.contains(where: { identity($0) == expected }) { return .ready }
+        let pinned = copies.filter { identity($0) == expected }
+        if pinned.contains(where: { !isQuarantined($0) }) { return .ready }
+        if !pinned.isEmpty { return .needsRepair }
         if !copies.isEmpty { return .outdated }
         return runsFromApplications ? .missing : .appNotInApplications
     }
@@ -117,6 +124,12 @@ struct ClaudeSafariBridgeInstaller {
         } catch {
             throw ClaudeSafariBridgeInstallError.copyFailed
         }
+        // The copy keeps the download flag AUV itself arrived with. Launched
+        // with it, macOS runs the Bridge from a temporary read-only copy (App
+        // Translocation), and Safari never accepts its requests: on a new Mac
+        // every read was dropped until the flag was removed. The Bridge is
+        // notarized and was checked with AUV when AUV was first opened.
+        clearQuarantine(target)
         register(target)
         guard await launch(target) else { throw ClaudeSafariBridgeInstallError.launchFailed }
         return target
@@ -268,5 +281,23 @@ extension ClaudeSafariBridgeAlerts {
                 alert.runModal()
             }
         )
+    }
+}
+
+/// The download flag macOS puts on files that came from the internet.
+enum ClaudeSafariBridgeQuarantine {
+    static let attribute = "com.apple.quarantine"
+
+    static func isQuarantined(_ url: URL) -> Bool {
+        getxattr(url.path, attribute, nil, 0, 0, XATTR_NOFOLLOW) >= 0
+    }
+
+    /// Removes the flag from the app and everything inside it.
+    static func clear(_ url: URL) {
+        removexattr(url.path, attribute, XATTR_NOFOLLOW)
+        guard let items = FileManager.default.enumerator(atPath: url.path) else { return }
+        for case let item as String in items {
+            removexattr(url.appendingPathComponent(item).path, attribute, XATTR_NOFOLLOW)
+        }
     }
 }

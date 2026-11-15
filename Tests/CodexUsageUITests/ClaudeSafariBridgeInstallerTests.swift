@@ -87,6 +87,25 @@ struct ClaudeSafariBridgeInstallerTests {
         #expect(disk.installer().status() == .outdated)
     }
 
+    @Test("A pinned copy that still has the download flag needs a repair, and installing clears the flag")
+    func quarantinedCopyIsRepaired() async throws {
+        let disk = try Disk()
+        // The Bridge inside AUV carries the flag, as it does after a download.
+        ClaudeSafariBridgeQuarantine.setForTest(disk.bundled)
+        let installed = disk.applications.appendingPathComponent("UMA Safari Bridge.app", isDirectory: true)
+        try FileManager.default.createDirectory(at: disk.applications, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: disk.bundled, to: installed)
+        disk.copies = [installed]
+        #expect(ClaudeSafariBridgeQuarantine.isQuarantined(installed))
+        #expect(disk.installer().status() == .needsRepair)
+
+        let target = try await disk.installer().install()
+        #expect(target == installed)
+        #expect(!ClaudeSafariBridgeQuarantine.isQuarantined(target))
+        #expect(!ClaudeSafariBridgeQuarantine.isQuarantined(target.appendingPathComponent("Contents/Info.plist")))
+        #expect(disk.installer().status() == .ready)
+    }
+
     @Test("The copy inside AUV and one in the Trash are not an install")
     func ignoresOwnCopyAndTrash() throws {
         let disk = try Disk()
@@ -188,6 +207,18 @@ struct ClaudeSafariBridgeInstallerTests {
         #expect(shownInstalled == 1)
         if case .safariBridgeSetupRequired = model.agentControlState {
             Issue.record("the page still asks for the Bridge")
+        }
+    }
+}
+
+extension ClaudeSafariBridgeQuarantine {
+    /// Marks a folder and its contents as downloaded, like Archive Utility does.
+    static func setForTest(_ url: URL) {
+        let value = Array("0083;00000000;Safari;".utf8)
+        setxattr(url.path, attribute, value, value.count, 0, XATTR_NOFOLLOW)
+        guard let items = FileManager.default.enumerator(atPath: url.path) else { return }
+        for case let item as String in items {
+            setxattr(url.appendingPathComponent(item).path, attribute, value, value.count, 0, XATTR_NOFOLLOW)
         }
     }
 }

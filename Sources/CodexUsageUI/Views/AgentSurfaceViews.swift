@@ -1420,6 +1420,14 @@ public struct AgentWorkspaceSurface: View {
                     .buttonStyle(.borderedProminent)
             }
             .accessibilityIdentifier("uma.agent.claude.safari-bridge")
+        case .needsRepair:
+            callout(systemImage: "wrench.and.screwdriver", tint: .orange, message: localized(
+                "The Safari Bridge needs a repair before Safari can use it.",
+                "Safari 助手需要修复，Safari 才能使用它。")) {
+                Button(localized("Repair Safari Bridge", "修复 Safari 助手"), action: connectClaude)
+                    .buttonStyle(.borderedProminent)
+            }
+            .accessibilityIdentifier("uma.agent.claude.safari-bridge")
         case .missing, .ready:
             callout(systemImage: "safari", tint: .accentColor, message: localized(
                 "Claude's exact usage is read through Safari. Install the Safari Bridge that comes with AUV.",
