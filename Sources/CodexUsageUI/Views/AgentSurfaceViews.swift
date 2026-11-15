@@ -911,6 +911,8 @@ public struct AgentWorkspaceSurface: View {
         let quota = kind == .fiveHour ? codexProjection.fiveHour : codexProjection.sevenDay
         let percent = quota.state.ringPercent
         let quotaText = quota.displayText(language: store.language)
+        let reset = Self.detailResetLine(
+            kind: kind, resetsAt: quota.resetAt, language: store.language, now: displayNow)
         let tint = LowRemainingUsagePolicy.color(for: LowRemainingUsagePolicy.assessment(
             providerID: providerID.rawValue, admittedPlan: provider?.planLabel,
             remainingPercent: percent))
@@ -924,9 +926,13 @@ public struct AgentWorkspaceSurface: View {
                     .monospacedDigit()
             }
             AgentRemainingQuotaBar(remainingPercent: percent, tint: tint)
+            if let reset { resetText(reset) }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(label) \(localized("remaining", "剩余")): \(quotaText)")
+        .accessibilityLabel(
+            "\(label) \(localized("remaining", "剩余")): \(quotaText)"
+                + (reset.map { ", \($0)" } ?? "")
+        )
         .accessibilityIdentifier("uma.agent.codex.quota.\(kind == .fiveHour ? "five-hour" : "seven-day")")
     }
 
@@ -1256,9 +1262,37 @@ public struct AgentWorkspaceSurface: View {
                 tint: LowRemainingUsagePolicy.color(for: LowRemainingUsagePolicy.assessment(
                     providerID: providerID.rawValue, admittedPlan: provider?.planLabel,
                     remainingPercent: quota.value.remainingPercent)))
+            if let reset = Self.detailResetLine(
+                kind: quota.kind, resetsAt: quota.resetsAt,
+                language: store.language, now: displayNow
+            ) {
+                resetText(reset)
+            }
         }
         .padding(.vertical, 10)
         .accessibilityElement(children: .combine)
+    }
+
+    /// The full page shows every reset that is known, whatever the Quick
+    /// Panel's own reset setting says. A credit balance's next expiry is not a
+    /// reset, and an unknown reset is left out rather than spelled out.
+    static func detailResetLine(
+        kind: ProviderProductQuotaKind,
+        resetsAt: Date?,
+        language: AppLanguage,
+        now: Date
+    ) -> String? {
+        guard kind != .credits, let resetsAt else { return nil }
+        return language.resetDescription(for: resetsAt, now: now)
+    }
+
+    private func resetText(_ text: String) -> some View {
+        Label(text, systemImage: "arrow.clockwise")
+            .labelStyle(.titleAndIcon)
+            .font(AUVType.secondary)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
     }
 
     /// `store.snapshot` is the primary provider's only, so a workspace that is

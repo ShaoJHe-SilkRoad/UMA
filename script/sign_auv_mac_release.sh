@@ -1,5 +1,6 @@
 #!/bin/bash
-# Turn an unsigned AUV release candidate into the notarized ZIP that is published.
+# Turn an unsigned AUV release candidate into the notarized DMG (the main
+# download: open it, drag AUV onto Applications) and ZIP that are published.
 #
 # It adds what the release candidate does not carry and every Mac needs:
 #   - Contents/embedded.provisionprofile: the app's entitlements name its app ID
@@ -90,6 +91,32 @@ spctl -a -vv -t exec "$check/UMA.app"
 test -f "$check/UMA.app/Contents/embedded.provisionprofile"
 spctl -a -vv -t exec "$check/UMA.app/Contents/Library/SafariBridge/UMA Safari Bridge.app"
 rm -rf "$check"
-echo "notarization id: $(awk '/^  id:/{print $2; exit}' notarization.txt)"
-echo "bytes: $(stat -f %z "$zip_name")"
-shasum -a 256 "$zip_name"
+
+# The DMG holds the stapled app and a shortcut to Applications. It is signed,
+# notarized and stapled itself, so it opens without a warning even offline.
+dmg_name="AUV_Mac_${version}_Universal.dmg"
+stage="$(mktemp -d)"
+ditto UMA.app "$stage/UMA.app"
+ln -s /Applications "$stage/Applications"
+hdiutil create -volname "AUV $version" -srcfolder "$stage" -fs HFS+ -format UDZO -ov "$dmg_name" >/dev/null
+rm -rf "$stage"
+codesign --force --timestamp --sign "$IDENTITY" "$dmg_name"
+xcrun notarytool submit "$dmg_name" --keychain-profile "$NOTARY_PROFILE" --wait | tee dmg-notarization.txt
+grep -q "status: Accepted" dmg-notarization.txt || { echo "DMG notarization was not accepted" >&2; exit 1; }
+xcrun stapler staple "$dmg_name"
+
+check="$(mktemp -d)"
+cp "$dmg_name" "$check/"
+xattr -w com.apple.quarantine "0081;$(printf %x "$(date +%s)");Safari;" "$check/$dmg_name"
+spctl -a -vv -t open --context context:primary-signature "$check/$dmg_name"
+mnt="$(mktemp -d)"
+hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$check/$dmg_name" >/dev/null
+spctl -a -vv -t exec "$mnt/UMA.app"
+test -f "$mnt/UMA.app/Contents/embedded.provisionprofile"
+[[ "$(readlink "$mnt/Applications")" == "/Applications" ]]
+hdiutil detach "$mnt" >/dev/null
+rm -rf "$check" "$mnt"
+
+echo "notarization id (app): $(awk '/^  id:/{print $2; exit}' notarization.txt)"
+echo "notarization id (dmg): $(awk '/^  id:/{print $2; exit}' dmg-notarization.txt)"
+for f in "$dmg_name" "$zip_name"; do echo "$f bytes: $(stat -f %z "$f")"; shasum -a 256 "$f"; done
