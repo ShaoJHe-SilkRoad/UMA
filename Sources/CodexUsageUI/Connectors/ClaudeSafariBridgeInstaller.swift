@@ -1,0 +1,272 @@
+import AppKit
+import CoreServices
+import Foundation
+import SafariServices
+
+/// Where the Safari Bridge that Claude's exact sync needs stands on this Mac.
+///
+/// The Bridge is its own app because Safari only loads a web extension from an
+/// app it knows about. AUV carries the exact build it is pinned to and copies
+/// it into ~/Applications, where Safari finds it like any installed app.
+public enum ClaudeSafariBridgeStatus: Equatable, Sendable {
+    /// The installed Bridge is the build this AUV is pinned to.
+    case ready
+    /// No Bridge is installed.
+    case missing
+    /// A Bridge is installed, but not the build this AUV is pinned to.
+    case outdated
+    /// AUV is running from a quarantined download location; macOS gives it a
+    /// temporary path there, so it must be moved to Applications first.
+    case appNotInApplications
+}
+
+struct ClaudeSafariBridgeIdentity: Equatable, Sendable {
+    let build: String
+    let generation: String
+
+    init(build: String, generation: String) {
+        self.build = build
+        self.generation = generation
+    }
+
+    init?(info: [String: Any]) {
+        guard let build = info["CFBundleVersion"] as? String,
+              let generation = info["UMARuntimeGenerationID"] as? String
+        else { return nil }
+        self.init(build: build, generation: generation)
+    }
+
+    static func of(app url: URL) -> Self? {
+        let plist = url.appendingPathComponent("Contents/Info.plist")
+        guard let info = NSDictionary(contentsOf: plist) as? [String: Any] else { return nil }
+        return Self(info: info)
+    }
+}
+
+enum ClaudeSafariBridgeInstallError: Error, Equatable {
+    case notBundled
+    case appNotInApplications
+    case copyFailed
+    case launchFailed
+}
+
+struct ClaudeSafariBridgeInstaller {
+    static let bundledRelativePath = "Contents/Library/SafariBridge/UMA Safari Bridge.app"
+    static let applicationName = "UMA Safari Bridge.app"
+    static let extensionIdentifier = "com.silkrd.uma.ClaudeBrowserCompanion"
+
+    /// The Bridge inside AUV, copied out on install.
+    let bundledBridge: URL
+    /// The build and runtime generation AUV is pinned to.
+    let expected: ClaudeSafariBridgeIdentity
+    /// AUV's own bundle, so a copy inside it is never taken for an install.
+    let appBundle: URL
+    let runsFromApplications: Bool
+    /// Where a new install goes: ~/Applications.
+    let installDirectory: URL
+    var installedCopies: () -> [URL]
+    var identity: (URL) -> ClaudeSafariBridgeIdentity? = ClaudeSafariBridgeIdentity.of(app:)
+    var register: (URL) -> Void = { LSRegisterURL($0 as CFURL, true) }
+    var quitRunning: @MainActor () async -> Void = {}
+    var launch: @MainActor (URL) async -> Bool = { _ in true }
+    var openSafariExtensionSettings: @MainActor () async -> Void = {}
+    var fileManager: FileManager = .default
+    /// Moves an old copy out of the way; the Trash, so nothing is lost.
+    var discard: (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
+
+    /// Copies that count as installed: not inside AUV, not in the Trash.
+    var installed: [URL] {
+        installedCopies().filter { url in
+            let path = url.standardizedFileURL.path
+            return !path.hasPrefix(appBundle.standardizedFileURL.path + "/")
+                && !path.contains("/.Trash/")
+        }
+    }
+
+    func status() -> ClaudeSafariBridgeStatus {
+        let copies = installed
+        if copies.contains(where: { identity($0) == expected }) { return .ready }
+        if !copies.isEmpty { return .outdated }
+        return runsFromApplications ? .missing : .appNotInApplications
+    }
+
+    /// An outdated copy is replaced where it is if that folder can be written;
+    /// otherwise, and for a first install, the Bridge goes to ~/Applications.
+    func destination() -> URL {
+        if let current = installed.first {
+            let folder = current.deletingLastPathComponent()
+            if fileManager.isWritableFile(atPath: folder.path) { return current }
+        }
+        return installDirectory.appendingPathComponent(Self.applicationName, isDirectory: true)
+    }
+
+    @MainActor
+    func install() async throws -> URL {
+        guard fileManager.fileExists(atPath: bundledBridge.path) else {
+            throw ClaudeSafariBridgeInstallError.notBundled
+        }
+        guard runsFromApplications else { throw ClaudeSafariBridgeInstallError.appNotInApplications }
+        let target = destination()
+        await quitRunning()
+        do {
+            try fileManager.createDirectory(
+                at: target.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            if fileManager.fileExists(atPath: target.path) { try discard(target) }
+            try fileManager.copyItem(at: bundledBridge, to: target)
+        } catch {
+            throw ClaudeSafariBridgeInstallError.copyFailed
+        }
+        register(target)
+        guard await launch(target) else { throw ClaudeSafariBridgeInstallError.launchFailed }
+        return target
+    }
+}
+
+extension ClaudeSafariBridgeInstaller {
+    /// The running app's installer, or nil when AUV carries no Bridge, as in a
+    /// development build. Then nothing about the Bridge is shown or checked.
+    static func live(bundle: Bundle = .main) -> Self? {
+        let bundled = bundle.bundleURL.appendingPathComponent(bundledRelativePath, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: bundled.path),
+              let hostID = bundle.object(forInfoDictionaryKey: "UMASafariHostBundleIdentifier") as? String,
+              let build = bundle.object(forInfoDictionaryKey: "UMASafariHostExtensionBuild") as? String,
+              let generation = bundle.object(forInfoDictionaryKey: "UMASafariHostRuntimeGenerationID") as? String
+        else { return nil }
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return Self(
+            bundledBridge: bundled,
+            expected: ClaudeSafariBridgeIdentity(build: build, generation: generation),
+            appBundle: bundle.bundleURL,
+            runsFromApplications: !bundle.bundlePath.contains("/AppTranslocation/"),
+            installDirectory: home.appendingPathComponent("Applications", isDirectory: true),
+            installedCopies: {
+                NSWorkspace.shared.urlsForApplications(withBundleIdentifier: hostID)
+            },
+            quitRunning: { await ClaudeSafariBridgeProcess.quit(bundleIdentifier: hostID) },
+            launch: { await ClaudeSafariBridgeProcess.launch($0) },
+            openSafariExtensionSettings: { await ClaudeSafariBridgeProcess.openSafariExtensionSettings() }
+        )
+    }
+}
+
+@MainActor
+enum ClaudeSafariBridgeProcess {
+    static func quit(bundleIdentifier: String) async {
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+        guard !running.isEmpty else { return }
+        running.forEach { $0.terminate() }
+        let end = ContinuousClock.now.advanced(by: .seconds(5))
+        while ContinuousClock.now < end,
+              running.contains(where: { !$0.isTerminated }) {
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+    }
+
+    /// The Bridge has no window; starting it once is what makes Safari list
+    /// its extension.
+    static func launch(_ url: URL) async -> Bool {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = false
+        configuration.addsToRecentItems = false
+        return (try? await NSWorkspace.shared.openApplication(at: url, configuration: configuration)) != nil
+    }
+
+    /// Opens Safari's Extensions settings at the companion. If Safari will not
+    /// take the request, Safari is opened so the person can go there.
+    static func openSafariExtensionSettings() async {
+        let shown = await withCheckedContinuation { continuation in
+            SFSafariApplication.showPreferencesForExtension(
+                withIdentifier: ClaudeSafariBridgeInstaller.extensionIdentifier
+            ) { error in
+                continuation.resume(returning: error == nil)
+            }
+        }
+        guard !shown,
+              let safari = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari")
+        else { return }
+        _ = try? await NSWorkspace.shared.openApplication(at: safari, configuration: .init())
+    }
+}
+
+/// What AUV tells the person after the Bridge is installed: the one step only
+/// they can take, turning the extension on in Safari.
+@MainActor
+enum ClaudeSafariBridgeCopy {
+    struct Text: Equatable {
+        let title: String
+        let body: String
+        let open: String
+        let later: String
+    }
+
+    static func installed(language: AppLanguage) -> Text {
+        if language == .simplifiedChinese {
+            return Text(
+                title: "在 Safari 中启用 AUV 的伴侣",
+                body: "Safari 助手已安装。最后一步需要你在 Safari 中完成：在“设置 → 扩展”中勾选“UMA Browser Companion for Claude”，并允许它访问 claude.ai。然后在 Safari 中登录 claude.ai，AUV 就能读取 Claude 的精确用量。",
+                open: "打开 Safari 设置",
+                later: "稍后"
+            )
+        }
+        return Text(
+            title: "Turn on AUV's companion in Safari",
+            body: "The Safari Bridge is installed. One step is left, and only you can take it: in Safari's Settings → Extensions, turn on “UMA Browser Companion for Claude” and allow it on claude.ai. Then sign in to claude.ai in Safari, and AUV can read Claude's exact usage.",
+            open: "Open Safari Settings",
+            later: "Later"
+        )
+    }
+
+    static func failed(_ error: ClaudeSafariBridgeInstallError, language: AppLanguage) -> (String, String) {
+        let chinese = language == .simplifiedChinese
+        switch error {
+        case .appNotInApplications:
+            return chinese
+                ? ("请先把 AUV 移到“应用程序”", "从“下载”直接打开时，macOS 会把 AUV 放在临时位置。请把 AUV 拖进“应用程序”，重新打开后再安装 Safari 助手。")
+                : ("Move AUV to Applications first", "Opened straight from Downloads, macOS runs AUV from a temporary place. Drag AUV into Applications, open it again, then install the Safari Bridge.")
+        case .launchFailed:
+            return chinese
+                ? ("Safari 助手没有启动", "已复制到“应用程序”，但没能启动。请在“访达”中打开“UMA Safari Bridge”一次。")
+                : ("The Safari Bridge didn't start", "It was copied to Applications but didn't start. Open “UMA Safari Bridge” once in the Finder.")
+        case .notBundled, .copyFailed:
+            return chinese
+                ? ("无法安装 Safari 助手", "AUV 没能把 Safari 助手复制到你的“应用程序”文件夹。请重新下载 AUV 后再试。")
+                : ("The Safari Bridge couldn't be installed", "AUV couldn't copy the Safari Bridge into your Applications folder. Download AUV again and retry.")
+        }
+    }
+}
+
+/// The two alerts around installing the Bridge. Only the running app shows
+/// them; tests give their own answers.
+struct ClaudeSafariBridgeAlerts {
+    /// Returns whether to open Safari's Extensions settings.
+    var installed: @MainActor () -> Bool
+    var failed: @MainActor (ClaudeSafariBridgeInstallError) -> Void
+}
+
+extension ClaudeSafariBridgeAlerts {
+    static func live(language: @escaping @MainActor () -> AppLanguage) -> Self {
+        Self(
+            installed: {
+                let copy = ClaudeSafariBridgeCopy.installed(language: language())
+                let alert = NSAlert()
+                alert.alertStyle = .informational
+                alert.messageText = copy.title
+                alert.informativeText = copy.body
+                alert.addButton(withTitle: copy.open)
+                alert.addButton(withTitle: copy.later)
+                NSApp.activate(ignoringOtherApps: true)
+                return alert.runModal() == .alertFirstButtonReturn
+            },
+            failed: { error in
+                let (title, body) = ClaudeSafariBridgeCopy.failed(error, language: language())
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = title
+                alert.informativeText = body
+                NSApp.activate(ignoringOtherApps: true)
+                alert.runModal()
+            }
+        )
+    }
+}

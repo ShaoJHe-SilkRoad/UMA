@@ -71,6 +71,10 @@ public enum ClaudeAgentControlState: Equatable, Sendable {
     case companionStarting
     case companionUpdateRequired
     case onlineVerificationUnavailable
+    /// The Safari Bridge that carries Claude's exact sync is not installed,
+    /// is not the build this AUV is pinned to, or cannot be installed until
+    /// AUV is in Applications.
+    case safariBridgeSetupRequired(ClaudeSafariBridgeStatus)
 
     static func classify(
         consentGranted: Bool,
@@ -219,6 +223,12 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
            control == .consentRequired || control == .localSmartRepairRequired {
             return .statusLineConfigurationUnavailable(statusLineConfigurationIssue)
         }
+        // Once Claude is allowed, the Bridge comes before a Local Smart
+        // repair: someone who uses claude.ai without Claude Code has no Local
+        // Smart to repair, and the Bridge is all their exact figures need.
+        if consentGranted, safariBridgeStatus != .ready {
+            return .safariBridgeSetupRequired(safariBridgeStatus)
+        }
         return control.offeringSync(when: consentGranted && offersAccuracySync)
     }
 
@@ -248,6 +258,12 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     private var safariPromptOpen = false
     private var automaticRetryTask: Task<Void, Never>?
     private let automaticRetrySleep: @Sendable (TimeInterval) async throws -> Void
+    /// Only the running app carries a Bridge to install; elsewhere this stays
+    /// nil and the Bridge reads as ready, as before.
+    private var safariBridge: ClaudeSafariBridgeInstaller?
+    private var safariBridgeAlerts: ClaudeSafariBridgeAlerts?
+    @Published private(set) var safariBridgeStatus: ClaudeSafariBridgeStatus = .ready
+    private var bridgeActivationObserver: AnyCancellable?
 
     /// The first run comes shortly after launch rather than a whole refresh
     /// interval in, so Claude is not left without a reading after every start.
@@ -344,6 +360,12 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     }
 
     public func connectWithConsent() {
+        // With consent given and Local Smart working, what is left to connect
+        // is the Safari Bridge, so the page's one button installs it.
+        if case .safariBridgeSetupRequired = agentControlState {
+            installSafariBridge()
+            return
+        }
         guard !actionInProgress, canConnectLocalSmartMode else { return }
         actionInProgress = true
         activeAction = .connecting
@@ -403,6 +425,53 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     /// alerts are modal: a runtime made anywhere else must never block on one.
     public func enableSafariPrompts(language: @escaping @MainActor () -> AppLanguage) {
         useSafariRecovery(.live(language: language))
+        if let bridge = ClaudeSafariBridgeInstaller.live() {
+            useSafariBridge(bridge, alerts: .live(language: language))
+        }
+    }
+
+    func useSafariBridge(_ bridge: ClaudeSafariBridgeInstaller, alerts: ClaudeSafariBridgeAlerts) {
+        safariBridge = bridge
+        safariBridgeAlerts = alerts
+        refreshSafariBridgeStatus()
+        // The person may install, move or delete it while AUV runs.
+        bridgeActivationObserver = NotificationCenter.default
+            .publisher(for: NSApplication.didBecomeActiveNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.refreshSafariBridgeStatus() }
+            }
+    }
+
+    func refreshSafariBridgeStatus() {
+        let status = safariBridge?.status() ?? .ready
+        if status != safariBridgeStatus { safariBridgeStatus = status }
+    }
+
+    /// Copies the Bridge AUV carries into Applications, starts it, and then
+    /// asks the person to turn the extension on in Safari.
+    public func installSafariBridge() {
+        guard let safariBridge, let safariBridgeAlerts, !actionInProgress else { return }
+        actionInProgress = true
+        activeAction = .connecting
+        Task {
+            do {
+                _ = try await safariBridge.install()
+                refreshSafariBridgeStatus()
+                actionInProgress = false
+                activeAction = nil
+                if safariBridgeAlerts.installed() {
+                    await safariBridge.openSafariExtensionSettings()
+                }
+            } catch {
+                refreshSafariBridgeStatus()
+                actionInProgress = false
+                activeAction = nil
+                safariBridgeAlerts.failed(
+                    error as? ClaudeSafariBridgeInstallError ?? .copyFailed
+                )
+            }
+        }
     }
 
     /// Whether a sync nobody pressed for, from the timer or Refresh All, may
@@ -446,6 +515,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     /// and a state that offers it.
     private var accuracySyncCanRun: Bool {
         consentGranted
+            && safariBridgeStatus == .ready
             && !actionInProgress
             && !safariPromptOpen
             && offersAccuracySync
@@ -456,6 +526,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     /// with Safari closed it asks to open it. Returns whether it went ahead.
     @discardableResult
     public func accuracySyncForRefreshAll() -> Bool {
+        refreshSafariBridgeStatus()
         guard accuracySyncCanRun else { return false }
         if safariRecovery != nil, !safariIsRunning() {
             offerToStartSafari(.launch, trigger: .user)
@@ -467,6 +538,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     }
 
     func runPeriodicAccuracySyncIfDue() {
+        refreshSafariBridgeStatus()
         guard automaticAccuracySyncInterval != nil, accuracySyncCanRun else { return }
         if safariIsRunning() {
             safariPromptPolicy.safariWasRunning()
