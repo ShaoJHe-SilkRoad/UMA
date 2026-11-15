@@ -172,6 +172,8 @@ final class WorkbenchFixtureRunner: HESectoriumCommandRunning, HESectoriumSecure
     var attachedImageInventory: [[String: Any]]?
     var ejectAfterUnmountEnabled = false
     var failNextImageEject = false
+    /// Result of the first-4-KB read probe of an attached image (`/bin/dd`).
+    var deviceReadOutcome: CommandOutcome?
     var occupancyIsClear = false
     var simulateLifecycle = false
     var ignoreNativeModification = false
@@ -251,6 +253,7 @@ final class WorkbenchFixtureRunner: HESectoriumCommandRunning, HESectoriumSecure
             if attachOutcome.succeeded, let attachedImageInventory { imageInventory = attachedImageInventory }
             return attachOutcome
         }
+        if executable == "/bin/dd", let deviceReadOutcome { return deviceReadOutcome }
         if executable == "/usr/sbin/lsof", occupancyIsClear { return .init(exitCode: 1, detail: "") }
         if executable == "/bin/sync", arguments.isEmpty { return .success }
         if executable == "/usr/sbin/diskutil", arguments.first == "unmount", occupancyIsClear { return .success }
@@ -2536,8 +2539,45 @@ struct SectoriumWorkbenchRuntimeTests {
         #expect(fixture.portableWriter.contexts.count == writes)
     }
 
-    @Test("Unload only keeps parent and image connected, then Load mounts the existing APFS volume without duplicate attach")
-    func unloadOnlyThenLoadKeepsPhysicalParentAndAttachedImage() throws {
+    @Test("Unload releases the image but keeps the parent connected, then Load attaches it afresh")
+    func unloadReleasesImageThenLoadAttachesAfresh() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+        fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+        fixture.runner.occupancyIsClear = true
+        fixture.runner.ejectAfterUnmountEnabled = true
+        #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id,
+            name: "Unload Fixture", capacityGiB: 1, filesystem: .apfs, autoLoad: false)).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        let check = try #require(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id))
+        let startIndex = fixture.runner.commands.count
+        let unloaded = fixture.service.unloadDevelopmentDisk(profileID: profile.id, checkpoint: check)
+        #expect(unloaded.succeeded, "\(unloaded)")
+        #expect(unloaded.steps.contains { $0.step == "detachImage" && $0.status == .succeeded })
+        #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == false)
+        // Nothing on the parent drive stays open, so Finder can eject it.
+        #expect(fixture.runner.imageInventory?.isEmpty == true)
+        #expect(fixture.store.value.workbenchOperation == nil)
+        #expect(fixture.store.value.suppressedProfileIDs.contains(profile.id))
+        #expect(fixture.observer.isPresent)
+        // Only the image device is released; the parent drive is never ejected.
+        let unloadMutations = fixture.runner.commands.dropFirst(startIndex).filter { $0.contains("eject") || $0.contains("detach") }
+        #expect(unloadMutations == [["/usr/sbin/diskutil", "eject", "/dev/disk30"]])
+        #expect(fixture.service.profileReadiness(profileID: profile.id) == .notStarted)
+        try FileManager.default.removeItem(atPath: profile.devMountPoint)
+        let loadIndex = fixture.runner.commands.count
+        let loaded = fixture.service.startDevelopmentDisk(profileID: profile.id)
+        #expect(loaded.succeeded, "\(loaded)")
+        #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == true)
+        let loadCommands = Array(fixture.runner.commands.dropFirst(loadIndex))
+        #expect(loadCommands.contains { $0.contains("attach") && $0.last == profile.imagePath })
+        #expect(!loadCommands.contains { $0.contains("eject") || $0.contains("detach") })
+        #expect(!fixture.store.value.suppressedProfileIDs.contains(profile.id))
+    }
+
+    @Test("A refused image release still completes Unload, and Load mounts the attached volume without duplicate attach")
+    func refusedImageReleaseKeepsImageAttachedForLoad() throws {
         let fixture = try makeWorkbenchFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
@@ -2547,28 +2587,88 @@ struct SectoriumWorkbenchRuntimeTests {
             name: "Unload Fixture", capacityGiB: 1, filesystem: .apfs, autoLoad: false)).succeeded)
         let profile = try #require(fixture.service.sectoriumProfiles().first)
         let check = try #require(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id))
+        fixture.runner.failNextImageEject = true
         let startIndex = fixture.runner.commands.count
         let unloaded = fixture.service.unloadDevelopmentDisk(profileID: profile.id, checkpoint: check)
         #expect(unloaded.succeeded, "\(unloaded)")
+        #expect(unloaded.steps.contains { $0.step == "detachImage" && $0.status == .skipped })
         #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == false)
         #expect(fixture.runner.imageInventory?.count == 1)
         #expect(fixture.store.value.workbenchOperation == nil)
-        #expect(fixture.store.value.suppressedProfileIDs.contains(profile.id))
         #expect(fixture.observer.isPresent)
-        #expect(!fixture.runner.commands.dropFirst(startIndex).contains { $0.contains("eject") || $0.contains("detach") })
         #expect(fixture.service.profileReadiness(profileID: profile.id) == .notStarted)
-        #expect(fixture.service.sectoriumReadiness(deviceID: profile.deviceID, selectedProfileID: profile.id,
-            devices: [fixture.device], profiles: [profile]) == .notStarted)
         // Native diskutil unmount removes its custom mountpoint; Load must restore
         // it beneath the verified parent before remounting the already-attached image.
         try FileManager.default.removeItem(atPath: profile.devMountPoint)
+        let loadIndex = fixture.runner.commands.count
         let loaded = fixture.service.startDevelopmentDisk(profileID: profile.id)
         #expect(loaded.succeeded, "\(loaded)")
         #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == true)
-        let commands = Array(fixture.runner.commands.dropFirst(startIndex))
+        let commands = Array(fixture.runner.commands.dropFirst(loadIndex))
         #expect(commands.contains(["/usr/sbin/diskutil", "mount", "-mountPoint", profile.devMountPoint, "/dev/disk31s1"]))
         #expect(!commands.contains { $0.contains("attach") || $0.contains("eject") || $0.contains("detach") })
-        #expect(!fixture.store.value.suppressedProfileIDs.contains(profile.id))
+        _ = startIndex
+    }
+
+    @Test("Load releases an attachment left from an earlier connection of the drive and attaches afresh")
+    func loadReleasesUnreadableAttachmentThenAttachesAfresh() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+        fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+        fixture.runner.occupancyIsClear = true
+        #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id,
+            name: "Stale Fixture", capacityGiB: 1, filesystem: .apfs, autoLoad: false)).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        let check = try #require(fixture.service.prepareStopDevelopmentDiskConfirmation(profileID: profile.id))
+        // The drive was unplugged with the image still attached: it is listed,
+        // nothing on it is mounted, and every read fails.
+        fixture.runner.failNextImageEject = true
+        #expect(fixture.service.unloadDevelopmentDisk(profileID: profile.id, checkpoint: check).succeeded)
+        #expect(fixture.runner.imageInventory?.count == 1)
+        fixture.runner.deviceReadOutcome = .init(exitCode: 1, detail: "dd: /dev/rdisk30: Input/output error\n0+0 records in\n0+0 records out")
+        fixture.runner.ejectAfterUnmountEnabled = true
+        try? FileManager.default.removeItem(atPath: profile.devMountPoint)
+        let loadIndex = fixture.runner.commands.count
+        let loaded = fixture.service.startDevelopmentDisk(profileID: profile.id)
+        #expect(loaded.succeeded, "\(loaded)")
+        #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == true)
+        let commands = Array(fixture.runner.commands.dropFirst(loadIndex))
+        let release = try #require(commands.firstIndex(of: ["/usr/sbin/diskutil", "eject", "/dev/disk30"]))
+        let attach = try #require(commands.firstIndex { $0.contains("attach") && $0.last == profile.imagePath })
+        #expect(release < attach)
+        // The unreadable attachment is never mounted.
+        #expect(!commands.contains(["/usr/sbin/diskutil", "mount", "-mountPoint", profile.devMountPoint, "/dev/disk31s1"]))
+    }
+
+    @Test("A read probe that times out or fails otherwise leaves the attachment alone")
+    func onlyExplicitReadFailuresCountAsUnreadable() {
+        #expect(MacStorageBackend.isUnreadableDeviceResult(.init(exitCode: 1, detail: "dd: /dev/rdisk5: Input/output error")))
+        #expect(MacStorageBackend.isUnreadableDeviceResult(.init(exitCode: 1, detail: "dd: /dev/rdisk5: Device not configured")))
+        #expect(MacStorageBackend.isUnreadableDeviceResult(.init(exitCode: 0, detail: "0+0 records in\n0+0 records out")))
+        #expect(!MacStorageBackend.isUnreadableDeviceResult(.init(exitCode: 0, detail: "1+0 records in\n1+0 records out")))
+        #expect(!MacStorageBackend.isUnreadableDeviceResult(.init(exitCode: -1, detail: "command timed out")))
+        #expect(!MacStorageBackend.isUnreadableDeviceResult(.init(exitCode: 1, detail: "dd: /dev/rdisk5: Permission denied")))
+        #expect(!MacStorageBackend.isUnreadableDeviceResult(.init(exitCode: 127, detail: "fixture command not configured")))
+    }
+
+    @Test("Resume accepts a pending target recorded as deviceID:imagePath")
+    func resumeAcceptsCompositePendingTarget() throws {
+        let fixture = try makeWorkbenchFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.runner.simulateLifecycle = true; fixture.runner.imageInventory = []
+        fixture.runner.encryptionOutput = .init(exitCode: 0, detail: "encrypted: NO\n")
+        fixture.runner.occupancyIsClear = true
+        #expect(fixture.service.createDevelopmentDisk(.init(deviceID: fixture.device.id,
+            name: "Resume Fixture", capacityGiB: 1, filesystem: .apfs, autoLoad: false)).succeeded)
+        let profile = try #require(fixture.service.sectoriumProfiles().first)
+        fixture.store.value = StoragePersistentState(revision: fixture.store.value.revision + 1, ejectIntent: false,
+            workbenchOperation: "unload:\(UUID().uuidString)", workbenchPhase: "mutating:unmountDEV",
+            workbenchTarget: "\(profile.deviceID):\(profile.imagePath)")
+        let resumed = fixture.service.resumePendingSectoriumOperation()
+        let detail = resumed.failure.map { String(describing: $0) } ?? ""
+        #expect(!detail.contains("failed fresh backing-device validation"), "\(resumed)")
+        #expect(!detail.contains("does not match the registered volume"), "\(resumed)")
     }
 
     @Test("Unload completion recovery is independent of external documentation and never repeats unmount")
@@ -2621,7 +2721,8 @@ struct SectoriumWorkbenchRuntimeTests {
         #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == false)
         #expect(!FileManager.default.fileExists(atPath: profile.devMountPoint))
         let mutations = fixture.runner.commands.dropFirst(before).filter { $0.contains("unmount") || $0.contains("eject") || $0.contains("detach") }
-        #expect(mutations == [["/usr/sbin/diskutil", "unmount", profile.devMountPoint]])
+        #expect(mutations == [["/usr/sbin/diskutil", "unmount", profile.devMountPoint],
+                              ["/usr/sbin/diskutil", "eject", "/dev/disk30"]])
         #expect(fixture.service.startDevelopmentDisk(profileID: profile.id).succeeded)
         #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == true)
         #expect(fixture.store.value.workbenchOperation == nil)

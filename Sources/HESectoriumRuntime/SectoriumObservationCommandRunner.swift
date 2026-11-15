@@ -106,7 +106,7 @@ final class SectoriumObservationCommandRunner: HESectoriumTimedCommandRunning, H
         guard allowance > 0 else { return Self.expired }
         let key = Key(executable: executable, arguments: arguments, cwd: cwd.path)
         // Occupancy is a foreground safety check, never reusable evidence.
-        let reusable = batch.reuse && executable != "/usr/sbin/lsof"
+        let reusable = batch.reuse && executable != "/usr/sbin/lsof" && executable != "/bin/dd"
         if reusable, let outcome = batch.commands[key] { return outcome }
         guard !reusable || batch.commands.count < 512 else { return Self.expired }
         let timeout = min(allowance, requestedTimeout ?? 15)
@@ -131,6 +131,13 @@ final class SectoriumObservationCommandRunner: HESectoriumTimedCommandRunning, H
         .init(exitCode: -1, detail: "read-only observation deadline exceeded; refresh to retry")
     }
 
+    /// The 4 KB read of an attached image's raw device; never reused.
+    static func isImageReadProbe(_ executable: String, _ arguments: [String]) -> Bool {
+        executable == "/bin/dd" && arguments.count == 4
+            && arguments[0].range(of: #"^if=/dev/rdisk[0-9]+$"#, options: .regularExpression) != nil
+            && Array(arguments.dropFirst()) == ["of=/dev/null", "bs=4096", "count=1"]
+    }
+
     private static func isMetadata(_ executable: String, _ arguments: [String]) -> Bool {
         ProcessCommandRunner.isReadOnlyPropertyList(executable: executable, arguments: arguments)
             || (executable == "/bin/df" && arguments.count == 2 && arguments[0] == "-P" && arguments[1].hasPrefix("/"))
@@ -138,6 +145,7 @@ final class SectoriumObservationCommandRunner: HESectoriumTimedCommandRunning, H
                 && arguments[1].hasPrefix("/") && arguments[2] == "-format")
             || (executable == "/usr/bin/hdiutil" && arguments.count == 2 && arguments[0] == "isencrypted"
                 && arguments[1].hasPrefix("/"))
+            || Self.isImageReadProbe(executable, arguments)
             || (executable == "/usr/sbin/lsof" && arguments.count == 4
                 && Array(arguments.prefix(3)) == ["-nP", "+f", "--"] && arguments[3].hasPrefix("/"))
             || (executable == "/usr/sbin/lsof" && arguments.count == 5

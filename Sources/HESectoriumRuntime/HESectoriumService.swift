@@ -50,26 +50,41 @@ public protocol HESectoriumSecureCommandRunning: HESectoriumCommandRunning {
 }
 public final class ProcessCommandRunner: HESectoriumSecureCommandRunning, HESectoriumTimedCommandRunning {
     private let observationCache = SectoriumReadOnlyObservationCache()
-    public init() {}
+    private let hostCache: SectoriumHostMetadataCache?
+    public init() { hostCache = .shared }
+    init(hostCache: SectoriumHostMetadataCache?) { self.hostCache = hostCache }
+    /// Read-only metadata is shared across observations while the host is
+    /// unchanged; every other command advances the host change clock.
+    private func hostCached(_ executable: String, _ arguments: [String],
+                            _ execute: () -> CommandOutcome) -> CommandOutcome {
+        guard let hostCache else { return execute() }
+        return hostCache.run(executable, arguments, execute: execute)
+    }
     func withReadOnlyObservation<T>(_ body: () throws -> T) rethrows -> T {
         try observationCache.withObservation(body)
     }
     public func run(_ executable: String, _ arguments: [String], cwd: URL) -> CommandOutcome {
         observationCache.run(executable, arguments, cwd: cwd) {
-            execute(executable, arguments, cwd: cwd, standardInput: Data(),
-                    timeout: Self.defaultTimeout(executable: executable, arguments: arguments))
+            hostCached(executable, arguments) {
+                execute(executable, arguments, cwd: cwd, standardInput: Data(),
+                        timeout: Self.defaultTimeout(executable: executable, arguments: arguments))
+            }
         }
     }
     public func run(_ executable: String, _ arguments: [String], cwd: URL, standardInput: Data) -> CommandOutcome {
         observationCache.invalidate()
         defer { observationCache.invalidate() }
+        hostCache?.noteChange()
+        defer { hostCache?.noteChange() }
         return execute(executable, arguments, cwd: cwd, standardInput: standardInput, timeout: nil)
     }
     public func run(_ executable: String, _ arguments: [String], cwd: URL, timeout: TimeInterval) -> CommandOutcome {
         // Timed calls are used by action preflight/execution; never reuse a UI observation.
         observationCache.invalidate()
         defer { observationCache.invalidate() }
-        return execute(executable, arguments, cwd: cwd, standardInput: Data(), timeout: timeout)
+        return hostCached(executable, arguments) {
+            execute(executable, arguments, cwd: cwd, standardInput: Data(), timeout: timeout)
+        }
     }
     private func execute(_ executable: String, _ arguments: [String], cwd: URL, standardInput: Data,
                          timeout: TimeInterval?) -> CommandOutcome {
@@ -182,6 +197,7 @@ public final class ProcessCommandRunner: HESectoriumSecureCommandRunning, HESect
         if executable == "/bin/ps", arguments.count == 4, arguments[0] == "-p", arguments[2] == "-o", arguments[3] == "ppid=" { return 2 }
         if executable == "/usr/sbin/diskutil", arguments.first == "unmount" || arguments.first == "mount" { return 30 }
         if executable == "/usr/sbin/diskutil", arguments == ["image", "attach", "--help"] { return 5 }
+        if SectoriumObservationCommandRunner.isImageReadProbe(executable, arguments) { return 5 }
         if executable == "/usr/sbin/diskutil", Array(arguments.prefix(2)) == ["image", "attach"] { return 90 }
         if isReadOnlyPropertyList(executable: executable, arguments: arguments)
             || (executable == "/usr/bin/hdiutil" && arguments.count == 3
@@ -849,7 +865,19 @@ public final class MacStorageBackend: StorageBackend {
                   let device = text(info, ["DeviceIdentifier"]), validDiskID(device) else {
                 return .init(exitCode: -2, detail: "The attached image does not have one verified unmounted development volume")
             }
-            return command("/usr/sbin/diskutil", ["mount", "-mountPoint", policy.devMountPoint, "/dev/\(device)"])
+            // An attachment made before the parent drive was unplugged and
+            // plugged in again still lists its volume, but every read fails and
+            // mounting ends in "failed to mount". Nothing on it is mounted (just
+            // verified), so release it and attach the image afresh below.
+            if let whole = imageWholeDisk(), attachedImageIsUnreadable(whole) {
+                let released = releaseUnreadableAttachment(whole)
+                guard released.succeeded, imageInventoryMatchCount(for: policy.imagePath) == 0 else {
+                    return .init(exitCode: -2,
+                        detail: "The image attachment left from an earlier connection of this drive could not be released: \(String(released.detail.prefix(160)))")
+                }
+            } else {
+                return command("/usr/sbin/diskutil", ["mount", "-mountPoint", policy.devMountPoint, "/dev/\(device)"])
+            }
         }
         if let password {
             guard let input = hdiutilPassphraseInput(password),
@@ -993,6 +1021,32 @@ public final class MacStorageBackend: StorageBackend {
 
     public func imageIsDetached() -> Bool {
         imageInventoryMatchCount(for: policy.imagePath) == 0
+    }
+
+    /// Reads the first 4 KB of the attached image. Only an explicit I/O error
+    /// or a vanished device counts as unreadable; a timeout or any other
+    /// failure is unknown and leaves the attachment alone.
+    func attachedImageIsUnreadable(_ whole: String) -> Bool {
+        guard validDiskID(whole), whole.range(of: #"^disk[0-9]+$"#, options: .regularExpression) != nil else { return false }
+        let arguments = ["if=/dev/r\(whole)", "of=/dev/null", "bs=4096", "count=1"]
+        // The production runner bounds this read at 5 seconds.
+        return Self.isUnreadableDeviceResult(command("/bin/dd", arguments))
+    }
+
+    static func isUnreadableDeviceResult(_ outcome: CommandOutcome) -> Bool {
+        // A disk image never ends at offset 0, so an empty read is unreadable too.
+        if outcome.exitCode == 0 { return outcome.detail.contains("0+0 records in") }
+        guard outcome.exitCode == 1 else { return false }
+        return outcome.detail.contains("Input/output error") || outcome.detail.contains("Device not configured")
+    }
+
+    /// Releases an attachment that can no longer be read. The caller has
+    /// verified that no volume on it is mounted, so forcing cannot drop data.
+    func releaseUnreadableAttachment(_ whole: String) -> CommandOutcome {
+        guard validDiskID(whole) else { return .init(exitCode: -2, detail: "Invalid image device") }
+        let ejected = command("/usr/sbin/diskutil", ["eject", "/dev/\(whole)"])
+        if ejected.succeeded { return ejected }
+        return command("/usr/bin/hdiutil", ["detach", "-force", "/dev/\(whole)"])
     }
     public func finalOuterState() -> FinalOuterState {
         guard let list = plist(command("/usr/sbin/diskutil", ["list", "-plist"])),
@@ -3012,6 +3066,17 @@ public final class HESectoriumService: @unchecked Sendable {
             guard unloaded else {
                 return workbenchFailure(id, steps, "Unload command completed; its volume state is not yet verified")
             }
+            // Release the image too, so nothing on the parent drive stays open.
+            // Otherwise Finder cannot eject the drive ("in use by diskimagesiod"),
+            // and pulling it leaves an attachment that can no longer be read.
+            // The volume is already unloaded; a refused detach leaves the image
+            // attached exactly as earlier builds did and Load reuses it.
+            if !backend.imageIsDetached() {
+                let detached = backend.perform(.detachImage)
+                steps.append(.init(step: "detachImage", status: detached.succeeded ? .succeeded : .skipped,
+                                   detail: detached.succeeded ? "Image released from the parent drive"
+                                       : "Image stays attached: \(String(detached.detail.prefix(160)))"))
+            }
             // Portable documentation is optional and cannot extend a storage
             // operation or recreate its busy state after the OS completed it.
             recordDeferredPortableCompletion(profile, event: "unloaded", operation: id)
@@ -3876,8 +3941,14 @@ public final class HESectoriumService: @unchecked Sendable {
                                         target: "\(profile.deviceID):\(profile.imagePath)") || state.workbenchPhase != "validating" else {
                 return workbenchFailure(id, steps, "Could not persist the recovery target")
             }
-            guard state.workbenchTarget == profile.imagePath,
-                  let device = verifiedDevice(profile.deviceID, requiringSelectionAnchor: false),
+            // Targets are recorded either as the image path (older builds) or as
+            // "deviceID:imagePath" (above, and every build since 0.17). Accepting
+            // only the first made every composite-target recovery fail here.
+            guard state.workbenchTarget == profile.imagePath
+                    || state.workbenchTarget == "\(profile.deviceID):\(profile.imagePath)" else {
+                return workbenchFailure(id, steps, "Pending operation target does not match the registered volume")
+            }
+            guard let device = verifiedDevice(profile.deviceID, requiringSelectionAnchor: false),
                   device.identityVerified,
                   device.volumeUUIDs.contains(profile.backingVolumeUUID),
                   verifiedBackingVolume(URL(fileURLWithPath: profile.backingMountPoint), on: device)?.uuid == profile.backingVolumeUUID else {
