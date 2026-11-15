@@ -967,10 +967,70 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: ClaudeSettingsMetrics.sectionSpacing) {
             statusCard
+            if model.consentGranted, model.safariSetup.nextStep != .done {
+                setupList
+            }
             settings()
             actions
             details
         }
+    }
+
+    // MARK: Setting up Claude's exact sync, step by step
+
+    private var setupList: some View {
+        let setup = model.safariSetup
+        let next = setup.nextStep
+        let bridgeStep: ClaudeSafariSetup.Step = switch setup.bridge {
+        case .appNotInApplications: .moveToApplications
+        case .outdated: .updateBridge
+        case .needsRepair: .repairBridge
+        case .missing, .ready: .installBridge
+        }
+        let siteStep: ClaudeSafariSetup.Step = next == .signIn ? .signIn : .allowSite
+        return VStack(alignment: .leading, spacing: 8) {
+            ClaudeSettingsGroupTitle(text: language == .simplifiedChinese
+                ? "设置 Claude 精确同步" : "Set up Claude's exact sync")
+            VStack(alignment: .leading, spacing: 10) {
+                setupRow(bridgeStep, done: setup.bridgeDone, next: next)
+                setupRow(.enableExtension, done: setup.extensionDone, next: next)
+                setupRow(siteStep, done: setup.needsSiteAccess || setup.needsSignIn ? false : (setup.hasExactReading ? true : nil), next: next)
+                setupRow(.syncOnce, done: setup.hasExactReading, next: next)
+            }
+            .modifier(ClaudeSettingsCardSurface())
+        }
+        .accessibilityIdentifier("claude.safari-setup.list")
+    }
+
+    /// One step: a tick once done, and the explanation and button only on the
+    /// step to take now. `done` is nil where Safari won't say.
+    private func setupRow(_ step: ClaudeSafariSetup.Step, done: Bool?, next: ClaudeSafariSetup.Step) -> some View {
+        let copy = ClaudeSafariSetupCopy.step(step, language: language)
+        let isNext = step == next
+        return HStack(alignment: .top, spacing: 8) {
+            Image(systemName: done == true ? "checkmark.circle.fill" : (isNext ? "arrow.right.circle.fill" : "circle"))
+                .foregroundStyle(done == true ? Color.green : (isNext ? Color.accentColor : Color.secondary))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(copy.title)
+                    .font(AUVType.headline)
+                    .foregroundStyle(done == true || isNext ? .primary : .secondary)
+                if isNext {
+                    Text(copy.message)
+                        .font(AUVType.secondary)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let button = copy.button {
+                        Button(button) { model.takeSafariSetupStep(step) }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .disabled(model.actionInProgress)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: What Claude reports now
@@ -985,7 +1045,14 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
                 )
                 Divider().opacity(0.5)
             }
-            stateSummary
+            if let action = model.activeAction {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text(language.claudeBrowserActionStatus(action))
+                        .font(AUVType.secondary)
+                }
+                .accessibilityElement(children: .combine)
+            }
             VStack(alignment: .leading, spacing: 3) {
                 Text(language.claudeLastExact(model.lastExactAt))
                 Text(language.claudeAccuracySyncRoute)
@@ -995,20 +1062,6 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
             .foregroundStyle(.secondary)
         }
         .modifier(ClaudeSettingsCardSurface())
-    }
-
-    @ViewBuilder
-    private var stateSummary: some View {
-        if let action = model.activeAction {
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.small)
-                Text(language.claudeBrowserActionStatus(action))
-                    .font(AUVType.secondary)
-            }
-            .accessibilityElement(children: .combine)
-        } else {
-            stateSummaryContent
-        }
     }
 
     @ViewBuilder
@@ -1173,6 +1226,8 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
 
             if showsDetails {
                 VStack(alignment: .leading, spacing: 10) {
+                    stateSummaryContent
+                    Divider().opacity(0.5)
                     detailHeading(language == .simplifiedChinese ? "Claude 本地智能模式" : "Claude Local Smart Mode")
                     detailText(
                         language == .simplifiedChinese

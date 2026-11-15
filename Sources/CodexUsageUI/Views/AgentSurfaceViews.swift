@@ -1396,47 +1396,24 @@ public struct AgentWorkspaceSurface: View {
                 callout(systemImage: "minus.circle", tint: .secondary, message: localized(
                     "Online verification unavailable", "在线验证不可用")) { EmptyView() }
                     .accessibilityIdentifier("uma.agent.claude.accuracy-unavailable")
-            case .safariBridgeSetupRequired(let status):
-                safariBridgeCallout(status)
+            case .safariSetupIncomplete(let step):
+                safariSetupCallout(step)
             }
         }
     }
 
-    /// Claude's exact figures come through the Safari Bridge, which AUV
-    /// carries and installs; the one button here is `connectClaude`, which
-    /// installs it in this state.
-    @ViewBuilder private func safariBridgeCallout(_ status: ClaudeSafariBridgeStatus) -> some View {
-        switch status {
-        case .appNotInApplications:
-            callout(systemImage: "folder.badge.plus", tint: .orange, message: localized(
-                "To read Claude's exact usage, move AUV to Applications and open it again.",
-                "要读取 Claude 的精确用量，请把 AUV 移到“应用程序”后重新打开。")) { EmptyView() }
-                .accessibilityIdentifier("uma.agent.claude.safari-bridge")
-        case .outdated:
-            callout(systemImage: "arrow.down.circle", tint: .orange, message: localized(
-                "The Safari Bridge needs an update to match this AUV.",
-                "Safari 助手需要更新，才能与这个版本的 AUV 配合。")) {
-                Button(localized("Update Safari Bridge", "更新 Safari 助手"), action: connectClaude)
+    /// Claude's exact figures come through Safari. Until that is set up, the
+    /// page shows the next step and one button for it; `connectClaude` takes
+    /// whichever step this is. Claude Settings lists all of them.
+    @ViewBuilder private func safariSetupCallout(_ step: ClaudeSafariSetup.Step) -> some View {
+        let copy = ClaudeSafariSetupCopy.step(step, language: store.language)
+        callout(systemImage: copy.symbol, tint: copy.urgent ? .orange : .accentColor, message: copy.message) {
+            if let button = copy.button {
+                Button(button, action: connectClaude)
                     .buttonStyle(.borderedProminent)
             }
-            .accessibilityIdentifier("uma.agent.claude.safari-bridge")
-        case .needsRepair:
-            callout(systemImage: "wrench.and.screwdriver", tint: .orange, message: localized(
-                "The Safari Bridge needs a repair before Safari can use it.",
-                "Safari 助手需要修复，Safari 才能使用它。")) {
-                Button(localized("Repair Safari Bridge", "修复 Safari 助手"), action: connectClaude)
-                    .buttonStyle(.borderedProminent)
-            }
-            .accessibilityIdentifier("uma.agent.claude.safari-bridge")
-        case .missing, .ready:
-            callout(systemImage: "safari", tint: .accentColor, message: localized(
-                "Claude's exact usage is read through Safari. Install the Safari Bridge that comes with AUV.",
-                "Claude 的精确用量通过 Safari 读取。请安装 AUV 自带的 Safari 助手。")) {
-                Button(localized("Install Safari Bridge", "安装 Safari 助手"), action: connectClaude)
-                    .buttonStyle(.borderedProminent)
-            }
-            .accessibilityIdentifier("uma.agent.claude.safari-bridge")
         }
+        .accessibilityIdentifier("uma.agent.claude.safari-setup")
     }
 
     private func callout<Action: View>(

@@ -160,6 +160,35 @@ struct ClaudeSafariBridgeInstallerTests {
         }
     }
 
+    @Test("Setup goes step by step, and each step's words read in both languages")
+    func setupSteps() {
+        func setup(_ bridge: ClaudeSafariBridgeStatus, enabled: Bool? = nil, site: Bool = false,
+                   signIn: Bool = false, exact: Bool = false) -> ClaudeSafariSetup.Step {
+            ClaudeSafariSetup(bridge: bridge, extensionEnabled: enabled, needsSiteAccess: site,
+                              needsSignIn: signIn, hasExactReading: exact).nextStep
+        }
+        #expect(setup(.appNotInApplications) == .moveToApplications)
+        #expect(setup(.missing) == .installBridge)
+        #expect(setup(.outdated, exact: true) == .updateBridge)
+        #expect(setup(.needsRepair) == .repairBridge)
+        #expect(setup(.ready, enabled: false) == .enableExtension)
+        #expect(setup(.ready, enabled: true, site: true) == .allowSite)
+        #expect(setup(.ready, signIn: true) == .signIn)
+        #expect(setup(.ready) == .syncOnce)
+        #expect(setup(.ready, enabled: true, exact: true) == .done)
+        // Safari not saying whether the extension is on is not a reason to stop.
+        #expect(setup(.ready, enabled: nil, exact: true) == .done)
+        for language in [AppLanguage.english, .simplifiedChinese] {
+            for step in [ClaudeSafariSetup.Step.moveToApplications, .installBridge, .updateBridge, .repairBridge,
+                         .enableExtension, .allowSite, .signIn, .syncOnce] {
+                let copy = ClaudeSafariSetupCopy.step(step, language: language)
+                #expect(!copy.title.isEmpty && !copy.message.isEmpty)
+            }
+            #expect(ClaudeSafariSetupCopy.step(.enableExtension, language: language).message
+                .contains("UMA Browser Companion for Claude"))
+        }
+    }
+
     @Test("Both alerts and every failure read in both languages")
     func copy() {
         for language in [AppLanguage.english, .simplifiedChinese] {
@@ -195,7 +224,7 @@ struct ClaudeSafariBridgeInstallerTests {
             installed: { shownInstalled += 1; return false },
             failed: { _ in Issue.record("install should not fail") }
         ))
-        #expect(model.agentControlState == .safariBridgeSetupRequired(.missing))
+        #expect(model.agentControlState == .safariSetupIncomplete(.installBridge))
         #expect(!model.accuracySyncForRefreshAll())
 
         // The page's one button installs it, and then the page is back to normal.
@@ -205,9 +234,8 @@ struct ClaudeSafariBridgeInstallerTests {
         try await waitForClaudeValue(model.$actionInProgress, matching: { !$0 })
         #expect(disk.launched.count == 1)
         #expect(shownInstalled == 1)
-        if case .safariBridgeSetupRequired = model.agentControlState {
-            Issue.record("the page still asks for the Bridge")
-        }
+        // With the Bridge in place, the page moves on to the last step.
+        #expect(model.agentControlState == .safariSetupIncomplete(.syncOnce))
     }
 }
 

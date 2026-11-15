@@ -71,10 +71,9 @@ public enum ClaudeAgentControlState: Equatable, Sendable {
     case companionStarting
     case companionUpdateRequired
     case onlineVerificationUnavailable
-    /// The Safari Bridge that carries Claude's exact sync is not installed,
-    /// is not the build this AUV is pinned to, or cannot be installed until
-    /// AUV is in Applications.
-    case safariBridgeSetupRequired(ClaudeSafariBridgeStatus)
+    /// Claude's exact sync through Safari is not set up yet; this is the next
+    /// step, and the page's button takes it.
+    case safariSetupIncomplete(ClaudeSafariSetup.Step)
 
     static func classify(
         consentGranted: Bool,
@@ -117,6 +116,46 @@ extension ClaudeAgentControlState {
 public enum ClaudeStatusLineConfigurationIssue: Equatable, Sendable {
     case requiresInstalledApp
     case developmentIsolation
+}
+
+/// How far Claude's exact sync through Safari is set up, one step at a time.
+public struct ClaudeSafariSetup: Equatable, Sendable {
+    public enum Step: Equatable, Sendable {
+        case moveToApplications
+        case installBridge
+        case updateBridge
+        case repairBridge
+        case enableExtension
+        case allowSite
+        case signIn
+        case syncOnce
+        case done
+    }
+
+    public let bridge: ClaudeSafariBridgeStatus
+    /// nil when Safari would not say.
+    public let extensionEnabled: Bool?
+    public let needsSiteAccess: Bool
+    public let needsSignIn: Bool
+    public let hasExactReading: Bool
+
+    public var bridgeDone: Bool { bridge == .ready }
+    public var extensionDone: Bool? { bridgeDone ? extensionEnabled : false }
+    public var siteDone: Bool { bridgeDone && !needsSiteAccess && !needsSignIn }
+
+    public var nextStep: Step {
+        switch bridge {
+        case .appNotInApplications: return .moveToApplications
+        case .missing: return .installBridge
+        case .outdated: return .updateBridge
+        case .needsRepair: return .repairBridge
+        case .ready: break
+        }
+        if extensionEnabled == false { return .enableExtension }
+        if needsSiteAccess { return .allowSite }
+        if needsSignIn { return .signIn }
+        return hasExactReading ? .done : .syncOnce
+    }
 }
 
 @MainActor
@@ -226,8 +265,9 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         // Once Claude is allowed, the Bridge comes before a Local Smart
         // repair: someone who uses claude.ai without Claude Code has no Local
         // Smart to repair, and the Bridge is all their exact figures need.
-        if consentGranted, safariBridgeStatus != .ready {
-            return .safariBridgeSetupRequired(safariBridgeStatus)
+        if consentGranted, safariBridge != nil {
+            let step = safariSetup.nextStep
+            if step != .done { return .safariSetupIncomplete(step) }
         }
         return control.offeringSync(when: consentGranted && offersAccuracySync)
     }
@@ -263,6 +303,21 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     private var safariBridge: ClaudeSafariBridgeInstaller?
     private var safariBridgeAlerts: ClaudeSafariBridgeAlerts?
     @Published private(set) var safariBridgeStatus: ClaudeSafariBridgeStatus = .ready
+    @Published private(set) var safariExtensionEnabled: Bool?
+
+    /// Where Claude's Safari setup stands. Only meaningful in the running app,
+    /// which carries a Bridge; elsewhere it reads as done.
+    public var safariSetup: ClaudeSafariSetup {
+        var exact = lastExactAt != nil
+        if case .exactAnchorAvailable = browserAccuracyState { exact = true }
+        return ClaudeSafariSetup(
+            bridge: safariBridge == nil ? .ready : safariBridgeStatus,
+            extensionEnabled: safariExtensionEnabled,
+            needsSiteAccess: state == .websiteAccessRequired,
+            needsSignIn: state == .signInRequired,
+            hasExactReading: safariBridge == nil || exact
+        )
+    }
     private var bridgeActivationObserver: AnyCancellable?
 
     /// The first run comes shortly after launch rather than a whole refresh
@@ -362,8 +417,8 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     public func connectWithConsent() {
         // With consent given and Local Smart working, what is left to connect
         // is the Safari Bridge, so the page's one button installs it.
-        if case .safariBridgeSetupRequired = agentControlState {
-            installSafariBridge()
+        if case .safariSetupIncomplete(let step) = agentControlState {
+            takeSafariSetupStep(step)
             return
         }
         guard !actionInProgress, canConnectLocalSmartMode else { return }
@@ -446,6 +501,32 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     func refreshSafariBridgeStatus() {
         let status = safariBridge?.status() ?? .ready
         if status != safariBridgeStatus { safariBridgeStatus = status }
+        refreshSafariExtensionState()
+    }
+
+    private func refreshSafariExtensionState() {
+        guard let safariBridge, safariBridgeStatus == .ready else { return }
+        Task {
+            let enabled = await safariBridge.extensionEnabled()
+            if enabled != safariExtensionEnabled { safariExtensionEnabled = enabled }
+        }
+    }
+
+    /// What the page's button and each line of the setup list do.
+    public func takeSafariSetupStep(_ step: ClaudeSafariSetup.Step) {
+        guard let safariBridge else { return }
+        switch step {
+        case .installBridge, .updateBridge, .repairBridge:
+            installSafariBridge()
+        case .enableExtension, .allowSite:
+            Task { await safariBridge.openSafariExtensionSettings() }
+        case .signIn:
+            Task { await safariBridge.openClaudeInSafari() }
+        case .syncOnce:
+            accuracySyncForRefreshAll()
+        case .moveToApplications, .done:
+            break
+        }
     }
 
     /// Copies the Bridge AUV carries into Applications, starts it, and then
