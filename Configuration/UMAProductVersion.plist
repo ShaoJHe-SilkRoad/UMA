@@ -18,24 +18,24 @@
 	<key>FrozenProduction</key>
 	<dict>
 		<key>MarketingVersion</key>
-		<string>0.14.6</string>
+		<string>0.14.7</string>
 		<key>SourceCommit</key>
-		<string>606aa5f83ff7ff708c40934c917b8b6d0a95044e</string>
+		<string>e8ae5482c1e83ea2f3d1c99a8826442883b3795e</string>
 	</dict>
 	<key>ReleaseCandidate</key>
 	<dict>
 		<key>ApplicationName</key>
 		<string>UMA</string>
 		<key>BuildNumber</key>
-		<string>2026111515</string>
+		<string>2026111516</string>
 		<key>BundleIdentifier</key>
 		<string>com.silkrd.uma</string>
 		<key>FrozenHostBuild</key>
-		<string>202611152323</string>
+		<string>202611152342</string>
 		<key>FrozenHostExtensionVersion</key>
-		<string>0.14.6</string>
+		<string>0.14.7</string>
 		<key>FrozenHostRuntimeGenerationID</key>
-		<string>25b11443-e714-4cb9-a293-51c00079b6cf</string>
+		<string>e4d533cc-a343-416b-b7b3-312c0a2e2d6f</string>
 		<key>HostAppGroupIdentifier</key>
 		<string>group.com.silkrd.uma.bridge</string>
 		<key>HostBundleIdentifier</key>
@@ -54,7 +54,7 @@
 		<key>CompanionMarketingVersion</key>
 		<string>1.4.0</string>
 		<key>HostMarketingVersion</key>
-		<string>0.14.6</string>
+		<string>0.14.7</string>
 		<key>ProtocolVersion</key>
 		<string>2</string>
 	</dict>
