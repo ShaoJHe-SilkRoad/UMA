@@ -717,6 +717,10 @@
       return;
     }
     const read = readFromV2Receipt(record);
+    if (ownedProviderReducer.isTerminal(record.state)) {
+      await settleTerminalV2Receipt(read);
+      return;
+    }
     if (Date.now() >= Date.parse(record.expiresAt)) {
       if (record.state === v2States.requestIntentPersisted
           || record.state === v2States.providerCreationPending
@@ -742,7 +746,30 @@
     scheduleV2Expiry(read);
   }
 
+  // A receipt reaches COMPLETE, CANCELLED or FAILED only after its read's
+  // cleanup was confirmed, and EXPIRED only before any tab was proven, so all
+  // that is left is to remove it; no tab is closed here. When the reply to
+  // that removal was lost, nothing else settled it: cleanup starts only from a
+  // state that is not yet terminal, and every later read was refused as an
+  // ownership loss, so Safari was never asked for the usage page again. A
+  // removal that fails now is tried again by the liveness check, which loads
+  // the receipt anew while no receipt is pending here.
+  async function settleTerminalV2Receipt(read) {
+    if (await removeV2Receipt(read, read.state)) {
+      pendingV2Receipt = null;
+      ownedTabRecoveryBlocked = false;
+      return true;
+    }
+    pendingV2Receipt = null;
+    ownedTabRecoveryBlocked = true;
+    return false;
+  }
+
   async function expireV2Receipt(read) {
+    if (ownedProviderReducer.isTerminal(read.state)) {
+      await settleTerminalV2Receipt(read);
+      return;
+    }
     if ([v2States.requestIntentPersisted, v2States.providerCreationPending,
       v2States.providerDocumentDiscovered].includes(read.state)) {
       if (await transitionV2(read, v2Events.expire)

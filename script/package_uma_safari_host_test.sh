@@ -139,6 +139,10 @@ for file in background-core.js claude-usage-extractor.js content-script.js provi
     /usr/bin/install -m 644 "$REPO_ROOT/BrowserExtension/Shared/$file" "$appex_contents/Resources/Shared/$file"
 done
 /usr/bin/install -m 644 "$REPO_ROOT/BrowserExtension/Safari/manifest.json" "$appex_contents/Resources/manifest.json"
+/bin/mkdir -p "$appex_contents/Resources/icons"
+for icon in "$REPO_ROOT"/BrowserExtension/Safari/icons/*.png; do
+    /usr/bin/install -m 644 "$icon" "$appex_contents/Resources/icons/$(/usr/bin/basename "$icon")"
+done
 readonly extension_version="$(/usr/bin/ruby -rjson -e 'print JSON.parse(File.binread(ARGV[0])).fetch("version")' "$appex_contents/Resources/manifest.json")"
 readonly host_version="$extension_version"
 cat > "$appex_contents/Resources/Safari/background-loader.js" <<EOF
