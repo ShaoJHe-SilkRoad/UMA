@@ -80,6 +80,25 @@ public enum AUVInstallNotice: Equatable, Sendable {
     }
 }
 
+/// The first-launch sound: a drumbeat, the first seven tones of 门楼, then
+/// "AUV 您吉祥" (Chinese) or "Welcome to AUV" (English). Built by
+/// script/render_auv_welcome_sounds.py. A drag in the disk image cannot play
+/// anything itself, so the drumbeat that marks a successful install is here.
+@MainActor
+enum AUVWelcomeSound {
+    private static var current: NSSound?
+
+    static func play(_ language: AppLanguage) {
+        let data = language == .simplifiedChinese ? AUVWelcomeSoundData.zh : AUVWelcomeSoundData.en
+        if let sound = NSSound(data: data) {
+            current = sound   // keep it alive while it plays
+            sound.play()
+        } else {
+            NSSound(named: "Glass")?.play()
+        }
+    }
+}
+
 @MainActor
 public enum AUVInstallNoticePresenter {
     /// Shows the notice that fits this launch, if any. `language` is read when
@@ -148,7 +167,7 @@ public enum AUVInstallNoticePresenter {
                 alert.addButton(withTitle: zh ? "好" : "OK")
             }
             defaults.set(versionKey, forKey: AUVInstallNotice.noticedKey)
-            NSSound(named: "Glass")?.play()
+            AUVWelcomeSound.play(language)
         case .notInstalled:
             alert.alertStyle = .warning
             alert.addButton(withTitle: zh ? "退出 AUV" : "Quit AUV")
