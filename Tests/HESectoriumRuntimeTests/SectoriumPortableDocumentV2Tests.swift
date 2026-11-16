@@ -141,6 +141,26 @@ private func v2JournalRoot() throws -> URL {
         }
     }
 
+    @Test func everyEarlierLayoutIsUpgradedAndTheSettingsBlockIsScannable() {
+        for layout in [SectoriumPortableV2.Layout.original, .usage] {
+            let fs = V2MemoryFileSystem(); let writer = SectoriumPortableDocumentWriter(fileSystem: fs)
+            let snapshot = SectoriumPortableSnapshot(context: v2Context(), history: [v2Event(after: v2Volume())])
+            let earlier = SectoriumPortableV2.render(snapshot, notes: SectoriumPortableV2.defaultNotes, layout: layout)
+            fs.files[v2DocumentPath] = Data(earlier.utf8)
+            let next = v2Event("operation-2:completed", kind: "loaded", index: 1, after: v2Volume())
+            #expect(writer.update(context: v2Context(), events: [next]) == .updated)
+            let text = v2Text(fs)
+            #expect(text.contains("## Volume settings and commands / 开发卷设置与命令"))
+            #expect(text.contains("disk-id: physical-fixture"))
+            #expect(text.contains("image: \(v2Profile).sparsebundle"))
+            #expect(text.contains("hdiutil attach -nomount -nobrowse '/Volumes/FixtureHost/\(v2Profile).sparsebundle'"))
+            #expect(text.contains("diskutil mount -mountPoint '/Volumes/FixtureHost/mount-\(v2Profile)' 79160516-FD8C-423F-B5BB-BE69A27B92C3"))
+            #expect(text.contains("hdiutil detach '/Volumes/FixtureHost/mount-\(v2Profile)'"))
+            #expect(SectoriumPortableV2.scannedSnapshot(Data(text.utf8))?.context.parent.physicalID == "physical-fixture")
+            #expect(SectoriumPortableV2.scannedSnapshot(Data((text + "edited\n").utf8)) == nil)
+        }
+    }
+
     @Test func preservesExactNotesAndRejectsOutsideEdits() {
         let fs = V2MemoryFileSystem(); let writer = SectoriumPortableDocumentWriter(fileSystem: fs)
         #expect(writer.update(context: v2Context(), events: [v2Event()]) == .updated)

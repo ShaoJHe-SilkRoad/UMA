@@ -71,6 +71,17 @@ public struct HESectoriumSettingsView: View {
                                 .font(.callout).foregroundStyle(.orange)
                         }
                     }
+                    SectoriumPreferenceSection(title: text("Drives with recorded volumes", "记录了开发卷的硬盘")) {
+                        HESectoriumSettingsNativeToggle(
+                            title: text("Register volumes recorded on a newly connected drive", "连接硬盘后自动登记其中记录的开发卷"),
+                            identifier: "uma.settings.hesectorium.autoRegister",
+                            isOn: model.autoRegisterDocumentedVolumes, isEnabled: !model.isBusy,
+                            action: model.setAutoRegisterDocumentedVolumes, onEscape: onClose)
+                            .frame(height: 24)
+                        Text(text("AUV reads IMPORTANT.md at the drive's root and uses it only when its disk ID matches the drive. Registering never loads a volume. Without this, use Scan drives.",
+                                  "AUV 读取硬盘根目录的 IMPORTANT.md，且只在磁盘标识相符时采用。登记不会加载开发卷。关闭时可用“扫描硬盘”手动查找。"))
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
                     SectoriumPreferenceSection(title: text("Components", "组件")) {
                         HStack(alignment: .center) {
                             Text(installedText).font(.callout).foregroundStyle(.secondary)

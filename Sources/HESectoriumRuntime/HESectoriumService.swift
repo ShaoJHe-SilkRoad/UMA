@@ -207,6 +207,9 @@ public final class ProcessCommandRunner: HESectoriumSecureCommandRunning, HESect
         // macOS dialog; give them time to read and answer it.
         if executable == "/usr/sbin/diskutil", arguments.first == "mount" { return 180 }
         if executable == "/usr/sbin/diskutil", arguments.first == "unmount" { return 30 }
+        // A read-only check of a 300 GB volume on a USB drive takes over a minute.
+        if executable == "/usr/sbin/diskutil", arguments.first == "verifyVolume" { return 900 }
+        if executable == "/usr/bin/hdiutil", arguments.first == "detach" { return 30 }
         if executable == "/usr/sbin/diskutil", arguments == ["image", "attach", "--help"] { return 5 }
         if SectoriumObservationCommandRunner.isImageReadProbe(executable, arguments) { return 5 }
         if executable == "/usr/bin/hdiutil", arguments.first == "attach", arguments.contains("-nomount") { return 60 }
@@ -572,6 +575,10 @@ public final class MacStorageBackend: StorageBackend {
 
     private let policy: StorageIdentityPolicy; private let paths: HESectoriumPaths; private let runner: HESectoriumCommandRunning
     var mountPointDirectory = SectoriumMountPointDirectory()
+    /// Set after the parent drive was unplugged without Disconnect: the volume
+    /// is checked read-only while attached and unmounted, and mounted only if
+    /// the check passes.
+    var checkFilesystemBeforeMount = false
     public init(paths: HESectoriumPaths, runner: HESectoriumCommandRunning = ProcessCommandRunner(), policy: StorageIdentityPolicy = .expected) {
         self.paths = paths; self.runner = runner; self.policy = policy
     }
@@ -649,6 +656,27 @@ public final class MacStorageBackend: StorageBackend {
         guard let mount = text(diskInfo("/dev/\(device)"), ["MountPoint"]), !mount.isEmpty,
               reportedMount == mount else { return nil }
         return (device, mount)
+    }
+    /// A verification reads the parent, the mount location, every device of
+    /// the image and the APFS container list, one `diskutil` process after
+    /// another (about 0.1-0.2 s each). None depends on another, so they start
+    /// together here and the checks below read the shared cache. The checks
+    /// themselves are unchanged; on a disk change the cache is dropped and they
+    /// simply read again.
+    private func prefetchVerificationMetadata() {
+        guard let prefetcher = runner as? SectoriumReadOnlyPrefetching else { return }
+        var commands: [(executable: String, arguments: [String])] = [
+            ("/usr/sbin/diskutil", ["apfs", "list", "-plist"]),
+            ("/usr/sbin/diskutil", ["info", "-plist", policy.outerMountPoint]),
+            ("/usr/sbin/diskutil", ["info", "-plist", policy.devMountPoint])]
+        if let images = plist(command("/usr/bin/hdiutil", ["info", "-plist"]))?["images"] as? [[String: Any]],
+           let image = images.first(where: { text($0, ["image-path"]) == policy.imagePath }),
+           let entities = image["system-entities"] as? [[String: Any]] {
+            commands += entities.compactMap { text($0, ["dev-entry"]) }
+                .filter { validDiskID($0.hasPrefix("/dev/") ? String($0.dropFirst(5)) : $0) }
+                .map { ("/usr/sbin/diskutil", ["info", "-plist", $0]) }
+        }
+        prefetcher.prefetchReadOnly(commands, cwd: paths.workingDirectory)
     }
     private func containers() -> [[String: Any]]? {
         guard let value = plist(command("/usr/sbin/diskutil", ["apfs", "list", "-plist"])) else { return nil }
@@ -804,6 +832,7 @@ public final class MacStorageBackend: StorageBackend {
     }
     public func observe() -> StorageObservation? {
         metadataObservation {
+            prefetchVerificationMetadata()
             guard canonical(policy.outerMountPoint) == policy.outerMountPoint,
                   canonical(policy.devMountPoint) == policy.devMountPoint,
                   canonical(policy.imagePath) == policy.imagePath else { return nil }
@@ -882,13 +911,16 @@ public final class MacStorageBackend: StorageBackend {
             // mounting ends in "failed to mount". Nothing on it is mounted (just
             // verified), so release it and attach the image afresh below.
             if let whole = imageWholeDisk(), attachedImageIsUnreadable(whole) {
+                // An unreadable attachment proves the drive was unplugged without
+                // Disconnect (possibly while AUV was not running): check first.
+                checkFilesystemBeforeMount = true
                 let released = releaseUnreadableAttachment(whole)
                 guard released.succeeded, imageInventoryMatchCount(for: policy.imagePath) == 0 else {
                     return .init(exitCode: -2,
                         detail: "The image attachment left from an earlier connection of this drive could not be released: \(String(released.detail.prefix(160)))")
                 }
             } else {
-                return command("/usr/sbin/diskutil", ["mount", "-mountPoint", policy.devMountPoint, "/dev/\(device)"])
+                return mountCheckedVolume(device)
             }
         }
         if let password {
@@ -922,7 +954,41 @@ public final class MacStorageBackend: StorageBackend {
             return .init(exitCode: -2,
                 detail: "The image is attached, but its development volume could not be verified; it is left attached and unmounted")
         }
-        return command("/usr/sbin/diskutil", ["mount", "-mountPoint", policy.devMountPoint, "/dev/\(volume)"])
+        return mountCheckedVolume(volume)
+    }
+
+    /// Mounts the verified, unmounted development volume. After an unclean
+    /// removal it is first checked read-only; `diskutil verifyVolume` must never
+    /// run on a mounted volume, because it remounts it at /Volumes/<name>.
+    private func mountCheckedVolume(_ device: String) -> CommandOutcome {
+        if checkFilesystemBeforeMount {
+            SectoriumTimingTrace.shared.mark("load: checking the volume after an unclean removal")
+            let check = command("/usr/sbin/diskutil", ["verifyVolume", "/dev/\(device)"])
+            guard Self.verifyVolumePassed(check) else {
+                return .init(exitCode: -3, detail: "The volume check after the drive was unplugged without Disconnect did not pass, so it was not mounted. Open Disk Utility, select DEV volume \(device), run First Aid, then Load again. The image stays attached and unmounted. Check output: \(String(check.detail.suffix(300)))")
+            }
+            // The check leaves an unmounted volume unmounted; confirm before mounting.
+            guard let info = diskInfo("/dev/\(device)"), Self.explicitlyUnmounted(info) else {
+                return .init(exitCode: -2, detail: "The volume state changed during its check; it was not mounted")
+            }
+        }
+        return command("/usr/sbin/diskutil", ["mount", "-mountPoint", policy.devMountPoint, "/dev/\(device)"])
+    }
+
+    /// The parent drive is gone but macOS still lists this image: force the
+    /// mounted volume off and release the attachment, so nothing keeps waiting
+    /// on a device that can no longer be read. Returns what was found.
+    func releaseOrphanedAttachment() -> (found: SectoriumOrphanedAttachment?, released: Bool) {
+        guard let orphan = SectoriumOrphanedAttachment.find(imagePath: policy.imagePath,
+                in: plist(command("/usr/bin/hdiutil", ["info", "-plist"]))) else { return (nil, true) }
+        for mountPoint in orphan.mountPoints {
+            _ = command("/usr/sbin/diskutil", ["unmount", "force", mountPoint])
+        }
+        var detached = command("/usr/bin/hdiutil", ["detach", "-force", "/dev/\(orphan.wholeDisk)"])
+        if !detached.succeeded { detached = command("/usr/sbin/diskutil", ["eject", "/dev/\(orphan.wholeDisk)"]) }
+        let gone = SectoriumOrphanedAttachment.find(imagePath: policy.imagePath,
+                in: plist(command("/usr/bin/hdiutil", ["info", "-plist"]))) == nil
+        return (orphan, detached.succeeded || gone)
     }
     private func canonical(_ path: String) -> String { URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path }
     func directoryEntryCount(_ path: String) -> UInt32? {
@@ -1009,6 +1075,7 @@ public final class MacStorageBackend: StorageBackend {
     }
 
     private func observeVerifiedUnmountedImageVolumeInfo() -> [String: Any]? {
+        prefetchVerificationMetadata()
         guard let expected = policy.devUUID, let whole = imageWholeDisk(),
               let images = plist(command("/usr/bin/hdiutil", ["info", "-plist"]))?["images"] as? [[String: Any]] else { return nil }
         let matches = images.filter { text($0, ["image-path"]) == policy.imagePath }
@@ -1057,6 +1124,7 @@ public final class MacStorageBackend: StorageBackend {
             return device
         }
         return metadataObservation {
+            prefetchVerificationMetadata()
             guard let images = plist(command("/usr/bin/hdiutil", ["info", "-plist"]))?["images"] as? [[String: Any]] else { return nil }
             let matches = images.filter { text($0, ["image-path"]) == policy.imagePath }
             guard matches.count == 1, let entities = matches[0]["system-entities"] as? [[String: Any]], !entities.isEmpty,
@@ -1144,6 +1212,7 @@ public final class HESectoriumService: @unchecked Sendable {
     private let sectoriumDeviceIOSampler: SectoriumDeviceIOCounterSampling
     private let portableDocumentWriter: SectoriumPortableDocumentWriting
     private let portableDocumentJournal: SectoriumPortableDocumentJournal
+    private let uncleanRemovals: SectoriumUncleanRemovalRegistry
     private var idleWaiters: [CheckedContinuation<Void, Never>] = []
     private let progressLock = NSLock(); private var currentProgress: HESectoriumOperationProgress = .idle
     private let installedStatusLock = NSLock()
@@ -1173,6 +1242,7 @@ public final class HESectoriumService: @unchecked Sendable {
             mounts: sectoriumMountMetadataProvider ?? SystemSectoriumMountMetadataProvider())
         self.portableDocumentJournal = SectoriumPortableDocumentJournal(url: paths.root.appendingPathComponent("sectorium-document-journal.json"))
         SectoriumTimingTrace.shared.configure(logDirectory: paths.logs)
+        self.uncleanRemovals = SectoriumUncleanRemovalRegistry(url: paths.root.appendingPathComponent("sectorium-unclean-removals.json"))
         self.sectoriumDeviceObserver = sectoriumDeviceObserver
         self.wholeDeviceEjectDriverOverride = wholeDeviceEjectDriverOverride
         self.portableDocumentWriter = portableDocumentWriter ?? SectoriumPortableDocumentWriter(
@@ -1990,6 +2060,77 @@ public final class HESectoriumService: @unchecked Sendable {
         }) == true
     }
 
+    /// Load completion on the internal disk only, with the volume's verified
+    /// facts. False when no earlier document context exists or recording failed;
+    /// the caller then documents synchronously as before.
+    private func recordDeferredLoadCompletion(_ profile: SectoriumDevelopmentProfile, operation: String) -> Bool {
+        do {
+            guard let context = try portableDocumentJournal.latestContext(parentID: profile.deviceID) else { return false }
+            let events = try portableDocumentJournal.events(parentID: profile.deviceID)
+            let eventID = operation + ":" + profile.id + ":completed"
+            if !events.contains(where: { $0.id == eventID }) {
+                let before = events.first(where: { $0.id == operation + ":" + profile.id + ":intended" })?.before
+                try portableDocumentJournal.record(context: context, event: .init(id: eventID, occurredAt: Date(),
+                    profileID: profile.id, kind: "loaded", before: before, after: portableVolumeRecord(profile)))
+            }
+            recordPortableDocumentPending(profileID: profile.id, reason: "Loaded; IMPORTANT.md is updated right after")
+            return true
+        } catch { return false }
+    }
+
+    /// Development volumes recorded in the IMPORTANT.md at the root of each
+    /// connected external drive that this Mac has not registered yet. A record
+    /// is used only when it is an unedited AUV document whose disk ID and host
+    /// volume are this drive's; paths are moved to where the drive is mounted
+    /// now, and the image must exist. Nothing is registered or mounted here.
+    public func documentedVolumesOnConnectedDrives() -> [SectoriumDocumentedVolume] {
+        guard let devices = try? observationRunner.withFreshObservation({ try observeSectoriumDevices() }) else { return [] }
+        let registered = readSectoriumProfiles() ?? []
+        var found: [SectoriumDocumentedVolume] = []
+        for device in devices where device.isExternal && device.identityVerified && device.isVirtual != true {
+            for path in device.mountedVolumePaths where path != "/" {
+                guard let backing = verifiedBackingVolume(URL(fileURLWithPath: path, isDirectory: true), on: device) else { continue }
+                let document = URL(fileURLWithPath: backing.mountPoint).appendingPathComponent("IMPORTANT.md")
+                guard let attributes = try? FileManager.default.attributesOfItem(atPath: document.path),
+                      attributes[.type] as? FileAttributeType == .typeRegular,
+                      let size = attributes[.size] as? Int, size <= SectoriumPortableDocumentLimits.maximumBytes,
+                      let data = try? Data(contentsOf: document),
+                      let snapshot = SectoriumPortableV2.scannedSnapshot(data),
+                      snapshot.context.parent.physicalID == device.id,
+                      snapshot.context.parent.documentVolumeUUID == backing.uuid else { continue }
+                let oldRoot = snapshot.context.parent.rootPath.hasSuffix("/")
+                    ? snapshot.context.parent.rootPath : snapshot.context.parent.rootPath + "/"
+                let newRoot = backing.mountPoint.hasSuffix("/") ? backing.mountPoint : backing.mountPoint + "/"
+                for volume in snapshot.context.volumes {
+                    guard volume.imagePath.hasPrefix(oldRoot), volume.mountPoint.hasPrefix(oldRoot) else { continue }
+                    let imagePath = newRoot + volume.imagePath.dropFirst(oldRoot.count)
+                    let mountPoint = newRoot + volume.mountPoint.dropFirst(oldRoot.count)
+                    guard isPlainDirectory(URL(fileURLWithPath: imagePath, isDirectory: true)),
+                          !registered.contains(where: { $0.imagePath == imagePath
+                              || (volume.volumeUUID != nil && $0.devUUID == volume.volumeUUID) }) else { continue }
+                    found.append(.init(deviceID: device.id, driveName: device.name, driveVolumeUUID: backing.uuid,
+                        name: volume.name, volumeUUID: volume.volumeUUID, logicalCapacityBytes: volume.logicalCapacityBytes,
+                        imagePath: imagePath, mountPoint: mountPoint))
+                }
+            }
+        }
+        return found
+    }
+
+    /// When the parent drive was last unplugged without Disconnect while this
+    /// volume's image was attached; the next Load checks the volume first.
+    public func uncleanRemoval(profileID: String) -> (date: Date, volumeWasMounted: Bool)? {
+        uncleanRemovals.entry(profileID).map { ($0.detectedAt, $0.volumeWasMounted) }
+    }
+
+    /// Writes IMPORTANT.md for a completed operation after its result is shown.
+    /// It waits for any running storage operation and never starts one; a
+    /// failure leaves the document pending for Retry or the next reconnect.
+    public func synchronizeDeferredDocumentation(profileID: String) -> SectoriumPortableDocumentResult {
+        guard portableDocumentationPending(profileID: profileID) else { return .unchanged }
+        return retryPortableDocumentation(profileID: profileID)
+    }
+
     /// Completing Unload changes no profile facts. Its pre-mutation context is
     /// already durable on the internal disk; avoid a second disk graph traversal
     /// (or an external file write) before publishing the native command result.
@@ -2353,6 +2494,9 @@ public final class HESectoriumService: @unchecked Sendable {
                          failure: .workbenchFailed("Image was created, but its exact registered profile could not be recovered"))
         }
         let loaded = startDevelopmentDisk(profileID: profile.id, password: request.password)
+        // A new volume's IMPORTANT.md is written with its first load, before
+        // Create reports success: it is what lets another Mac recognize it.
+        if loaded.succeeded { _ = synchronizeDeferredDocumentation(profileID: profile.id) }
         return .init(operationID: created.operationID, mode: .manual,
                      steps: created.steps + loaded.steps, failure: loaded.failure)
         }
@@ -2551,6 +2695,26 @@ public final class HESectoriumService: @unchecked Sendable {
     }
 
     public func adoptDevelopmentDisk(deviceID: String, imageURL: URL) -> OperationResult {
+        adoptDevelopmentDisk(deviceID: deviceID, imageURL: imageURL, documented: nil)
+    }
+
+    /// Registers every volume found by `documentedVolumesOnConnectedDrives`,
+    /// each through the same verified registration as Register existing….
+    public func registerDocumentedVolumes(_ volumes: [SectoriumDocumentedVolume]) -> OperationResult {
+        var steps: [OperationStepResult] = []
+        var failure: OperationFailure?
+        for volume in volumes {
+            let result = adoptDevelopmentDisk(deviceID: volume.deviceID,
+                imageURL: URL(fileURLWithPath: volume.imagePath, isDirectory: true), documented: volume)
+            steps.append(.init(step: "registerDocumented.\(volume.name)", status: result.succeeded ? .succeeded : .failed,
+                detail: result.failure.map { "\($0)" } ?? "Registered from the drive's IMPORTANT.md"))
+            failure = failure ?? result.failure
+        }
+        return .init(operationID: UUID().uuidString, mode: .manual, steps: steps, failure: failure)
+    }
+
+    private func adoptDevelopmentDisk(deviceID: String, imageURL: URL,
+                                      documented: SectoriumDocumentedVolume?) -> OperationResult {
         workbenchOperation("adopt") { id, steps in
             guard recordWorkbenchTarget(operation: id, target: "\(deviceID):\(imageURL.path)") else {
                 return workbenchFailure(id, steps, "Could not persist the selected adoption target")
@@ -2579,17 +2743,42 @@ public final class HESectoriumService: @unchecked Sendable {
                   imagePath.hasPrefix(backing.mountPoint.hasSuffix("/") ? backing.mountPoint : backing.mountPoint + "/") else {
                 return workbenchFailure(id, steps, "Selected image is not on a freshly verified volume of the selected external device")
             }
-            let legacyIdentity = legacyTuple && imagePath == configuredImage
+            // A volume registered from its drive's IMPORTANT.md uses those
+            // settings, never the built-in legacy tuple (which needs it attached).
+            let legacyIdentity = documented == nil && legacyTuple && imagePath == configuredImage
                 && backing.uuid == configured.outerUUID && backing.mountPoint == configured.outerMountPoint
+            // Settings read from this drive's IMPORTANT.md: its disk ID and host
+            // volume were matched when it was scanned and are checked again here.
+            let documentedSettings = documented.flatMap { doc -> SectoriumDocumentedVolume? in
+                guard doc.deviceID == deviceID, doc.driveVolumeUUID == backing.uuid,
+                      doc.imagePath == imagePath else { return nil }
+                return doc
+            }
+            if documented != nil, documentedSettings == nil {
+                return workbenchFailure(id, steps, "The drive's IMPORTANT.md does not match this drive or image")
+            }
             let imageName = canonicalImage.deletingPathExtension().lastPathComponent
-            let profileName = legacyIdentity ? "DEV_APFS" : imageName
+            let profileName = legacyIdentity ? "DEV_APFS" : documentedSettings?.name ?? imageName
             guard legacyIdentity || profileName.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$"#, options: .regularExpression) != nil else {
                 return workbenchFailure(id, steps, "Sparsebundle name is not a supported development profile identity")
             }
             let detachedMountName = legacyIdentity ? "DEV_APFS" : profileName
             let adoptedProfileID = UUID().uuidString
-            let detachedMountPoint = legacyIdentity ? configured.devMountPoint : URL(fileURLWithPath: backing.mountPoint)
+            let detachedMountPoint = legacyIdentity ? configured.devMountPoint : documentedSettings?.mountPoint
+                ?? URL(fileURLWithPath: backing.mountPoint)
                 .appendingPathComponent(".AUV-Sectorium-Mounts").appendingPathComponent(adoptedProfileID).path
+            if let doc = documentedSettings {
+                // The recorded mount location must be a plain folder (or absent)
+                // on this drive with nothing mounted on it, as for Load.
+                let location = URL(fileURLWithPath: doc.mountPoint, isDirectory: true)
+                let root = backing.mountPoint.hasSuffix("/") ? backing.mountPoint : backing.mountPoint + "/"
+                guard doc.mountPoint.hasPrefix(root), location.standardizedFileURL.path == doc.mountPoint,
+                      !FileManager.default.fileExists(atPath: doc.mountPoint)
+                        || (isPlainDirectory(location)
+                            && verifiedBackingVolume(location, on: device)?.uuid == backing.uuid) else {
+                    return workbenchFailure(id, steps, "The mount location recorded in IMPORTANT.md is not a plain folder on this drive")
+                }
+            }
             guard let registered = readSectoriumProfiles() else {
                 return workbenchFailure(id, steps, "Registered profile configuration is unavailable or invalid")
             }
@@ -2605,10 +2794,11 @@ public final class HESectoriumService: @unchecked Sendable {
                 return workbenchFailure(id, steps, "Image inventory is unavailable or contains an ambiguous duplicate identity")
             }
             let isAttached = inventoryCount == 1
-            if !legacyIdentity && !isAttached && FileManager.default.fileExists(atPath: detachedMountPoint) {
+            if !legacyIdentity && !isAttached && documentedSettings == nil && FileManager.default.fileExists(atPath: detachedMountPoint) {
                 return workbenchFailure(id, steps, "Detached image mount point is already occupied")
             }
-            var verifiedDevUUID: UUID?
+            // A recorded volume UUID makes the first Load verify exactly that volume.
+            var verifiedDevUUID: UUID? = isAttached ? nil : documentedSettings?.volumeUUID
             var devVolumeName = detachedMountName
             var devMountPoint = detachedMountPoint
             var storageBackend = inventoryBackend
@@ -2845,7 +3035,12 @@ public final class HESectoriumService: @unchecked Sendable {
                 return workbenchFailure(id, steps, "Could not persist the image-attach boundary")
             }
             SectoriumTimingTrace.shared.mark("load: checks done, attaching and mounting")
+            backend.checkFilesystemBeforeMount = uncleanRemovals.entry(profile.id) != nil
             let attached = backend.attachImage(password: password)
+            if backend.checkFilesystemBeforeMount, !attached.succeeded {
+                // Keep requiring the check until a Load passes it.
+                uncleanRemovals.mark(profile.id, volumeWasMounted: false)
+            }
             SectoriumTimingTrace.shared.mark("load: attach and mount returned")
             steps.append(.init(step: "attachImage", status: attached.succeeded ? .succeeded : .failed,
                                detail: password == nil ? attached.detail : "Unlock/attach returned \(attached.exitCode)"))
@@ -2899,9 +3094,22 @@ public final class HESectoriumService: @unchecked Sendable {
                 return workbenchFailure(id, steps, "Mounted image validated but manual load intent could not be recorded")
             }
             let documentedProfile = readSectoriumProfiles()?.first(where: { $0.id == profile.id }) ?? profile
-            SectoriumTimingTrace.shared.mark("load: mount verified, writing records and IMPORTANT.md")
-            guard completePortableOperation(documentedProfile, event: "loaded", operation: id),
-                  clearWorkbenchMarker() else { return workbenchFailure(id, steps, "Mounted successfully but its durable completion remains pending") }
+            SectoriumTimingTrace.shared.mark("load: mount verified, writing records")
+            // The completion is recorded on the internal disk now; IMPORTANT.md on
+            // the drive is rewritten right after the result is shown
+            // (synchronizeDeferredDocumentation). Writing it here needed a fresh
+            // inventory of every disk and held the result back about a second.
+            // Without an earlier document context (a first load) it is written now.
+            let recorded = recordDeferredLoadCompletion(documentedProfile, operation: id)
+                || completePortableOperation(documentedProfile, event: "loaded", operation: id)
+            guard recorded, clearWorkbenchMarker() else {
+                return workbenchFailure(id, steps, "Mounted successfully but its durable completion remains pending")
+            }
+            if backend.checkFilesystemBeforeMount {
+                uncleanRemovals.clear(profile.id)
+                steps.append(.init(step: "checkAfterUncleanRemoval", status: .succeeded,
+                    detail: "The drive had been unplugged without Disconnect; the volume check passed before mounting"))
+            }
             SectoriumTimingTrace.shared.mark("load: records written")
             return .init(operationID: id, mode: .manual, steps: steps)
         }
@@ -4542,6 +4750,21 @@ public final class HESectoriumService: @unchecked Sendable {
             firstFailure = firstFailure ?? result.failure
             steps += result.steps.map { step in
                 .init(step: "profile.\(profile.id).\(step.step)", status: step.status, detail: step.detail)
+            }
+            if isDisconnect {
+                // Fail-safe for a drive unplugged without Disconnect: macOS keeps
+                // the image attached (and the volume mounted) on a device that can
+                // no longer be read. Release it now and have the next Load check
+                // the volume before mounting it.
+                let released = profileBackend.releaseOrphanedAttachment()
+                if let orphan = released.found {
+                    uncleanRemovals.mark(profile.id, volumeWasMounted: !orphan.mountPoints.isEmpty)
+                    steps.append(.init(step: "profile.\(profile.id).releaseAfterUncleanRemoval",
+                        status: released.released ? .succeeded : .failed,
+                        detail: released.released
+                            ? "The drive was unplugged without Disconnect; its image was released and the next Load checks the volume first"
+                            : "The drive was unplugged without Disconnect; its image attachment could not be released"))
+                }
             }
             if result.succeeded, result.steps.contains(where: { $0.step == "recordProfileReady" }) {
                 guard lock.acquire() else { firstFailure = firstFailure ?? .operationInProgress; continue }

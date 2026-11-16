@@ -192,8 +192,11 @@ public final class HESectoriumStore: ObservableObject {
     @Published public private(set) var creationFilesystems: [SectoriumFilesystem] = []
     @Published public private(set) var userNotice: SectoriumUserNotice?
     @Published private(set) var activeWorkbenchAction: SectoriumCommandAction?
+    /// Load progress that explains the volume check after an unclean removal.
+    private var loadProgressOverride: SectoriumUserNotice?
     public var progressNotice: SectoriumUserNotice {
-        activeWorkbenchAction?.progress ?? .init(english: "Checking the drive…", chinese: "正在检查硬盘…")
+        (activeWorkbenchAction == .load ? loadProgressOverride : nil)
+            ?? activeWorkbenchAction?.progress ?? .init(english: "Checking the drive…", chinese: "正在检查硬盘…")
     }
     @Published public private(set) var safeToUnplugDriveName: String?
     @Published public private(set) var safetyCheck: SectoriumSafetyCheck?
@@ -484,6 +487,67 @@ public final class HESectoriumStore: ObservableObject {
             }
         }
         debounceConnectionRefresh()
+        if change?.kind == .appeared, autoRegisterDocumentedVolumes { scheduleAutomaticDriveScan() }
+    }
+
+    // MARK: Volumes recorded on a drive
+
+    private static let autoRegisterKey = "uma.sectorium.autoRegisterDocumentedVolumes"
+    /// Off by default; the first scan of a drive is manual unless this is on.
+    @Published public private(set) var autoRegisterDocumentedVolumes =
+        UserDefaults.standard.bool(forKey: HESectoriumStore.autoRegisterKey)
+    /// Volumes found by a manual scan, waiting for the user to confirm.
+    @Published public private(set) var documentedCandidates: [SectoriumDocumentedVolume] = []
+    private var automaticScanTask: Task<Void, Never>?
+
+    public func setAutoRegisterDocumentedVolumes(_ enabled: Bool) {
+        autoRegisterDocumentedVolumes = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.autoRegisterKey)
+        if enabled { scanDrivesForRecordedVolumes(automatic: true) }
+    }
+
+    /// Reads the IMPORTANT.md at the root of each connected external drive and
+    /// finds the volumes it records that this Mac has not registered. A manual
+    /// scan asks before registering; with automatic registration on, a newly
+    /// connected drive's volumes are registered directly. Registering never
+    /// loads a volume.
+    public func scanDrivesForRecordedVolumes(automatic: Bool = false) {
+        guard !isPreviewFixture, !registryUnavailable, automatic || !isBusy else { return }
+        let service = self.service
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let found = service.documentedVolumesOnConnectedDrives()
+            await MainActor.run {
+                guard let self else { return }
+                if automatic {
+                    guard !found.isEmpty, self.autoRegisterDocumentedVolumes, !self.isBusy else { return }
+                    self.performWorkbench({ $0.registerDocumentedVolumes(found) })
+                } else if found.isEmpty {
+                    self.userNotice = .init(english: "No unregistered development volumes are recorded on the connected drives.",
+                                            chinese: "已连接的硬盘上没有记录尚未登记的开发卷。")
+                } else {
+                    self.documentedCandidates = found
+                }
+            }
+        }
+    }
+
+    public func registerDocumentedCandidates() {
+        let candidates = documentedCandidates
+        documentedCandidates = []
+        guard !candidates.isEmpty else { return }
+        performWorkbench({ $0.registerDocumentedVolumes(candidates) })
+    }
+
+    public func dismissDocumentedCandidates() { documentedCandidates = [] }
+
+    private func scheduleAutomaticDriveScan() {
+        automaticScanTask?.cancel()
+        automaticScanTask = Task { @MainActor [weak self] in
+            // Let the new drive's volumes finish mounting first.
+            do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return }
+            guard let self, !self.isBusy else { return }
+            self.scanDrivesForRecordedVolumes(automatic: true)
+        }
     }
 
     private func debounceConnectionRefresh() {
@@ -1516,6 +1580,9 @@ public final class HESectoriumStore: ObservableObject {
 
     public func loadDevelopmentDisk(profileID: String, password: String? = nil) {
         guard volumeRows.contains(where: { $0.id == profileID && $0.canLoad }) else { return }
+        loadProgressOverride = service.uncleanRemoval(profileID: profileID) == nil ? nil : .init(
+            english: "Loading the development volume… The drive was unplugged without Disconnect last time, so AUV first checks the volume read-only (about 1–2 minutes). macOS then asks for your password or Touch ID to mount it.",
+            chinese: "正在加载开发卷…上次拔盘前没有点“断开”，AUV 先只读检查开发卷（约 1–2 分钟），然后 macOS 会请你输入密码或使用 Touch ID 来挂载。")
         SectoriumTimingTrace.shared.begin("Load " + (volumeRows.first { $0.id == profileID }?.profile.name ?? profileID))
         performWorkbench({ $0.startDevelopmentDisk(profileID: profileID, password: password) },
             profileID: profileID, actionKind: .load)
@@ -1913,6 +1980,32 @@ public final class HESectoriumStore: ObservableObject {
                 }
                 self.needsConnectionRefresh = true
                 self.finishOperationObservation()
+                if actionKind == .load, result.succeeded, let id = completedProfileID {
+                    self.synchronizeDocumentationAfterLoad(profileID: id)
+                }
+            }
+        }
+    }
+
+    /// Load shows its result before IMPORTANT.md is rewritten; this writes it
+    /// in the background. It never marks the page busy: a storage action the
+    /// user starts meanwhile simply waits the second or so it takes.
+    private func synchronizeDocumentationAfterLoad(profileID: String) {
+        guard !isPreviewFixture else { return }
+        let service = self.service
+        Task.detached(priority: .utility) { [weak self] in
+            _ = service.synchronizeDeferredDocumentation(profileID: profileID)
+            let pending = service.portableDocumentationPending(profileID: profileID)
+            let history = service.portableDocumentHistory(profileID: profileID)
+            await MainActor.run {
+                guard let self, let index = self.volumeRows.firstIndex(where: { $0.id == profileID }) else { return }
+                let row = self.volumeRows[index]
+                self.volumeRows[index] = SectoriumVolumeRow(profile: row.profile, parentDeviceID: row.parentDeviceID,
+                    parentName: row.parentName, isExternal: row.isExternal, verifiedLoaded: row.verifiedLoaded,
+                    parentConnected: row.parentConnected, canLoad: row.canLoad, canUnloadOnly: row.canUnloadOnly,
+                    canSafeUnloadAndEject: row.canSafeUnloadAndEject, isBusy: row.isBusy,
+                    importantDocumentURL: nil, documentationPending: pending, documentHistory: history,
+                    capacityChangeUnavailableReason: row.capacityChangeUnavailableReason)
             }
         }
     }

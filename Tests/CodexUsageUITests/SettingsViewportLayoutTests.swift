@@ -26,7 +26,7 @@ struct SettingsViewportLayoutTests {
         // the Sectorium page; the pane now says so itself in the footer row
         // below. A `mount` button here would be the defect, not its absence —
         // but this set kept naming one, and had been failing unread since.
-        let expected: Set<String> = ["install", "repair", "automation", "eject", "refresh"]
+        let expected: Set<String> = ["install", "repair", "automation", "autoRegister", "eject", "refresh"]
         #expect(Set(actions.compactMap { $0.accessibilityIdentifier().split(separator: ".").last.map(String.init) }) == expected)
         var pinned: Set<String> = []
         for action in actions {

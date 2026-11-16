@@ -275,6 +275,14 @@ public struct SectoriumWorkbenchView: View {
                         Text(text("YOUR DRIVES", "你的硬盘"))
                             .font(.caption.weight(.semibold)).tracking(1.2).foregroundStyle(.secondary)
                         Spacer()
+                        Button { model.scanDrivesForRecordedVolumes() } label: {
+                            Label(text("Scan drives", "扫描硬盘"), systemImage: "magnifyingglass")
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(model.isBusy || model.registryUnavailable)
+                        .help(text("Find development volumes recorded in the IMPORTANT.md of connected drives",
+                                   "查找已连接硬盘的 IMPORTANT.md 中记录的开发卷"))
+                        .accessibilityIdentifier("uma.sectorium.scan")
                         Button { prepareCreation() } label: {
                             Label(text("Create volume", "创建开发卷"), systemImage: "plus")
                         }
@@ -317,6 +325,20 @@ public struct SectoriumWorkbenchView: View {
         .sheet(isPresented: $showingCreate) { createSheet }
         .sheet(isPresented: $showingUnlock) { unlockSheet }
         .sheet(isPresented: $showingVolumeSettings) { volumeSettingsSheet }
+        .alert(text("Register recorded volumes?", "登记硬盘上记录的开发卷？"),
+               isPresented: Binding(get: { !model.documentedCandidates.isEmpty },
+                                    set: { if !$0 { model.dismissDocumentedCandidates() } })) {
+            Button(text("Register", "登记")) { model.registerDocumentedCandidates() }
+            Button(text("Cancel", "取消"), role: .cancel) { model.dismissDocumentedCandidates() }
+        } message: {
+            Text(model.documentedCandidates.map { volume in
+                let size = volume.logicalCapacityBytes.map {
+                    ByteCountFormatter.string(fromByteCount: Int64(clamping: $0), countStyle: .file) } ?? "?"
+                return "\(volume.name) · \(volume.driveName) · \(size)"
+            }.joined(separator: "\n") + "\n\n" + text(
+                "Read from each drive's IMPORTANT.md. Registering does not load them.",
+                "读取自各硬盘的 IMPORTANT.md。登记不会加载它们。"))
+        }
         .sheet(isPresented: $showingSettings, onDismiss: restoreSettingsFocus) {
             HESectoriumSettingsView(isChinese: isChinese, store: model) {
                 showingSettings = false
