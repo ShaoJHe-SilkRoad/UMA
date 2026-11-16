@@ -115,6 +115,28 @@ struct ClaudeSafariBridgeInstallerTests {
         #expect(disk.installer().status() == .missing)
     }
 
+    @Test("A copy outside the Applications folders is neither ready nor replaced in place")
+    func ignoresCopiesOutsideApplications() async throws {
+        let disk = try Disk()
+        // Launch Services remembers Bridges inside release packages on a drive.
+        let package = disk.root.appendingPathComponent("Volumes/HE/DEV/UMA/Packages/old/UMA Safari Bridge.app")
+        try Disk.makeBridge(at: package, identity: .init(build: "1", generation: "old"))
+        let pinnedPackage = disk.root.appendingPathComponent("Volumes/HE/DEV/UMA/Packages/new/UMA Safari Bridge.app")
+        try Disk.makeBridge(at: pinnedPackage, identity: Self.pinned)
+        let current = disk.applications.appendingPathComponent("UMA Safari Bridge.app")
+        try Disk.makeBridge(at: current, identity: .init(build: "2", generation: "current"))
+        disk.copies = [package, pinnedPackage, current]
+        var installer = disk.installer()
+        installer.applicationFolders = [disk.root.appendingPathComponent("Applications"), disk.applications]
+        #expect(installer.status() == .outdated)
+        let target = try await installer.install()
+        #expect(target == current)
+        #expect(ClaudeSafariBridgeIdentity.of(app: current) == Self.pinned)
+        #expect(ClaudeSafariBridgeIdentity.of(app: package) == .init(build: "1", generation: "old"))
+        disk.copies = [package, pinnedPackage]
+        #expect(installer.status() == .missing)
+    }
+
     @Test("Installing copies the Bridge to Applications, registers and starts it")
     func installs() async throws {
         let disk = try Disk()

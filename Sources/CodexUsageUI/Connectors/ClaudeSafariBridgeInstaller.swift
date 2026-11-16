@@ -82,11 +82,23 @@ struct ClaudeSafariBridgeInstaller {
     /// Moves an old copy out of the way; the Trash, so nothing is lost.
     var discard: (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
 
-    /// Copies that count as installed: not inside AUV, not in the Trash.
+    /// Folders an installed Bridge may live in (/Applications and
+    /// ~/Applications in the running app). Launch Services also lists any copy
+    /// it has seen elsewhere, such as one inside a release package on an
+    /// external drive; updating that copy in place would put the Bridge where it
+    /// disappears with the drive. Nil means any folder (tests).
+    var applicationFolders: [URL]? = nil
+
+    /// Copies that count as installed: in an Applications folder, not inside
+    /// AUV, not in the Trash.
     var installed: [URL] {
         installedCopies().filter { url in
             let path = url.standardizedFileURL.path
-            return !path.hasPrefix(appBundle.standardizedFileURL.path + "/")
+            let inApplications = applicationFolders.map { folders in
+                folders.contains { path.hasPrefix($0.standardizedFileURL.path + "/") }
+            } ?? true
+            return inApplications
+                && !path.hasPrefix(appBundle.standardizedFileURL.path + "/")
                 && !path.contains("/.Trash/")
         }
     }
@@ -150,7 +162,7 @@ extension ClaudeSafariBridgeInstaller {
               let generation = bundle.object(forInfoDictionaryKey: "UMASafariHostRuntimeGenerationID") as? String
         else { return nil }
         let home = FileManager.default.homeDirectoryForCurrentUser
-        return Self(
+        var installer = Self(
             bundledBridge: bundled,
             expected: ClaudeSafariBridgeIdentity(build: build, generation: generation),
             appBundle: bundle.bundleURL,
@@ -165,6 +177,9 @@ extension ClaudeSafariBridgeInstaller {
             openClaudeInSafari: { await ClaudeSafariBridgeProcess.openClaudeInSafari() },
             extensionEnabled: { await ClaudeSafariBridgeProcess.extensionEnabled() }
         )
+        installer.applicationFolders = [URL(fileURLWithPath: "/Applications", isDirectory: true),
+                                        home.appendingPathComponent("Applications", isDirectory: true)]
+        return installer
     }
 }
 
