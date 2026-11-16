@@ -1002,7 +1002,43 @@ public final class MacStorageBackend: StorageBackend {
         guard canonical(mount) == mount, FileManager.default.fileExists(atPath: mount) else {
             return .init(assessment: .incomplete(reason: "verified mount scope unavailable"))
         }
-        return .parse(command("/usr/sbin/lsof", ["-nP", "-Fpcf", "+f", "--", mount]))
+        let direct = SectoriumActivityReport.parse(command("/usr/sbin/lsof", ["-nP", "-Fpcf", "+f", "--", mount]))
+        guard scope == .dev else { return direct }
+        // Disk images stored inside the volume are ejected by Unload first. Their
+        // helper processes hold the image files open here and are not a reason to
+        // stop; whoever uses the volumes inside those images is.
+        // Without the image list the check stays as it was; an image still
+        // attached inside the volume then stops the unmount with its own error.
+        guard let images = SectoriumAttachedImages.read(runner: runner, cwd: paths.workingDirectory) else { return direct }
+        let nested = imagesStoredInDevelopmentVolume(images)
+        var report = direct.excluding(SectoriumAttachedImages.helperPIDs(of: nested))
+        for image in nested {
+            for mountPoint in image.mountPoints {
+                report = report.merged(with: .parse(command("/usr/sbin/lsof", ["-nP", "-Fpcf", "+f", "--", mountPoint])))
+            }
+        }
+        return report
+    }
+
+    private func imagesStoredInDevelopmentVolume(_ images: [SectoriumAttachedImage]) -> [SectoriumAttachedImage] {
+        let own = SectoriumAttachedImages.canonical(policy.imagePath)
+        return images.filter { $0.isStored(under: policy.devMountPoint) && SectoriumAttachedImages.canonical($0.path) != own }
+    }
+
+    /// Ejects every disk image stored inside the development volume, inner ones
+    /// first, so the volume itself can unmount. Run after the activity check
+    /// found nobody using them. Returns the names released, or why it stopped.
+    func releaseImagesStoredInDevelopmentVolume() -> (released: [String], failure: String?) {
+        guard let images = SectoriumAttachedImages.read(runner: runner, cwd: paths.workingDirectory) else { return ([], nil) }
+        var released: [String] = []
+        for image in SectoriumAttachedImages.innermostFirst(imagesStoredInDevelopmentVolume(images)) {
+            let outcome = command("/usr/sbin/diskutil", ["eject", "/dev/\(image.wholeDisk)"])
+            guard outcome.succeeded else {
+                return (released, "The disk image “\(image.displayName)” stored in this volume could not be ejected: \(String(outcome.detail.prefix(160)))")
+            }
+            released.append(image.displayName)
+        }
+        return (released, nil)
     }
     public func perform(_ step: EjectStep) -> CommandOutcome {
         switch step {
@@ -1609,7 +1645,15 @@ public final class HESectoriumService: @unchecked Sendable {
                 if case .incomplete = report.assessment { return report }
                 processes += report.processes
             }
-            let grouped = Dictionary(grouping: processes, by: \.processID).map { pid, rows in
+            // Each attached image on this drive is served by a diskimages-helper
+            // that keeps the image's file open here. Disconnect detaches those
+            // images itself, so their helpers are not someone using the drive.
+            let imageDisks = Set(topology.images.filter(\.attached).compactMap { image -> String? in
+                image.identity.hasPrefix("image:") ? String(image.identity.dropFirst("image:".count)) : nil
+            })
+            let attached = SectoriumAttachedImages.read(runner: commandRunner, cwd: paths.workingDirectory) ?? []
+            let helpers = SectoriumAttachedImages.helperPIDs(of: attached.filter { imageDisks.contains($0.wholeDisk) })
+            let grouped = Dictionary(grouping: processes.filter { !helpers.contains($0.processID) }, by: \.processID).map { pid, rows in
                 SectoriumActivityProcess(processID: pid, command: rows[0].command,
                     executablePath: rows.compactMap(\.executablePath).first, references: rows.flatMap(\.references))
             }.sorted { $0.processID < $1.processID }
@@ -3317,6 +3361,12 @@ public final class HESectoriumService: @unchecked Sendable {
                 return workbenchFailure(id, steps, "Unload requires a fresh matching development volume")
             }
             if let failure = activityFailure(backend.assessOccupancy(scope: .dev), id: id, steps: steps) { return failure }
+            let nested = backend.releaseImagesStoredInDevelopmentVolume()
+            if !nested.released.isEmpty {
+                steps.append(.init(step: "ejectImagesStoredInVolume", status: .succeeded,
+                    detail: "Ejected disk images stored in this volume: " + nested.released.joined(separator: ", ")))
+            }
+            if let reason = nested.failure { return workbenchFailure(id, steps, reason) }
             guard suppressProfile(profile.id),
                   beginWorkbenchMutation(operation: id, target: profile.imagePath, step: "unmountDEV") else {
                 return workbenchFailure(id, steps, "Could not retain the unload intent")

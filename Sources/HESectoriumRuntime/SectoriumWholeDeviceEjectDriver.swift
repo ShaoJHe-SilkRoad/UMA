@@ -600,7 +600,15 @@ public final class SectoriumWholeDeviceEjectDriver: WholeDeviceEjectDriving {
         }
         imageWholeDiskByIdentity = wholeDisks
         imageVolumesByIdentity = volumeSets
-        return mapped.sorted { $0.identity < $1.identity }
+        // Detach order: an image stored inside another image's volume goes
+        // first, or that volume cannot unmount (diskimagesiod refuses).
+        let order = SectoriumAttachedImages.innermostFirst(
+            (SectoriumAttachedImages.parse(root) ?? []).filter { image in wholeDisks.values.contains(image.wholeDisk) })
+            .map { "image:\($0.wholeDisk)" }
+        return mapped.sorted { lhs, rhs in
+            let l = order.firstIndex(of: lhs.identity) ?? Int.max, r = order.firstIndex(of: rhs.identity) ?? Int.max
+            return l != r ? l < r : lhs.identity < rhs.identity
+        }
     }
 
     private func verifiedImageWholeDisk(_ wholeNodes: [String], entityNodes: Set<String>) -> String? {

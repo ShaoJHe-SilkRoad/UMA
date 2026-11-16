@@ -889,7 +889,8 @@ func imageBackingAndDevAPFSChainMustMatchReadOnlyCommandOutput(outerMount: Strin
     #expect(backend.assessOccupancy(scope: .dev) == .noVisibleOccupancy)
     runner.outputs[key] = .init(exitCode: 1, detail: "permission denied")
     #expect(backend.assessOccupancy(scope: .dev) == .incomplete(reason: "lsof exit=1: permission denied"))
-    #expect(runner.invocations.allSatisfy { $0.0 == "/usr/sbin/lsof" })
+    // Read-only only: lsof, plus hdiutil's list of images stored in the volume.
+    #expect(runner.invocations.allSatisfy { $0.0 == "/usr/sbin/lsof" || ($0.0 == "/usr/bin/hdiutil" && $0.1 == ["info", "-plist"]) })
 }
 
 @Test func kernelLockAndDurableIntentUseOnlyInjectedFixtureRoot() throws {
