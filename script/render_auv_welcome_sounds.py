@@ -79,7 +79,7 @@ def add(mix, start_s, samples, gain):
 
 
 # Drumbeat in front of the tones, per language.
-DRUM = {"zh": True, "en": False}
+DRUM = {"zh": False, "en": False}
 # Loudness target (LUFS) for the recording, chosen to sit with the tones.
 VOICE_LUFS = -18
 VOICE_TRUE_PEAK = -1.5

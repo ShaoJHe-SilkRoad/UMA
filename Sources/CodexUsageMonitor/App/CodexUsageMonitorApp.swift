@@ -123,6 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) -> Bool {
         sender.unhide(nil)
         shellCoordinator?.showMainWindow()
+        shellCoordinator?.recordDockClick()
         return true
     }
 

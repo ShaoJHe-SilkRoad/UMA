@@ -1942,7 +1942,7 @@ private final class HESectoriumHeldDeviceObserver: SectoriumDeviceObserving {
     func release() { condition.lock(); holding = false; condition.broadcast(); condition.unlock() }
     func waitUntilEntered() -> Bool {
         condition.lock(); defer { condition.unlock() }
-        let deadline = Date().addingTimeInterval(2)
+        let deadline = Date().addingTimeInterval(10) // a cold first run can take over 2 s; returns as soon as entered
         while !entered && Date() < deadline { _ = condition.wait(until: deadline) }
         return entered
     }
