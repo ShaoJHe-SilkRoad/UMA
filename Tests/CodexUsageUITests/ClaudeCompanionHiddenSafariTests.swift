@@ -265,6 +265,27 @@ struct ClaudeCompanionSelfRecoveryTests {
         #expect(page.log.contains("receipt-removed EXPIRED"))
     }
 
+    /// Seen live on 2026-11-15: a read whose page went silent closed its tab and
+    /// wrote FAILED, but the reply to the removal never came back. The receipt
+    /// still named the tab, recovery only knew how to clean up a tab that was
+    /// not yet terminal, and every later read was refused as an ownership loss,
+    /// so no usage page was opened again.
+    @Test("A FAILED receipt whose removal was lost no longer blocks every read")
+    func terminalReceiptWithTabIsSettled() throws {
+        let page = try CompanionPage()
+        page.plantExpiredReceipt(Self.read, state: "FAILED", ownedTabID: 83_818)
+        page.advance(milliseconds: 60_000)
+        #expect(page.log.contains("receipt-removed FAILED"))
+        // Its tab was already closed during cleanup; nothing is closed again.
+        #expect(!page.log.contains("tabs.remove 83818"))
+
+        page.clearLog()
+        page.dispatchRead(Self.firstWake, placement: nil)
+        #expect(page.log.contains("automation refreshStarted"))
+        #expect(page.log.contains("tabs.create background"))
+        #expect(!page.log.contains("automation ownedTabOwnershipLost"))
+    }
+
     /// Seen live after the native process was killed: each command arrived
     /// twice, both copies started a read, and the read was refused.
     /// Safari suspends a background tab's process when its page goes quiet, and
@@ -422,8 +443,12 @@ private final class CompanionPage {
         Int(context.evaluateScript("UMACompanionHarness.receiptLoads()")?.toInt32() ?? 0)
     }
 
-    func plantExpiredReceipt(_ requestID: String) {
-        context.evaluateScript("UMACompanionHarness.plantExpiredReceipt(\"\(requestID)\")")
+    func plantExpiredReceipt(_ requestID: String, state: String? = nil, ownedTabID: Int? = nil) {
+        let stateArgument = state.map { "\"\($0)\"" } ?? "undefined"
+        let tabArgument = ownedTabID.map(String.init) ?? "undefined"
+        context.evaluateScript("""
+        UMACompanionHarness.plantExpiredReceipt("\(requestID)", \(stateArgument), \(tabArgument))
+        """)
     }
 
     func setNativeAnswers(_ answers: Bool) {
