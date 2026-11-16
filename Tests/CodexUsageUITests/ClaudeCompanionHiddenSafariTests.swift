@@ -1,3 +1,4 @@
+import ClaudeBrowserBridgeProtocol
 import ClaudeSafariHostIPC
 import Foundation
 import JavaScriptCore
@@ -111,6 +112,46 @@ struct ClaudeCompanionHiddenSafariTests {
         #expect(SafariWindowVisibility.placement(hasWindowOnCurrentDesktop: false) == .temporaryWindow)
         #expect(SafariWindowVisibility.placement(hasWindowOnCurrentDesktop: true) == .existingWindow)
         #expect(SafariWindowVisibility.placement(hasWindowOnCurrentDesktop: nil) == .existingWindow)
+    }
+
+    /// Seen on Nov 15 2026: with Safari on screen, a third of reads ended as
+    /// tabUnavailable because Safari suspended the hidden background tab, and
+    /// the automatic retry opened another background tab that went the same way.
+    @Test("A first read follows Safari's windows; after a silent background tab the retry gets a temporary window")
+    func silentBackgroundTabRetriesInTemporaryWindow() {
+        var policy = ClaudeSafariReadPlacementPolicy()
+        // A normal first read follows SafariWindowVisibility.
+        #expect(policy.placementForNextRead(hasWindowOnCurrentDesktop: true) == .existingWindow)
+        #expect(policy.placementForNextRead(hasWindowOnCurrentDesktop: false) == .temporaryWindow)
+        #expect(policy.placementForNextRead(hasWindowOnCurrentDesktop: nil) == .existingWindow)
+
+        // The page in a background tab went silent: only the next read moves.
+        policy.readEnded(.tabUnavailable, placement: .existingWindow)
+        #expect(policy.placementForNextRead(hasWindowOnCurrentDesktop: true) == .temporaryWindow)
+        #expect(policy.placementForNextRead(hasWindowOnCurrentDesktop: true) == .existingWindow)
+
+        // A retry that fails in the temporary window does not lead to another.
+        policy.readEnded(.tabUnavailable, placement: .existingWindow)
+        _ = policy.placementForNextRead(hasWindowOnCurrentDesktop: true)
+        policy.readEnded(.tabUnavailable, placement: .temporaryWindow)
+        #expect(policy.placementForNextRead(hasWindowOnCurrentDesktop: true) == .existingWindow)
+
+        // Other endings leave placement alone.
+        for status in [ClaudeBrowserAutomationStatus.usageUnavailable, .signInRequired,
+                       .permissionRequired, .ownedTabOwnershipLost] {
+            policy.readEnded(status, placement: .existingWindow)
+            #expect(policy.placementForNextRead(hasWindowOnCurrentDesktop: true) == .existingWindow)
+        }
+    }
+
+    @Test("A completed read clears the temporary window for the next read")
+    func completedReadResetsPlacement() {
+        var policy = ClaudeSafariReadPlacementPolicy()
+        policy.readEnded(.tabUnavailable, placement: .existingWindow)
+        #expect(policy.temporaryWindowForNextRead)
+        policy.readEnded(.refreshCompleted, placement: .existingWindow)
+        #expect(!policy.temporaryWindowForNextRead)
+        #expect(policy.placementForNextRead(hasWindowOnCurrentDesktop: true) == .existingWindow)
     }
 
     @Test("Only a full-size, visible Safari window counts as on screen")

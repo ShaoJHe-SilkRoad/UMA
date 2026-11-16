@@ -24,6 +24,10 @@ actor ClaudeSafariHostClientAdapter {
     /// The app that was in front when a read opened a temporary Safari window,
     /// so it can be brought back if Safari took the front while reading.
     private var focusReturnTargets: [String: pid_t] = [:]
+    /// The placement each read in flight was sent with, and what decides the
+    /// next one: after a silent background tab, one read in a temporary window.
+    private var workPlacements: [String: ClaudeSafariHostIPCProviderPlacement] = [:]
+    private var placementPolicy = ClaudeSafariReadPlacementPolicy()
     private let safariWindowVisibility: @Sendable () -> Bool?
 
     init?(
@@ -56,6 +60,7 @@ actor ClaudeSafariHostClientAdapter {
         controlRequestIDOrder.removeAll()
         activeWorkRequestIDs.removeAll()
         focusReturnTargets.removeAll()
+        workPlacements.removeAll()
         let active = waiters.values
         waiters.removeAll()
         for waiter in active {
@@ -130,7 +135,7 @@ actor ClaudeSafariHostClientAdapter {
         else { return .workDispatchFailed }
         guard await wakeHost() else { return .browserUnavailable }
         let operation: ClaudeSafariHostIPCOperation = oneShot ? .accuracySync : .automaticRefresh
-        let placement = SafariWindowVisibility.placement(
+        let placement = placementPolicy.placementForNextRead(
             hasWindowOnCurrentDesktop: safariWindowVisibility()
         )
         if placement == .temporaryWindow,
@@ -142,6 +147,7 @@ actor ClaudeSafariHostClientAdapter {
         // answer immediately on a warm App Group listener; no valid terminal
         // response may arrive before the adapter recognizes its request ID.
         activeWorkRequestIDs.insert(normalizedRequestID)
+        workPlacements[normalizedRequestID] = placement
         do {
             try client.submit(.init(
                 requestID: normalizedRequestID,
@@ -154,6 +160,7 @@ actor ClaudeSafariHostClientAdapter {
         } catch {
             activeWorkRequestIDs.remove(normalizedRequestID)
             focusReturnTargets.removeValue(forKey: normalizedRequestID)
+            workPlacements.removeValue(forKey: normalizedRequestID)
             return .workDispatchFailed
         }
     }
@@ -177,8 +184,16 @@ actor ClaudeSafariHostClientAdapter {
         }
     }
 
+    /// Records how a read ended before it is forgotten, so the next read's
+    /// placement can follow it.
+    private func finishWork(_ requestID: String, endedWith status: ClaudeBrowserAutomationStatus) {
+        placementPolicy.readEnded(status, placement: workPlacements[requestID])
+        finishWork(requestID)
+    }
+
     @discardableResult
     private func finishWork(_ requestID: String) -> Bool {
+        workPlacements.removeValue(forKey: requestID)
         let wasActive = activeWorkRequestIDs.remove(requestID) != nil
         if let target = focusReturnTargets.removeValue(forKey: requestID) {
             Self.returnFocus(to: target)
@@ -286,7 +301,7 @@ actor ClaudeSafariHostClientAdapter {
             // A single IPC file establishes causal ordering. The ordered
             // consumer still receives the observation before the terminal
             // cleanup receipt so publication cannot race ahead of the anchor.
-            finishWork(response.requestID)
+            finishWork(response.requestID, endedWith: event.status)
             consumer?.submit(.observation(.success(observation)))
             consumer?.submit(.automation(event))
         } else if activeWorkRequestIDs.contains(response.requestID),
@@ -294,7 +309,7 @@ actor ClaudeSafariHostClientAdapter {
             consumer?.submit(.observation(.success(observation)))
         } else if activeWorkRequestIDs.contains(response.requestID),
                   let event = response.automationEvent {
-            finishWork(response.requestID)
+            finishWork(response.requestID, endedWith: event.status)
             consumer?.submit(.automation(event))
         } else if activeWorkRequestIDs.contains(response.requestID),
                   response.outcome == .failed {
