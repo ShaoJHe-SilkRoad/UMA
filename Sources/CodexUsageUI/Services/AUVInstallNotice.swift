@@ -80,10 +80,10 @@ public enum AUVInstallNotice: Equatable, Sendable {
     }
 }
 
-/// The first-launch sound: a drumbeat, the first seven tones of 门楼, then
-/// "AUV 您吉祥" (Chinese) or "Welcome to AUV" (English). Built by
+/// The first-launch sound. English: the first seven tones of 门楼. Chinese: a
+/// drumbeat, the seven tones, then the greeting the owner recorded. Built by
 /// script/render_auv_welcome_sounds.py. A drag in the disk image cannot play
-/// anything itself, so the drumbeat that marks a successful install is here.
+/// anything itself, so the sound that marks a successful install is here.
 @MainActor
 public enum AUVWelcomeSound {
     private static var current: NSSound?

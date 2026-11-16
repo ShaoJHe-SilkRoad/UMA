@@ -1,4 +1,5 @@
-import CodexUsageUI
+import AppKit
+@testable import CodexUsageUI
 import Foundation
 import Testing
 
@@ -77,5 +78,16 @@ struct AUVInstallNoticeTests {
         #expect(run([0.0, 0.4, 0.8, 1.2, 1.6, 1.8]) == [false, false, false, false, true, false])
         // A pause longer than the window starts the count over.
         #expect(run([0.0, 0.5, 1.0, 1.5, 4.0]) == [false, false, false, false, false])
+    }
+
+    @Test("Both welcome sounds are playable; English is the seven tones alone")
+    @MainActor
+    func welcomeSoundData() throws {
+        let zh = try #require(NSSound(data: AUVWelcomeSoundData.zh))
+        let en = try #require(NSSound(data: AUVWelcomeSoundData.en))
+        // Seven tones at quarter = 80 run about 4 s with their ring-out; the
+        // spoken greeting and the drum are not in the English sound.
+        #expect(en.duration > 3.5 && en.duration < 5)
+        #expect(zh.duration >= en.duration)
     }
 }
