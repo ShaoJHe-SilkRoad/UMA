@@ -202,6 +202,7 @@ public final class ProcessCommandRunner: HESectoriumSecureCommandRunning, HESect
         if executable == "/usr/sbin/diskutil", arguments.first == "unmount" { return 30 }
         if executable == "/usr/sbin/diskutil", arguments == ["image", "attach", "--help"] { return 5 }
         if SectoriumObservationCommandRunner.isImageReadProbe(executable, arguments) { return 5 }
+        if executable == "/usr/bin/hdiutil", arguments.first == "attach", arguments.contains("-nomount") { return 60 }
         if executable == "/usr/sbin/diskutil", Array(arguments.prefix(2)) == ["image", "attach"] { return 180 }
         if isReadOnlyPropertyList(executable: executable, arguments: arguments)
             || (executable == "/usr/bin/hdiutil" && arguments.count == 3
@@ -893,15 +894,28 @@ public final class MacStorageBackend: StorageBackend {
                 cwd: paths.workingDirectory, standardInput: input)
             return .init(exitCode: outcome.exitCode, detail: "Unlock/attach returned \(outcome.exitCode)")
         }
-        // Newer macOS exposes the system-supported image API used in Terminal.
-        // Select before dispatch; an authentication/cancellation/action failure
-        // must never trigger a second attach through another executable.
-        let capability = command("/usr/sbin/diskutil", ["image", "attach", "--help"])
-        let supportsNativeImageAPI = capability.succeeded && capability.detail.contains("diskutil image attach")
-        let result = supportsNativeImageAPI
-            ? command("/usr/sbin/diskutil", ["image", "attach", "--nobrowse", "--mountPoint", policy.devMountPoint, policy.imagePath])
-            : command("/usr/bin/hdiutil", ["attach", "-nobrowse", "-mountpoint", policy.devMountPoint, policy.imagePath])
-        return .init(exitCode: result.exitCode, detail: result.detail)
+        // Attach without mounting, then mount the one verified volume. Attaching
+        // needs no approval; macOS asks for a password or Touch ID only for the
+        // mount inside the parent drive, so there is exactly one prompt.
+        // `diskutil image attach --mountPoint` was used before: after mounting it
+        // reopens the image and reads every band (21,000 files on exFAT, about
+        // 10 s) before it exits. A failed or cancelled step is never retried
+        // through another command.
+        let attached = command("/usr/bin/hdiutil", ["attach", "-nomount", "-nobrowse", policy.imagePath])
+        guard attached.succeeded else { return .init(exitCode: attached.exitCode, detail: attached.detail) }
+        // hdiutil returns once the devices exist; allow a moment for their
+        // metadata, but never wait when the image is not listed at all.
+        var volume: String?
+        for attempt in 0..<5 {
+            if let device = attachedUnmountedVolumeDevice() { volume = device; break }
+            guard attempt < 4, (imageInventoryMatchCount(for: policy.imagePath) ?? 0) > 0 else { break }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        guard let volume else {
+            return .init(exitCode: -2,
+                detail: "The image is attached, but its development volume could not be verified; it is left attached and unmounted")
+        }
+        return command("/usr/sbin/diskutil", ["mount", "-mountPoint", policy.devMountPoint, "/dev/\(volume)"])
     }
     private func canonical(_ path: String) -> String { URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path }
     func directoryEntryCount(_ path: String) -> UInt32? {
@@ -1021,6 +1035,40 @@ public final class MacStorageBackend: StorageBackend {
         }
         if let mount = info["MountPoint"] { return (mount as? String)?.isEmpty == true }
         return info["Mounted"] as? Bool == false
+    }
+
+    /// The one unmounted APFS volume of the freshly attached image. With a
+    /// known volume UUID this is the full verified chain. A volume created or
+    /// registered but never loaded has no recorded UUID yet: then it must be the
+    /// only APFS volume on this image, unmounted, in a container whose single
+    /// physical store is a partition of this image. Load validates its name and
+    /// chain after mounting, as before.
+    private func attachedUnmountedVolumeDevice() -> String? {
+        if policy.devUUID != nil {
+            guard let info = verifiedUnmountedImageVolumeInfo(),
+                  let device = text(info, ["DeviceIdentifier"]), validDiskID(device) else { return nil }
+            return device
+        }
+        return metadataObservation {
+            guard let images = plist(command("/usr/bin/hdiutil", ["info", "-plist"]))?["images"] as? [[String: Any]] else { return nil }
+            let matches = images.filter { text($0, ["image-path"]) == policy.imagePath }
+            guard matches.count == 1, let entities = matches[0]["system-entities"] as? [[String: Any]], !entities.isEmpty,
+                  entities.allSatisfy({ text($0, ["mount-point"])?.isEmpty != false }) else { return nil }
+            let devices = entities.compactMap { text($0, ["dev-entry"]).map { $0.hasPrefix("/dev/") ? String($0.dropFirst(5)) : $0 } }
+            guard devices.count == entities.count, devices.allSatisfy(validDiskID) else { return nil }
+            let volumes = devices.compactMap { device -> (String, [String: Any])? in
+                guard let info = diskInfo("/dev/" + device),
+                      text(info, ["FilesystemType", "FilesystemName", "FileSystemPersonality"])?.uppercased().contains("APFS") == true,
+                      text(info, ["VolumeUUID", "APFSVolumeUUID"]).flatMap(UUID.init(uuidString:)) != nil else { return nil }
+                return (device, info)
+            }
+            guard volumes.count == 1, let (device, info) = volumes.first, Self.explicitlyUnmounted(info),
+                  let containerID = text(info, ["APFSContainerReference"]), let all = containers() else { return nil }
+            let container = all.filter { text($0, ["ContainerReference"]) == containerID }
+            guard container.count == 1, let stores = physicalStoreDevices(container[0]), stores.count == 1,
+                  let store = stores.first, devices.contains(store) else { return nil }
+            return device
+        }
     }
 
     public func imageIsDetached() -> Bool {

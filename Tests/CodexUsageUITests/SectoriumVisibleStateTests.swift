@@ -71,7 +71,9 @@ struct SectoriumVisibleStateTests {
         try await eventually(diagnostics: fixture.diagnostics) { !fixture.store.isBusy && fixture.store.volumeRows.first?.verifiedLoaded == true }
         #expect(fixture.store.userNotice?.english.hasPrefix("Load successful") == true)
         #expect(fixture.store.volumeRows.first?.canUnloadOnly == true)
-        #expect(fixture.runner.mutationCalls.map { $0[1] } == ["unmount", "mount"])
+        // Unload also releases the image ("eject" of the image device); the
+        // 4 KB read probe before reusing an attachment is not a mutation.
+        #expect(fixture.runner.mutationCalls.filter { $0[0] != "/bin/dd" }.map { $0[1] } == ["unmount", "eject", "mount"])
         #expect(fixture.ejectDriver.mutationCalls == 0)
     }
 

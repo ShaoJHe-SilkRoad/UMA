@@ -174,6 +174,9 @@ final class WorkbenchFixtureRunner: HESectoriumCommandRunning, HESectoriumSecure
     var failNextImageEject = false
     /// Result of the first-4-KB read probe of an attached image (`/bin/dd`).
     var deviceReadOutcome: CommandOutcome?
+    /// A `-nomount` attach of a preset inventory leaves its volumes unmounted
+    /// until `diskutil mount` restores the preset mounted state.
+    private var pendingMount: (inventory: [[String: Any]], infos: [String: [String: Any]])?
     var occupancyIsClear = false
     var simulateLifecycle = false
     var ignoreNativeModification = false
@@ -250,8 +253,40 @@ final class WorkbenchFixtureRunner: HESectoriumCommandRunning, HESectoriumSecure
         }
         if executable == "/usr/bin/hdiutil", arguments.first == "isencrypted" { return encryptionOutput }
         if executable == "/usr/bin/hdiutil", arguments.first == "attach" {
-            if attachOutcome.succeeded, let attachedImageInventory { imageInventory = attachedImageInventory }
+            if attachOutcome.succeeded, let attachedImageInventory {
+                if arguments.contains("-nomount") {
+                    var saved: [String: [String: Any]] = [:]
+                    imageInventory = attachedImageInventory.map { image in
+                        var image = image
+                        if let entities = image["system-entities"] as? [[String: Any]] {
+                            image["system-entities"] = entities.map { entity in
+                                var entity = entity
+                                if let mount = entity.removeValue(forKey: "mount-point") as? String,
+                                   let device = entity["dev-entry"] as? String {
+                                    for key in [mount, device] { saved[key] = additionalDiskInfos[key] }
+                                    var unmounted = additionalDiskInfos[device] ?? additionalDiskInfos[mount] ?? [:]
+                                    unmounted["Mounted"] = false; unmounted["MountPoint"] = ""
+                                    additionalDiskInfos[device] = unmounted
+                                    additionalDiskInfos.removeValue(forKey: mount)
+                                }
+                                return entity
+                            }
+                        }
+                        return image
+                    }
+                    pendingMount = (attachedImageInventory, saved)
+                } else {
+                    imageInventory = attachedImageInventory
+                }
+            }
             return attachOutcome
+        }
+        if executable == "/usr/sbin/diskutil", arguments.first == "mount", arguments.count == 4, let pending = pendingMount {
+            if let mountOutcome, !mountOutcome.succeeded { return mountOutcome }
+            imageInventory = pending.inventory
+            for (key, info) in pending.infos { additionalDiskInfos[key] = info }
+            pendingMount = nil
+            return .success
         }
         if executable == "/bin/dd", let deviceReadOutcome { return deviceReadOutcome }
         if executable == "/usr/sbin/lsof", occupancyIsClear { return .init(exitCode: 1, detail: "") }
@@ -301,6 +336,22 @@ final class WorkbenchFixtureRunner: HESectoriumCommandRunning, HESectoriumSecure
             simulatedImages[path] = .init(name: after("-volname"), bytes: gib * 1_073_741_824,
                                           fs: after("-fs"), uuid: UUID())
             return nil // ordinary fixture creates only a disposable empty directory
+        }
+        if executable == "/usr/bin/hdiutil", arguments.first == "attach", arguments.contains("-nomount"),
+           let path = arguments.last, let image = simulatedImages[path] {
+            // Attached, nothing mounted: the volume waits for an approved mount.
+            let info: [String: Any] = ["VolumeUUID": image.uuid.uuidString, "MountPoint": "", "Mounted": false,
+                "FilesystemType": "APFS", "FileSystemPersonality": image.fs == "APFSX" ? "Case-sensitive APFS" : "APFS",
+                "WritableVolume": true, "VolumeName": image.name, "DeviceIdentifier": "disk31s1",
+                "APFSContainerReference": "disk31", "TotalSize": image.bytes]
+            additionalDiskInfos["/dev/disk31s1"] = info
+            imageInventory = [["image-path": path, "system-entities": [
+                ["content-hint": "GUID_partition_scheme", "dev-entry": "/dev/disk30"],
+                ["content-hint": "Apple_APFS", "dev-entry": "/dev/disk30s2"],
+                ["volume-uuid": image.uuid.uuidString, "dev-entry": "/dev/disk31s1"]]]]
+            apfsContainers = [["ContainerReference": "disk31", "PhysicalStores": [["DeviceIdentifier": "disk30s2"]],
+                               "Volumes": [["APFSVolumeUUID": image.uuid.uuidString, "DeviceIdentifier": "disk31s1"]]]]
+            return .success
         }
         if executable == "/usr/bin/hdiutil", arguments.first == "attach", let path = arguments.last,
            let image = simulatedImages[path], let i = arguments.firstIndex(of: "-mountpoint") {
@@ -2637,8 +2688,10 @@ struct SectoriumWorkbenchRuntimeTests {
         let release = try #require(commands.firstIndex(of: ["/usr/sbin/diskutil", "eject", "/dev/disk30"]))
         let attach = try #require(commands.firstIndex { $0.contains("attach") && $0.last == profile.imagePath })
         #expect(release < attach)
-        // The unreadable attachment is never mounted.
-        #expect(!commands.contains(["/usr/sbin/diskutil", "mount", "-mountPoint", profile.devMountPoint, "/dev/disk31s1"]))
+        // The unreadable attachment is never mounted: the only mount follows the fresh attach.
+        let mounts = commands.indices.filter { commands[$0].count > 1 && commands[$0][1] == "mount" }
+        #expect(mounts.count == 1)
+        #expect(mounts.allSatisfy { $0 > attach })
     }
 
     @Test("A read probe that times out or fails otherwise leaves the attachment alone")

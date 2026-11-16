@@ -111,12 +111,12 @@ struct SectoriumLoadRecoveryTests {
         let actions = fixture.runner.commands.dropFirst(before).filter {
             !$0.contains("--help") && ($0.contains("attach") || $0.contains("mount"))
         }
-        let expected = mode == "attached"
-            ? ["/usr/sbin/diskutil", "mount", "-mountPoint", profile.devMountPoint, "/dev/disk31s1"]
-            : mode == "diskutil-image"
-                ? ["/usr/sbin/diskutil", "image", "attach", "--nobrowse", "--mountPoint", profile.devMountPoint, profile.imagePath]
-                : ["/usr/bin/hdiutil", "attach", "-nobrowse", "-mountpoint", profile.devMountPoint, profile.imagePath]
-        #expect(actions == [expected])
+        // A detached image is attached without mounting, then its one verified
+        // volume is mounted: only that mount needs macOS approval.
+        let mount = ["/usr/sbin/diskutil", "mount", "-mountPoint", profile.devMountPoint, "/dev/disk31s1"]
+        let expected = mode == "attached" ? [mount]
+            : [["/usr/bin/hdiutil", "attach", "-nomount", "-nobrowse", profile.imagePath], mount]
+        #expect(actions == expected)
         #expect(try String(contentsOf: saved, encoding: .utf8) == "unchanged")
         #expect((try FileManager.default.attributesOfItem(atPath: profile.devMountPoint)[.systemFileNumber] as? UInt64) == inode)
         #expect((try FileManager.default.attributesOfItem(atPath: profile.devMountPoint)[.posixPermissions] as? Int) == 0o750)
@@ -177,7 +177,8 @@ struct SectoriumLoadRecoveryTests {
         #expect(!fixture.store.value.suppressedProfileIDs.contains(profile.id))
         let actions = fixture.runner.commands.dropFirst(beforeRetry)
         #expect(actions.filter { $0.count > 1 && $0[1] == "attach" }.count == (detached ? 1 : 0))
-        #expect(actions.filter { $0.count > 1 && $0[1] == "mount" }.count == (detached ? 0 : 1))
+        // A detached image is attached without mounting, so both paths mount once.
+        #expect(actions.filter { $0.count > 1 && $0[1] == "mount" }.count == 1)
     }
 
     @Test("Unknown or wrong APFS image-chain evidence cannot clear an interrupted Load",
@@ -237,9 +238,9 @@ struct SectoriumLoadRecoveryTests {
         #expect(fixture.service.startDevelopmentDisk(profileID: profile.id).succeeded)
     }
 
-    @Test("Supported native diskutil image attach is selected and cancellation never falls back to a second action",
+    @Test("Load attaches once and mounts once; a cancelled approval never falls back to a second action",
           arguments: [false, true])
-    func modernImageAttachUsesNativeCommandWithoutActionFallback(cancelled: Bool) throws {
+    func attachThenApprovedMountWithoutActionFallback(cancelled: Bool) throws {
         let fixture = try loadedFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let profile = try #require(fixture.service.sectoriumProfiles().first)
@@ -247,15 +248,15 @@ struct SectoriumLoadRecoveryTests {
         fixture.runner.imageInventory = []
         fixture.runner.modernImageAttachSupported = true
         let cancellation = "User cancelled native authorization (-128)"
-        if cancelled { fixture.runner.modernImageAttachOutcome = .init(exitCode: 1, detail: cancellation) }
+        if cancelled { fixture.runner.mountOutcome = .init(exitCode: 1, detail: cancellation) }
         let before = fixture.runner.commands.count
         let result = fixture.service.startDevelopmentDisk(profileID: profile.id)
         #expect(result.succeeded == !cancelled, "\(result)")
         let actions = fixture.runner.commands.dropFirst(before)
-        #expect(actions.contains(["/usr/sbin/diskutil", "image", "attach", "--help"]))
-        #expect(actions.filter { $0 == ["/usr/sbin/diskutil", "image", "attach", "--nobrowse",
-                                      "--mountPoint", profile.devMountPoint, profile.imagePath] }.count == 1)
-        #expect(!actions.contains { $0.count > 1 && $0[0] == "/usr/bin/hdiutil" && $0[1] == "attach" })
+        #expect(actions.filter { $0 == ["/usr/bin/hdiutil", "attach", "-nomount", "-nobrowse", profile.imagePath] }.count == 1)
+        #expect(actions.filter { $0 == ["/usr/sbin/diskutil", "mount", "-mountPoint",
+                                      profile.devMountPoint, "/dev/disk31s1"] }.count == 1)
+        #expect(!actions.contains { $0.count > 1 && $0[0] == "/usr/sbin/diskutil" && $0[1] == "image" })
         if cancelled {
             #expect(String(describing: result.failure).contains(cancellation))
             #expect(fixture.service.verifiedLoadedState(profileID: profile.id) == false)

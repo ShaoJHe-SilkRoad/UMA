@@ -183,15 +183,38 @@ private enum SectoriumPortableV2 {
          "Creation or format method / 创建或格式化方式: \(line(volume.formatMethod ?? "not recorded / 未记录"))"]
             .map { prefix + $0 }
     }
+    static let historyEntriesShown = 30
+
+    /// What someone holding this drive needs first: what is on it and how to
+    /// use it on a Mac, including the macOS approval that Load asks for.
+    static func usageLines(_ snapshot: SectoriumPortableSnapshot) -> [String] {
+        let volumes = snapshot.context.volumes.sorted(by: { $0.profileID < $1.profileID })
+        var lines = ["## On this drive / 这块硬盘上有什么", ""]
+        if volumes.isEmpty {
+            lines += ["No registered development volume. / 没有已登记的开发卷。", ""]
+        } else {
+            for volume in volumes {
+                let image = URL(fileURLWithPath: volume.imagePath).lastPathComponent
+                lines += ["- \(line(volume.name)): image / 镜像 \(line(image)), mounted at / 挂载到 \(line(volume.mountPoint))"]
+            }
+            lines += [""]
+        }
+        lines += ["## Using it on a Mac / 在 Mac 上使用", "",
+            "1. Open AUV → Sectorium. If the volume is not listed, choose Register existing… and select the image above (press Command-Shift-. to show hidden files). / 打开 AUV →“分区工”。如果没有列出该开发卷，选择“登记已有开发卷…”，选中上面的镜像（按 Command-Shift-. 显示隐藏文件）。",
+            "2. Load: macOS asks for your password or Touch ID before it mounts the volume inside this drive. / 加载：macOS 会请你输入密码或使用 Touch ID，才能把开发卷挂载到这块硬盘中。",
+            "3. Before unplugging, choose Disconnect and wait for \"safe to unplug\". Never unplug while a volume is loaded. / 拔盘前点“断开”，等出现“可以拔出”。开发卷加载着时不要拔盘。", ""]
+        return lines
+    }
+
     static func render(_ snapshot: SectoriumPortableSnapshot, notes: String) -> String {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         guard let encoded = try? encoder.encode(snapshot) else { return "" }
         let parent = snapshot.context.parent
         let used = parent.totalBytes.flatMap { total in parent.availableBytes.flatMap { $0 <= total ? total - $0 : nil } }
         var lines = ["<!-- AUV-SECTORIUM-IMPORTANT:v2 host=\(parent.documentVolumeUUID.uuidString) -->",
-            "# AUV development volumes / AUV 开发盘", "",
-            "This record separates intended actions from verified completed operations. It is a human-readable record, never authorization or a source of disk identity.",
-            "本记录区分拟执行操作与已核验完成的操作。它供人阅读，不授予操作权限，也不是磁盘身份的依据。", "",
+            "# AUV development volumes / AUV 开发盘", ""]
+        lines += usageLines(snapshot)
+        lines += ["## This drive / 这块硬盘", "",
             "Parent device / 母盘: \(line(parent.name ?? "not recorded / 未记录"))",
             "Physical identity / 物理身份: \(line(parent.physicalID))",
             "Physical device capacity / 物理母盘容量: \(bytes(parent.physicalCapacityBytes))",
@@ -208,8 +231,15 @@ private enum SectoriumPortableV2 {
         for volume in snapshot.context.volumes.sorted(by: { $0.profileID < $1.profileID }) {
             lines += ["### \(line(volume.name))"] + volumeLines(volume) + [""]
         }
+        // The full history stays in the record data at the end of this file and
+        // travels with the drive; the readable list shows the latest entries.
+        let shown = snapshot.history.suffix(historyEntriesShown)
         lines += ["## History / 操作历史", "<!-- AUV-SECTORIUM-HISTORY:BEGIN -->"]
-        for event in snapshot.history {
+        if snapshot.history.count > shown.count {
+            let earlier = snapshot.history.count - shown.count
+            lines += ["Latest \(shown.count) of \(snapshot.history.count) entries; the \(earlier) earlier ones are kept in the record data at the end of this file. / 显示最近 \(shown.count) 条，共 \(snapshot.history.count) 条；更早的 \(earlier) 条保存在本文件末尾的记录数据中。", ""]
+        }
+        for event in shown {
             let phase = event.phase == .intended ? "Intended / 拟执行" : "Completed and verified / 已完成并核验"
             lines += ["### \(date(event.occurredAt)) · \(phase) · \(eventLabel(event.kind))",
                       "- Event ID / 事件标识: \(line(event.id))", "- Profile ID / 配置标识: \(event.profileID)"]
@@ -220,6 +250,8 @@ private enum SectoriumPortableV2 {
         lines += ["<!-- AUV-SECTORIUM-HISTORY:END -->", "", "## Inspection and recovery / 检查与恢复", "",
             "Use AUV Sectorium to verify this physical parent, image, mount location, and access before using a volume. Native Disk Utility can inspect the recorded image and volume identities without erasing them. If records disagree, keep storage connected and inspect AUV's local operation history; never erase or recreate an image to fix missing metadata. Active work must finish before normal unmount and physical ejection. Automatic loading may require current macOS authorization; encrypted images may require unlocking.",
             "使用开发盘前，请在 AUV 分区工核实此物理母盘、镜像、挂载位置和访问能力。系统“磁盘工具”可检查记录中的镜像与卷身份，无须擦除。若记录不一致，请保持设备连接并检查 AUV 本地操作历史；不要为补齐元数据而擦除或重建镜像。活跃工作结束后才能正常卸载及物理弹出。自动加载可能需要当前 macOS 授权；加密镜像可能需要解锁。", "",
+            "This record separates intended actions from verified completed operations. It is a human-readable record, never authorization or a source of disk identity. Earlier versions of this file are in .AUV-Sectorium/previous-versions.",
+            "本记录区分拟执行操作与已核验完成的操作。它供人阅读，不授予操作权限，也不是磁盘身份的依据。本文件的旧版本保存在 .AUV-Sectorium/previous-versions 中。", "",
             notesBegin, notes, notesEnd, dataPrefix + encoded.base64EncodedString() + " -->", ""]
         return lines.joined(separator: "\n")
     }

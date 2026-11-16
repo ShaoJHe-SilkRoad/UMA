@@ -283,6 +283,58 @@ public final class SystemSectoriumPortableDocumentFileSystem: SectoriumPortableD
             throw PortableDocumentError.changedBeforeWrite
         }
         try finishPortableTransaction(recordURL: recordURL, staged: staged)
+        archiveSupersededCopies(in: root)
+    }
+
+    /// The transaction keeps the previous document twice (a preimage copy and
+    /// the displaced original) and never removed either, so the drive's root
+    /// filled with `.IMPORTANT.md.auv-*` files. Once a write is verified and its
+    /// transaction record is gone, earlier versions move into one hidden folder.
+    /// A preimage identical to its displaced original is an exact duplicate and
+    /// is removed; nothing else is deleted. Runs under the document lock.
+    private func archiveSupersededCopies(in root: URL) {
+        let displacedPrefix = ".IMPORTANT.md.auv-displaced-", recoveryPrefix = ".IMPORTANT.md.auv-recovery-"
+        guard let names = try? fileManager.contentsOfDirectory(atPath: root.path) else { return }
+        func token(_ name: String, _ prefix: String) -> String? {
+            guard name.hasPrefix(prefix) else { return nil }
+            let value = String(name.dropFirst(prefix.count))
+            return UUID(uuidString: value) == nil ? nil : value
+        }
+        let managed = names.filter { token($0, displacedPrefix) != nil || token($0, recoveryPrefix) != nil }
+        guard !managed.isEmpty else { return }
+        let archive = root.appendingPathComponent(".AUV-Sectorium/previous-versions", isDirectory: true)
+        do { try fileManager.createDirectory(at: archive, withIntermediateDirectories: true) } catch { return }
+        func isPlainFile(_ url: URL) -> Bool {
+            (try? fileManager.attributesOfItem(atPath: url.path))?[.type] as? FileAttributeType == .typeRegular
+        }
+        func move(_ name: String) {
+            let source = root.appendingPathComponent(name), destination = archive.appendingPathComponent(name)
+            guard isPlainFile(source), !fileManager.fileExists(atPath: destination.path),
+                  rename(source.path, destination.path) == 0 else { return }
+            // Extended attributes on exFAT live in an AppleDouble "._" sibling.
+            let companion = root.appendingPathComponent("._" + name)
+            if isPlainFile(companion) {
+                _ = rename(companion.path, archive.appendingPathComponent("._" + name).path)
+            }
+        }
+        for name in managed {
+            if let value = token(name, recoveryPrefix) {
+                let source = root.appendingPathComponent(name)
+                let displaced = root.appendingPathComponent(displacedPrefix + value)
+                let archived = archive.appendingPathComponent(displacedPrefix + value)
+                let original = isPlainFile(displaced) ? displaced : archived
+                if isPlainFile(source), isPlainFile(original),
+                   let copy = try? readRegularFile(source, limit: SectoriumPortableDocumentLimits.maximumBytes),
+                   let kept = try? readRegularFile(original, limit: SectoriumPortableDocumentLimits.maximumBytes),
+                   copy == kept {
+                    _ = unlink(source.path)
+                    _ = unlink(root.appendingPathComponent("._" + name).path)
+                    continue
+                }
+            }
+            move(name)
+        }
+        try? syncDirectory(root)
     }
 
     private func recoverPortableTransaction(target: URL, recordURL: URL) throws {
