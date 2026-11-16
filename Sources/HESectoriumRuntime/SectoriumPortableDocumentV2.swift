@@ -82,7 +82,7 @@ public struct SectoriumPortableDocumentEvent: Codable, Equatable, Sendable {
     }
 }
 
-private struct SectoriumPortableSnapshot: Codable, Equatable {
+struct SectoriumPortableSnapshot: Codable, Equatable {
     let context: SectoriumPortableDocumentContext
     let history: [SectoriumPortableDocumentEvent]
 }
@@ -134,7 +134,7 @@ enum SectoriumPortableValidation {
     }
 }
 
-private enum SectoriumPortableV2 {
+enum SectoriumPortableV2 {
     static let notesBegin = "<!-- AUV-SECTORIUM-NOTES:BEGIN -->"
     static let notesEnd = "<!-- AUV-SECTORIUM-NOTES:END -->"
     static let dataPrefix = "<!-- AUV-SECTORIUM-DATA:"
@@ -184,6 +184,11 @@ private enum SectoriumPortableV2 {
             .map { prefix + $0 }
     }
     static let historyEntriesShown = 30
+    static let recordNotice = [
+        "This record separates intended actions from verified completed operations. It is a human-readable record, never authorization or a source of disk identity.",
+        " Earlier versions of this file are in .AUV-Sectorium/previous-versions.",
+        "本记录区分拟执行操作与已核验完成的操作。它供人阅读，不授予操作权限，也不是磁盘身份的依据。",
+        "本文件的旧版本保存在 .AUV-Sectorium/previous-versions 中。"]
 
     /// What someone holding this drive needs first: what is on it and how to
     /// use it on a Mac, including the macOS approval that Load asks for.
@@ -206,15 +211,27 @@ private enum SectoriumPortableV2 {
         return lines
     }
 
-    static func render(_ snapshot: SectoriumPortableSnapshot, notes: String) -> String {
+    /// The layout a document was written in. Parsing re-renders a document to
+    /// prove nobody edited it outside the notes, so every layout AUV has ever
+    /// written must stay reproducible here, or upgrading AUV makes each drive's
+    /// existing IMPORTANT.md look hand-edited and it is never rewritten again.
+    enum Layout: CaseIterable { case current, original }
+
+    static func render(_ snapshot: SectoriumPortableSnapshot, notes: String,
+                       layout: Layout = .current) -> String {
+        let original = layout == .original
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         guard let encoded = try? encoder.encode(snapshot) else { return "" }
         let parent = snapshot.context.parent
         let used = parent.totalBytes.flatMap { total in parent.availableBytes.flatMap { $0 <= total ? total - $0 : nil } }
         var lines = ["<!-- AUV-SECTORIUM-IMPORTANT:v2 host=\(parent.documentVolumeUUID.uuidString) -->",
             "# AUV development volumes / AUV 开发盘", ""]
-        lines += usageLines(snapshot)
-        lines += ["## This drive / 这块硬盘", "",
+        if original {
+            lines += [recordNotice[0], recordNotice[2], ""]
+        } else {
+            lines += usageLines(snapshot) + ["## This drive / 这块硬盘", ""]
+        }
+        lines += [
             "Parent device / 母盘: \(line(parent.name ?? "not recorded / 未记录"))",
             "Physical identity / 物理身份: \(line(parent.physicalID))",
             "Physical device capacity / 物理母盘容量: \(bytes(parent.physicalCapacityBytes))",
@@ -233,7 +250,7 @@ private enum SectoriumPortableV2 {
         }
         // The full history stays in the record data at the end of this file and
         // travels with the drive; the readable list shows the latest entries.
-        let shown = snapshot.history.suffix(historyEntriesShown)
+        let shown = original ? snapshot.history[...] : snapshot.history.suffix(historyEntriesShown)
         lines += ["## History / 操作历史", "<!-- AUV-SECTORIUM-HISTORY:BEGIN -->"]
         if snapshot.history.count > shown.count {
             let earlier = snapshot.history.count - shown.count
@@ -250,9 +267,9 @@ private enum SectoriumPortableV2 {
         lines += ["<!-- AUV-SECTORIUM-HISTORY:END -->", "", "## Inspection and recovery / 检查与恢复", "",
             "Use AUV Sectorium to verify this physical parent, image, mount location, and access before using a volume. Native Disk Utility can inspect the recorded image and volume identities without erasing them. If records disagree, keep storage connected and inspect AUV's local operation history; never erase or recreate an image to fix missing metadata. Active work must finish before normal unmount and physical ejection. Automatic loading may require current macOS authorization; encrypted images may require unlocking.",
             "使用开发盘前，请在 AUV 分区工核实此物理母盘、镜像、挂载位置和访问能力。系统“磁盘工具”可检查记录中的镜像与卷身份，无须擦除。若记录不一致，请保持设备连接并检查 AUV 本地操作历史；不要为补齐元数据而擦除或重建镜像。活跃工作结束后才能正常卸载及物理弹出。自动加载可能需要当前 macOS 授权；加密镜像可能需要解锁。", "",
-            "This record separates intended actions from verified completed operations. It is a human-readable record, never authorization or a source of disk identity. Earlier versions of this file are in .AUV-Sectorium/previous-versions.",
-            "本记录区分拟执行操作与已核验完成的操作。它供人阅读，不授予操作权限，也不是磁盘身份的依据。本文件的旧版本保存在 .AUV-Sectorium/previous-versions 中。", "",
-            notesBegin, notes, notesEnd, dataPrefix + encoded.base64EncodedString() + " -->", ""]
+        ]
+        if !original { lines += [recordNotice[0] + recordNotice[1], recordNotice[2] + recordNotice[3], ""] }
+        lines += [notesBegin, notes, notesEnd, dataPrefix + encoded.base64EncodedString() + " -->", ""]
         return lines.joined(separator: "\n")
     }
     static func parse(_ data: Data, parent: SectoriumPortableParentRecord) -> (SectoriumPortableSnapshot, String)? {
@@ -270,7 +287,7 @@ private enum SectoriumPortableV2 {
               snapshot.context.parent.documentVolumeUUID == parent.documentVolumeUUID,
               SectoriumPortableValidation.context(snapshot.context),
               let merged = SectoriumPortableValidation.merge([], snapshot.history), merged == snapshot.history,
-              render(snapshot, notes: notes) == text else { return nil }
+              Layout.allCases.contains(where: { render(snapshot, notes: notes, layout: $0) == text }) else { return nil }
         return (snapshot, notes)
     }
 }
