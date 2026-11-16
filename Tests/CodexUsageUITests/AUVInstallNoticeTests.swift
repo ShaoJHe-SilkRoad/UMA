@@ -1,0 +1,93 @@
+import AppKit
+@testable import CodexUsageUI
+import Foundation
+import Testing
+
+@Suite("Install notice")
+struct AUVInstallNoticeTests {
+    @Test("Where AUV runs from decides the notice")
+    func location() {
+        let home = "/Users/someone"
+        #expect(AUVInstallNotice.location(bundlePath: "/Applications/UMA.app", homeDirectory: home,
+                                          isOnReadOnlyVolume: false) == .applications)
+        #expect(AUVInstallNotice.location(bundlePath: "\(home)/Applications/UMA.app", homeDirectory: home,
+                                          isOnReadOnlyVolume: false) == .applications)
+        #expect(AUVInstallNotice.location(bundlePath: "/Volumes/AUV 0.18.9/UMA.app", homeDirectory: home,
+                                          isOnReadOnlyVolume: true) == .diskImageOrTemporary)
+        #expect(AUVInstallNotice.location(
+            bundlePath: "/private/var/folders/x/T/AppTranslocation/ABC/d/UMA.app", homeDirectory: home,
+            isOnReadOnlyVolume: false) == .diskImageOrTemporary)
+        // A development build or a copy left in Downloads stays quiet.
+        #expect(AUVInstallNotice.location(bundlePath: "\(home)/Downloads/UMA.app", homeDirectory: home,
+                                          isOnReadOnlyVolume: false) == .elsewhere)
+    }
+
+    @Test("Installed is said once per build; not installed is said every time")
+    func decide() {
+        let key = "0.18.9 (2026111507)"
+        #expect(AUVInstallNotice.decide(location: .applications, version: "0.18.9", versionKey: key,
+                                        lastNoticedKey: nil) == .installed(version: "0.18.9"))
+        #expect(AUVInstallNotice.decide(location: .applications, version: "0.18.9", versionKey: key,
+                                        lastNoticedKey: "0.18.8 (2026111506)") == .installed(version: "0.18.9"))
+        #expect(AUVInstallNotice.decide(location: .applications, version: "0.18.9", versionKey: key,
+                                        lastNoticedKey: key) == nil)
+        #expect(AUVInstallNotice.decide(location: .diskImageOrTemporary, version: "0.18.9", versionKey: key,
+                                        lastNoticedKey: key) == .notInstalled)
+        #expect(AUVInstallNotice.decide(location: .elsewhere, version: "0.18.9", versionKey: key,
+                                        lastNoticedKey: nil) == nil)
+    }
+
+    @Test("Both notices read in both languages")
+    func copy() {
+        for language in [AppLanguage.english, .simplifiedChinese] {
+            for notice in [AUVInstallNotice.installed(version: "0.18.9"), .notInstalled] {
+                #expect(!notice.title(language).isEmpty)
+                #expect(!notice.message(language, installerMounted: false).isEmpty)
+            }
+            #expect(AUVInstallNotice.installed(version: "0.18.9").message(language, installerMounted: true)
+                .count > AUVInstallNotice.installed(version: "0.18.9").message(language, installerMounted: false).count)
+        }
+        #expect(AUVInstallNotice.installed(version: "0.18.9").title(.simplifiedChinese) == "AUV 0.18.9 已安装")
+    }
+
+    @Test("The notice is shown from the run loop, and Quit goes through the run loop")
+    func presenterAvoidsMainQueueBlocks() throws {
+        // A modal alert inside a main-queue block deadlocked Quit in build
+        // 2026111507: termination waits for a main-actor task that cannot run.
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("Sources/CodexUsageUI/Services/AUVInstallNotice.swift"),
+            encoding: .utf8)
+        #expect(!source.contains("DispatchQueue.main"))
+        #expect(source.contains("RunLoop.main.add(timer, forMode: .common)"))
+        #expect(!source.contains("NSApp.terminate(nil)"))
+        #expect(source.contains("NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0)"))
+    }
+
+    @Test("Five quick clicks play the welcome sound once")
+    func welcomeTaps() {
+        func run(_ times: [TimeInterval]) -> [Bool] {
+            var taps = AUVWelcomeTapCounter()
+            var results: [Bool] = []
+            for time in times { results.append(taps.record(at: time)) }
+            return results
+        }
+        #expect(run([0.0, 0.4, 0.8, 1.2, 1.6]) == [false, false, false, false, true])
+        // The count starts over after a play.
+        #expect(run([0.0, 0.4, 0.8, 1.2, 1.6, 1.8]) == [false, false, false, false, true, false])
+        // A pause longer than the window starts the count over.
+        #expect(run([0.0, 0.5, 1.0, 1.5, 4.0]) == [false, false, false, false, false])
+    }
+
+    @Test("Both welcome sounds are playable; English is the seven tones alone")
+    @MainActor
+    func welcomeSoundData() throws {
+        let zh = try #require(NSSound(data: AUVWelcomeSoundData.zh))
+        let en = try #require(NSSound(data: AUVWelcomeSoundData.en))
+        // Seven tones at quarter = 80 run about 4 s with their ring-out; the
+        // spoken greeting and the drum are not in the English sound.
+        #expect(en.duration > 3.5 && en.duration < 5)
+        #expect(zh.duration >= en.duration)
+    }
+}

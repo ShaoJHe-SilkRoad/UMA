@@ -684,14 +684,19 @@ func imageBackingAndDevAPFSChainMustMatchReadOnlyCommandOutput(outerMount: Strin
         "WritableVolume": true, "VolumeName": "HE", "DeviceIdentifier": "disk6s1", "ParentWholeDisk": "disk6"
     ])
     runner.outputs["/usr/bin/hdiutil info -plist"] = try diskInfo(["images": []])
-    let attach = "/usr/bin/hdiutil attach -nobrowse -mountpoint \(dev.path) \(image.path)"
+    let attach = "/usr/bin/hdiutil attach -nomount -nobrowse \(image.path)"
     runner.outputs[attach] = .init(exitCode: 0)
     let backend = MacStorageBackend(paths: f.paths, runner: runner, policy: policy)
 
     let result = backend.attachImage()
 
-    #expect(result.succeeded)
+    // The empty mountpoint does not block the attach. This script does not
+    // publish the attached volume, so the mount is not attempted and the image
+    // is reported as left attached and unmounted.
     #expect(runner.invocations.filter { $0.0 == "/usr/bin/hdiutil" && $0.1.first == "attach" }.count == 1)
+    #expect(!result.succeeded)
+    #expect(result.detail.contains("left attached and unmounted"))
+    #expect(!runner.invocations.contains { $0.0 == "/usr/sbin/diskutil" && $0.1.first == "mount" })
 }
 
 @Test func absentOrMalformedDEVObservationRefusesBeforeAttach() throws {
@@ -828,8 +833,7 @@ func imageBackingAndDevAPFSChainMustMatchReadOnlyCommandOutput(outerMount: Strin
         "WritableVolume": true, "VolumeName": "HE", "DeviceIdentifier": "disk20s1"
     ])
     runner.outputs["/usr/bin/hdiutil info -plist"] = try diskInfo(["images": []])
-    runner.outputs["/usr/sbin/diskutil image attach --help"] = .init(exitCode: 0, detail: "diskutil image attach")
-    let nativeKey = "/usr/sbin/diskutil image attach --nobrowse --mountPoint \(dev.path) \(image.path)"
+    let nativeKey = "/usr/bin/hdiutil attach -nomount -nobrowse \(image.path)"
     runner.outputs[nativeKey] = .init(exitCode: 1, detail: "Native mount cancelled by user")
     let backend = MacStorageBackend(paths: f.paths, runner: runner, policy: policy)
     let result = backend.attachImage()
@@ -838,8 +842,9 @@ func imageBackingAndDevAPFSChainMustMatchReadOnlyCommandOutput(outerMount: Strin
     #expect(result.exitCode == 1)
     #expect(result.detail == "Native mount cancelled by user")
     #expect(try Data(contentsOf: dev.appendingPathComponent("existing.txt")) == Data("preserve".utf8))
-    #expect(runner.invocations.filter { $0.0 == "/usr/sbin/diskutil" && $0.1 == ["image", "attach", "--nobrowse", "--mountPoint", dev.path, image.path] }.count == 1)
-    #expect(!runner.invocations.contains { $0.0 == "/usr/bin/hdiutil" && $0.1.first == "attach" })
+    // One attach, no mount after it failed, and no second attach through another command.
+    #expect(runner.invocations.filter { $0.0 == "/usr/bin/hdiutil" && $0.1 == ["attach", "-nomount", "-nobrowse", image.path] }.count == 1)
+    #expect(!runner.invocations.contains { $0.0 == "/usr/sbin/diskutil" && ($0.1.first == "image" || $0.1.first == "mount") })
 }
 
 @Test func serviceSnapshotSeparatesDesiredAutomationFromLoadedAgentAndProgress() throws {

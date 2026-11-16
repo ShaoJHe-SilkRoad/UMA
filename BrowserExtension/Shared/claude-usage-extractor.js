@@ -393,6 +393,36 @@
     return candidates.length === 1 ? candidates[0] : null;
   }
 
+  // claude.ai shows the plan as a short badge beside the "Your usage" heading.
+  // Only an allowlisted plan word leaves this function, lowercased; anything
+  // else, or more than one candidate, reads as no plan.
+  const PLAN_VALUES = Object.freeze(["free", "pro", "max", "team", "enterprise"]);
+  const PLAN_BADGE_PATTERN = /^(free|pro|max|team|enterprise)(?: plan| \d{1,2}x)?$/i;
+  const USAGE_HEADING_PATTERN = /^(?:your usage|你的用量|您的用量)$/i;
+  const PLAN_BADGE_MAXIMUM_DEPTH = 2;
+
+  function planBadge(documentLike) {
+    const headings = Array.from(documentLike.querySelectorAll('h1, h2, h3, h4, h5, h6, [role="heading"]'))
+      .slice(0, CONTRACT.maximumLabelElementCount)
+      .filter((node) => USAGE_HEADING_PATTERN.test(boundedOwnText(node, 40) || ""));
+    if (headings.length !== 1) return null;
+    const heading = headings[0];
+    let row = heading.parentElement;
+    for (let depth = 0; row && depth < PLAN_BADGE_MAXIMUM_DEPTH; depth += 1) {
+      const plans = new Set();
+      for (const node of Array.from(row.querySelectorAll("span, div, p, small"))) {
+        if (node === heading || node.contains(heading) || heading.contains(node)) continue;
+        if (node.childElementCount > 0) continue;
+        const match = PLAN_BADGE_PATTERN.exec(boundedOwnText(node, 24) || "");
+        if (match) plans.add(match[1].toLowerCase());
+      }
+      if (plans.size > 1) return null;
+      if (plans.size === 1) return Array.from(plans)[0];
+      row = row.parentElement;
+    }
+    return null;
+  }
+
   function validateWindow(windowValue) {
     if (windowValue === null) return true;
     if (!windowValue || Object.getPrototypeOf(windowValue) !== Object.prototype) return false;
@@ -404,8 +434,11 @@
 
   function validateObservation(value) {
     if (!value || Object.getPrototypeOf(value) !== Object.prototype) return false;
-    const keys = Object.keys(value).sort().join(",");
+    // planLabel is optional so observations without it, from an older
+    // companion, still validate.
+    const keys = Object.keys(value).filter((key) => key !== "planLabel").sort().join(",");
     if (keys !== "extractorSchemaVersion,fiveHour,modelSpecificWeekly,observedAt,sourceLayoutVersion,weeklyAllModels") return false;
+    if ("planLabel" in value && value.planLabel !== null && !PLAN_VALUES.includes(value.planLabel)) return false;
     if (value.extractorSchemaVersion !== CONTRACT.schemaVersion) return false;
     if (value.sourceLayoutVersion !== CONTRACT.sourceLayoutVersion) return false;
     if (!normalizedTimestamp(value.observedAt)) return false;
@@ -432,6 +465,7 @@
       fiveHour,
       weeklyAllModels,
       modelSpecificWeekly: modelSpecificWindow(documentLike, now),
+      planLabel: planBadge(documentLike),
       observedAt: (now || new Date()).toISOString(),
       extractorSchemaVersion: CONTRACT.schemaVersion,
       sourceLayoutVersion: CONTRACT.sourceLayoutVersion,

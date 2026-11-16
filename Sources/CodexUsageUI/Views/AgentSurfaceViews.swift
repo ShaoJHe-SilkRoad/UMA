@@ -911,6 +911,8 @@ public struct AgentWorkspaceSurface: View {
         let quota = kind == .fiveHour ? codexProjection.fiveHour : codexProjection.sevenDay
         let percent = quota.state.ringPercent
         let quotaText = quota.displayText(language: store.language)
+        let reset = Self.detailResetLine(
+            kind: kind, resetsAt: quota.resetAt, language: store.language, now: displayNow)
         let tint = LowRemainingUsagePolicy.color(for: LowRemainingUsagePolicy.assessment(
             providerID: providerID.rawValue, admittedPlan: provider?.planLabel,
             remainingPercent: percent))
@@ -924,9 +926,13 @@ public struct AgentWorkspaceSurface: View {
                     .monospacedDigit()
             }
             AgentRemainingQuotaBar(remainingPercent: percent, tint: tint)
+            if let reset { resetText(reset) }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(label) \(localized("remaining", "剩余")): \(quotaText)")
+        .accessibilityLabel(
+            "\(label) \(localized("remaining", "剩余")): \(quotaText)"
+                + (reset.map { ", \($0)" } ?? "")
+        )
         .accessibilityIdentifier("uma.agent.codex.quota.\(kind == .fiveHour ? "five-hour" : "seven-day")")
     }
 
@@ -1256,9 +1262,39 @@ public struct AgentWorkspaceSurface: View {
                 tint: LowRemainingUsagePolicy.color(for: LowRemainingUsagePolicy.assessment(
                     providerID: providerID.rawValue, admittedPlan: provider?.planLabel,
                     remainingPercent: quota.value.remainingPercent)))
+            if let reset = Self.detailResetLine(
+                kind: quota.kind, resetsAt: quota.resetsAt,
+                language: store.language, now: displayNow
+            ) {
+                resetText(reset)
+            }
         }
         .padding(.vertical, 10)
         .accessibilityElement(children: .combine)
+    }
+
+    /// The full page shows every reset that is known, whatever the Quick
+    /// Panel's own reset setting says. A credit balance's next expiry is not a
+    /// reset, and an unknown reset is left out rather than spelled out.
+    static func detailResetLine(
+        kind: ProviderProductQuotaKind,
+        resetsAt: Date?,
+        language: AppLanguage,
+        now: Date
+    ) -> String? {
+        guard kind != .credits, let resetsAt else { return nil }
+        return language.resetDescription(for: resetsAt, now: now)
+    }
+
+    /// Every reset line keeps the same type size: a long line wraps instead of
+    /// shrinking (0.18.8 shrank Claude's 5H line next to its 7D line).
+    private func resetText(_ text: String) -> some View {
+        Label(text, systemImage: "arrow.clockwise")
+            .labelStyle(.titleAndIcon)
+            .font(AUVType.secondary)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// `store.snapshot` is the primary provider's only, so a workspace that is
@@ -1396,8 +1432,24 @@ public struct AgentWorkspaceSurface: View {
                 callout(systemImage: "minus.circle", tint: .secondary, message: localized(
                     "Online verification unavailable", "在线验证不可用")) { EmptyView() }
                     .accessibilityIdentifier("uma.agent.claude.accuracy-unavailable")
+            case .safariSetupIncomplete(let step):
+                safariSetupCallout(step)
             }
         }
+    }
+
+    /// Claude's exact figures come through Safari. Until that is set up, the
+    /// page shows the next step and one button for it; `connectClaude` takes
+    /// whichever step this is. Claude Settings lists all of them.
+    @ViewBuilder private func safariSetupCallout(_ step: ClaudeSafariSetup.Step) -> some View {
+        let copy = ClaudeSafariSetupCopy.step(step, language: store.language)
+        callout(systemImage: copy.symbol, tint: copy.urgent ? .orange : .accentColor, message: copy.message) {
+            if let button = copy.button {
+                Button(button, action: connectClaude)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .accessibilityIdentifier("uma.agent.claude.safari-setup")
     }
 
     private func callout<Action: View>(

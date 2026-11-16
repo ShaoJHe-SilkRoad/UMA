@@ -71,6 +71,9 @@ public struct SectoriumUserNotice: Equatable, Sendable {
             return .init(english: "The parent drive was not confirmed ejected. Keep it connected and continue the pending operation.", chinese: "尚未确认母盘已弹出。请保持连接并继续待完成操作。")
         case .observationUnavailable, .readiness, .stateConflict, .stateUnavailable:
             return .init(english: "The volume could not be verified. No safe-to-disconnect result is available. Refresh and review its details.", chinese: "无法核实开发卷，尚不能确认可安全拔线。请刷新并查看详情。")
+        case .workbenchFailed(let message) where message.hasPrefix("Load awaiting approval"):
+            return .init(english: "macOS asked for your password or Touch ID to mount the development volume, and it was not answered in time. If its window is still open, approve it and the volume loads; then select Refresh. Otherwise select Load again.",
+                         chinese: "macOS 请求输入密码或使用 Touch ID 来挂载开发卷，但未及时得到确认。若授权窗口仍在，确认后开发卷即会加载，之后点“刷新”；否则请再次点击“加载”。")
         case .workbenchFailed(let message) where message.hasPrefix("Load failed: "):
             let reason = String(message.dropFirst("Load failed: ".count))
             if reason.localizedCaseInsensitiveContains("cancel") {
@@ -90,7 +93,10 @@ enum SectoriumCommandAction: Equatable, Sendable {
 
     var progress: SectoriumUserNotice {
         switch self {
-        case .load: .init(english: "Loading the development volume…", chinese: "正在加载开发卷…")
+        // Mounting inside another drive needs an administrator's approval on
+        // macOS 27; say so, or the wait for the system dialog looks like a hang.
+        case .load: .init(english: "Loading the development volume… macOS may ask for your password or Touch ID before it mounts a volume inside another drive. Approve it in the macOS window to continue.",
+                          chinese: "正在加载开发卷…macOS 可能会要求输入密码或使用 Touch ID，才能把开发卷挂载到外接硬盘中。请在 macOS 的授权窗口中确认后继续。")
         case .unload: .init(english: "Unloading the development volume… The parent drive stays connected.", chinese: "正在卸载开发卷…母盘将保持连接。")
         case .disconnect: .init(english: "Disconnecting the external drive…", chinese: "正在安全断开外接硬盘…")
         case .other: .init(english: "Updating storage…", chinese: "正在更新存储状态…")
@@ -186,8 +192,11 @@ public final class HESectoriumStore: ObservableObject {
     @Published public private(set) var creationFilesystems: [SectoriumFilesystem] = []
     @Published public private(set) var userNotice: SectoriumUserNotice?
     @Published private(set) var activeWorkbenchAction: SectoriumCommandAction?
+    /// Load progress that explains the volume check after an unclean removal.
+    private var loadProgressOverride: SectoriumUserNotice?
     public var progressNotice: SectoriumUserNotice {
-        activeWorkbenchAction?.progress ?? .init(english: "Checking the drive…", chinese: "正在检查硬盘…")
+        (activeWorkbenchAction == .load ? loadProgressOverride : nil)
+            ?? activeWorkbenchAction?.progress ?? .init(english: "Checking the drive…", chinese: "正在检查硬盘…")
     }
     @Published public private(set) var safeToUnplugDriveName: String?
     @Published public private(set) var safetyCheck: SectoriumSafetyCheck?
@@ -478,6 +487,67 @@ public final class HESectoriumStore: ObservableObject {
             }
         }
         debounceConnectionRefresh()
+        if change?.kind == .appeared, autoRegisterDocumentedVolumes { scheduleAutomaticDriveScan() }
+    }
+
+    // MARK: Volumes recorded on a drive
+
+    private static let autoRegisterKey = "uma.sectorium.autoRegisterDocumentedVolumes"
+    /// Off by default; the first scan of a drive is manual unless this is on.
+    @Published public private(set) var autoRegisterDocumentedVolumes =
+        UserDefaults.standard.bool(forKey: HESectoriumStore.autoRegisterKey)
+    /// Volumes found by a manual scan, waiting for the user to confirm.
+    @Published public private(set) var documentedCandidates: [SectoriumDocumentedVolume] = []
+    private var automaticScanTask: Task<Void, Never>?
+
+    public func setAutoRegisterDocumentedVolumes(_ enabled: Bool) {
+        autoRegisterDocumentedVolumes = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.autoRegisterKey)
+        if enabled { scanDrivesForRecordedVolumes(automatic: true) }
+    }
+
+    /// Reads the IMPORTANT.md at the root of each connected external drive and
+    /// finds the volumes it records that this Mac has not registered. A manual
+    /// scan asks before registering; with automatic registration on, a newly
+    /// connected drive's volumes are registered directly. Registering never
+    /// loads a volume.
+    public func scanDrivesForRecordedVolumes(automatic: Bool = false) {
+        guard !isPreviewFixture, !registryUnavailable, automatic || !isBusy else { return }
+        let service = self.service
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let found = service.documentedVolumesOnConnectedDrives()
+            await MainActor.run {
+                guard let self else { return }
+                if automatic {
+                    guard !found.isEmpty, self.autoRegisterDocumentedVolumes, !self.isBusy else { return }
+                    self.performWorkbench({ $0.registerDocumentedVolumes(found) })
+                } else if found.isEmpty {
+                    self.userNotice = .init(english: "No unregistered development volumes are recorded on the connected drives.",
+                                            chinese: "已连接的硬盘上没有记录尚未登记的开发卷。")
+                } else {
+                    self.documentedCandidates = found
+                }
+            }
+        }
+    }
+
+    public func registerDocumentedCandidates() {
+        let candidates = documentedCandidates
+        documentedCandidates = []
+        guard !candidates.isEmpty else { return }
+        performWorkbench({ $0.registerDocumentedVolumes(candidates) })
+    }
+
+    public func dismissDocumentedCandidates() { documentedCandidates = [] }
+
+    private func scheduleAutomaticDriveScan() {
+        automaticScanTask?.cancel()
+        automaticScanTask = Task { @MainActor [weak self] in
+            // Let the new drive's volumes finish mounting first.
+            do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return }
+            guard let self, !self.isBusy else { return }
+            self.scanDrivesForRecordedVolumes(automatic: true)
+        }
     }
 
     private func debounceConnectionRefresh() {
@@ -1510,6 +1580,10 @@ public final class HESectoriumStore: ObservableObject {
 
     public func loadDevelopmentDisk(profileID: String, password: String? = nil) {
         guard volumeRows.contains(where: { $0.id == profileID && $0.canLoad }) else { return }
+        loadProgressOverride = service.uncleanRemoval(profileID: profileID) == nil ? nil : .init(
+            english: "Loading the development volume… The drive was unplugged without Disconnect last time, so AUV first checks the volume read-only (about 1–2 minutes). macOS then asks for your password or Touch ID to mount it.",
+            chinese: "正在加载开发卷…上次拔盘前没有点“断开”，AUV 先只读检查开发卷（约 1–2 分钟），然后 macOS 会请你输入密码或使用 Touch ID 来挂载。")
+        SectoriumTimingTrace.shared.begin("Load " + (volumeRows.first { $0.id == profileID }?.profile.name ?? profileID))
         performWorkbench({ $0.startDevelopmentDisk(profileID: profileID, password: password) },
             profileID: profileID, actionKind: .load)
     }
@@ -1531,6 +1605,10 @@ public final class HESectoriumStore: ObservableObject {
 
     private func prepareSafetyCheck(target: SectoriumSafetyTarget, name: String) {
         guard !isBusy, !isPreviewFixture else { return }
+        switch target {
+        case .volume: SectoriumTimingTrace.shared.begin("Unload " + name)
+        case .drive: SectoriumTimingTrace.shared.begin("Disconnect " + name)
+        }
         safetyWaitTask?.cancel()
         safetyGeneration &+= 1
         let generation = safetyGeneration
@@ -1545,6 +1623,7 @@ public final class HESectoriumStore: ObservableObject {
             await MainActor.run {
                 guard let self, self.finishPreparation(preparation),
                       self.safetyGeneration == generation else { return }
+                SectoriumTimingTrace.shared.mark("activity check shown: \(report.assessment)")
                 self.safetyCheck = .init(target: target, name: name, activity: report.assessment,
                     processes: report.processes, applications: self.applicationQuitter.applications(using: report.processes))
                 if report.assessment == .noVisibleOccupancy { self.confirmSafeUnload() }
@@ -1637,6 +1716,7 @@ public final class HESectoriumStore: ObservableObject {
 
     public func confirmSafeUnload() {
         guard let check = safetyCheck, check.canProceed, !isBusy else { return }
+        SectoriumTimingTrace.shared.mark("confirmed; preparing the operation")
         cancelSafetyCheck()
         let service = self.service
         let preparation = beginPreparation()
@@ -1853,9 +1933,12 @@ public final class HESectoriumStore: ObservableObject {
         let token = UUID()
         activeWorkbenchOperationToken = token
         Task.detached(priority: .userInitiated) { [weak self] in
+            SectoriumTimingTrace.shared.mark("operation started")
             let result = action(service)
+            SectoriumTimingTrace.shared.mark("operation returned")
             let pending = service.pendingSectoriumOperation()
             await MainActor.run {
+                defer { SectoriumTimingTrace.shared.end(result.failure.map { "shown: failed: \($0)" } ?? "shown: completed") }
                 guard let self, self.activeWorkbenchOperationToken == token else { return }
                 self.activeWorkbenchOperationToken = nil
                 // The actual operation has finished. Do not keep a global busy
@@ -1897,6 +1980,32 @@ public final class HESectoriumStore: ObservableObject {
                 }
                 self.needsConnectionRefresh = true
                 self.finishOperationObservation()
+                if actionKind == .load, result.succeeded, let id = completedProfileID {
+                    self.synchronizeDocumentationAfterLoad(profileID: id)
+                }
+            }
+        }
+    }
+
+    /// Load shows its result before IMPORTANT.md is rewritten; this writes it
+    /// in the background. It never marks the page busy: a storage action the
+    /// user starts meanwhile simply waits the second or so it takes.
+    private func synchronizeDocumentationAfterLoad(profileID: String) {
+        guard !isPreviewFixture else { return }
+        let service = self.service
+        Task.detached(priority: .utility) { [weak self] in
+            _ = service.synchronizeDeferredDocumentation(profileID: profileID)
+            let pending = service.portableDocumentationPending(profileID: profileID)
+            let history = service.portableDocumentHistory(profileID: profileID)
+            await MainActor.run {
+                guard let self, let index = self.volumeRows.firstIndex(where: { $0.id == profileID }) else { return }
+                let row = self.volumeRows[index]
+                self.volumeRows[index] = SectoriumVolumeRow(profile: row.profile, parentDeviceID: row.parentDeviceID,
+                    parentName: row.parentName, isExternal: row.isExternal, verifiedLoaded: row.verifiedLoaded,
+                    parentConnected: row.parentConnected, canLoad: row.canLoad, canUnloadOnly: row.canUnloadOnly,
+                    canSafeUnloadAndEject: row.canSafeUnloadAndEject, isBusy: row.isBusy,
+                    importantDocumentURL: nil, documentationPending: pending, documentHistory: history,
+                    capacityChangeUnavailableReason: row.capacityChangeUnavailableReason)
             }
         }
     }

@@ -625,12 +625,12 @@ enum ProviderProductStatePolicy {
 
         return ProviderProductState(
             id: entry.productID,
-            // A provider-reported plan always wins. The declared plan is only a
-            // fallback for providers that report none, and it is still filtered
-            // through the policy allowlist rather than trusted as typed.
+            // A plan the person chose wins; otherwise the one the provider
+            // reports (for Claude, read from claude.ai by Accuracy Sync). Either
+            // is filtered through the policy allowlist rather than trusted.
             planLabel: LowRemainingUsagePolicy.admittedPlanIdentifier(
                 providerID: entry.productID.rawValue,
-                label: card?.planLabel ?? declaredPlan
+                label: declaredPlan.flatMap { $0.isEmpty ? nil : $0 } ?? card?.planLabel
             ),
             quotas: quotas,
             primaryQuotaID: primaryQuotaID,

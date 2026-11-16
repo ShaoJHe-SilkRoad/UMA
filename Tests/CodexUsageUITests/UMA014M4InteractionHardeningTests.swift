@@ -124,7 +124,30 @@ struct UMA014M4InteractionHardeningTests {
                     quota: nil, showsReset: true, language: language, now: now
                 ) == nil
             )
+            // The full page shows a known reset whatever the Quick Panel's
+            // setting, never a credit expiry, and nothing when none is known.
+            #expect(
+                AgentWorkspaceSurface.detailResetLine(
+                    kind: .sevenDay, resetsAt: quota.resetsAt, language: language, now: now
+                ) == language.resetDescription(for: quota.resetsAt, now: now)
+            )
+            #expect(
+                AgentWorkspaceSurface.detailResetLine(
+                    kind: .fiveHour, resetsAt: nil, language: language, now: now
+                ) == nil
+            )
+            #expect(
+                AgentWorkspaceSurface.detailResetLine(
+                    kind: .credits, resetsAt: quota.resetsAt, language: language, now: now
+                ) == nil
+            )
         }
+
+        // A reset line wraps rather than shrinking, so 5H and 7D match in size.
+        let resetView = try #require(surfaces.range(of: "private func resetText(_ text: String) -> some View {"))
+        let resetBody = String(surfaces[resetView.upperBound...].prefix(400))
+        #expect(!resetBody.contains("minimumScaleFactor"))
+        #expect(resetBody.contains(".fixedSize(horizontal: false, vertical: true)"))
 
         // The spoken label must read the same gate the body does.
         #expect(surfaces.contains("if let resetLine { label += \", \\(resetLine)\" }"))

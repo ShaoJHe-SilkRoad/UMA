@@ -247,6 +247,23 @@ struct ClaudeBrowserConnectorDiagnostics: Equatable, Sendable {
 }
 
 actor ClaudeCodeUsageConnector: AgentUsageConnector {
+    /// The plan claude.ai shows beside "Your usage", read by Accuracy Sync and
+    /// kept across launches, so Claude's bars can be coloured for it without
+    /// the person having to state it.
+    static let detectedPlanDefaultsKey = "claude.detectedPlan"
+    private var detectedPlan: String? = UserDefaults.standard.string(
+        forKey: ClaudeCodeUsageConnector.detectedPlanDefaultsKey
+    )
+
+    private var detectedPlanMetrics: AgentAccountMetrics? {
+        Self.planMetrics(detectedPlan)
+    }
+
+    static func planMetrics(_ plan: String?) -> AgentAccountMetrics? {
+        guard let plan else { return nil }
+        return AgentAccountMetrics(planLabel: plan, availableResets: nil, lifetimeTokens: nil, sevenDayTokens: nil)
+    }
+
     typealias ConsentReader = @Sendable () async -> Bool
     typealias ConsentClearer = @Sendable () async -> Void
     typealias CacheReader = @Sendable () async -> Data?
@@ -1349,6 +1366,13 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
             admitted += 1
         }
         guard admitted > 0 else { throw ClaudeBrowserBridgeError.noAccountWindow }
+        // A reading without a plan, from an older companion or a page that
+        // didn't show one, keeps the plan already known.
+        if let plan = envelope.observation.planLabel,
+           ClaudeBrowserObservation.allowedPlanLabels.contains(plan), plan != detectedPlan {
+            detectedPlan = plan
+            UserDefaults.standard.set(plan, forKey: Self.detectedPlanDefaultsKey)
+        }
         let requiredCommit = anchors.filter { !priorAnchors.contains($0) }
         do {
             // Optional-reset Safari observations are sanitized exact state and
@@ -1605,7 +1629,7 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
                     resetsAt: $0.resetsAt
                 )
             },
-            accountMetrics: nil,
+            accountMetrics: detectedPlanMetrics,
             localActivityMetrics: nil,
             safeFailure: freshness == .stale ? .unavailable : nil
         )
@@ -1940,7 +1964,7 @@ actor ClaudeCodeUsageConnector: AgentUsageConnector {
             capturedAt: observedAt,
             coverageNote: "Claude official Usage page · one-shot Accuracy Sync",
             rateLimitWindows: windows,
-            accountMetrics: nil,
+            accountMetrics: planMetrics(envelope.observation.planLabel),
             localActivityMetrics: nil,
             safeFailure: failure
         )

@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let wakeNotificationCenter: NotificationCenter
     private let terminationReply: @MainActor (NSApplication) -> Void
     private let storageAutomation: (any SectoriumAutomationLifecycle)?
+    private let installNotice: (@MainActor (@escaping @MainActor () -> AppLanguage) -> Void)?
     private var hasStarted = false
     private var isDisconnectingForTermination = false
     private(set) var wakeObserver: CodexWakeRefreshObserver?
@@ -36,7 +37,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             wakeNotificationCenter: NSWorkspace.shared.notificationCenter,
             shellCoordinator: AppShellCoordinator(),
             shellDiagnosticRequested: CommandLine.arguments.contains("--diagnose-app-shell"),
-            storageAutomation: SectoriumAutomationSession.live()
+            storageAutomation: SectoriumAutomationSession.live(),
+            installNotice: { AUVInstallNoticePresenter.presentIfNeeded(language: $0) }
         )
     }
 
@@ -48,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shellCoordinator: AppShellCoordinator? = nil,
         shellDiagnosticRequested: Bool = false,
         storageAutomation: (any SectoriumAutomationLifecycle)? = nil,
+        installNotice: (@MainActor (@escaping @MainActor () -> AppLanguage) -> Void)? = nil,
         terminationReply: @escaping @MainActor (NSApplication) -> Void = {
             $0.reply(toApplicationShouldTerminate: true)
         }
@@ -58,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.shellDiagnosticRequested = shellDiagnosticRequested
         self.terminationReply = terminationReply
         self.storageAutomation = storageAutomation
+        self.installNotice = installNotice
         super.init()
     }
 
@@ -85,6 +89,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.shellCoordinator?.attach(runtime: runtime)
                 if self.shellDiagnosticRequested {
                     await self.finishShellDiagnostic(runtimeAttached: true)
+                } else {
+                    self.installNotice? { [weak store = runtime.store] in
+                        store?.language ?? .systemMatch()
+                    }
                 }
             } catch {
                 self.shellCoordinator?.recordRuntimeAttachmentFailure()
@@ -115,6 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) -> Bool {
         sender.unhide(nil)
         shellCoordinator?.showMainWindow()
+        shellCoordinator?.recordDockClick()
         return true
     }
 

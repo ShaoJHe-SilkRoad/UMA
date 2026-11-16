@@ -123,6 +123,9 @@
           expiresAt: new Date(nowMilliseconds - 180_000).toISOString(),
           lifecycleState: planted.state,
           revision: planted.revision,
+          ...(Number.isInteger(planted.ownedTabID)
+            ? { providerCandidateTabID: planted.ownedTabID, providerOwnedTabID: planted.ownedTabID }
+            : {}),
         };
       }
       case "saveV2":
@@ -257,11 +260,14 @@
     portCount: () => ports.length,
     receiptLoads: () => receiptLoads,
     // A receipt the native side saved after the page stopped waiting for it.
-    plantExpiredReceipt(requestID) {
+    // With a terminal state and a tab, it is one whose cleanup was confirmed
+    // but whose removal reply never came back.
+    plantExpiredReceipt(requestID, state, ownedTabID) {
       plantedReceiptID = requestID;
       receipts.set(requestID, {
-        revision: 1,
-        state: root.UMAOwnedProviderTabV2Reducer.STATES.requestIntentPersisted,
+        revision: state ? 8 : 1,
+        state: state || root.UMAOwnedProviderTabV2Reducer.STATES.requestIntentPersisted,
+        ownedTabID,
       });
     },
     // While false, sendNativeMessage returns a promise that never settles.

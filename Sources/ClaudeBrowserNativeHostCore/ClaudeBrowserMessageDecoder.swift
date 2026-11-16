@@ -27,7 +27,8 @@ public enum ClaudeBrowserMessageDecoder {
         "kind", "schemaVersion", "sourceID", "browserFamily", "routeState", "requestID", "observationID", "observation",
     ]
     private static let observationKeys: Set<String> = [
-        "fiveHour", "weeklyAllModels", "modelSpecificWeekly", "observedAt", "extractorSchemaVersion", "sourceLayoutVersion",
+        "fiveHour", "weeklyAllModels", "modelSpecificWeekly", "planLabel", "observedAt", "extractorSchemaVersion",
+        "sourceLayoutVersion",
     ]
     private static let windowKeys: Set<String> = ["usedPercentage", "resetAt"]
     private static let modelWindowKeys: Set<String> = ["modelFamily", "window"]
@@ -111,6 +112,10 @@ public enum ClaudeBrowserMessageDecoder {
         try validate(window: envelope.observation.fiveHour)
         try validate(window: envelope.observation.weeklyAllModels)
         try validate(window: envelope.observation.modelSpecificWeekly?.window)
+        if let plan = envelope.observation.planLabel,
+           !ClaudeBrowserObservation.allowedPlanLabels.contains(plan) {
+            throw ClaudeBrowserBridgeError.invalidContract
+        }
         guard parseTimestamp(envelope.observation.observedAt) != nil else {
             throw ClaudeBrowserBridgeError.invalidTimestamp
         }

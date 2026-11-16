@@ -222,7 +222,7 @@ private func portableTransactionFileSystem(_ root: URL) -> SystemSectoriumPortab
     return fs
 }
 
-@Test func portableDocumentExFATCreationAndReplacementRetainPreimage() throws {
+@Test func portableDocumentExFATReplacementArchivesThePreviousVersion() throws {
     let root = try portableTransactionFixture("replace")
     defer { try? FileManager.default.removeItem(at: root) }
     let fs = portableTransactionFileSystem(root), target = root.appendingPathComponent("IMPORTANT.md")
@@ -230,11 +230,41 @@ private func portableTransactionFileSystem(_ root: URL) -> SystemSectoriumPortab
     try fs.commit(prior, to: target, expectedPrior: nil)
     try fs.commit(next, to: target, expectedPrior: prior)
     #expect(try Data(contentsOf: target) == next)
-    let saved = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
-        .filter { $0.lastPathComponent.hasPrefix(".IMPORTANT.md.auv-recovery-") }
-    #expect(saved.count == 1)
-    #expect(try Data(contentsOf: saved[0]) == prior)
+    // Nothing but the document stays in the drive's root.
+    let leftovers = try FileManager.default.contentsOfDirectory(atPath: root.path)
+        .filter { $0.hasPrefix(".IMPORTANT.md.auv-") && $0 != ".IMPORTANT.md.auv-lock" }
+    #expect(leftovers.isEmpty, "\(leftovers)")
+    // The previous version is kept once, in the hidden archive; its identical
+    // preimage copy is not kept twice.
+    let archive = root.appendingPathComponent(".AUV-Sectorium/previous-versions")
+    let archived = try FileManager.default.contentsOfDirectory(atPath: archive.path)
+    #expect(archived.filter { $0.hasPrefix(".IMPORTANT.md.auv-displaced-") }.count == 1)
+    #expect(archived.filter { $0.hasPrefix(".IMPORTANT.md.auv-recovery-") }.isEmpty)
+    let previous = try #require(archived.first { $0.hasPrefix(".IMPORTANT.md.auv-displaced-") })
+    #expect(try Data(contentsOf: archive.appendingPathComponent(previous)) == prior)
     #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(".IMPORTANT.md.auv-transaction.json").path))
+}
+
+@Test func portableDocumentReplacementMovesEarlierLeftoversIntoTheArchive() throws {
+    let root = try portableTransactionFixture("leftovers")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let fs = portableTransactionFileSystem(root), target = root.appendingPathComponent("IMPORTANT.md")
+    let prior = Data("prior".utf8), next = Data("next".utf8)
+    try fs.commit(prior, to: target, expectedPrior: nil)
+    // Copies earlier builds left behind, including a preimage with different bytes.
+    let old = UUID().uuidString, other = UUID().uuidString
+    try Data("older".utf8).write(to: root.appendingPathComponent(".IMPORTANT.md.auv-displaced-\(old)"))
+    try Data("older".utf8).write(to: root.appendingPathComponent(".IMPORTANT.md.auv-recovery-\(old)"))
+    try Data("unmatched".utf8).write(to: root.appendingPathComponent(".IMPORTANT.md.auv-recovery-\(other)"))
+    try Data("user file".utf8).write(to: root.appendingPathComponent(".IMPORTANT.md.auv-displaced-notes"))
+    try fs.commit(next, to: target, expectedPrior: prior)
+    let archive = root.appendingPathComponent(".AUV-Sectorium/previous-versions")
+    let archived = Set(try FileManager.default.contentsOfDirectory(atPath: archive.path))
+    #expect(archived.contains(".IMPORTANT.md.auv-displaced-\(old)"))
+    #expect(!archived.contains(".IMPORTANT.md.auv-recovery-\(old)"))   // identical duplicate
+    #expect(archived.contains(".IMPORTANT.md.auv-recovery-\(other)")) // different bytes: kept
+    // Only AUV's own managed names are touched.
+    #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(".IMPORTANT.md.auv-displaced-notes").path))
 }
 
 @Test func portableDocumentExFATReplacementRestoresConcurrentForeignFile() throws {

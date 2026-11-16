@@ -372,6 +372,8 @@ final class StatusBarController: NSObject {
         }
     }
 
+    private var welcomeTaps = AUVWelcomeTapCounter()
+
     @objc
     private func handleStatusItemAction() {
         guard !isTornDown else {
@@ -394,6 +396,10 @@ final class StatusBarController: NSObject {
             showContextMenu()
         } else {
             panelController?.toggle()
+            // Five quick clicks on the AUV button play the welcome sound once.
+            if welcomeTaps.record(at: ProcessInfo.processInfo.systemUptime) {
+                AUVWelcomeSound.play(store?.language ?? .simplifiedChinese)
+            }
         }
     }
 

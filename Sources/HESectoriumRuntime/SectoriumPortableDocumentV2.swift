@@ -82,7 +82,7 @@ public struct SectoriumPortableDocumentEvent: Codable, Equatable, Sendable {
     }
 }
 
-private struct SectoriumPortableSnapshot: Codable, Equatable {
+struct SectoriumPortableSnapshot: Codable, Equatable {
     let context: SectoriumPortableDocumentContext
     let history: [SectoriumPortableDocumentEvent]
 }
@@ -134,7 +134,7 @@ enum SectoriumPortableValidation {
     }
 }
 
-private enum SectoriumPortableV2 {
+enum SectoriumPortableV2 {
     static let notesBegin = "<!-- AUV-SECTORIUM-NOTES:BEGIN -->"
     static let notesEnd = "<!-- AUV-SECTORIUM-NOTES:END -->"
     static let dataPrefix = "<!-- AUV-SECTORIUM-DATA:"
@@ -183,15 +183,109 @@ private enum SectoriumPortableV2 {
          "Creation or format method / 创建或格式化方式: \(line(volume.formatMethod ?? "not recorded / 未记录"))"]
             .map { prefix + $0 }
     }
-    static func render(_ snapshot: SectoriumPortableSnapshot, notes: String) -> String {
+    static let historyEntriesShown = 30
+    static let recordNotice = [
+        "This record separates intended actions from verified completed operations. It is a human-readable record, never authorization or a source of disk identity.",
+        " Earlier versions of this file are in .AUV-Sectorium/previous-versions.",
+        "本记录区分拟执行操作与已核验完成的操作。它供人阅读，不授予操作权限，也不是磁盘身份的依据。",
+        "本文件的旧版本保存在 .AUV-Sectorium/previous-versions 中。"]
+
+    /// What someone holding this drive needs first: what is on it and how to
+    /// use it on a Mac, including the macOS approval that Load asks for.
+    static func usageLines(_ snapshot: SectoriumPortableSnapshot) -> [String] {
+        let volumes = snapshot.context.volumes.sorted(by: { $0.profileID < $1.profileID })
+        var lines = ["## On this drive / 这块硬盘上有什么", ""]
+        if volumes.isEmpty {
+            lines += ["No registered development volume. / 没有已登记的开发卷。", ""]
+        } else {
+            for volume in volumes {
+                let image = URL(fileURLWithPath: volume.imagePath).lastPathComponent
+                lines += ["- \(line(volume.name)): image / 镜像 \(line(image)), mounted at / 挂载到 \(line(volume.mountPoint))"]
+            }
+            lines += [""]
+        }
+        lines += ["## Using it on a Mac / 在 Mac 上使用", "",
+            "1. Open AUV → Sectorium. If the volume is not listed, choose Register existing… and select the image above (press Command-Shift-. to show hidden files). / 打开 AUV →“分区工”。如果没有列出该开发卷，选择“登记已有开发卷…”，选中上面的镜像（按 Command-Shift-. 显示隐藏文件）。",
+            "2. Load: macOS asks for your password or Touch ID before it mounts the volume inside this drive. / 加载：macOS 会请你输入密码或使用 Touch ID，才能把开发卷挂载到这块硬盘中。",
+            "3. Before unplugging, choose Disconnect and wait for \"safe to unplug\". Never unplug while a volume is loaded. / 拔盘前点“断开”，等出现“可以拔出”。开发卷加载着时不要拔盘。", ""]
+        return lines
+    }
+
+    /// The layout a document was written in. Parsing re-renders a document to
+    /// prove nobody edited it outside the notes, so every layout AUV has ever
+    /// written must stay reproducible here, or upgrading AUV makes each drive's
+    /// existing IMPORTANT.md look hand-edited and it is never rewritten again.
+    /// current: settings and commands per volume (0.18.10 build 2026111514);
+    /// usage: "On this drive" and "Using it on a Mac" (builds 2026111511-13);
+    /// original: 0.18.9 and earlier.
+    enum Layout: CaseIterable { case current, usage, original }
+
+    /// One block per volume that AUV and a person can both read: what the
+    /// volume is, keyed by this drive's disk ID, and the exact macOS commands
+    /// that load and unload it. AUV never runs commands read from this file; it
+    /// reads the record data at the end and builds its own commands, which are
+    /// the same ones shown here.
+    static func settingsLines(_ snapshot: SectoriumPortableSnapshot) -> [String] {
+        let parent = snapshot.context.parent
+        let root = parent.rootPath.hasSuffix("/") ? parent.rootPath : parent.rootPath + "/"
+        func relative(_ path: String) -> String { path.hasPrefix(root) ? String(path.dropFirst(root.count)) : path }
+        func safe(_ value: String) -> Bool {
+            !value.isEmpty && !value.contains(where: { $0.isNewline || $0 == "`" || $0 == "<" || $0 == ">" })
+        }
+        func quoted(_ value: String) -> String { "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+        var lines = ["## Volume settings and commands / 开发卷设置与命令", "",
+            "AUV reads these settings when this drive is scanned on a Mac, and applies them only to the drive whose disk ID matches. The commands are the ones AUV runs; they also work in Terminal. / 在 Mac 上扫描这块硬盘时，AUV 读取这些设置，且只用于磁盘标识相符的硬盘。下面的命令就是 AUV 实际运行的命令，也可以在“终端”里直接使用。", ""]
+        for volume in snapshot.context.volumes.sorted(by: { $0.profileID < $1.profileID }) {
+            lines += ["### \(line(volume.name))", ""]
+            guard safe(volume.name), safe(volume.imagePath), safe(volume.mountPoint), safe(parent.rootPath) else {
+                lines += ["Settings are not shown because a name or path contains unusual characters. / 名称或路径含特殊字符，未显示设置。", ""]
+                continue
+            }
+            let gib = volume.logicalCapacityBytes.map { Int(($0 + (1 << 30) - 1) >> 30) }
+            lines += ["```sectorium",
+                "disk-id: \(parent.physicalID)",
+                "drive-volume-uuid: \(parent.documentVolumeUUID.uuidString)",
+                "name: \(volume.name)",
+                "volume-uuid: \(volume.volumeUUID?.uuidString ?? "not recorded yet")",
+                "type: \(volume.filesystem ?? "APFS") volume in a sparse bundle disk image",
+                "size-bytes: \(volume.logicalCapacityBytes.map(String.init) ?? "not verified")",
+                "image: \(relative(volume.imagePath))",
+                "mount-point: \(relative(volume.mountPoint))",
+                "```", "",
+                "```bash",
+                "# Load / 装载 (macOS asks for your password or Touch ID / 需要密码或 Touch ID)",
+                "hdiutil attach -nomount -nobrowse \(quoted(volume.imagePath))",
+                "diskutil mount -mountPoint \(quoted(volume.mountPoint)) \(volume.volumeUUID?.uuidString ?? "<the APFS volume listed by the attach command / 上一条命令列出的 APFS 卷>")",
+                "# Unload and release the image / 卸载并释放镜像",
+                "hdiutil detach \(quoted(volume.mountPoint))",
+                "# Before unplugging: unload every volume, then / 拔盘前：先卸载所有开发卷，再运行",
+                "diskutil eject \(quoted(parent.rootPath))"]
+            if let gib {
+                lines += ["# How it was created (reference only; never run it on an existing image) / 创建方式（仅供参考，切勿对已有镜像运行）",
+                          "# hdiutil create -type SPARSEBUNDLE -fs APFS -size \(gib)g -volname \(quoted(volume.name)) \(quoted(volume.imagePath))"]
+            }
+            lines += ["```", ""]
+        }
+        return lines
+    }
+
+    static func render(_ snapshot: SectoriumPortableSnapshot, notes: String,
+                       layout: Layout = .current) -> String {
+        let original = layout == .original
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         guard let encoded = try? encoder.encode(snapshot) else { return "" }
         let parent = snapshot.context.parent
         let used = parent.totalBytes.flatMap { total in parent.availableBytes.flatMap { $0 <= total ? total - $0 : nil } }
         var lines = ["<!-- AUV-SECTORIUM-IMPORTANT:v2 host=\(parent.documentVolumeUUID.uuidString) -->",
-            "# AUV development volumes / AUV 开发盘", "",
-            "This record separates intended actions from verified completed operations. It is a human-readable record, never authorization or a source of disk identity.",
-            "本记录区分拟执行操作与已核验完成的操作。它供人阅读，不授予操作权限，也不是磁盘身份的依据。", "",
+            "# AUV development volumes / AUV 开发盘", ""]
+        if original {
+            lines += [recordNotice[0], recordNotice[2], ""]
+        } else {
+            lines += usageLines(snapshot)
+            if layout == .current { lines += settingsLines(snapshot) }
+            lines += ["## This drive / 这块硬盘", ""]
+        }
+        lines += [
             "Parent device / 母盘: \(line(parent.name ?? "not recorded / 未记录"))",
             "Physical identity / 物理身份: \(line(parent.physicalID))",
             "Physical device capacity / 物理母盘容量: \(bytes(parent.physicalCapacityBytes))",
@@ -208,8 +302,15 @@ private enum SectoriumPortableV2 {
         for volume in snapshot.context.volumes.sorted(by: { $0.profileID < $1.profileID }) {
             lines += ["### \(line(volume.name))"] + volumeLines(volume) + [""]
         }
+        // The full history stays in the record data at the end of this file and
+        // travels with the drive; the readable list shows the latest entries.
+        let shown = original ? snapshot.history[...] : snapshot.history.suffix(historyEntriesShown)
         lines += ["## History / 操作历史", "<!-- AUV-SECTORIUM-HISTORY:BEGIN -->"]
-        for event in snapshot.history {
+        if snapshot.history.count > shown.count {
+            let earlier = snapshot.history.count - shown.count
+            lines += ["Latest \(shown.count) of \(snapshot.history.count) entries; the \(earlier) earlier ones are kept in the record data at the end of this file. / 显示最近 \(shown.count) 条，共 \(snapshot.history.count) 条；更早的 \(earlier) 条保存在本文件末尾的记录数据中。", ""]
+        }
+        for event in shown {
             let phase = event.phase == .intended ? "Intended / 拟执行" : "Completed and verified / 已完成并核验"
             lines += ["### \(date(event.occurredAt)) · \(phase) · \(eventLabel(event.kind))",
                       "- Event ID / 事件标识: \(line(event.id))", "- Profile ID / 配置标识: \(event.profileID)"]
@@ -220,9 +321,27 @@ private enum SectoriumPortableV2 {
         lines += ["<!-- AUV-SECTORIUM-HISTORY:END -->", "", "## Inspection and recovery / 检查与恢复", "",
             "Use AUV Sectorium to verify this physical parent, image, mount location, and access before using a volume. Native Disk Utility can inspect the recorded image and volume identities without erasing them. If records disagree, keep storage connected and inspect AUV's local operation history; never erase or recreate an image to fix missing metadata. Active work must finish before normal unmount and physical ejection. Automatic loading may require current macOS authorization; encrypted images may require unlocking.",
             "使用开发盘前，请在 AUV 分区工核实此物理母盘、镜像、挂载位置和访问能力。系统“磁盘工具”可检查记录中的镜像与卷身份，无须擦除。若记录不一致，请保持设备连接并检查 AUV 本地操作历史；不要为补齐元数据而擦除或重建镜像。活跃工作结束后才能正常卸载及物理弹出。自动加载可能需要当前 macOS 授权；加密镜像可能需要解锁。", "",
-            notesBegin, notes, notesEnd, dataPrefix + encoded.base64EncodedString() + " -->", ""]
+        ]
+        if !original { lines += [recordNotice[0] + recordNotice[1], recordNotice[2] + recordNotice[3], ""] }
+        lines += [notesBegin, notes, notesEnd, dataPrefix + encoded.base64EncodedString() + " -->", ""]
         return lines.joined(separator: "\n")
     }
+    /// The record carried by a drive's IMPORTANT.md, read when scanning a
+    /// drive AUV does not know yet. Only an unedited document AUV wrote is
+    /// accepted; the caller still matches its disk ID against the drive.
+    static func scannedSnapshot(_ data: Data) -> SectoriumPortableSnapshot? {
+        guard data.count <= SectoriumPortableDocumentLimits.maximumBytes,
+              let text = String(data: data, encoding: .utf8),
+              text.hasPrefix("<!-- AUV-SECTORIUM-IMPORTANT:v2 host=") else { return nil }
+        let dataLines = text.split(separator: "\n", omittingEmptySubsequences: false).filter { $0.hasPrefix(dataPrefix) }
+        guard dataLines.count == 1, let dataLine = dataLines.first, dataLine.hasSuffix(" -->"),
+              let encoded = Data(base64Encoded: String(dataLine.dropFirst(dataPrefix.count).dropLast(4))),
+              let snapshot = try? JSONDecoder().decode(SectoriumPortableSnapshot.self, from: encoded),
+              SectoriumPortableValidation.context(snapshot.context),
+              parse(data, parent: snapshot.context.parent) != nil else { return nil }
+        return snapshot
+    }
+
     static func parse(_ data: Data, parent: SectoriumPortableParentRecord) -> (SectoriumPortableSnapshot, String)? {
         guard let text = String(data: data, encoding: .utf8),
               text.hasPrefix("<!-- AUV-SECTORIUM-IMPORTANT:v2 host=\(parent.documentVolumeUUID.uuidString) -->\n"),
@@ -238,7 +357,7 @@ private enum SectoriumPortableV2 {
               snapshot.context.parent.documentVolumeUUID == parent.documentVolumeUUID,
               SectoriumPortableValidation.context(snapshot.context),
               let merged = SectoriumPortableValidation.merge([], snapshot.history), merged == snapshot.history,
-              render(snapshot, notes: notes) == text else { return nil }
+              Layout.allCases.contains(where: { render(snapshot, notes: notes, layout: $0) == text }) else { return nil }
         return (snapshot, notes)
     }
 }

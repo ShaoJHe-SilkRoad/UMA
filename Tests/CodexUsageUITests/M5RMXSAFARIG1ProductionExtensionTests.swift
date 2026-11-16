@@ -1,3 +1,4 @@
+import AppKit
 import ClaudeBrowserBridgeProtocol
 @testable import ClaudeBrowserNativeHostCore
 import ClaudeSafariHostIPC
@@ -713,6 +714,39 @@ struct M5RMXSAFARIG1ProductionExtensionTests {
         return try #require(Bundle(url: root))
     }
 
+    /// Safari showed a gray placeholder in the toolbar and a generic icon in
+    /// its Extensions settings: the manifest declared no icons and the Bridge
+    /// app carried none.
+    @Test("The Safari extension and the Bridge carry their icons")
+    func extensionAndBridgeIcons() throws {
+        let manifest = try json("BrowserExtension/Safari/manifest.json")
+        let icons = try #require(manifest["icons"] as? [String: String])
+        #expect(Set(icons.keys) == ["48", "96", "128", "256", "512"])
+        let action = try #require(manifest["browser_action"] as? [String: Any])
+        #expect(action["default_popup"] == nil)
+        #expect((action["default_title"] as? String)?.isEmpty == false)
+        let toolbar = try #require(action["default_icon"] as? [String: String])
+        #expect(Set(toolbar.keys) == ["16", "19", "32", "38", "48"])
+        for (size, path) in Array(icons) + Array(toolbar) {
+            let url = root().appendingPathComponent("BrowserExtension/Safari")
+                .appendingPathComponent(path)
+            let image = try #require(NSImage(contentsOf: url), "\(path) is missing")
+            let rep = try #require(image.representations.first)
+            #expect(rep.pixelsWide == Int(size) && rep.pixelsHigh == Int(size), "\(path)")
+            #expect(rep.hasAlpha, "\(path) needs a transparent background")
+        }
+        // The toolbar button only shows the icon; a click starts nothing.
+        #expect(!(try source("BrowserExtension/Shared/background-core.js")).contains("browserAction"))
+
+        let bridge = try plist("ProductionSigning/SafariHost/App/Info.plist")
+        #expect(bridge["CFBundleIconFile"] as? String == "AppIcon")
+        #expect(FileManager.default.fileExists(
+            atPath: root().appendingPathComponent("Assets/AppIcon.icns").path
+        ))
+        let script = try source("script/package_uma_safari_host_production.sh")
+        #expect(script.contains("Contents/Resources/AppIcon.icns"))
+        #expect(script.contains("BrowserExtension/Safari/icons/"))
+    }
 }
 
 private func root() -> URL {

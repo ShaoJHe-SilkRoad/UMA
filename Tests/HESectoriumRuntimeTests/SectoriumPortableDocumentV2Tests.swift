@@ -113,6 +113,54 @@ private func v2JournalRoot() throws -> URL {
         #expect(fs.files[v2DocumentPath] == old)
     }
 
+    /// 0.18.10 changed the readable layout. Parsing re-renders a document to
+    /// detect outside edits, so without the earlier layout every existing drive's
+    /// IMPORTANT.md looked hand-edited and was never rewritten again.
+    @Test func upgradesADocumentWrittenInTheOriginalLayout() {
+        let fs = V2MemoryFileSystem(); let writer = SectoriumPortableDocumentWriter(fileSystem: fs)
+        let history = (0..<40).map { v2Event("operation-\($0):completed", index: $0, after: v2Volume()) }
+        let snapshot = SectoriumPortableSnapshot(context: v2Context(), history: history)
+        let notes = "\n  My notes / 我的备注  \n"
+        let original = SectoriumPortableV2.render(snapshot, notes: notes, layout: .original)
+        #expect(original.contains("This record separates intended actions"))
+        #expect(!original.contains("On this drive"))
+        fs.files[v2DocumentPath] = Data(original.utf8)
+        #expect(writer.preservedHistory(context: v2Context())?.count == 40)
+        #expect(writer.verifiedDocumentURL(context: v2Context()) != nil)
+        let next = v2Event("operation-40:completed", kind: "loaded", index: 40, after: v2Volume())
+        #expect(writer.update(context: v2Context(), events: history + [next]) == .updated)
+        let upgraded = v2Text(fs)
+        #expect(upgraded.contains("## On this drive / 这块硬盘上有什么"))
+        #expect(upgraded.contains("Latest 30 of 41 entries"))
+        #expect(upgraded.contains(notes))
+        #expect(writer.preservedHistory(context: v2Context())?.count == 41)
+        // An edit outside the notes is still refused in either layout.
+        fs.files[v2DocumentPath] = Data((original + "unmanaged text\n").utf8)
+        guard case .pending = writer.update(context: v2Context(), events: history + [next]) else {
+            Issue.record("Edited original-layout document overwritten"); return
+        }
+    }
+
+    @Test func everyEarlierLayoutIsUpgradedAndTheSettingsBlockIsScannable() {
+        for layout in [SectoriumPortableV2.Layout.original, .usage] {
+            let fs = V2MemoryFileSystem(); let writer = SectoriumPortableDocumentWriter(fileSystem: fs)
+            let snapshot = SectoriumPortableSnapshot(context: v2Context(), history: [v2Event(after: v2Volume())])
+            let earlier = SectoriumPortableV2.render(snapshot, notes: SectoriumPortableV2.defaultNotes, layout: layout)
+            fs.files[v2DocumentPath] = Data(earlier.utf8)
+            let next = v2Event("operation-2:completed", kind: "loaded", index: 1, after: v2Volume())
+            #expect(writer.update(context: v2Context(), events: [next]) == .updated)
+            let text = v2Text(fs)
+            #expect(text.contains("## Volume settings and commands / 开发卷设置与命令"))
+            #expect(text.contains("disk-id: physical-fixture"))
+            #expect(text.contains("image: \(v2Profile).sparsebundle"))
+            #expect(text.contains("hdiutil attach -nomount -nobrowse '/Volumes/FixtureHost/\(v2Profile).sparsebundle'"))
+            #expect(text.contains("diskutil mount -mountPoint '/Volumes/FixtureHost/mount-\(v2Profile)' 79160516-FD8C-423F-B5BB-BE69A27B92C3"))
+            #expect(text.contains("hdiutil detach '/Volumes/FixtureHost/mount-\(v2Profile)'"))
+            #expect(SectoriumPortableV2.scannedSnapshot(Data(text.utf8))?.context.parent.physicalID == "physical-fixture")
+            #expect(SectoriumPortableV2.scannedSnapshot(Data((text + "edited\n").utf8)) == nil)
+        }
+    }
+
     @Test func preservesExactNotesAndRejectsOutsideEdits() {
         let fs = V2MemoryFileSystem(); let writer = SectoriumPortableDocumentWriter(fileSystem: fs)
         #expect(writer.update(context: v2Context(), events: [v2Event()]) == .updated)

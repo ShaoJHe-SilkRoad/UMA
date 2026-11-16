@@ -71,6 +71,9 @@ public enum ClaudeAgentControlState: Equatable, Sendable {
     case companionStarting
     case companionUpdateRequired
     case onlineVerificationUnavailable
+    /// Claude's exact sync through Safari is not set up yet; this is the next
+    /// step, and the page's button takes it.
+    case safariSetupIncomplete(ClaudeSafariSetup.Step)
 
     static func classify(
         consentGranted: Bool,
@@ -115,6 +118,46 @@ public enum ClaudeStatusLineConfigurationIssue: Equatable, Sendable {
     case developmentIsolation
 }
 
+/// How far Claude's exact sync through Safari is set up, one step at a time.
+public struct ClaudeSafariSetup: Equatable, Sendable {
+    public enum Step: Equatable, Sendable {
+        case moveToApplications
+        case installBridge
+        case updateBridge
+        case repairBridge
+        case enableExtension
+        case allowSite
+        case signIn
+        case syncOnce
+        case done
+    }
+
+    public let bridge: ClaudeSafariBridgeStatus
+    /// nil when Safari would not say.
+    public let extensionEnabled: Bool?
+    public let needsSiteAccess: Bool
+    public let needsSignIn: Bool
+    public let hasExactReading: Bool
+
+    public var bridgeDone: Bool { bridge == .ready }
+    public var extensionDone: Bool? { bridgeDone ? extensionEnabled : false }
+    public var siteDone: Bool { bridgeDone && !needsSiteAccess && !needsSignIn }
+
+    public var nextStep: Step {
+        switch bridge {
+        case .appNotInApplications: return .moveToApplications
+        case .missing: return .installBridge
+        case .outdated: return .updateBridge
+        case .needsRepair: return .repairBridge
+        case .ready: break
+        }
+        if extensionEnabled == false { return .enableExtension }
+        if needsSiteAccess { return .allowSite }
+        if needsSignIn { return .signIn }
+        return hasExactReading ? .done : .syncOnce
+    }
+}
+
 @MainActor
 final class ClaudeBrowserConsentStore {
     private enum Key {
@@ -123,6 +166,7 @@ final class ClaudeBrowserConsentStore {
         static let allowSafariLaunch = "ClaudeBrowserSyncAllowSafariLaunch.v1"
         static let periodicAccuracySync = "ClaudeBrowserPeriodicAccuracySync.v1"
         static let automaticSafariPromptsOff = "ClaudeSafariAutomaticPromptsOff.v1"
+        static let safariSetupFinished = "ClaudeSafariSetupFinished.v1"
     }
 
     private let defaults: UserDefaults
@@ -161,6 +205,14 @@ final class ClaudeBrowserConsentStore {
         set { defaults.set(newValue, forKey: Key.automaticSafariPromptsOff) }
     }
 
+    /// An exact reading has arrived since consent was given. After a restart
+    /// the last reading comes back as stale, which is not a reason to ask for
+    /// "sync once" again.
+    var safariSetupFinished: Bool {
+        get { defaults.bool(forKey: Key.safariSetupFinished) }
+        set { defaults.set(newValue, forKey: Key.safariSetupFinished) }
+    }
+
     func clearLegacyPeriodicAccuracySync() {
         defaults.removeObject(forKey: Key.periodicAccuracySync)
     }
@@ -185,6 +237,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     @Published private(set) var automaticAccuracySyncInterval: TimeInterval?
     @Published private(set) var estimateConfidence: String?
     @Published private(set) var lastExactAt: Date?
+    @Published private(set) var safariSetupFinished: Bool
     @Published private(set) var liveLinkStage: ClaudeLiveLinkStageReason?
     @Published private(set) var currentQuotaIncludesSafariAccuracy: Bool
     @Published private(set) var localSmartState: ClaudeLocalSmartState
@@ -219,6 +272,13 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
            control == .consentRequired || control == .localSmartRepairRequired {
             return .statusLineConfigurationUnavailable(statusLineConfigurationIssue)
         }
+        // Once Claude is allowed, the Bridge comes before a Local Smart
+        // repair: someone who uses claude.ai without Claude Code has no Local
+        // Smart to repair, and the Bridge is all their exact figures need.
+        if consentGranted, safariBridge != nil {
+            let step = safariSetup.nextStep
+            if step != .done { return .safariSetupIncomplete(step) }
+        }
         return control.offeringSync(when: consentGranted && offersAccuracySync)
     }
 
@@ -248,6 +308,27 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     private var safariPromptOpen = false
     private var automaticRetryTask: Task<Void, Never>?
     private let automaticRetrySleep: @Sendable (TimeInterval) async throws -> Void
+    /// Only the running app carries a Bridge to install; elsewhere this stays
+    /// nil and the Bridge reads as ready, as before.
+    private var safariBridge: ClaudeSafariBridgeInstaller?
+    private var safariBridgeAlerts: ClaudeSafariBridgeAlerts?
+    @Published private(set) var safariBridgeStatus: ClaudeSafariBridgeStatus = .ready
+    @Published private(set) var safariExtensionEnabled: Bool?
+
+    /// Where Claude's Safari setup stands. Only meaningful in the running app,
+    /// which carries a Bridge; elsewhere it reads as done.
+    public var safariSetup: ClaudeSafariSetup {
+        var exact = lastExactAt != nil || safariSetupFinished
+        if case .exactAnchorAvailable = browserAccuracyState { exact = true }
+        return ClaudeSafariSetup(
+            bridge: safariBridge == nil ? .ready : safariBridgeStatus,
+            extensionEnabled: safariExtensionEnabled,
+            needsSiteAccess: state == .websiteAccessRequired,
+            needsSignIn: state == .signInRequired,
+            hasExactReading: safariBridge == nil || exact
+        )
+    }
+    private var bridgeActivationObserver: AnyCancellable?
 
     /// The first run comes shortly after launch rather than a whole refresh
     /// interval in, so Claude is not left without a reading after every start.
@@ -291,6 +372,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         automaticAccuracySyncInterval = nil
         estimateConfidence = nil
         lastExactAt = nil
+        safariSetupFinished = consentStore.safariSetupFinished
         liveLinkStage = nil
         currentQuotaIncludesSafariAccuracy = false
         localSmartState = .unavailable
@@ -344,6 +426,12 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     }
 
     public func connectWithConsent() {
+        // With consent given and Local Smart working, what is left to connect
+        // is the Safari Bridge, so the page's one button installs it.
+        if case .safariSetupIncomplete(let step) = agentControlState {
+            takeSafariSetupStep(step)
+            return
+        }
         guard !actionInProgress, canConnectLocalSmartMode else { return }
         actionInProgress = true
         activeAction = .connecting
@@ -403,6 +491,82 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     /// alerts are modal: a runtime made anywhere else must never block on one.
     public func enableSafariPrompts(language: @escaping @MainActor () -> AppLanguage) {
         useSafariRecovery(.live(language: language))
+        if let bridge = ClaudeSafariBridgeInstaller.live() {
+            useSafariBridge(bridge, alerts: .live(language: language))
+        }
+    }
+
+    func useSafariBridge(_ bridge: ClaudeSafariBridgeInstaller, alerts: ClaudeSafariBridgeAlerts) {
+        safariBridge = bridge
+        safariBridgeAlerts = alerts
+        refreshSafariBridgeStatus()
+        // The person may install, move or delete it while AUV runs.
+        bridgeActivationObserver = NotificationCenter.default
+            .publisher(for: NSApplication.didBecomeActiveNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.refreshSafariBridgeStatus() }
+            }
+    }
+
+    func refreshSafariBridgeStatus() {
+        let status = safariBridge?.status() ?? .ready
+        if status != safariBridgeStatus { safariBridgeStatus = status }
+        refreshSafariExtensionState()
+    }
+
+    private func refreshSafariExtensionState() {
+        guard let safariBridge, safariBridgeStatus == .ready else { return }
+        Task {
+            let enabled = await safariBridge.extensionEnabled()
+            if enabled != safariExtensionEnabled { safariExtensionEnabled = enabled }
+        }
+    }
+
+    /// What the page's button and each line of the setup list do.
+    public func takeSafariSetupStep(_ step: ClaudeSafariSetup.Step) {
+        guard let safariBridge else { return }
+        switch step {
+        case .installBridge, .updateBridge, .repairBridge:
+            installSafariBridge()
+        case .enableExtension, .allowSite:
+            Task { await safariBridge.openSafariExtensionSettings() }
+        case .signIn:
+            Task { await safariBridge.openClaudeInSafari() }
+        case .syncOnce:
+            accuracySyncForRefreshAll()
+        case .moveToApplications, .done:
+            break
+        }
+    }
+
+    /// Copies the Bridge AUV carries into Applications, starts it, and then
+    /// asks the person to turn the extension on in Safari.
+    public func installSafariBridge() {
+        guard let safariBridge, let safariBridgeAlerts, !actionInProgress else { return }
+        actionInProgress = true
+        activeAction = .connecting
+        // An update or a repair keeps the extension as Safari had it, so only
+        // a first install ends with the step that is left in Safari.
+        let firstInstall = safariBridgeStatus == .missing
+        Task {
+            do {
+                _ = try await safariBridge.install()
+                refreshSafariBridgeStatus()
+                actionInProgress = false
+                activeAction = nil
+                if firstInstall, safariBridgeAlerts.installed() {
+                    await safariBridge.openSafariExtensionSettings()
+                }
+            } catch {
+                refreshSafariBridgeStatus()
+                actionInProgress = false
+                activeAction = nil
+                safariBridgeAlerts.failed(
+                    error as? ClaudeSafariBridgeInstallError ?? .copyFailed
+                )
+            }
+        }
     }
 
     /// Whether a sync nobody pressed for, from the timer or Refresh All, may
@@ -446,6 +610,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     /// and a state that offers it.
     private var accuracySyncCanRun: Bool {
         consentGranted
+            && safariBridgeStatus == .ready
             && !actionInProgress
             && !safariPromptOpen
             && offersAccuracySync
@@ -456,6 +621,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     /// with Safari closed it asks to open it. Returns whether it went ahead.
     @discardableResult
     public func accuracySyncForRefreshAll() -> Bool {
+        refreshSafariBridgeStatus()
         guard accuracySyncCanRun else { return false }
         if safariRecovery != nil, !safariIsRunning() {
             offerToStartSafari(.launch, trigger: .user)
@@ -467,6 +633,7 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
     }
 
     func runPeriodicAccuracySyncIfDue() {
+        refreshSafariBridgeStatus()
         guard automaticAccuracySyncInterval != nil, accuracySyncCanRun else { return }
         if safariIsRunning() {
             safariPromptPolicy.safariWasRunning()
@@ -723,6 +890,8 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
                 configurationRestoreFailure = nil
                 consentStore.consentGranted = false
                 consentGranted = false
+                consentStore.safariSetupFinished = false
+                safariSetupFinished = false
                 state = .disconnected
             } catch {
                 consentGranted = consentStore.consentGranted
@@ -785,6 +954,10 @@ public final class ClaudeBrowserSettingsModel: ObservableObject {
         let account = snapshot.channels.first(where: { $0.id == .account })
         estimateConfidence = account?.sourceConfidence
         lastExactAt = account?.lastExactAt
+        if lastExactAt != nil, !safariSetupFinished {
+            consentStore.safariSetupFinished = true
+            safariSetupFinished = true
+        }
         liveLinkStage = diagnostics.lastLiveLinkStage
         currentQuotaIncludesSafariAccuracy = diagnostics.currentQuotaIncludesSafariAccuracy
         localSmartState = diagnostics.localSmartState

@@ -437,6 +437,18 @@ final class AppShellCoordinator {
         )
     }
 
+    private var dockWelcomeTaps = AUVWelcomeTapCounter()
+
+    /// A click on AUV's Dock icon. Five quick ones play the welcome sound once,
+    /// as on the menu-bar button: the app has both, and either can be the one
+    /// a person reaches for.
+    func recordDockClick() {
+        guard !isTornDown else { return }
+        if dockWelcomeTaps.record(at: ProcessInfo.processInfo.systemUptime) {
+            AUVWelcomeSound.play(runtime?.store.language ?? .simplifiedChinese)
+        }
+    }
+
     func showMainWindow() {
         guard !isTornDown else { return }
         resumeMonitoringForWindowPresentation()

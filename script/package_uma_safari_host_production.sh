@@ -54,14 +54,18 @@ swift_options=(--disable-sandbox --disable-keychain --disable-netrc --manifest-c
 "${swift_env[@]}" /usr/bin/xcrun swift build "${swift_options[@]}" -c release --product UMASafariBridgeHost
 bin="$("${swift_env[@]}" /usr/bin/xcrun swift build "${swift_options[@]}" -c release --show-bin-path)"; popd >/dev/null
 host="$scratch/UMA Safari Bridge.app"; appex="$host/Contents/PlugIns/ClaudeBrowserCompanion.appex"
-mkdir -p "$host/Contents/MacOS" "$appex/Contents/MacOS" "$appex/Contents/Resources/Shared" "$appex/Contents/Resources/Safari"
+mkdir -p "$host/Contents/MacOS" "$host/Contents/Resources" "$appex/Contents/MacOS" "$appex/Contents/Resources/Shared" "$appex/Contents/Resources/Safari" "$appex/Contents/Resources/icons"
 install -m 755 "$bin/UMASafariBridgeHost" "$host/Contents/MacOS/UMASafariBridgeHost"
 cp "$src/ProductionSigning/SafariHost/App/Info.plist" "$host/Contents/Info.plist"; cp "$src/ProductionSigning/SafariHost/Extension/Info.plist" "$appex/Contents/Info.plist"
 cp "$host_profile" "$host/Contents/embedded.provisionprofile"; cp "$extension_profile" "$appex/Contents/embedded.provisionprofile"
 "${swift_env[@]}" /usr/bin/xcrun swiftc -sdk "$SDK_REQUIRED" -target arm64-apple-macosx14.0 -application-extension -Xlinker -application_extension -O -parse-as-library -D UMA_PRODUCTION_RELEASE -module-name ClaudeBrowserCompanion -I "$bin" "$handler" "$bin/ClaudeBrowserBridgeProtocol.o" "$bin/ClaudeBrowserNativeHostCore.o" -framework Foundation -framework SafariServices -Xlinker -e -Xlinker _NSExtensionMain -o "$appex/Contents/MacOS/ClaudeBrowserCompanion"
 for f in background-core.js claude-usage-extractor.js content-script.js provider-ownership-v2.js owned-provider-tab-v2-reducer.js; do install -m 644 "$src/BrowserExtension/Shared/$f" "$appex/Contents/Resources/Shared/$f"; done
+install -m 644 "$src/Assets/AppIcon.icns" "$host/Contents/Resources/AppIcon.icns"
+for f in "$src"/BrowserExtension/Safari/icons/*.png; do install -m 644 "$f" "$appex/Contents/Resources/icons/$(basename "$f")"; done
 cp "$src/BrowserExtension/Safari/manifest.json" "$appex/Contents/Resources/manifest.json"; /usr/bin/ruby -rjson -e 'p=ARGV[0]; j=JSON.parse(File.binread(p)); j["version"]=ARGV[1]; File.binwrite(p,JSON.pretty_generate(j)+"\n")' "$appex/Contents/Resources/manifest.json" "$version"
 /usr/bin/ruby -rjson -e 'j=JSON.parse(File.binread(ARGV[0])); s=Array(j["content_scripts"]); ok=Array(j["permissions"]).sort == ["https://claude.ai/new*","nativeMessaging"].sort && s.length == 1 && Array(s[0]["matches"]) == ["https://claude.ai/new*"] && s[0]["all_frames"] == false; abort "PRODUCTION_MANIFEST_PERMISSION_MISMATCH" unless ok' "$appex/Contents/Resources/manifest.json"
+/usr/bin/ruby -rjson -e 'r=ARGV[0]; j=JSON.parse(File.binread(r+"/manifest.json")); a=j["browser_action"] || {}; paths=j.fetch("icons",{}).values+a.fetch("default_icon",{}).values; ok=!paths.empty? && !a.key?("default_popup") && paths.all?{|p| File.file?(File.join(r,p))}; abort "PRODUCTION_MANIFEST_ICON_MISSING" unless ok' "$appex/Contents/Resources"
+[[ "$(plist "$host/Contents/Info.plist" CFBundleIconFile)" == AppIcon && -f "$host/Contents/Resources/AppIcon.icns" ]] || { echo PRODUCTION_APP_ICON_MISSING >&2; exit 1; }
 cat > "$appex/Contents/Resources/Safari/background-loader.js" <<EOF
 globalThis.UMA_BROWSER_CONFIG = Object.freeze({
   browserFamily: "safari", nativeApplication: "$HOST_ID",
