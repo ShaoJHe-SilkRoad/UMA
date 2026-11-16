@@ -1,4 +1,5 @@
 import AppKit
+import ClaudeBrowserBridgeProtocol
 import ClaudeSafariHostIPC
 import CoreGraphics
 
@@ -50,5 +51,42 @@ enum SafariWindowVisibility {
         hasWindowOnCurrentDesktop: Bool?
     ) -> ClaudeSafariHostIPCProviderPlacement {
         hasWindowOnCurrentDesktop == false ? .temporaryWindow : .existingWindow
+    }
+}
+
+/// Where each read opens its Usage page. Normally that follows
+/// `SafariWindowVisibility`. Safari can also suspend a hidden background tab in
+/// a window that is on screen: the page takes the read and then stops answering,
+/// and the read ends as `tabUnavailable` (on Nov 15 2026, 17 of 52 reads). Only
+/// the next read after that, normally the automatic retry, opens in a temporary
+/// window, which Safari keeps running because it is visible. A completed read
+/// clears it, and nothing else ever makes the temporary window the default.
+struct ClaudeSafariReadPlacementPolicy: Equatable, Sendable {
+    private(set) var temporaryWindowForNextRead = false
+
+    /// The placement for a read starting now. Using the temporary window here
+    /// spends it, so a read that fails in it does not lead to another.
+    mutating func placementForNextRead(
+        hasWindowOnCurrentDesktop: Bool?
+    ) -> ClaudeSafariHostIPCProviderPlacement {
+        if temporaryWindowForNextRead {
+            temporaryWindowForNextRead = false
+            return .temporaryWindow
+        }
+        return SafariWindowVisibility.placement(hasWindowOnCurrentDesktop: hasWindowOnCurrentDesktop)
+    }
+
+    mutating func readEnded(
+        _ status: ClaudeBrowserAutomationStatus,
+        placement: ClaudeSafariHostIPCProviderPlacement?
+    ) {
+        switch status {
+        case .refreshCompleted:
+            temporaryWindowForNextRead = false
+        case .tabUnavailable where placement == .existingWindow:
+            temporaryWindowForNextRead = true
+        default:
+            break
+        }
     }
 }
