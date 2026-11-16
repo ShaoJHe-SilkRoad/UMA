@@ -1516,6 +1516,7 @@ public final class HESectoriumStore: ObservableObject {
 
     public func loadDevelopmentDisk(profileID: String, password: String? = nil) {
         guard volumeRows.contains(where: { $0.id == profileID && $0.canLoad }) else { return }
+        SectoriumTimingTrace.shared.begin("Load " + (volumeRows.first { $0.id == profileID }?.profile.name ?? profileID))
         performWorkbench({ $0.startDevelopmentDisk(profileID: profileID, password: password) },
             profileID: profileID, actionKind: .load)
     }
@@ -1537,6 +1538,10 @@ public final class HESectoriumStore: ObservableObject {
 
     private func prepareSafetyCheck(target: SectoriumSafetyTarget, name: String) {
         guard !isBusy, !isPreviewFixture else { return }
+        switch target {
+        case .volume: SectoriumTimingTrace.shared.begin("Unload " + name)
+        case .drive: SectoriumTimingTrace.shared.begin("Disconnect " + name)
+        }
         safetyWaitTask?.cancel()
         safetyGeneration &+= 1
         let generation = safetyGeneration
@@ -1551,6 +1556,7 @@ public final class HESectoriumStore: ObservableObject {
             await MainActor.run {
                 guard let self, self.finishPreparation(preparation),
                       self.safetyGeneration == generation else { return }
+                SectoriumTimingTrace.shared.mark("activity check shown: \(report.assessment)")
                 self.safetyCheck = .init(target: target, name: name, activity: report.assessment,
                     processes: report.processes, applications: self.applicationQuitter.applications(using: report.processes))
                 if report.assessment == .noVisibleOccupancy { self.confirmSafeUnload() }
@@ -1643,6 +1649,7 @@ public final class HESectoriumStore: ObservableObject {
 
     public func confirmSafeUnload() {
         guard let check = safetyCheck, check.canProceed, !isBusy else { return }
+        SectoriumTimingTrace.shared.mark("confirmed; preparing the operation")
         cancelSafetyCheck()
         let service = self.service
         let preparation = beginPreparation()
@@ -1859,9 +1866,12 @@ public final class HESectoriumStore: ObservableObject {
         let token = UUID()
         activeWorkbenchOperationToken = token
         Task.detached(priority: .userInitiated) { [weak self] in
+            SectoriumTimingTrace.shared.mark("operation started")
             let result = action(service)
+            SectoriumTimingTrace.shared.mark("operation returned")
             let pending = service.pendingSectoriumOperation()
             await MainActor.run {
+                defer { SectoriumTimingTrace.shared.end(result.failure.map { "shown: failed: \($0)" } ?? "shown: completed") }
                 guard let self, self.activeWorkbenchOperationToken == token else { return }
                 self.activeWorkbenchOperationToken = nil
                 // The actual operation has finished. Do not keep a global busy

@@ -89,6 +89,13 @@ public final class ProcessCommandRunner: HESectoriumSecureCommandRunning, HESect
     }
     private func execute(_ executable: String, _ arguments: [String], cwd: URL, standardInput: Data,
                          timeout: TimeInterval?) -> CommandOutcome {
+        let trace = SectoriumTimingTrace.shared, token = trace.startCommand()
+        let outcome = executeProcess(executable, arguments, cwd: cwd, standardInput: standardInput, timeout: timeout)
+        trace.finishCommand(token, executable: executable, arguments: arguments, exitCode: outcome.exitCode)
+        return outcome
+    }
+    private func executeProcess(_ executable: String, _ arguments: [String], cwd: URL, standardInput: Data,
+                                timeout: TimeInterval?) -> CommandOutcome {
         if let timeout, !timeout.isFinite || timeout <= 0 {
             return .init(exitCode: -1, detail: "command timeout must be finite and positive")
         }
@@ -1165,6 +1172,7 @@ public final class HESectoriumService: @unchecked Sendable {
         self.consistencyProbe = SectoriumConsistencyProbe(paths: paths, runner: runner,
             mounts: sectoriumMountMetadataProvider ?? SystemSectoriumMountMetadataProvider())
         self.portableDocumentJournal = SectoriumPortableDocumentJournal(url: paths.root.appendingPathComponent("sectorium-document-journal.json"))
+        SectoriumTimingTrace.shared.configure(logDirectory: paths.logs)
         self.sectoriumDeviceObserver = sectoriumDeviceObserver
         self.wholeDeviceEjectDriverOverride = wholeDeviceEjectDriverOverride
         self.portableDocumentWriter = portableDocumentWriter ?? SectoriumPortableDocumentWriter(
@@ -2836,7 +2844,9 @@ public final class HESectoriumService: @unchecked Sendable {
             guard beginWorkbenchMutation(operation: id, target: profile.imagePath, step: "attachImage") else {
                 return workbenchFailure(id, steps, "Could not persist the image-attach boundary")
             }
+            SectoriumTimingTrace.shared.mark("load: checks done, attaching and mounting")
             let attached = backend.attachImage(password: password)
+            SectoriumTimingTrace.shared.mark("load: attach and mount returned")
             steps.append(.init(step: "attachImage", status: attached.succeeded ? .succeeded : .failed,
                                detail: password == nil ? attached.detail : "Unlock/attach returned \(attached.exitCode)"))
             if attached.succeeded, !completeWorkbenchStep(operation: id, step: "attachImage") {
@@ -2889,8 +2899,10 @@ public final class HESectoriumService: @unchecked Sendable {
                 return workbenchFailure(id, steps, "Mounted image validated but manual load intent could not be recorded")
             }
             let documentedProfile = readSectoriumProfiles()?.first(where: { $0.id == profile.id }) ?? profile
+            SectoriumTimingTrace.shared.mark("load: mount verified, writing records and IMPORTANT.md")
             guard completePortableOperation(documentedProfile, event: "loaded", operation: id),
                   clearWorkbenchMarker() else { return workbenchFailure(id, steps, "Mounted successfully but its durable completion remains pending") }
+            SectoriumTimingTrace.shared.mark("load: records written")
             return .init(operationID: id, mode: .manual, steps: steps)
         }
     }
@@ -3101,7 +3113,9 @@ public final class HESectoriumService: @unchecked Sendable {
                   beginWorkbenchMutation(operation: id, target: profile.imagePath, step: "unmountDEV") else {
                 return workbenchFailure(id, steps, "Could not retain the unload intent")
             }
+            SectoriumTimingTrace.shared.mark("unload: checks done, unmounting")
             let result = backend.perform(.unmountDEV)
+            SectoriumTimingTrace.shared.mark("unload: unmount returned")
             steps.append(.init(step: "unmountDEV", status: result.succeeded ? .succeeded : .failed, detail: result.detail))
             if !result.succeeded {
                 // A normal busy refusal leaves the same loaded volume safe to
@@ -3126,6 +3140,7 @@ public final class HESectoriumService: @unchecked Sendable {
             // and pulling it leaves an attachment that can no longer be read.
             // The volume is already unloaded; a refused detach leaves the image
             // attached exactly as earlier builds did and Load reuses it.
+            SectoriumTimingTrace.shared.mark("unload: unmount verified")
             if !backend.imageIsDetached() {
                 let detached = backend.perform(.detachImage)
                 steps.append(.init(step: "detachImage", status: detached.succeeded ? .succeeded : .skipped,
