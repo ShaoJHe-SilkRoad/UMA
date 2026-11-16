@@ -63,4 +63,19 @@ struct AUVInstallNoticeTests {
         #expect(!source.contains("NSApp.terminate(nil)"))
         #expect(source.contains("NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0)"))
     }
+
+    @Test("Five quick clicks play the welcome sound once")
+    func welcomeTaps() {
+        func run(_ times: [TimeInterval]) -> [Bool] {
+            var taps = AUVWelcomeTapCounter()
+            var results: [Bool] = []
+            for time in times { results.append(taps.record(at: time)) }
+            return results
+        }
+        #expect(run([0.0, 0.4, 0.8, 1.2, 1.6]) == [false, false, false, false, true])
+        // The count starts over after a play.
+        #expect(run([0.0, 0.4, 0.8, 1.2, 1.6, 1.8]) == [false, false, false, false, true, false])
+        // A pause longer than the window starts the count over.
+        #expect(run([0.0, 0.5, 1.0, 1.5, 4.0]) == [false, false, false, false, false])
+    }
 }

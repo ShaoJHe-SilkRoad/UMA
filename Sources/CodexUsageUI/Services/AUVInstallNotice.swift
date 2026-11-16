@@ -85,10 +85,10 @@ public enum AUVInstallNotice: Equatable, Sendable {
 /// script/render_auv_welcome_sounds.py. A drag in the disk image cannot play
 /// anything itself, so the drumbeat that marks a successful install is here.
 @MainActor
-enum AUVWelcomeSound {
+public enum AUVWelcomeSound {
     private static var current: NSSound?
 
-    static func play(_ language: AppLanguage) {
+    public static func play(_ language: AppLanguage) {
         let data = language == .simplifiedChinese ? AUVWelcomeSoundData.zh : AUVWelcomeSoundData.en
         if let sound = NSSound(data: data) {
             current = sound   // keep it alive while it plays
@@ -96,6 +96,30 @@ enum AUVWelcomeSound {
         } else {
             NSSound(named: "Glass")?.play()
         }
+    }
+}
+
+/// Five quick clicks on the AUV menu-bar button play the welcome sound once.
+/// Each click must come within `window` seconds of the one before; the count
+/// starts over after a play.
+public struct AUVWelcomeTapCounter: Equatable, Sendable {
+    public static let requiredTaps = 5
+    public static let window: TimeInterval = 2
+
+    private var count = 0
+    private var lastTap: TimeInterval?
+
+    public init() {}
+
+    /// Records a click at `time` (seconds, any steady clock); true on the fifth.
+    public mutating func record(at time: TimeInterval) -> Bool {
+        if let lastTap, time - lastTap > Self.window { count = 0 }
+        lastTap = time
+        count += 1
+        guard count >= Self.requiredTaps else { return false }
+        count = 0
+        lastTap = nil
+        return true
     }
 }
 
