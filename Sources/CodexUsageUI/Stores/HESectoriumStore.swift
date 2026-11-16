@@ -71,6 +71,9 @@ public struct SectoriumUserNotice: Equatable, Sendable {
             return .init(english: "The parent drive was not confirmed ejected. Keep it connected and continue the pending operation.", chinese: "尚未确认母盘已弹出。请保持连接并继续待完成操作。")
         case .observationUnavailable, .readiness, .stateConflict, .stateUnavailable:
             return .init(english: "The volume could not be verified. No safe-to-disconnect result is available. Refresh and review its details.", chinese: "无法核实开发卷，尚不能确认可安全拔线。请刷新并查看详情。")
+        case .workbenchFailed(let message) where message.hasPrefix("Load awaiting approval"):
+            return .init(english: "macOS asked for your password or Touch ID to mount the development volume, and it was not answered in time. If its window is still open, approve it and the volume loads; then select Refresh. Otherwise select Load again.",
+                         chinese: "macOS 请求输入密码或使用 Touch ID 来挂载开发卷，但未及时得到确认。若授权窗口仍在，确认后开发卷即会加载，之后点“刷新”；否则请再次点击“加载”。")
         case .workbenchFailed(let message) where message.hasPrefix("Load failed: "):
             let reason = String(message.dropFirst("Load failed: ".count))
             if reason.localizedCaseInsensitiveContains("cancel") {
@@ -90,7 +93,10 @@ enum SectoriumCommandAction: Equatable, Sendable {
 
     var progress: SectoriumUserNotice {
         switch self {
-        case .load: .init(english: "Loading the development volume…", chinese: "正在加载开发卷…")
+        // Mounting inside another drive needs an administrator's approval on
+        // macOS 27; say so, or the wait for the system dialog looks like a hang.
+        case .load: .init(english: "Loading the development volume… macOS may ask for your password or Touch ID before it mounts a volume inside another drive. Approve it in the macOS window to continue.",
+                          chinese: "正在加载开发卷…macOS 可能会要求输入密码或使用 Touch ID，才能把开发卷挂载到外接硬盘中。请在 macOS 的授权窗口中确认后继续。")
         case .unload: .init(english: "Unloading the development volume… The parent drive stays connected.", chinese: "正在卸载开发卷…母盘将保持连接。")
         case .disconnect: .init(english: "Disconnecting the external drive…", chinese: "正在安全断开外接硬盘…")
         case .other: .init(english: "Updating storage…", chinese: "正在更新存储状态…")

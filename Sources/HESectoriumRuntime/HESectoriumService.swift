@@ -53,6 +53,7 @@ public final class ProcessCommandRunner: HESectoriumSecureCommandRunning, HESect
     private let hostCache: SectoriumHostMetadataCache?
     public init() { hostCache = .shared }
     init(hostCache: SectoriumHostMetadataCache?) { self.hostCache = hostCache }
+    var hasHostCache: Bool { hostCache != nil }
     /// Read-only metadata is shared across observations while the host is
     /// unchanged; every other command advances the host change clock.
     private func hostCached(_ executable: String, _ arguments: [String],
@@ -195,10 +196,13 @@ public final class ProcessCommandRunner: HESectoriumSecureCommandRunning, HESect
 
     static func defaultTimeout(executable: String, arguments: [String]) -> TimeInterval? {
         if executable == "/bin/ps", arguments.count == 4, arguments[0] == "-p", arguments[2] == "-o", arguments[3] == "ppid=" { return 2 }
-        if executable == "/usr/sbin/diskutil", arguments.first == "unmount" || arguments.first == "mount" { return 30 }
+        // A mount inside another drive waits for the user's approval in a
+        // macOS dialog; give them time to read and answer it.
+        if executable == "/usr/sbin/diskutil", arguments.first == "mount" { return 180 }
+        if executable == "/usr/sbin/diskutil", arguments.first == "unmount" { return 30 }
         if executable == "/usr/sbin/diskutil", arguments == ["image", "attach", "--help"] { return 5 }
         if SectoriumObservationCommandRunner.isImageReadProbe(executable, arguments) { return 5 }
-        if executable == "/usr/sbin/diskutil", Array(arguments.prefix(2)) == ["image", "attach"] { return 90 }
+        if executable == "/usr/sbin/diskutil", Array(arguments.prefix(2)) == ["image", "attach"] { return 180 }
         if isReadOnlyPropertyList(executable: executable, arguments: arguments)
             || (executable == "/usr/bin/hdiutil" && arguments.count == 3
                 && arguments[0] == "imageinfo" && arguments[1].hasPrefix("/") && arguments[2] == "-format")
@@ -2791,6 +2795,9 @@ public final class HESectoriumService: @unchecked Sendable {
                 return workbenchFailure(id, steps, "Image attached but its recovery step could not be persisted")
             }
             guard attached.succeeded else {
+                if password == nil, Self.isUnansweredApprovalTimeout(attached) {
+                    return workbenchFailure(id, steps, Self.unansweredApprovalMessage)
+                }
                 return workbenchFailure(id, steps, "Load failed: " + (password == nil ? attached.detail : "Unlock/attach returned \(attached.exitCode)"))
             }
             guard let observation = backend.observe() else {
@@ -3832,6 +3839,14 @@ public final class HESectoriumService: @unchecked Sendable {
             detail: changed ? "Fresh native facts matched the recorded request; no modification was replayed" : "Fresh native facts and registry matched the preserved preimage; original settings retained"))
         return .init(operationID: responseID, mode: .manual, steps: steps)
     }
+
+    /// A mount inside another drive waits for an administrator's approval in a
+    /// macOS dialog. When nobody answers, the command times out but the dialog
+    /// and the system's mount request stay open; approving later still mounts.
+    static func isUnansweredApprovalTimeout(_ outcome: CommandOutcome) -> Bool {
+        !outcome.succeeded && outcome.detail.contains("timed out")
+    }
+    static let unansweredApprovalMessage = "Load awaiting approval: the macOS password or Touch ID request was not answered in time"
 
     public func resumePendingSectoriumOperation() -> OperationResult {
         workbenchOperation("resume") { id, steps in

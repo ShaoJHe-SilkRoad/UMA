@@ -20,6 +20,7 @@ final class SectoriumObservationCommandRunner: HESectoriumTimedCommandRunning, H
         }
     }
     private let base: HESectoriumCommandRunning
+    var baseRunner: HESectoriumCommandRunning { base }
     private let now: () -> TimeInterval
     private let duration: TimeInterval
     private let threadKey = "AUV.Sectorium.observationBatch." + UUID().uuidString

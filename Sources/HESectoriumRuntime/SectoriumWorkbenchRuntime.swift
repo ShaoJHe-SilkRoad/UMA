@@ -463,6 +463,9 @@ public final class SystemSectoriumDeviceObserver: SectoriumDeviceObserving {
         }
             .compactMap { $0["DeviceIdentifier"] as? String }
             .filter { $0.range(of: #"^disk[0-9]+s[0-9]+$"#, options: .regularExpression) != nil }
+        (runner as? SectoriumReadOnlyPrefetching)?.prefetchReadOnly(
+            (wholeDisks + volumeNodes).map { ("/usr/sbin/diskutil", ["info", "-plist", "/dev/\($0)"]) },
+            cwd: workingDirectory)
         var information: [String: [String: Any]] = [:]
         for disk in wholeDisks + volumeNodes {
             let info = runner.run("/usr/sbin/diskutil", ["info", "-plist", "/dev/\(disk)"], cwd: workingDirectory)

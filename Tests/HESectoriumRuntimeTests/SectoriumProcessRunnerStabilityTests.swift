@@ -57,11 +57,14 @@ struct SectoriumProcessRunnerStabilityTests {
         #expect(ProcessCommandRunner.defaultTimeout(executable: "/usr/sbin/diskutil",
             arguments: ["image", "attach", "--help"]) == 5)
         #expect(ProcessCommandRunner.defaultTimeout(executable: "/usr/sbin/diskutil",
-            arguments: ["image", "attach", "--nobrowse", "--mountPoint", "/synthetic/DEV", "/synthetic/image"]) == 90)
+            arguments: ["image", "attach", "--nobrowse", "--mountPoint", "/synthetic/DEV", "/synthetic/image"]) == 180)
         #expect(ProcessCommandRunner.defaultTimeout(executable: "/usr/sbin/diskutil",
             arguments: ["unmount", "/dev/disk81s1"]) == 30)
         #expect(ProcessCommandRunner.defaultTimeout(executable: "/usr/sbin/diskutil",
-            arguments: ["mount", "-mountPoint", "/synthetic/DEV", "/dev/disk31s1"]) == 30)
+            arguments: ["mount", "-mountPoint", "/synthetic/DEV", "/dev/disk31s1"]) == 180)
+        // The 4 KB read probe of an attached image is bounded too.
+        #expect(ProcessCommandRunner.defaultTimeout(executable: "/bin/dd",
+            arguments: ["if=/dev/rdisk30", "of=/dev/null", "bs=4096", "count=1"]) == 5)
         #expect(ProcessCommandRunner.defaultTimeout(executable: "/bin/ps",
             arguments: ["-p", "123", "-o", "ppid="]) == 2)
     }
