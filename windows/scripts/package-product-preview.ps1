@@ -237,17 +237,18 @@ Upgrade: quit the old copy, extract this package separately and run its AUV.exe.
 Existing settings in %LOCALAPPDATA%\AUV.Windows.UI.Preview are kept and still read.
 
 New in ${Version}:
-- Connecting Claude is simpler: one Connect button on the Claude page, then a three-step checklist
-  that ticks itself (registered, extension loaded, signed in) with Load in Chrome/Edge and
-  Open claude.ai buttons. Browser and placement options move under Advanced.
-- Claude's bars use the same green/red colours as Codex.
-- The browser companion now lives in this folder (BrowserCompanion\); load
-  BrowserCompanion\extension once in Chrome or Edge. Each new AUV folder needs one more load.
-  Coming from 0.18.5, AUV offers to delete its old copy in %LOCALAPPDATA%.
-- A cleaner look with restrained motion; off when Windows "Show animations" is off.
-  Quota bars and the Desktop Wizard look the same.
-- Still here: Refresh All and automatic refresh, your agent order, English and Chinese,
-  ThreadOS from Codex settings and the optional Codex Local Cost Estimate.
+- Showing the Desktop Wizard now also turns it on. Before, it stayed hidden when
+  "Enable Desktop Wizard" was off, and nothing said why.
+- Tray Usage panel: clicking the tray icon while the panel is open now closes it instead of
+  reopening it; a double click keeps it open.
+- A maximized window comes back maximized after minimizing, after saving settings while
+  minimized, and from Open AUV in the tray. The first time AUV hides to the tray,
+  Windows shows a one-time "AUV is still running" notice.
+  If the tray icon is in the overflow area (^), drag it onto the taskbar to keep it visible.
+- New AUV icon (the same "B3" icon as AUV for Mac), also for the browser extension.
+- Still here: one Connect button for Claude through the Chrome/Edge companion in
+  BrowserCompanion\, Claude's bars in Codex's colours, Refresh All and automatic refresh,
+  your agent order, English and Chinese, ThreadOS from Codex settings.
 
 Codex reads the installed client's existing login through a read-only usage interface.
 WorkBuddy Credit sync is experimental and uses AUV's separate official-site browser session.
