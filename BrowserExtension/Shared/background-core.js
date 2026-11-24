@@ -53,6 +53,9 @@
   const providerPlacements = Object.freeze(["existingWindow", "temporaryWindow"]);
   const temporaryWindowSize = Object.freeze({ width: 480, height: 640 });
   const ownedTabReceiptMaximumAgeMilliseconds = 2 * 60 * 1_000;
+  // How long an expired receipt whose proven tab is still open waits for that
+  // tab's page to prove it again before the receipt is given up.
+  const unprovableTabGraceMilliseconds = 60_000;
   const extractUsageMessage = "umaClaudeExtractUsage";
   const runtimeQualificationMessageName = "umaClaudeRuntimeQualification";
   const automaticReadStates = Object.freeze({
@@ -683,17 +686,40 @@
     return true;
   }
 
+  // Seen live on 2026-11-23: a read's proven tab outlived its receipt with no
+  // page left to prove it again, and every read for over an hour was refused
+  // as an ownership loss before any tab was opened, until the person closed
+  // that tab themselves. Once the receipt has expired and its page has had
+  // this long to come back through the recovery port, the receipt is given up.
+  // The tab is not closed: nothing proves it is still this read's tab.
+  async function abandonUnprovableV2Receipt(read, presence) {
+    // Its page came back and the read is running again; that read settles it.
+    if (automaticRead === read) return false;
+    void sendNativeReply({
+      kind: pageTraceKind,
+      trace: `status=staleReceiptAbandoned tab=${presence}`,
+    });
+    if (await finalizeAbsentV2Cleanup(read)) return true;
+    // A refused step means this copy of the receipt is stale. The liveness
+    // check loads it again from the native side while none is pending here.
+    pendingV2Receipt = null;
+    ownedTabRecoveryBlocked = true;
+    return false;
+  }
+
   async function recoverCleanupOnlyV2(read) {
     read.cleanupOnly = true;
     read.cleanupTerminalState = ownedProviderReducer.isTerminal(read.state)
       ? read.state : v2States.failed;
     const presence = await exactV2TabPresence(read.providerOwnedTabID);
     if (presence === "absent") return await finalizeAbsentV2Cleanup(read);
+    if (!Number.isFinite(read.unprovableSince)) read.unprovableSince = Date.now();
+    if (Date.now() >= v2SettleDueAt(read)) {
+      return await abandonUnprovableV2Receipt(read, presence);
+    }
     pendingV2Receipt = read;
     ownedTabRecoveryBlocked = true;
-    if (presence === "present" && Date.now() < Date.parse(read.expiresAt)) {
-      scheduleV2Expiry(read);
-    }
+    scheduleV2Expiry(read);
     return false;
   }
 
@@ -793,9 +819,18 @@
     await expireV2Receipt(read);
   }
 
+  // A receipt is settled at its expiry, or, while its proven tab is still
+  // open, once that tab's page has had a while to prove it again.
+  function v2SettleDueAt(read) {
+    const expiry = Date.parse(read.expiresAt);
+    return Number.isFinite(read.unprovableSince)
+      ? Math.max(expiry, read.unprovableSince + unprovableTabGraceMilliseconds)
+      : expiry;
+  }
+
   function scheduleV2Expiry(read) {
     if (!read || ownedTabExpiryTimer !== null) return;
-    const remaining = Math.max(1, Date.parse(read.expiresAt) - Date.now() + 1);
+    const remaining = Math.max(1, v2SettleDueAt(read) - Date.now() + 1);
     ownedTabExpiryTimer = setTimeout(() => {
       ownedTabExpiryTimer = null;
       if (pendingV2Receipt?.requestID !== read.requestID) return;
@@ -938,6 +973,22 @@
     read.updateListener = null;
   }
 
+  // Closes the read's proven tab. Returns whether the close went through.
+  async function closeProvenV2Tab(read) {
+    read.closingOwnedTab = true;
+    try {
+      // Safari keeps a window open after its last tab is removed, so a
+      // temporary window goes as a whole, with the proven tab in it.
+      if (!await closeTemporaryProviderWindow(read)) {
+        await api.tabs.remove(read.providerOwnedTabID);
+      }
+      return true;
+    } catch (_) {
+      read.closingOwnedTab = false;
+      return false;
+    }
+  }
+
   async function cleanupV2(read, terminalState) {
     if (!read) return false;
     if (!Number.isInteger(read.providerOwnedTabID) || !read.providerPort) {
@@ -952,21 +1003,30 @@
     }
     if (read.state !== v2States.cleanupRequested
         && read.state !== v2States.cleanupConfirmed
-        && !await transitionV2(read, v2Events.requestCleanup)) return false;
-    if (!read.removalAlreadyConfirmed) {
-      read.closingOwnedTab = true;
-      try {
-        // Safari keeps a window open after its last tab is removed, so a
-        // temporary window goes as a whole, with the proven tab in it.
-        if (!await closeTemporaryProviderWindow(read)) {
-          await api.tabs.remove(read.providerOwnedTabID);
-        }
-      } catch (_) {
-        read.closingOwnedTab = false;
-        pendingV2Receipt = read;
-        ownedTabRecoveryBlocked = true;
-        return false;
-      }
+        && !await transitionV2(read, v2Events.requestCleanup)) {
+      // The receipt did not record the cleanup, most often because the native
+      // reply came too late or a revision moved under this read. Its live page
+      // still proves the tab, so the tab closes now: left open, it outlives
+      // the receipt and holds back every later read. This copy of the receipt
+      // may be stale, so it is loaded again and settled as one whose tab is
+      // gone.
+      const tabGone = read.removalAlreadyConfirmed || await closeProvenV2Tab(read);
+      void sendNativeReply({
+        kind: pageTraceKind,
+        trace: `status=cleanupUnrecorded tabGone=${tabGone ? 1 : 0}`,
+      });
+      // As the liveness check does: reads wait for this load, which blocks
+      // them again while a receipt is left.
+      pendingV2Receipt = null;
+      ownedTabRecoveryBlocked = false;
+      ownedTabRecoveryPromise = recoverV2Receipt();
+      retainRuntimeOperation(ownedTabRecoveryPromise);
+      return false;
+    }
+    if (!read.removalAlreadyConfirmed && !await closeProvenV2Tab(read)) {
+      pendingV2Receipt = read;
+      ownedTabRecoveryBlocked = true;
+      return false;
     }
     if (read.state === v2States.cleanupRequested
         && !await transitionV2(read, v2Events.confirmCleanup)) return false;

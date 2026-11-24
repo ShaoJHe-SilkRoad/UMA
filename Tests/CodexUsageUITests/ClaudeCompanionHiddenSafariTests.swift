@@ -100,9 +100,9 @@ struct ClaudeCompanionHiddenSafariTests {
             encoding: .utf8
         )
         #expect(background.contains("""
-                if (!await closeTemporaryProviderWindow(read)) {
-                  await api.tabs.remove(read.providerOwnedTabID);
-                }
+              if (!await closeTemporaryProviderWindow(read)) {
+                await api.tabs.remove(read.providerOwnedTabID);
+              }
         """))
         #expect(background.contains("const expectedTabID = read.providerOwnedTabID"))
     }
@@ -327,6 +327,71 @@ struct ClaudeCompanionSelfRecoveryTests {
         #expect(!page.log.contains("automation ownedTabOwnershipLost"))
     }
 
+    /// Seen live on 2026-11-23: an expired EXTRACTING receipt still named a tab
+    /// Safari had open, and no page came back to prove it. Every read for over
+    /// an hour was refused as an ownership loss before any tab was opened,
+    /// until the person closed that tab.
+    @Test("An expired receipt whose tab stays open and unproven stops blocking reads")
+    func unprovableOpenTabReceiptIsGivenUp() throws {
+        let page = try CompanionPage()
+        page.plantExpiredReceipt(Self.read, state: "EXTRACTING", ownedTabID: 83_818)
+        page.advance(milliseconds: 60_000)
+        #expect(!page.log.contains { $0.hasPrefix("receipt-removed") })
+
+        // Its page still has a while to come back through the recovery port.
+        page.clearLog()
+        page.dispatchRead(Self.firstWake, placement: nil)
+        #expect(page.log.contains("automation ownedTabOwnershipLost"))
+        #expect(!page.log.contains("tabs.create background"))
+
+        page.advance(milliseconds: 61_000)
+        #expect(page.log.contains("receipt-removed FAILED"))
+        #expect(page.log.contains("trace status=staleReceiptAbandoned tab=present"))
+        // Nothing proves the open tab is still the read's, so it is left alone.
+        #expect(!page.log.contains("tabs.remove 83818"))
+
+        page.clearLog()
+        page.dispatchRead(Self.secondWake, placement: nil)
+        #expect(page.log.contains("automation refreshStarted"))
+        #expect(page.log.contains("tabs.create background"))
+        #expect(!page.log.contains("automation ownedTabOwnershipLost"))
+    }
+
+    /// Safari can hold back a background page's timers; the next read then
+    /// gives the receipt up itself once the page has had its while.
+    @Test("An unproven open tab's receipt is given up by a read when timers stalled")
+    func unprovableOpenTabReceiptIsGivenUpWithStalledTimers() throws {
+        let page = try CompanionPage()
+        page.plantExpiredReceipt(Self.read, state: "RESULT_READY", ownedTabID: 83_818)
+        page.advance(milliseconds: 60_000)
+        page.suspendTimers(true)
+        page.advance(milliseconds: 61_000)
+        page.clearLog()
+        page.dispatchRead(Self.firstWake, placement: nil)
+        #expect(page.log.contains("receipt-removed FAILED"))
+        #expect(!page.log.contains("tabs.remove 83818"))
+        #expect(page.log.contains("automation refreshStarted"))
+        #expect(!page.log.contains("automation ownedTabOwnershipLost"))
+    }
+
+    /// Before, a cleanup the receipt refused to record returned before closing
+    /// the tab, which is how a proven tab could outlive its receipt.
+    @Test("A cleanup the receipt does not record still closes the proven tab")
+    func unrecordedCleanupStillClosesTheTab() throws {
+        let page = try CompanionPage()
+        page.refuseTransitions(to: "CLEANUP_REQUESTED")
+        page.dispatchRead(Self.read, placement: nil)
+        page.connectProvider(tabID: 71)
+        page.providerSend("""
+        { type: "umaClaudeProviderDocumentDiscoveredV2", ownershipNonce: "uma-v2-\(String(repeating: "a", count: 43))" }
+        """)
+        page.providerSendCorrelated(type: "umaClaudeProviderReadyV2", requestID: Self.read)
+        page.advance(milliseconds: 10_000)
+        #expect(page.log.contains("tabs.remove 71"))
+        #expect(page.log.contains("trace status=cleanupUnrecorded tabGone=1"))
+        #expect(page.log.contains { $0.hasPrefix("trace status=tabUnavailable") })
+    }
+
     /// Seen live after the native process was killed: each command arrived
     /// twice, both copies started a read, and the read was refused.
     /// Safari suspends a background tab's process when its page goes quiet, and
@@ -490,6 +555,10 @@ private final class CompanionPage {
         context.evaluateScript("""
         UMACompanionHarness.plantExpiredReceipt("\(requestID)", \(stateArgument), \(tabArgument))
         """)
+    }
+
+    func refuseTransitions(to state: String) {
+        context.evaluateScript("UMACompanionHarness.refuseTransitionsTo(\"\(state)\")")
     }
 
     func setNativeAnswers(_ answers: Bool) {

@@ -87,6 +87,9 @@
   let nativeAnswers = root.UMACompanionHarnessNativeAnswersAtStart !== false;
   let receiptLoads = 0;
   let plantedReceiptID = null;
+  // Lifecycle states the native store refuses to move a receipt into, as when
+  // its reply came too late or a revision moved under the page.
+  const refusedStates = new Set();
   const stored = new Map();
   root.localStorage = {
     getItem: (key) => (stored.has(key) ? stored.get(key) : null),
@@ -135,6 +138,7 @@
       case "bindCandidateV2": {
         const receipt = receipts.get(id);
         if (!receipt || receipt.revision !== payload.expectedRevision) return { ok: false };
+        if (refusedStates.has(payload.nextLifecycleState)) return { ok: false };
         // Binding the same tab again is a confirmation, not a new revision.
         if (payload.action === "bindCandidateV2"
             && receipt.candidateTabID === payload.providerCandidateTabID) {
@@ -270,6 +274,7 @@
         ownedTabID,
       });
     },
+    refuseTransitionsTo(state) { refusedStates.add(state); },
     // While false, sendNativeMessage returns a promise that never settles.
     setNativeAnswers(value) { nativeAnswers = value; },
     // Delivers a containing-app command on the newest port, as Safari does
