@@ -13,7 +13,7 @@ readonly EXTENSION_ID="com.silkrd.uma.ClaudeBrowserCompanion"
 readonly APP_GROUP="group.com.silkrd.uma.bridge"
 readonly REQUIRED_IDENTITY="Developer ID Application: SHAOTING HE (C6TUZVJ6SJ)"
 readonly DEVELOPER_DIR_REQUIRED="/Applications/Xcode-beta.app/Contents/Developer"
-readonly SDK_REQUIRED="$DEVELOPER_DIR_REQUIRED/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk"
+readonly SDK_REQUIRED="$DEVELOPER_DIR_REQUIRED/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.2.sdk"
 commit= build= version= output= identity= host_profile= extension_profile=
 while [[ $# -gt 0 ]]; do case "$1" in
   --commit) commit="${2:-}"; shift 2;; --build) build="${2:-}"; shift 2;;

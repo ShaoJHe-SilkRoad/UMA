@@ -319,7 +319,7 @@ swift_driver=(/usr/bin/xcrun swift)
 appex_compiler="/Library/Developer/CommandLineTools/usr/bin/swiftc"
 if [[ "$phase" == "apple-development-test" ]]; then
     export DEVELOPER_DIR="$APPLE_DEVELOPMENT_DEVELOPER_DIR"
-    SDK="$APPLE_DEVELOPMENT_DEVELOPER_DIR/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk"
+    SDK="$APPLE_DEVELOPMENT_DEVELOPER_DIR/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.2.sdk"
     swift_driver=(/usr/bin/xcrun swift)
     appex_compiler="$APPLE_DEVELOPMENT_DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
 fi

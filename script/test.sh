@@ -21,7 +21,7 @@ if [[ "${1:-}" == "--native-app-host" ]]; then
 fi
 readonly DEVELOPER_DIR_REQUIRED="/Applications/Xcode-beta.app/Contents/Developer"
 readonly TOOLCHAIN="$DEVELOPER_DIR_REQUIRED/Toolchains/XcodeDefault.xctoolchain"
-readonly SDK="$DEVELOPER_DIR_REQUIRED/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk"
+readonly SDK="$DEVELOPER_DIR_REQUIRED/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.2.sdk"
 readonly PLATFORM_DEVELOPER="$DEVELOPER_DIR_REQUIRED/Platforms/MacOSX.platform/Developer"
 
 fail() {

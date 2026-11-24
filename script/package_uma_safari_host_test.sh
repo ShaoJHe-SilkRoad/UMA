@@ -115,7 +115,7 @@ readonly host_binary="$bin_path/$HOST_PRODUCT"
 
 readonly extension_binary="$scratch/$EXTENSION_PRODUCT"
 "$DEVELOPER_DIR_REQUIRED/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc" \
-    -sdk "$DEVELOPER_DIR_REQUIRED/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk" \
+    -sdk "$DEVELOPER_DIR_REQUIRED/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.2.sdk" \
     -target arm64-apple-macosx14.0 -application-extension -Xlinker -application_extension \
     -O -parse-as-library \
     -module-name "$EXTENSION_PRODUCT" -I "$bin_path" \

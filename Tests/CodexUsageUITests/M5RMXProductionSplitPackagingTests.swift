@@ -45,7 +45,7 @@ struct M5RMXProductionSplitPackagingTests {
     func failClosed() throws {
         let package = try source("script/package_uma_0_13_production_split.sh")
         for reason in ["SOURCE_NOT_COMMIT_EXACT", "DEVELOPER_ID_IDENTITY_UNAVAILABLE", "COHERENT_XCODE_TOOLCHAIN_UNAVAILABLE", "PRODUCTION_PROFILE_MISSING", "PRODUCTION_PROFILE_MISMATCH", "PRODUCTION_HANDLER_QUALIFICATION_ABSENT"] { #expect(package.contains(reason)) }
-        for contract in ["/Applications/Xcode-beta.app/Contents/Developer", "MacOSX27.0.sdk", "SWIFTPM_MODULECACHE_OVERRIDE", "--disable-keychain", "--manifest-cache"] { #expect(package.contains(contract)) }
+        for contract in ["/Applications/Xcode-beta.app/Contents/Developer", "MacOSX27.2.sdk", "SWIFTPM_MODULECACHE_OVERRIDE", "--disable-keychain", "--manifest-cache"] { #expect(package.contains(contract)) }
         #expect(package.contains("mkdir -p \"$src\""))
         #expect(package.contains("swift_env=(/usr/bin/env HOME="))
         #expect(!package.contains("SDKROOT=\"$SDK_REQUIRED\" HOME="))

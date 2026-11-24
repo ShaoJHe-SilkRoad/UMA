@@ -250,7 +250,7 @@ struct M5RMXImmutableSafariHostPackagingTests {
         #expect(package.contains(
             "\"$DEVELOPER_DIR_REQUIRED/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc\""
         ))
-        #expect(package.contains("MacOSX27.0.sdk"))
+        #expect(package.contains("MacOSX27.2.sdk"))
         #expect(!package.contains("swift build || true"))
     }
 

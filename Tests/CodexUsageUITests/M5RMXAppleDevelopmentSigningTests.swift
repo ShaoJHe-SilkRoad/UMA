@@ -500,7 +500,7 @@ struct M5RMXAppleDevelopmentSigningTests {
             "readonly APPLE_DEVELOPMENT_DEVELOPER_DIR=\"/Applications/Xcode-beta.app/Contents/Developer\""
         ))
         #expect(package.contains(
-            "SDK=\"$APPLE_DEVELOPMENT_DEVELOPER_DIR/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk\""
+            "SDK=\"$APPLE_DEVELOPMENT_DEVELOPER_DIR/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.2.sdk\""
         ))
         #expect(package.contains(
             "export DEVELOPER_DIR=\"$APPLE_DEVELOPMENT_DEVELOPER_DIR\""
