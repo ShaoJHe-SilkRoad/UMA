@@ -41,12 +41,15 @@ public struct UsageMonitorRuntime {
     static let productionConnectorIDs: Set<AgentConnectorID> = [
         CodexUsageConnector.connectorID,
         ClaudeCodeUsageConnector.connectorID,
+        GeminiUsageConnector.connectorID,
     ]
 
     public let preferences: ApplicationPreferences
     public let dataPaths: ApplicationDataPaths
     public let store: UsageStore
     public let claudeSettings: ClaudeBrowserSettingsModel
+    /// Nil only for runtimes built without the Gemini connector.
+    public let geminiSettings: GeminiSettingsModel?
     private let startupTask: Task<Void, Never>?
     private let threadOSAttributionPreferenceObservation: ApplicationPreferences.Observation?
     private let claudeAutomaticSyncObservation: ApplicationPreferences.Observation?
@@ -58,12 +61,14 @@ public struct UsageMonitorRuntime {
         startupTask: Task<Void, Never>? = nil,
         threadOSAttributionPreferenceObservation: ApplicationPreferences.Observation? = nil,
         claudeAutomaticSyncObservation: ApplicationPreferences.Observation? = nil,
+        geminiSettings: GeminiSettingsModel? = nil,
         dataPaths: ApplicationDataPaths = .current()
     ) {
         self.preferences = preferences
         self.dataPaths = dataPaths
         self.store = store
         self.claudeSettings = claudeSettings
+        self.geminiSettings = geminiSettings
         self.startupTask = startupTask
         self.threadOSAttributionPreferenceObservation = threadOSAttributionPreferenceObservation
         self.claudeAutomaticSyncObservation = claudeAutomaticSyncObservation
@@ -163,6 +168,15 @@ public struct UsageMonitorRuntime {
         let agentSettings = AgentSettingsCoordinator(
             store: AgentPreferenceStore(preferences: preferences)
         )
+        // Gemini reads share the Claude integration's Safari Bridge client.
+        // Its monitoring switch is the consent: it starts off, and nothing is
+        // read until the person turns it on.
+        let geminiConnector = GeminiUsageConnector.production(
+            integration: startProviders ? .shared() : .unavailable(),
+            hasConsent: { @MainActor in
+                agentSettings.isMonitoringEnabled(for: AgentPreferenceRecord.geminiProviderID)
+            }
+        )
         let threadOSAttributionSource = ReloadableThreadOSHistoricalAttributionSource(
             ThreadOSHistoricalAttributionPreferences.source(from: preferences)
         )
@@ -174,7 +188,7 @@ public struct UsageMonitorRuntime {
             snapshotStore: snapshotStore,
             localActivityReader: CodexLocalActivityReader(ledgerURL: dataPaths.codexLedgerURL),
             threadOSAttributionSource: threadOSAttributionSource,
-            additionalConnectors: [claudeConnector]
+            additionalConnectors: [claudeConnector, geminiConnector]
         )
         let claudeSettings = ClaudeBrowserSettingsModel(
             connector: claudeConnector,
@@ -187,6 +201,20 @@ public struct UsageMonitorRuntime {
                 ? (dataPaths.supportsProviderConfiguration ? .requiresInstalledApp : .developmentIsolation)
                 : nil,
             permitsDesktopLocalSmart: desktopInstalled,
+            refreshAdmissions: { @MainActor in
+                let descriptors = await registry.orderedDescriptors()
+                let excluded = agentSettings.disabledConnectorIDs(
+                    from: descriptors.map(\.id)
+                )
+                _ = await registry.scanSurfaceAdmissions(
+                    trigger: .manualRefresh,
+                    excludedProviderIDs: excluded
+                )
+            }
+        )
+        let geminiSettings = GeminiSettingsModel(
+            connector: geminiConnector,
+            agentSettings: agentSettings,
             refreshAdmissions: { @MainActor in
                 let descriptors = await registry.orderedDescriptors()
                 let excluded = agentSettings.disabledConnectorIDs(
@@ -263,6 +291,7 @@ public struct UsageMonitorRuntime {
             startupTask: startupTask,
             threadOSAttributionPreferenceObservation: threadOSAttributionPreferenceObservation,
             claudeAutomaticSyncObservation: claudeAutomaticSyncObservation,
+            geminiSettings: geminiSettings,
             dataPaths: dataPaths
         )
     }

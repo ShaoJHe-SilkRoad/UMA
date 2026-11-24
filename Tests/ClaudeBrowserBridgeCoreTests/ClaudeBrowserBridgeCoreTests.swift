@@ -569,11 +569,13 @@ struct ClaudeBrowserBridgeCoreTests {
         #expect(safari["permissions"] as? [String] == [
             "nativeMessaging",
             ClaudeBrowserBridgeContract.exactUsageHostPermission,
+            GeminiBrowserContract.exactUsageHostPermission,
         ])
         #expect(safari["host_permissions"] == nil)
         let safariBackground = try #require(safari["background"] as? [String: Any])
         #expect(safariBackground["scripts"] as? [String] == [
             "Shared/claude-usage-extractor.js",
+            "Shared/gemini-usage-extractor.js",
             "Shared/provider-ownership-v2.js",
             "Shared/owned-provider-tab-v2-reducer.js",
             "Safari/background-loader.js",
@@ -582,7 +584,9 @@ struct ClaudeBrowserBridgeCoreTests {
         #expect(safariBackground["persistent"] as? Bool == true)
         #expect(safariBackground["service_worker"] == nil)
         let safariContentScripts = try #require(safari["content_scripts"] as? [[String: Any]])
-        #expect(safariContentScripts.count == 1)
+        // One exact entry per provider page; each page loads only its own
+        // extractor.
+        #expect(safariContentScripts.count == 2)
         #expect(safariContentScripts[0]["matches"] as? [String] == [
             ClaudeBrowserBridgeContract.exactUsageHostPermission,
         ])
@@ -590,6 +594,18 @@ struct ClaudeBrowserBridgeCoreTests {
         #expect(safariContentScripts[0]["all_frames"] as? Bool == false)
         #expect(safariContentScripts[0]["js"] as? [String] == [
             "Shared/claude-usage-extractor.js",
+            "Shared/provider-ownership-v2.js",
+            "Shared/content-script.js",
+        ])
+        #expect(safariContentScripts[1]["matches"] as? [String] == [
+            GeminiBrowserContract.exactUsageHostPermission,
+        ])
+        #expect(safariContentScripts[1]["run_at"] as? String == "document_start")
+        #expect(safariContentScripts[1]["all_frames"] as? Bool == false)
+        #expect(safariContentScripts[1]["js"] as? [String] == [
+            // The Claude extractor's reset-text reader is shared.
+            "Shared/claude-usage-extractor.js",
+            "Shared/gemini-usage-extractor.js",
             "Shared/provider-ownership-v2.js",
             "Shared/content-script.js",
         ])

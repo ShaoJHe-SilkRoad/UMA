@@ -233,7 +233,8 @@ final class MainWindowController: NSWindowController {
         promptClipboard: (any ThreadOSSettingsClipboard)? = nil,
         promptPreferences: ApplicationPreferences = .production,
         appStorageDefaults: UserDefaults = .standard,
-        claudeSettings: ClaudeBrowserSettingsModel? = nil
+        claudeSettings: ClaudeBrowserSettingsModel? = nil,
+        geminiSettings: GeminiSettingsModel? = nil
     ) {
         guard attachedStore == nil else { return }
         // NSHostingController may negotiate its minimum content size while it
@@ -255,7 +256,8 @@ final class MainWindowController: NSWindowController {
             hesectoriumStore: hesectoriumStore,
             promptClipboard: promptClipboard,
             promptPreferences: promptPreferences,
-            claudeSettings: claudeSettings
+            claudeSettings: claudeSettings,
+            geminiSettings: geminiSettings
         )
         if appStorageDefaults === UserDefaults.standard {
             // Preserve the production hosting type and its existing diagnostics.

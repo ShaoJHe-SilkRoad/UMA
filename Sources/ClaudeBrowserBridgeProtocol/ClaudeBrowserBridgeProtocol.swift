@@ -360,6 +360,117 @@ public struct ClaudeBrowserObservationEnvelope: Codable, Equatable, Sendable {
     }
 }
 
+/// The provider whose official usage page one companion read opens. The
+/// companion, its lifecycle messages, and its owned-tab receipt are shared;
+/// only the page, its extractor, and the observation schema differ. An absent
+/// provider means Claude, so the Claude wire format stays byte-identical.
+public enum BrowserUsageProvider: String, Codable, CaseIterable, Sendable {
+    case claude
+    case gemini
+}
+
+public enum GeminiBrowserContract {
+    public static let messageKind = "geminiUsageObservation"
+    public static let sourceID = "gemini-browser-usage"
+    public static let schemaVersion = 1
+    public static let extractorSchemaVersion = 1
+    public static let sourceLayoutVersion = 1
+    public static let officialOrigin = "https://gemini.google.com"
+    public static let officialUsagePath = "/usage"
+    public static let officialUsageURL = URL(string: "\(officialOrigin)\(officialUsagePath)")!
+    public static let exactUsageHostPermission = "https://gemini.google.com/usage*"
+    public static let maximumBuckets = 12
+    /// Every bucket that leaves the page is one of these fixed identifiers; no
+    /// page text ever crosses the bridge, so a conversation title in the
+    /// Gemini sidebar can never become a label. AUV localizes the names.
+    /// The Usage page shows "Current usage" and "Weekly limit".
+    public static let allowedBucketIDs: Set<String> = ["current", "weekly"]
+    public static let allowedPlanLabels: Set<String> = ["free", "plus", "pro", "ultra"]
+}
+
+/// How long the quota the page shows lasts before it resets. `unknown` means
+/// the page names no period the extractor can read with certainty.
+public enum GeminiBrowserQuotaPeriod: String, Codable, CaseIterable, Sendable {
+    case fiveHour
+    case daily
+    case weekly
+    case unknown
+}
+
+public struct GeminiBrowserBucket: Codable, Equatable, Sendable {
+    public let bucketID: String
+    public let period: GeminiBrowserQuotaPeriod
+    /// Provider-displayed usage. A page that shows "x of y" is converted to a
+    /// percentage in the extractor; the raw counts never leave the page.
+    public let usedPercentage: Double
+    public let resetAt: String?
+
+    public init(
+        bucketID: String,
+        period: GeminiBrowserQuotaPeriod,
+        usedPercentage: Double,
+        resetAt: String? = nil
+    ) {
+        self.bucketID = bucketID
+        self.period = period
+        self.usedPercentage = usedPercentage
+        self.resetAt = resetAt
+    }
+}
+
+public struct GeminiBrowserObservation: Codable, Equatable, Sendable {
+    public let buckets: [GeminiBrowserBucket]
+    public let planLabel: String?
+    public let observedAt: String
+    public let extractorSchemaVersion: Int
+    public let sourceLayoutVersion: Int
+
+    public init(
+        buckets: [GeminiBrowserBucket],
+        planLabel: String? = nil,
+        observedAt: String,
+        extractorSchemaVersion: Int = GeminiBrowserContract.extractorSchemaVersion,
+        sourceLayoutVersion: Int = GeminiBrowserContract.sourceLayoutVersion
+    ) {
+        self.buckets = buckets
+        self.planLabel = planLabel
+        self.observedAt = observedAt
+        self.extractorSchemaVersion = extractorSchemaVersion
+        self.sourceLayoutVersion = sourceLayoutVersion
+    }
+}
+
+public struct GeminiBrowserObservationEnvelope: Codable, Equatable, Sendable {
+    public let kind: String
+    public let schemaVersion: Int
+    public let sourceID: String
+    public let browserFamily: ClaudeBrowserFamily
+    public let routeState: ClaudeBrowserRouteState
+    public let requestID: String
+    public let observationID: String
+    public let observation: GeminiBrowserObservation
+
+    public init(
+        observation: GeminiBrowserObservation,
+        browserFamily: ClaudeBrowserFamily = .safari,
+        kind: String = GeminiBrowserContract.messageKind,
+        schemaVersion: Int = GeminiBrowserContract.schemaVersion,
+        sourceID: String = GeminiBrowserContract.sourceID,
+        routeState: ClaudeBrowserRouteState = .verifiedUsage,
+        requestID: String = UUID().uuidString.lowercased(),
+        observationID: String = UUID().uuidString.lowercased()
+    ) {
+        self.kind = kind
+        self.schemaVersion = schemaVersion
+        self.sourceID = sourceID
+        self.browserFamily = browserFamily
+        self.routeState = routeState
+        self.requestID = requestID
+        self.observationID = observationID
+        self.observation = observation
+    }
+}
+
 /// A content-free control result for one app-owned automatic refresh request.
 /// It contains no URL, tab title, page text, account value, or browser identity.
 public enum ClaudeBrowserAutomationStatus: String, Codable, CaseIterable, Sendable {
@@ -483,6 +594,9 @@ public struct ClaudeBrowserTerminalPacket: Codable, Equatable, Sendable {
     public let status: ClaudeBrowserAutomationStatus
     public let occurredAt: String
     public let observation: ClaudeBrowserObservationEnvelope?
+    /// Set instead of `observation` when the read was a Gemini read. Nil is
+    /// never encoded, so a Claude packet is unchanged on the wire.
+    public let geminiObservation: GeminiBrowserObservationEnvelope?
     public let providerFailureReason: ClaudeBrowserProviderFailureReason?
 
     public init(
@@ -492,6 +606,7 @@ public struct ClaudeBrowserTerminalPacket: Codable, Equatable, Sendable {
         status: ClaudeBrowserAutomationStatus,
         occurredAt: String,
         observation: ClaudeBrowserObservationEnvelope? = nil,
+        geminiObservation: GeminiBrowserObservationEnvelope? = nil,
         providerFailureReason: ClaudeBrowserProviderFailureReason? = nil,
         kind: String = ClaudeBrowserBridgeContract.terminalMessageKind,
         schemaVersion: Int = ClaudeBrowserBridgeContract.schemaVersion,
@@ -508,6 +623,7 @@ public struct ClaudeBrowserTerminalPacket: Codable, Equatable, Sendable {
         self.status = status
         self.occurredAt = occurredAt
         self.observation = observation
+        self.geminiObservation = geminiObservation
         self.providerFailureReason = providerFailureReason
     }
 }

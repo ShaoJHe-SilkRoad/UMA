@@ -1,7 +1,14 @@
 (function () {
   "use strict";
 
-  const extractor = globalThis.UMAClaudeUsageExtractor;
+  // Each provider's page loads only its own extractor; the page's own origin
+  // picks it, so a Claude page can never run the Gemini extractor or the
+  // reverse.
+  const geminiExtractor = globalThis.UMAGeminiUsageExtractor;
+  const extractor = geminiExtractor
+      && globalThis.location?.origin === geminiExtractor.CONTRACT.origin
+    ? geminiExtractor
+    : globalThis.UMAClaudeUsageExtractor;
   const ownership = globalThis.UMAProviderOwnershipV2;
   const runtime = globalThis.browser?.runtime || globalThis.chrome?.runtime;
   if (!extractor || !ownership || !runtime) return;
@@ -196,6 +203,9 @@
   }
 
   function stableProjection(observation) {
+    if (typeof extractor.stableProjection === "function") {
+      return extractor.stableProjection(observation);
+    }
     if (!observation) return null;
     // observedAt is the extraction time, not provider data. Stability is
     // proven from two equivalent sanitized quota/reset projections.

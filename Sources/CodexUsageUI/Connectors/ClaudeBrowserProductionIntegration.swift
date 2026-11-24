@@ -155,47 +155,17 @@ struct ClaudeSafariInventoryReceipt: Equatable, Sendable {
     let updatedAt: String
 }
 
-final class ClaudeBrowserOrderedConsumer: @unchecked Sendable {
-    typealias Processor = @Sendable (ClaudeBrowserInboundEvent) async -> Void
-
-    private let lock = NSLock()
-    private let processor: Processor
-    private var pending: [ClaudeBrowserInboundEvent] = []
-    private var isDraining = false
-
-    init(processor: @escaping Processor) { self.processor = processor }
-
-    func submit(_ event: ClaudeBrowserInboundEvent) {
-        let shouldStart = lock.withLock {
-            pending.append(event)
-            guard !isDraining else { return false }
-            isDraining = true
-            return true
-        }
-        guard shouldStart else { return }
-        Task { await drain() }
-    }
-
-    private func drain() async {
-        while let event = next() { await processor(event) }
-    }
-
-    private func next() -> ClaudeBrowserInboundEvent? {
-        lock.withLock {
-            guard !pending.isEmpty else {
-                isDraining = false
-                return nil
-            }
-            return pending.removeFirst()
-        }
-    }
-}
+typealias ClaudeBrowserOrderedConsumer = SafariBridgeOrderedConsumer<ClaudeBrowserInboundEvent>
 
 extension ClaudeBrowserProductionIntegration {
     static func make() -> Self {
         guard let runtime = ClaudeSafariHostClientAdapter() else {
             return .unavailable()
         }
+        // Gemini reads go through this same adapter: it owns the one response
+        // listener on the App Group mailbox, which consumes every answer, and
+        // the turn-taking between Claude and Gemini reads.
+        SafariBridgeSharedClient.publish(runtime)
         let health: @Sendable () async -> ClaudeBrowserCompanionHealth = {
             switch await runtime.verify() {
             case .verified: .ready

@@ -35,6 +35,7 @@ enum AgentProviderOrder {
         case "claude": 100
         case "workbuddy": 200
         case "antigravity": 250
+        case "gemini": 260
         case "manus": 300
         case "cursor": 400
         case "kimi": 500

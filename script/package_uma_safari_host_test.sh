@@ -135,7 +135,7 @@ readonly appex_contents="$appex/Contents"
 /usr/bin/install -m 755 "$host_binary" "$contents/MacOS/$HOST_PRODUCT"
 /usr/bin/install -m 755 "$extension_binary" "$appex_contents/MacOS/$EXTENSION_PRODUCT"
 /bin/mkdir -p "$appex_contents/Resources/Shared" "$appex_contents/Resources/Safari"
-for file in background-core.js claude-usage-extractor.js content-script.js provider-ownership-v2.js owned-provider-tab-v2-reducer.js; do
+for file in background-core.js claude-usage-extractor.js gemini-usage-extractor.js content-script.js provider-ownership-v2.js owned-provider-tab-v2-reducer.js; do
     /usr/bin/install -m 644 "$REPO_ROOT/BrowserExtension/Shared/$file" "$appex_contents/Resources/Shared/$file"
 done
 /usr/bin/install -m 644 "$REPO_ROOT/BrowserExtension/Safari/manifest.json" "$appex_contents/Resources/manifest.json"
@@ -150,6 +150,7 @@ globalThis.UMA_BROWSER_CONFIG = Object.freeze({
   browserFamily: "safari", nativeApplication: "$HOST_ID",
   supportsAutomaticRefresh: true, supportsManualAction: false,
   exactHostPermission: "https://claude.ai/new*",
+  providerHostPermissions: Object.freeze({ claude: "https://claude.ai/new*", gemini: "https://gemini.google.com/usage*" }),
   wakeMessageName: "umaClaudeWakeBridge",
   automaticRefreshMessageName: "umaClaudeAutomaticRefresh",
   closeOwnedTabMessageName: "umaClaudeCloseOwnedUsageTab",
@@ -229,7 +230,7 @@ extension_signing_identity="$(/usr/bin/codesign -d --verbose=4 "$appex" 2>&1)"
     && "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$appex_contents/Info.plist")" == "$EXTENSION_ID" \
     && "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$contents/Info.plist")" == "$HOST_PRODUCT" ]]
 manifest_permissions="$(/usr/bin/ruby -rjson -e 'puts JSON.parse(File.binread(ARGV[0])).fetch("permissions").sort' "$appex_contents/Resources/manifest.json")"
-[[ "$manifest_permissions" == $'https://claude.ai/new*\nnativeMessaging' ]] || {
+[[ "$manifest_permissions" == $'https://claude.ai/new*\nhttps://gemini.google.com/usage*\nnativeMessaging' ]] || {
     printf '%s\n' 'Safari Host extension permissions are not the approved exact set.' >&2; exit 1;
 }
 

@@ -59,14 +59,26 @@
   root.UMAProviderOwnershipV2 = Object.freeze({
     markerPattern: /^uma-v2-[A-Za-z0-9_-]{43}$/,
     nonceDigest: async () => "a".repeat(64),
-    providerURLForNonce: (nonce) => nonce
-      ? `https://claude.ai/new?uma=${nonce}#settings/usage` : null,
+    providerURLForNonce: (nonce, provider = "claude") => {
+      if (!nonce) return null;
+      return provider === "gemini"
+        ? `https://gemini.google.com/usage#uma_ot=${nonce}`
+        : `https://claude.ai/new?uma=${nonce}#settings/usage`;
+    },
   });
+
+  // Set before this file loads, with the Gemini extractor loaded first, to
+  // model a companion packaged with Gemini's site permission.
+  const packagedWithGemini = root.UMACompanionHarnessGemini === true;
 
   root.UMA_BROWSER_CONFIG = Object.freeze({
     browserFamily: "safari", nativeApplication: "com.silkrd.uma.safarihost",
     supportsAutomaticRefresh: true, supportsManualAction: false,
     exactHostPermission: "https://claude.ai/new*",
+    ...(packagedWithGemini ? { providerHostPermissions: Object.freeze({
+      claude: "https://claude.ai/new*",
+      gemini: "https://gemini.google.com/usage*",
+    }) } : {}),
     wakeMessageName: "umaClaudeWakeBridge",
     automaticRefreshMessageName: "umaClaudeAutomaticRefresh",
     closeOwnedTabMessageName: "umaClaudeCloseOwnedUsageTab",
@@ -79,6 +91,9 @@
   });
 
   const log = [];
+  const terminals = [];
+  const createdURLs = [];
+  const deniedOrigins = new Set();
   const ports = [];
   const receipts = new Map();
   let tabSequence = 70;
@@ -162,6 +177,7 @@
     if (payload?.kind === "claudeOwnedProviderTabV2ReceiptCommand") return receiptReply(payload);
     if (payload?.kind === "claudeBrowserAutomationEvent") log.push(`automation ${payload.status}`);
     if (payload?.kind === "umaCompanionPageTraceV1") log.push(`trace ${payload.trace}`);
+    if (payload?.kind === "claudeBrowserTerminalPacket") terminals.push(JSON.parse(JSON.stringify(payload)));
     return { ok: true };
   }
 
@@ -187,13 +203,16 @@
         return port;
       },
     },
-    permissions: { contains: async () => true },
+    permissions: {
+      contains: async ({ origins }) => !origins.some((origin) => deniedOrigins.has(origin)),
+    },
     tabs: {
       onRemoved: listenerSet(),
       onReplaced: listenerSet(),
       onUpdated: listenerSet(),
       async create(properties) {
         tabSequence += 1;
+        createdURLs.push(properties.url);
         log.push(`tabs.create ${properties.active === false ? "background" : "active"}`);
         return { id: tabSequence };
       },
@@ -234,14 +253,14 @@
   root.UMACompanionHarness = {
     log,
     // Connects a provider page in the given tab, as its content script does.
-    connectProvider(tabID) {
+    connectProvider(tabID, url = "https://claude.ai/new") {
       const posted = [];
       providerPort = {
         name: "umaClaudeOwnedProviderV2",
         sender: {
           id: root.browser.runtime.id,
           frameId: 0,
-          url: "https://claude.ai/new",
+          url,
           tab: { id: tabID },
         },
         posted,
@@ -260,6 +279,10 @@
     providerPosted: () => providerPort.posted.map((message) => message.type),
     providerClearPosted: () => { providerPort.posted.length = 0; },
     entries: () => log.slice(),
+    // Every terminal packet sent to the native side, as sent.
+    terminals: () => terminals.slice(),
+    createdURLs: () => createdURLs.slice(),
+    denyOrigin(origin) { deniedOrigins.add(origin); },
     clearLog: () => { log.length = 0; },
     portCount: () => ports.length,
     receiptLoads: () => receiptLoads,

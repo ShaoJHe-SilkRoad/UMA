@@ -9,12 +9,21 @@ actor ClaudeSafariHostClientAdapter {
     /// deadline bounds the complete transaction and mailbox delivery only;
     /// acknowledgements, not elapsed time, synchronize phase progress.
     static let verificationTransactionDeadline: Duration = .seconds(23)
+    /// How long a read waits for the other provider's read to finish. It is
+    /// longer than the Host's whole provider operation, so a read that ends
+    /// normally always lets the waiting one start.
+    static let crossProviderWaitDeadline: Duration = .seconds(45)
 
     private let client: ClaudeSafariHostIPCClient
     private let generation: String
     private let hostApplicationIdentifier: String
     private var listener: ClaudeSafariHostIPCResponseListener?
     private var consumer: ClaudeBrowserOrderedConsumer?
+    private var geminiConsumer: SafariBridgeOrderedConsumer<GeminiBrowserInboundEvent>?
+    /// The provider of each read in flight. Claude is every read without one.
+    private var workProviders: [String: BrowserUsageProvider] = [:]
+    private var readQueue = SafariBridgeReadQueue()
+    private var idleWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
     private var waiters: [String: CheckedContinuation<ClaudeSafariHostVerificationTrace, Never>] = [:]
     private var acceptedResponseIDs: Set<String> = []
     private var acceptedResponseIDOrder: [String] = []
@@ -52,15 +61,53 @@ actor ClaudeSafariHostClientAdapter {
         return listen()
     }
 
+    /// Gemini reads report to their own handler; Claude's stays as it was.
+    func startGemini(_ handler: @escaping @Sendable (GeminiBrowserInboundEvent) async -> Void) -> Bool {
+        geminiConsumer = SafariBridgeOrderedConsumer(processor: handler)
+        return listen()
+    }
+
+    /// Claude's side stops. The adapter is shared with Gemini reads, so the
+    /// response listener and the Bridge turn-taking stay up while Gemini
+    /// still listens; only Claude's reads and waits are let go.
     func stop() {
+        consumer = nil
+        guard geminiConsumer == nil else {
+            forgetWork(of: .claude)
+            resumeVerificationWaiters()
+            return
+        }
+        stopAll()
+    }
+
+    /// Gemini's side stops; Claude's listener, if any, keeps running.
+    func stopGemini() {
+        geminiConsumer = nil
+        guard consumer == nil else {
+            forgetWork(of: .gemini)
+            return
+        }
+        stopAll()
+    }
+
+    private func stopAll() {
         listener?.stop()
         listener = nil
         consumer = nil
+        geminiConsumer = nil
         controlRequestIDs.removeAll()
         controlRequestIDOrder.removeAll()
         activeWorkRequestIDs.removeAll()
+        workProviders.removeAll()
         focusReturnTargets.removeAll()
         workPlacements.removeAll()
+        for waiter in idleWaiters.values { waiter.resume(returning: false) }
+        idleWaiters.removeAll()
+        readQueue = SafariBridgeReadQueue()
+        resumeVerificationWaiters()
+    }
+
+    private func resumeVerificationWaiters() {
         let active = waiters.values
         waiters.removeAll()
         for waiter in active {
@@ -73,6 +120,17 @@ actor ClaudeSafariHostClientAdapter {
                 firstFailureReason: .listenerStopped,
                 runtimeDescriptor: nil
             ))
+        }
+    }
+
+    /// Lets go of one provider's reads in flight and waiting, so they no
+    /// longer hold the Bridge for the other provider.
+    private func forgetWork(of provider: BrowserUsageProvider) {
+        for (requestID, owner) in workProviders where owner == provider {
+            finishWork(requestID)
+        }
+        for ticket in readQueue.waiting where ticket.provider == provider {
+            abandonWait(ticket.id)
         }
     }
 
@@ -127,13 +185,30 @@ actor ClaudeSafariHostClientAdapter {
         }
     }
 
-    func submit(requestID: String, oneShot: Bool) async -> ClaudeBrowserAutomaticDispatchResult {
+    func submit(
+        requestID: String,
+        oneShot: Bool,
+        provider: BrowserUsageProvider = .claude
+    ) async -> ClaudeBrowserAutomaticDispatchResult {
         let normalizedRequestID = requestID.lowercased()
-        guard UUID(uuidString: normalizedRequestID) != nil,
-              activeWorkRequestIDs.isEmpty,
-              listen()
-        else { return .workDispatchFailed }
-        guard await wakeHost() else { return .browserUnavailable }
+        guard UUID(uuidString: normalizedRequestID) != nil, listen() else {
+            return .workDispatchFailed
+        }
+        switch SafariBridgeReadQueue.admission(
+            for: provider, activeProviders: Array(workProviders.values)
+        ) {
+        case .start: break
+        case .refuse: return .workDispatchFailed
+        case .wait:
+            guard await waitForIdleBridge(provider) else { return .workDispatchFailed }
+        }
+        // Another read may have started while this one waited.
+        guard activeWorkRequestIDs.isEmpty else { return .workDispatchFailed }
+        guard await wakeHost() else {
+            wakeNextWaitingRead()
+            return .browserUnavailable
+        }
+        guard activeWorkRequestIDs.isEmpty else { return .workDispatchFailed }
         let operation: ClaudeSafariHostIPCOperation = oneShot ? .accuracySync : .automaticRefresh
         let placement = placementPolicy.placementForNextRead(
             hasWindowOnCurrentDesktop: safariWindowVisibility()
@@ -148,21 +223,51 @@ actor ClaudeSafariHostClientAdapter {
         // response may arrive before the adapter recognizes its request ID.
         activeWorkRequestIDs.insert(normalizedRequestID)
         workPlacements[normalizedRequestID] = placement
+        workProviders[normalizedRequestID] = provider
         do {
             try client.submit(.init(
                 requestID: normalizedRequestID,
                 runtimeGenerationID: generation,
                 operation: operation,
                 allowSafariLaunch: oneShot,
-                providerPlacement: placement
+                providerPlacement: placement,
+                // Claude is the absent default, so its request is unchanged.
+                provider: provider == .claude ? nil : provider
             ))
             return .dispatched
         } catch {
             activeWorkRequestIDs.remove(normalizedRequestID)
             focusReturnTargets.removeValue(forKey: normalizedRequestID)
             workPlacements.removeValue(forKey: normalizedRequestID)
+            workProviders.removeValue(forKey: normalizedRequestID)
+            wakeNextWaitingRead()
             return .workDispatchFailed
         }
+    }
+
+    /// Waits, bounded, until the other provider's read has finished.
+    private func waitForIdleBridge(_ provider: BrowserUsageProvider) async -> Bool {
+        let ticket = SafariBridgeReadQueue.Ticket(id: UUID(), provider: provider)
+        guard readQueue.enqueue(ticket) else { return false }
+        let deadline = Task { [weak self] in
+            try? await Task.sleep(for: Self.crossProviderWaitDeadline)
+            await self?.abandonWait(ticket.id)
+        }
+        let granted = await withCheckedContinuation { continuation in
+            idleWaiters[ticket.id] = continuation
+        }
+        deadline.cancel()
+        return granted
+    }
+
+    private func abandonWait(_ id: UUID) {
+        guard readQueue.remove(id) else { return }
+        idleWaiters.removeValue(forKey: id)?.resume(returning: false)
+    }
+
+    private func wakeNextWaitingRead() {
+        guard activeWorkRequestIDs.isEmpty, let ticket = readQueue.next() else { return }
+        idleWaiters.removeValue(forKey: ticket.id)?.resume(returning: true)
     }
 
     func close(_ requestID: String) async {
@@ -194,10 +299,12 @@ actor ClaudeSafariHostClientAdapter {
     @discardableResult
     private func finishWork(_ requestID: String) -> Bool {
         workPlacements.removeValue(forKey: requestID)
+        workProviders.removeValue(forKey: requestID)
         let wasActive = activeWorkRequestIDs.remove(requestID) != nil
         if let target = focusReturnTargets.removeValue(forKey: requestID) {
             Self.returnFocus(to: target)
         }
+        wakeNextWaitingRead()
         return wasActive
     }
 
@@ -291,6 +398,14 @@ actor ClaudeSafariHostClientAdapter {
                 runtimeDescriptor: response.runtimeDescriptor
             ))
         } else if activeWorkRequestIDs.contains(response.requestID),
+                  workProviders[response.requestID] == .gemini {
+            receiveGemini(response)
+        } else if activeWorkRequestIDs.contains(response.requestID),
+                  response.geminiObservation != nil {
+            // A Gemini page result can never complete a Claude read.
+            finishWork(response.requestID)
+            consumer?.submit(.dispatchFailure(.protocolMismatch))
+        } else if activeWorkRequestIDs.contains(response.requestID),
                   response.runtimeGenerationID != generation {
             finishWork(response.requestID)
             consumer?.submit(.dispatchFailure(.protocolMismatch))
@@ -335,6 +450,51 @@ actor ClaudeSafariHostClientAdapter {
                 status: status,
                 occurredAt: response.occurredAt
             )))
+        }
+    }
+
+    /// The Gemini counterpart of the Claude routing above, with the same
+    /// order: the observation reaches its consumer before the terminal event.
+    private func receiveGemini(_ response: ClaudeSafariHostIPCResponse) {
+        let requestID = response.requestID
+        guard response.runtimeGenerationID == generation, response.observation == nil else {
+            finishWork(requestID)
+            geminiConsumer?.submit(.dispatchFailure(.protocolMismatch))
+            return
+        }
+        if response.outcome == .completed,
+           let observation = response.geminiObservation,
+           let event = response.automationEvent {
+            finishWork(requestID, endedWith: event.status)
+            geminiConsumer?.submit(.observation(observation))
+            geminiConsumer?.submit(.automation(event))
+        } else if let event = response.automationEvent {
+            finishWork(requestID, endedWith: event.status)
+            geminiConsumer?.submit(.automation(event))
+        } else if response.outcome == .failed {
+            finishWork(requestID)
+            geminiConsumer?.submit(Self.inboundFailure(response))
+        }
+    }
+
+    private static func inboundFailure(
+        _ response: ClaudeSafariHostIPCResponse
+    ) -> GeminiBrowserInboundEvent {
+        switch response.failureReason {
+        case .protocolMismatch, .runtimeGenerationMismatch:
+            return .dispatchFailure(.protocolMismatch)
+        case .safariUnavailable:
+            return .dispatchFailure(.browserUnavailable)
+        case .extensionUnavailable, .dispatchRejected,
+             .dispatchCompletionUnavailable, .nativeResponseUnavailable,
+             .extensionBackgroundNotAcknowledged:
+            return .dispatchFailure(.companionUnavailable)
+        default:
+            return .automation(.init(
+                requestID: response.requestID,
+                status: .usageUnavailable,
+                occurredAt: response.occurredAt
+            ))
         }
     }
 

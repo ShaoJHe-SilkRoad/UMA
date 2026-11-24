@@ -120,10 +120,18 @@ struct M5RMXG1ClaudeSourceContractTests {
         )
         let permissions = try #require(manifest["permissions"] as? [String])
         #expect(Set(permissions) == Set([
-            "nativeMessaging", "https://claude.ai/new*",
+            "nativeMessaging", "https://claude.ai/new*", "https://gemini.google.com/usage*",
         ]))
         let contentScripts = try #require(manifest["content_scripts"] as? [[String: Any]])
-        #expect(contentScripts.count == 1)
+        #expect(contentScripts.count == 2)
+        #expect(contentScripts[1]["matches"] as? [String] == ["https://gemini.google.com/usage*"])
+        #expect(contentScripts[1]["js"] as? [String] == [
+            // The Claude extractor's reset-text reader is shared.
+            "Shared/claude-usage-extractor.js",
+            "Shared/gemini-usage-extractor.js",
+            "Shared/provider-ownership-v2.js",
+            "Shared/content-script.js",
+        ])
         #expect(contentScripts[0]["matches"] as? [String] == ["https://claude.ai/new*"])
         #expect(contentScripts[0]["js"] as? [String] == [
             "Shared/claude-usage-extractor.js",

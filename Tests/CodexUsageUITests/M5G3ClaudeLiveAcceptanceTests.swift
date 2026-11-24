@@ -336,7 +336,7 @@ struct M5G3ClaudeLiveAcceptanceTests {
         #expect(background.contains("allowedSenderURL(tab?.url || \"\")"))
         #expect(background.contains("api.scripting.executeScript"))
         #expect(background.contains("api.tabs.create({ url: providerURL, active: false })"))
-        #expect(background.contains("providerURLForNonce(read.rawNonce)"))
+        #expect(background.contains("providerURLForNonce(read.rawNonce, read.provider)"))
         #expect(!background.contains("tabs.query({})"))
         #expect(!background.contains("api.tabs.query("))
         #expect(background.contains("api.tabs.remove(read.providerOwnedTabID)"))

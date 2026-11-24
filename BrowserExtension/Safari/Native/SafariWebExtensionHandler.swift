@@ -194,8 +194,14 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         let isObservation = (try? ClaudeBrowserMessageDecoder.decode(data))?.browserFamily == .safari
         let automationStatus = (try? ClaudeBrowserAutomationEventDecoder.decode(data))?.status
         let isAutomationEvent = automationStatus != nil
-        let terminalStatus = (try? ClaudeBrowserTerminalPacketDecoder.decode(data))?.status
+        let terminalPacket = try? ClaudeBrowserTerminalPacketDecoder.decode(data)
+        let terminalStatus = terminalPacket?.status
         let isTerminalPacket = terminalStatus != nil
+        // Gemini observations travel only inside terminal packets; the one
+        // content-free provider word lets the appex log tell the reads apart.
+        // A failure packet carries no observation, so it names no provider.
+        let terminalProvider = terminalPacket?.geminiObservation != nil ? "gemini"
+            : terminalPacket?.observation != nil ? "claude" : "none"
         guard isObservation || isAutomationEvent || isTerminalPacket else { return }
 
         do {
@@ -209,7 +215,7 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             replyItem.userInfo = [SFExtensionMessageKey: ["ok": true]]
             if let terminalStatus {
                 logger.notice(
-                    "Forwarded sanitized Claude browser terminal status: \(terminalStatus.rawValue, privacy: .public)"
+                    "Forwarded sanitized Claude browser terminal status: \(terminalStatus.rawValue, privacy: .public) provider=\(terminalProvider, privacy: .public)"
                 )
             } else if let automationStatus {
                 logger.notice(

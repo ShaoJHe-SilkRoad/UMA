@@ -515,7 +515,7 @@ struct ClaudeCompanionSelfRecoveryTests {
 private final class CompanionPage {
     private let context: JSContext
 
-    init(nativeAnswersAtStart: Bool = true) throws {
+    init(nativeAnswersAtStart: Bool = true, packagedWithGemini: Bool = false) throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -524,7 +524,9 @@ private final class CompanionPage {
         var failure: String?
         context.exceptionHandler = { _, exception in failure = exception?.toString() }
         context.evaluateScript("globalThis.UMACompanionHarnessNativeAnswersAtStart = \(nativeAnswersAtStart)")
-        for file in [
+        context.evaluateScript("globalThis.UMACompanionHarnessGemini = \(packagedWithGemini)")
+        let geminiFiles = packagedWithGemini ? ["BrowserExtension/Shared/gemini-usage-extractor.js"] : []
+        for file in geminiFiles + [
             "BrowserExtension/Shared/claude-usage-extractor.js",
             "BrowserExtension/Shared/owned-provider-tab-v2-reducer.js",
             "Tests/Fixtures/ClaudeCompanion/background-harness.js",
@@ -603,8 +605,29 @@ private final class CompanionPage {
         context.evaluateScript("UMACompanionHarness.disconnectNewestPort()")
     }
 
-    func connectProvider(tabID: Int) {
-        context.evaluateScript("UMACompanionHarness.connectProvider(\(tabID))")
+    func connectProvider(tabID: Int, url: String = "https://claude.ai/new") {
+        context.evaluateScript("UMACompanionHarness.connectProvider(\(tabID), \"\(url)\")")
+    }
+
+    func dispatchRead(_ requestID: String, provider: String) {
+        context.evaluateScript("""
+        UMACompanionHarness.dispatch({
+          command: "umaClaudeAutomaticRefresh", requestID: "\(requestID)", provider: "\(provider)"
+        })
+        """)
+    }
+
+    /// Each terminal packet sent to the native side, as JSON objects.
+    var terminals: [[String: Any]] {
+        context.evaluateScript("UMACompanionHarness.terminals()")?.toArray() as? [[String: Any]] ?? []
+    }
+
+    var createdURLs: [String] {
+        context.evaluateScript("UMACompanionHarness.createdURLs()")?.toArray() as? [String] ?? []
+    }
+
+    func denyOrigin(_ origin: String) {
+        context.evaluateScript("UMACompanionHarness.denyOrigin(\"\(origin)\")")
     }
 
     func providerSend(_ message: String) {
@@ -637,5 +660,109 @@ private final class CompanionPage {
 
     func clearLog() {
         context.evaluateScript("UMACompanionHarness.clearLog()")
+    }
+}
+
+/// Gemini reads share the companion's lifecycle, receipt and cleanup with
+/// Claude; only the page, its extractor and the observation field differ.
+@Suite("Gemini reads through the shared Safari companion")
+struct GeminiCompanionReadTests {
+    private static let read = "44444444-4444-4444-8444-444444444444"
+    private static let claudeRead = "55555555-5555-4555-8555-555555555555"
+    private static let nonce = "uma-v2-\(String(repeating: "a", count: 43))"
+    private static let geminiPage = "https://gemini.google.com/usage"
+    private static let observation = """
+    { buckets: [{ bucketID: "weekly", period: "weekly", usedPercentage: 4, resetAt: null }],
+      planLabel: "pro", observedAt: new Date().toISOString(),
+      extractorSchemaVersion: 1, sourceLayoutVersion: 1 }
+    """
+
+    private func provePage(_ page: CompanionPage, tabID: Int, url: String) {
+        page.connectProvider(tabID: tabID, url: url)
+        page.providerSend("""
+        { type: "umaClaudeProviderDocumentDiscoveredV2", ownershipNonce: "\(Self.nonce)" }
+        """)
+    }
+
+    @Test("A Gemini read opens the Gemini Usage page and returns its observation in its own field")
+    func geminiReadCompletes() throws {
+        let page = try CompanionPage(packagedWithGemini: true)
+        page.dispatchRead(Self.read, provider: "gemini")
+        #expect(page.log.contains("tabs.create background"))
+        #expect(page.createdURLs.last?.hasPrefix("https://gemini.google.com/usage#uma_ot=") == true)
+
+        provePage(page, tabID: 71, url: Self.geminiPage)
+        #expect(page.providerPosted.contains("umaClaudeProviderOwnershipAcceptedV2"))
+        page.providerSendCorrelated(type: "umaClaudeProviderReadyV2", requestID: Self.read)
+        #expect(page.providerPosted.contains("umaClaudeExtractProviderUsageV2"))
+        page.providerSend("""
+        { type: "umaClaudeProviderResultV2", status: "success", requestID: "\(Self.read)",
+          runtimeGenerationID: UMA_BROWSER_CONFIG.runtimeGenerationID, observation: \(Self.observation) }
+        """)
+
+        #expect(page.log.contains("tabs.remove 71"))
+        #expect(page.log.contains("receipt-removed COMPLETE"))
+        let terminal = try #require(page.terminals.last)
+        #expect(terminal["status"] as? String == "refreshCompleted")
+        #expect(terminal["sourceID"] as? String == "claude-browser-usage")
+        #expect(terminal["observation"] is NSNull)
+        let gemini = try #require(terminal["geminiObservation"] as? [String: Any])
+        #expect(gemini["kind"] as? String == "geminiUsageObservation")
+        #expect(gemini["sourceID"] as? String == "gemini-browser-usage")
+        #expect(gemini["schemaVersion"] as? Int == 1)
+        #expect(gemini["requestID"] as? String == Self.read)
+    }
+
+    @Test("A Claude page cannot take ownership of a Gemini read, even from its tab")
+    func otherProvidersPageIsRefused() throws {
+        let page = try CompanionPage(packagedWithGemini: true)
+        page.dispatchRead(Self.read, provider: "gemini")
+        provePage(page, tabID: 71, url: "https://claude.ai/new")
+        #expect(!page.providerPosted.contains("umaClaudeProviderOwnershipAcceptedV2"))
+    }
+
+    @Test("A Claude read's terminal packet keeps exactly its old keys")
+    func claudeTerminalIsUnchanged() throws {
+        let page = try CompanionPage(packagedWithGemini: true)
+        page.denyOrigin("https://claude.ai/new*")
+        page.dispatchRead(Self.claudeRead, placement: nil)
+        let terminal = try #require(page.terminals.last)
+        #expect(terminal["status"] as? String == "permissionRequired")
+        #expect(terminal["geminiObservation"] == nil)
+        #expect(Set(terminal.keys) == [
+            "kind", "schemaVersion", "sourceID", "browserFamily", "requestID", "targetRequestID",
+            "runtimeGenerationID", "status", "occurredAt", "observation", "providerFailureReason",
+        ])
+    }
+
+    @Test("Without gemini.google.com access a Gemini read asks for it, and Claude still reads")
+    func geminiSiteAccessIsItsOwn() throws {
+        let page = try CompanionPage(packagedWithGemini: true)
+        page.denyOrigin("https://gemini.google.com/usage*")
+        page.dispatchRead(Self.read, provider: "gemini")
+        let terminal = try #require(page.terminals.last)
+        #expect(terminal["status"] as? String == "permissionRequired")
+        #expect(!page.log.contains("tabs.create background"))
+
+        page.dispatchRead(Self.claudeRead, placement: nil)
+        #expect(page.log.contains("tabs.create background"))
+        #expect(page.createdURLs.last?.hasPrefix("https://claude.ai/new") == true)
+    }
+
+    @Test("A companion packaged without Gemini refuses a Gemini read at once")
+    func unpackagedProviderIsRefused() throws {
+        let page = try CompanionPage()
+        page.dispatchRead(Self.read, provider: "gemini")
+        #expect(page.log.contains("automation usageUnavailable"))
+        #expect(!page.log.contains("tabs.create background"))
+    }
+
+    @Test("A provider the companion does not know is not a read command")
+    func unknownProviderIsIgnored() throws {
+        let page = try CompanionPage(packagedWithGemini: true)
+        page.clearLog()
+        page.dispatchRead(Self.read, provider: "openai")
+        #expect(!page.log.contains { $0.hasPrefix("automation ") })
+        #expect(!page.log.contains("tabs.create background"))
     }
 }

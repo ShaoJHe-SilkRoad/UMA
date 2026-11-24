@@ -168,6 +168,138 @@ public enum ClaudeBrowserMessageDecoder {
     }
 }
 
+/// Strict decoder for the allowlisted Gemini Usage observation. It shares the
+/// Claude decoder's size bound and timestamp rules; the only page-derived
+/// values it admits are fixed bucket identifiers, a fixed period, a bounded
+/// percentage, an optional reset timestamp, and an allowlisted plan word.
+public enum GeminiBrowserMessageDecoder {
+    private static let envelopeKeys: Set<String> = [
+        "kind", "schemaVersion", "sourceID", "browserFamily", "routeState", "requestID", "observationID", "observation",
+    ]
+    private static let observationKeys: Set<String> = [
+        "buckets", "planLabel", "observedAt", "extractorSchemaVersion", "sourceLayoutVersion",
+    ]
+    private static let bucketKeys: Set<String> = ["bucketID", "period", "usedPercentage", "resetAt"]
+
+    public static func decode(_ data: Data) throws -> GeminiBrowserObservationEnvelope {
+        guard !data.isEmpty else { throw ClaudeBrowserBridgeError.messageEmpty }
+        guard data.count <= ClaudeBrowserBridgeContract.maximumMessageBytes else {
+            throw ClaudeBrowserBridgeError.messageTooLarge
+        }
+        let raw: Any
+        do {
+            raw = try JSONSerialization.jsonObject(with: data, options: [])
+        } catch {
+            throw ClaudeBrowserBridgeError.malformedJSON
+        }
+        guard let dictionary = raw as? [String: Any] else {
+            throw ClaudeBrowserBridgeError.invalidTopLevel
+        }
+        try requireExactKeys(dictionary, allowed: envelopeKeys, required: envelopeKeys)
+        guard let observation = dictionary["observation"] as? [String: Any] else {
+            throw ClaudeBrowserBridgeError.invalidTopLevel
+        }
+        try requireExactKeys(
+            observation,
+            allowed: observationKeys,
+            required: ["buckets", "observedAt", "extractorSchemaVersion", "sourceLayoutVersion"]
+        )
+        guard let buckets = observation["buckets"] as? [Any] else {
+            throw ClaudeBrowserBridgeError.invalidTopLevel
+        }
+        for bucket in buckets {
+            guard let bucket = bucket as? [String: Any] else {
+                throw ClaudeBrowserBridgeError.invalidTopLevel
+            }
+            try requireExactKeys(
+                bucket, allowed: bucketKeys, required: ["bucketID", "period", "usedPercentage"]
+            )
+        }
+        let envelope: GeminiBrowserObservationEnvelope
+        do {
+            envelope = try JSONDecoder().decode(GeminiBrowserObservationEnvelope.self, from: data)
+        } catch {
+            throw ClaudeBrowserBridgeError.malformedJSON
+        }
+        try validate(envelope)
+        return envelope
+    }
+
+    public static func encode(_ envelope: GeminiBrowserObservationEnvelope) throws -> Data {
+        try validate(envelope)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let data = try encoder.encode(envelope)
+        guard data.count <= ClaudeBrowserBridgeContract.maximumMessageBytes else {
+            throw ClaudeBrowserBridgeError.messageTooLarge
+        }
+        return data
+    }
+
+    public static func validate(_ envelope: GeminiBrowserObservationEnvelope) throws {
+        let observation = envelope.observation
+        guard envelope.kind == GeminiBrowserContract.messageKind,
+              envelope.schemaVersion == GeminiBrowserContract.schemaVersion,
+              envelope.sourceID == GeminiBrowserContract.sourceID,
+              envelope.browserFamily == .safari,
+              envelope.routeState == .verifiedUsage,
+              UUID(uuidString: envelope.requestID) != nil,
+              UUID(uuidString: envelope.observationID) != nil,
+              observation.extractorSchemaVersion == GeminiBrowserContract.extractorSchemaVersion,
+              observation.sourceLayoutVersion == GeminiBrowserContract.sourceLayoutVersion
+        else {
+            throw ClaudeBrowserBridgeError.invalidContract
+        }
+        guard !observation.buckets.isEmpty else { throw ClaudeBrowserBridgeError.noAccountWindow }
+        guard observation.buckets.count <= GeminiBrowserContract.maximumBuckets,
+              Set(observation.buckets.map(\.bucketID)).count == observation.buckets.count
+        else { throw ClaudeBrowserBridgeError.invalidContract }
+        for bucket in observation.buckets {
+            guard GeminiBrowserContract.allowedBucketIDs.contains(bucket.bucketID) else {
+                throw ClaudeBrowserBridgeError.invalidContract
+            }
+            guard bucket.usedPercentage.isFinite, (0...100).contains(bucket.usedPercentage) else {
+                throw ClaudeBrowserBridgeError.invalidPercentage
+            }
+            if let reset = bucket.resetAt {
+                guard reset.utf8.count <= 64, parseTimestamp(reset) != nil else {
+                    throw ClaudeBrowserBridgeError.invalidReset
+                }
+            }
+        }
+        if let plan = observation.planLabel,
+           !GeminiBrowserContract.allowedPlanLabels.contains(plan) {
+            throw ClaudeBrowserBridgeError.invalidContract
+        }
+        guard parseTimestamp(observation.observedAt) != nil else {
+            throw ClaudeBrowserBridgeError.invalidTimestamp
+        }
+    }
+
+    private static func parseTimestamp(_ value: String) -> Date? {
+        guard value.utf8.count <= 64 else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: value) { return date }
+        let standard = ISO8601DateFormatter()
+        standard.formatOptions = [.withInternetDateTime]
+        return standard.date(from: value)
+    }
+
+    private static func requireExactKeys(
+        _ dictionary: [String: Any],
+        allowed: Set<String>,
+        required: Set<String>
+    ) throws {
+        if let unexpected = Set(dictionary.keys).subtracting(allowed).sorted().first {
+            throw ClaudeBrowserBridgeError.unexpectedField(unexpected)
+        }
+        if let missing = required.subtracting(Set(dictionary.keys)).sorted().first {
+            throw ClaudeBrowserBridgeError.missingField(missing)
+        }
+    }
+}
+
 public enum ClaudeBrowserAutomationEventDecoder {
     private static let baseEventKeys: Set<String> = [
         "kind", "schemaVersion", "sourceID", "browserFamily", "requestID", "status", "occurredAt",
@@ -302,10 +434,10 @@ public enum ClaudeBrowserTerminalPacketDecoder {
     private static let exactKeys: Set<String> = [
         "kind", "schemaVersion", "sourceID", "browserFamily", "requestID",
         "targetRequestID", "runtimeGenerationID", "status", "occurredAt",
-        "observation", "providerFailureReason",
+        "observation", "geminiObservation", "providerFailureReason",
     ]
     private static let requiredKeys = exactKeys.subtracting([
-        "targetRequestID", "observation", "providerFailureReason",
+        "targetRequestID", "observation", "geminiObservation", "providerFailureReason",
     ])
     private static let failureStatuses: Set<ClaudeBrowserAutomationStatus> = [
         .permissionRequired, .signInRequired, .routeRejected, .usageUnavailable,
@@ -360,15 +492,30 @@ public enum ClaudeBrowserTerminalPacketDecoder {
 
         if packet.status == .refreshCompleted {
             guard packet.targetRequestID == nil,
-                  packet.providerFailureReason == nil,
-                  let observation = packet.observation,
-                  observation.requestID.lowercased() == packet.requestID
+                  packet.providerFailureReason == nil
             else { throw ClaudeBrowserBridgeError.invalidContract }
-            try ClaudeBrowserMessageDecoder.validate(observation)
+            // Exactly one provider's observation completes a read.
+            switch (packet.observation, packet.geminiObservation) {
+            case let (observation?, nil):
+                guard observation.requestID.lowercased() == packet.requestID else {
+                    throw ClaudeBrowserBridgeError.invalidContract
+                }
+                try ClaudeBrowserMessageDecoder.validate(observation)
+            case let (nil, observation?):
+                guard observation.requestID.lowercased() == packet.requestID else {
+                    throw ClaudeBrowserBridgeError.invalidContract
+                }
+                try GeminiBrowserMessageDecoder.validate(observation)
+            default:
+                throw ClaudeBrowserBridgeError.invalidContract
+            }
             return
         }
 
-        guard failureStatuses.contains(packet.status), packet.observation == nil else {
+        guard failureStatuses.contains(packet.status),
+              packet.observation == nil,
+              packet.geminiObservation == nil
+        else {
             throw ClaudeBrowserBridgeError.invalidContract
         }
         if packet.providerFailureReason != nil {

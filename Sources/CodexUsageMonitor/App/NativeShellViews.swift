@@ -262,6 +262,7 @@ struct MainWindowRootView: View {
     var promptClipboard: (any ThreadOSSettingsClipboard)? = nil
     var promptPreferences: ApplicationPreferences = .production
     var claudeSettings: ClaudeBrowserSettingsModel? = nil
+    var geminiSettings: GeminiSettingsModel? = nil
     var referenceDate: Date? = nil
     var agentRailDisplayNames: [ProviderProductID: String] = [:]
     var initiallyExpandedResetProviderID: ProviderProductID? = nil
@@ -308,6 +309,7 @@ struct MainWindowRootView: View {
                 store: store,
                 providerID: providerID.settingsProviderID,
                 claudeSettings: claudeSettings,
+                geminiSettings: geminiSettings,
                 openThreadOS: {
                     sheetProviderID = nil
                     navigation.destination = .threadOS

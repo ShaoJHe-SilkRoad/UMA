@@ -13,14 +13,17 @@ struct M5RMXSAFARIG1ProductionExtensionTests {
         let manifest = try json("BrowserExtension/Safari/manifest.json")
         #expect(manifest["manifest_version"] as? Int == 2)
         #expect(manifest["permissions"] as? [String] == [
-            "nativeMessaging", "https://claude.ai/new*",
+            "nativeMessaging", "https://claude.ai/new*", "https://gemini.google.com/usage*",
         ])
         #expect(manifest["host_permissions"] == nil)
         let contentScripts = try #require(manifest["content_scripts"] as? [[String: Any]])
-        #expect(contentScripts.count == 1)
+        #expect(contentScripts.count == 2)
         #expect(contentScripts[0]["matches"] as? [String] == ["https://claude.ai/new*"])
-        #expect(contentScripts[0]["run_at"] as? String == "document_start")
-        #expect(contentScripts[0]["all_frames"] as? Bool == false)
+        #expect(contentScripts[1]["matches"] as? [String] == ["https://gemini.google.com/usage*"])
+        for script in contentScripts {
+            #expect(script["run_at"] as? String == "document_start")
+            #expect(script["all_frames"] as? Bool == false)
+        }
         #expect(manifest["action"] == nil)
 
         let info = try plist("BrowserExtension/Safari/Native/Info.plist")
@@ -277,7 +280,7 @@ struct M5RMXSAFARIG1ProductionExtensionTests {
     func safariWorkerUsesRequestBoundOneShotNativeMessagingOnly() throws {
         let background = try source("BrowserExtension/Shared/background-core.js")
         let loader = try source("BrowserExtension/Safari/background-loader.js")
-        #expect(background.contains("function observationEnvelope(requestID, observation)"))
+        #expect(background.contains("function observationEnvelope(requestID, observation, provider = \"claude\")"))
         #expect(background.contains("requestID,"))
         #expect(background.contains("function runtimeQualificationRequest(requestID)"))
         #expect(background.contains("runtimeGenerationID: config.runtimeGenerationID"))
@@ -404,7 +407,7 @@ struct M5RMXSAFARIG1ProductionExtensionTests {
         let background = try source("BrowserExtension/Shared/background-core.js")
         #expect(background.contains("if (automaticRead)"))
         #expect(background.contains("await api.tabs.create({ url: providerURL, active: false })"))
-        #expect(background.contains("providerURLForNonce(read.rawNonce)"))
+        #expect(background.contains("providerURLForNonce(read.rawNonce, read.provider)"))
         #expect(background.contains("const senderTabID = port.sender.tab.id"))
         #expect(!background.contains("bootstrapURL"))
     }

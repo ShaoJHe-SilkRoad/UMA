@@ -7,7 +7,7 @@ struct UMA014M2ProviderProductStateTests {
     private let epoch = Date(timeIntervalSince1970: 1_788_134_400)
 
     @Test
-    func catalogIsExactlyFourAdmittedProductsInStableOrder() {
+    func catalogIsExactlyFiveAdmittedProductsInStableOrder() {
         let reduction = ProviderProductStatePolicy.reduce(
             snapshots: [],
             admissions: [],
@@ -19,7 +19,7 @@ struct UMA014M2ProviderProductStateTests {
         )
 
         let productIDs: [ProviderProductID] = [
-            .codex, .claude, .workBuddy, .antigravity,
+            .codex, .claude, .workBuddy, .antigravity, .gemini,
         ]
         #expect(reduction.inventory.providers.map { $0.id } == productIDs)
         #expect(reduction.inventory.agentWorkspaceProviders.isEmpty)
@@ -246,6 +246,7 @@ struct UMA014M2ProviderProductStateTests {
         #expect(UsageMonitorRuntime.productionConnectorIDs == Set([
             CodexUsageConnector.connectorID,
             ClaudeCodeUsageConnector.connectorID,
+            GeminiUsageConnector.connectorID,
         ]))
         #expect(!UsageMonitorRuntime.productionConnectorIDs.contains(
             WorkBuddyAccountWebCreditsConnector.connectorID

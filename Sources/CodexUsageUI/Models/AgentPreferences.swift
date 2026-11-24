@@ -29,7 +29,12 @@ struct AgentProviderSettingsPayload: Codable, Equatable, Sendable {
 
     static func defaults(for providerID: AgentConnectorID) -> Self {
         Self(
-            monitoring: AgentMonitoringPreferences(),
+            // Gemini reads a web page through Safari, so it starts off and is
+            // turned on only by the person, in Settings. Every other provider
+            // is monitored once it is found.
+            monitoring: AgentMonitoringPreferences(
+                monitoringEnabled: providerID != AgentPreferenceRecord.geminiProviderID
+            ),
             codexDetails: providerID == AgentPreferenceRecord.codexProviderID
                 ? .defaults
                 : nil
@@ -43,6 +48,7 @@ struct AgentPreferenceRecord: Codable, Equatable, Identifiable, Sendable {
     static let claudeProviderID = AgentConnectorID(rawValue: "claude")!
     static let workBuddyProviderID = AgentConnectorID(rawValue: "workbuddy")!
     static let antigravityProviderID = AgentConnectorID(rawValue: "antigravity")!
+    static let geminiProviderID = AgentConnectorID(rawValue: "gemini")!
 
     let providerID: AgentConnectorID
     var hasBeenDetected: Bool

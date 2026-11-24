@@ -18,7 +18,8 @@ public enum LowRemainingUsagePolicy {
         let provider = providerID.lowercased().split(separator: ".").first.map(String.init)
         let plan = label?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         switch (provider, plan) {
-        case ("codex", "pro"), ("codex", "plus"), ("claude", "pro"), ("claude", "max"):
+        case ("codex", "pro"), ("codex", "plus"), ("claude", "pro"), ("claude", "max"),
+             ("gemini", "free"), ("gemini", "plus"), ("gemini", "pro"), ("gemini", "ultra"):
             return plan
         default: return nil
         }
@@ -52,8 +53,9 @@ public enum LowRemainingUsagePolicy {
     public static func lowThresholdPercent(providerID: String, admittedPlan: String?) -> Double? {
         let provider = providerID.lowercased().split(separator: ".").first.map(String.init)
         switch (provider, admittedPlanIdentifier(providerID: providerID, label: admittedPlan)) {
-        case ("codex", "pro"), ("claude", "max"): return 10
-        case ("codex", "plus"), ("claude", "pro"): return 20
+        case ("codex", "pro"), ("claude", "max"), ("gemini", "ultra"): return 10
+        case ("codex", "plus"), ("claude", "pro"), ("gemini", "pro"): return 20
+        case ("gemini", "free"), ("gemini", "plus"): return 25
         default: return nil
         }
     }

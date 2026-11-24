@@ -1557,6 +1557,7 @@ public struct AgentWorkspaceSurface: View {
         case .combinedSanitized: localized("Combined sanitized sources", "组合脱敏来源")
         case .authenticatedAccountWeb: localized("Authenticated provider account", "已认证的提供方账户")
         case .officialCLI: localized("Official command-line source", "官方命令行来源")
+        case .geminiWebUsage: localized("Gemini web Usage page (Gemini App quota)", "Gemini 网页用量页（Gemini App 额度）")
         case .unavailable: localized("Unavailable", "不可用")
         }
     }

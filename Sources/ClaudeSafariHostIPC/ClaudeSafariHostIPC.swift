@@ -68,6 +68,9 @@ public struct ClaudeSafariHostIPCRequest: Codable, Equatable, Sendable {
     public let allowSafariLaunch: Bool
     /// Present only for a read. Absent means the existing front window.
     public let providerPlacement: ClaudeSafariHostIPCProviderPlacement?
+    /// Present only for a read. Absent means Claude, so a request from an AUV
+    /// before Gemini decodes and runs exactly as it always did.
+    public let provider: BrowserUsageProvider?
     public let createdAt: String
 
     public init(
@@ -77,6 +80,7 @@ public struct ClaudeSafariHostIPCRequest: Codable, Equatable, Sendable {
         targetRequestID: String? = nil,
         allowSafariLaunch: Bool = false,
         providerPlacement: ClaudeSafariHostIPCProviderPlacement? = nil,
+        provider: BrowserUsageProvider? = nil,
         createdAt: String = ISO8601DateFormatter().string(from: Date())
     ) {
         schemaVersion = ClaudeSafariHostIPCContract.schemaVersion
@@ -86,8 +90,12 @@ public struct ClaudeSafariHostIPCRequest: Codable, Equatable, Sendable {
         self.targetRequestID = targetRequestID?.lowercased()
         self.allowSafariLaunch = allowSafariLaunch
         self.providerPlacement = providerPlacement
+        self.provider = provider
         self.createdAt = createdAt
     }
+
+    /// The provider whose page this request reads.
+    public var readProvider: BrowserUsageProvider { provider ?? .claude }
 
     public var isStructurallyValid: Bool {
         let targetIsValid: Bool
@@ -105,6 +113,9 @@ public struct ClaudeSafariHostIPCRequest: Codable, Equatable, Sendable {
                 || operation == .verifyCompanion
                 || operation == .accuracySync)
             && (providerPlacement == nil
+                || operation == .accuracySync
+                || operation == .automaticRefresh)
+            && (provider == nil
                 || operation == .accuracySync
                 || operation == .automaticRefresh)
             && targetIsValid
@@ -358,6 +369,8 @@ public struct ClaudeSafariHostIPCResponse: Codable, Equatable, Sendable {
     public let runtimeGenerationID: String
     public let outcome: ClaudeSafariHostIPCOutcome
     public let observation: ClaudeBrowserObservationEnvelope?
+    /// Set instead of `observation` for a Gemini read; never both.
+    public let geminiObservation: GeminiBrowserObservationEnvelope?
     public let automationEvent: ClaudeBrowserAutomationEvent?
     public let providerFailureReason: ClaudeBrowserProviderFailureReason?
     public let failureReason: ClaudeSafariHostIPCFailureReason?
@@ -371,6 +384,7 @@ public struct ClaudeSafariHostIPCResponse: Codable, Equatable, Sendable {
         runtimeGenerationID: String,
         outcome: ClaudeSafariHostIPCOutcome,
         observation: ClaudeBrowserObservationEnvelope? = nil,
+        geminiObservation: GeminiBrowserObservationEnvelope? = nil,
         automationEvent: ClaudeBrowserAutomationEvent? = nil,
         providerFailureReason: ClaudeBrowserProviderFailureReason? = nil,
         failureReason: ClaudeSafariHostIPCFailureReason? = nil,
@@ -384,6 +398,7 @@ public struct ClaudeSafariHostIPCResponse: Codable, Equatable, Sendable {
         self.runtimeGenerationID = runtimeGenerationID.lowercased()
         self.outcome = outcome
         self.observation = observation
+        self.geminiObservation = geminiObservation
         self.automationEvent = automationEvent
         self.providerFailureReason = providerFailureReason
         self.failureReason = failureReason
@@ -404,26 +419,35 @@ public struct ClaudeSafariHostIPCResponse: Codable, Equatable, Sendable {
                   runtimeDescriptor.runtimeGenerationID == runtimeGenerationID
             else { return false }
         }
+        // At most one provider's observation, matched to this request.
+        let observationRequestID: String?
+        switch (observation, geminiObservation) {
+        case (nil, nil): observationRequestID = nil
+        case let (claude?, nil): observationRequestID = claude.requestID.lowercased()
+        case let (nil, gemini?): observationRequestID = gemini.requestID.lowercased()
+        default: return false
+        }
+        let hasObservation = observationRequestID != nil
         switch outcome {
         case .companionVerified:
-            return observation == nil && automationEvent == nil
+            return !hasObservation && automationEvent == nil
                 && providerFailureReason == nil && failureReason == nil
                 && verificationStage == .companionVerified
                 && runtimeDescriptor != nil
         case .completed:
-            return observation?.requestID.lowercased() == requestID
+            return observationRequestID == requestID
                 && automationEvent?.requestID.lowercased() == requestID
                 && automationEvent?.status == .refreshCompleted
                 && providerFailureReason == nil && failureReason == nil
                 && verificationStage == nil
         case .observation:
-            return observation?.requestID.lowercased() == requestID
+            return observationRequestID == requestID
                 && automationEvent == nil && providerFailureReason == nil
                 && failureReason == nil
                 && verificationStage == nil
         case .automation:
             return automationEvent?.requestID.lowercased() == requestID
-                && observation == nil && failureReason == nil
+                && !hasObservation && failureReason == nil
                 && verificationStage == nil
                 && (providerFailureReason == nil
                     || automationEvent?.status == .permissionRequired
@@ -432,7 +456,7 @@ public struct ClaudeSafariHostIPCResponse: Codable, Equatable, Sendable {
                     || automationEvent?.status == .usageUnavailable
                     || automationEvent?.status == .tabUnavailable)
         case .failed:
-            return failureReason != nil && observation == nil && automationEvent == nil
+            return failureReason != nil && !hasObservation && automationEvent == nil
                 && providerFailureReason == nil
         }
     }

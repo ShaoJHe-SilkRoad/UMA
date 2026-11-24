@@ -6,6 +6,7 @@ public enum ProviderProductID: String, CaseIterable, Identifiable, Sendable {
     case claude
     case workBuddy
     case antigravity
+    case gemini
 
     public var id: String { rawValue }
     public var settingsProviderID: String {
@@ -14,6 +15,7 @@ public enum ProviderProductID: String, CaseIterable, Identifiable, Sendable {
         case .claude: AgentPreferenceRecord.claudeProviderID.rawValue
         case .workBuddy: AgentPreferenceRecord.workBuddyProviderID.rawValue
         case .antigravity: AgentPreferenceRecord.antigravityProviderID.rawValue
+        case .gemini: AgentPreferenceRecord.geminiProviderID.rawValue
         }
     }
     public var displayName: String {
@@ -22,6 +24,7 @@ public enum ProviderProductID: String, CaseIterable, Identifiable, Sendable {
         case .claude: "Claude"
         case .workBuddy: "WorkBuddy"
         case .antigravity: "Google Antigravity"
+        case .gemini: "Gemini"
         }
     }
 }
@@ -60,6 +63,9 @@ public enum ProviderProductSourceSummary: Equatable, Sendable {
     case combinedSanitized
     case authenticatedAccountWeb
     case officialCLI
+    /// The Gemini App's own quota, read from the official Usage page. It is
+    /// not Antigravity's quota and is never shown as such.
+    case geminiWebUsage
     case unavailable
 }
 
@@ -324,6 +330,7 @@ public struct ProviderProductInventory: Equatable, Sendable {
         case .claude: 1
         case .workBuddy: 2
         case .antigravity: 3
+        case .gemini: 4
         }
     }
 
@@ -366,7 +373,7 @@ struct ProviderProductReduction: Equatable, Sendable {
 /// Strict adapter from sanitized connector snapshots into product truth. It
 /// never retains the source snapshot, channel, descriptor, or arbitrary text.
 enum ProviderProductStatePolicy {
-    private static let currentSupportedProducts: Set<ProviderProductID> = [.codex, .claude]
+    private static let currentSupportedProducts: Set<ProviderProductID> = [.codex, .claude, .gemini]
     private struct CatalogEntry {
         let productID: ProviderProductID
         let connectorID: AgentConnectorID
@@ -383,6 +390,7 @@ enum ProviderProductStatePolicy {
             productID: .antigravity,
             connectorID: GoogleAntigravityUsageConnector.connectorID
         ),
+        CatalogEntry(productID: .gemini, connectorID: GeminiUsageConnector.connectorID),
     ]
 
     static var catalogConnectorIDs: [AgentConnectorID] {
@@ -499,6 +507,8 @@ enum ProviderProductStatePolicy {
             return .authenticatedAccountWeb
         case .antigravity:
             return .officialCLI
+        case .gemini:
+            return .geminiWebUsage
         }
     }
 
@@ -1031,6 +1041,7 @@ enum ProviderProductStatePolicy {
         case .codex: return .officialLocal
         case .workBuddy: return .authenticatedAccountWeb
         case .antigravity: return .officialCLI
+        case .gemini: return .geminiWebUsage
         case .claude:
             switch account.sourceVersion {
             case "smart-1-local-exact": return .localSmartExact

@@ -3,7 +3,11 @@
   "name": "UMA Browser Companion for Claude",
   "version": "1.4.0",
   "description": "Sends normalized Claude plan-limit percentages from the exact official Usage route to UMA.",
-  "permissions": ["nativeMessaging", "https://claude.ai/new*"],
+  "permissions": [
+    "nativeMessaging",
+    "https://claude.ai/new*",
+    "https://gemini.google.com/usage*"
+  ],
   "icons": {
     "48": "icons/extension-48.png",
     "96": "icons/extension-96.png",
@@ -24,6 +28,7 @@
   "background": {
     "scripts": [
       "Shared/claude-usage-extractor.js",
+      "Shared/gemini-usage-extractor.js",
       "Shared/provider-ownership-v2.js",
       "Shared/owned-provider-tab-v2-reducer.js",
       "Safari/background-loader.js",
@@ -31,14 +36,31 @@
     ],
     "persistent": true
   },
-  "content_scripts": [{
-    "matches": ["https://claude.ai/new*"],
-    "js": [
-      "Shared/claude-usage-extractor.js",
-      "Shared/provider-ownership-v2.js",
-      "Shared/content-script.js"
-    ],
-    "run_at": "document_start",
-    "all_frames": false
-  }]
+  "content_scripts": [
+    {
+      "matches": [
+        "https://claude.ai/new*"
+      ],
+      "js": [
+        "Shared/claude-usage-extractor.js",
+        "Shared/provider-ownership-v2.js",
+        "Shared/content-script.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "https://gemini.google.com/usage*"
+      ],
+      "js": [
+        "Shared/claude-usage-extractor.js",
+        "Shared/gemini-usage-extractor.js",
+        "Shared/provider-ownership-v2.js",
+        "Shared/content-script.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ]
 }

@@ -224,6 +224,11 @@ actor UMASafariBridgeHostCoordinator {
               item.request.operation == .accuracySync
                 || item.request.operation == .automaticRefresh
         else { return }
+        // A Claude observation can complete only a Claude read.
+        guard item.request.readProvider == .claude else {
+            completeFailure(requestID: requestID, reason: .unexpectedNativeResponse)
+            return
+        }
         guard item.observation == nil else {
             completeFailure(requestID: requestID, reason: .duplicateNativeResponse)
             return
@@ -366,6 +371,7 @@ actor UMASafariBridgeHostCoordinator {
                 requestID: requestID,
                 targetRequestID: item.request.targetRequestID,
                 providerPlacement: item.request.providerPlacement,
+                provider: item.request.operation == .closeOwnedTab ? nil : item.request.provider,
                 extensionIdentifier: runtime.extensionIdentifier
             )
             switch dispatchResult {
@@ -564,7 +570,29 @@ actor UMASafariBridgeHostCoordinator {
               item.request.operation == .accuracySync
                 || item.request.operation == .automaticRefresh
         else { return }
+        // The observation must be the requested provider's; the other
+        // provider's page result can never complete this read.
         if terminal.status == .refreshCompleted,
+           (terminal.observation != nil && item.request.readProvider != .claude)
+            || (terminal.geminiObservation != nil && item.request.readProvider != .gemini) {
+            completeFailure(requestID: requestID, reason: .unexpectedNativeResponse)
+        } else if terminal.status == .refreshCompleted,
+                  let observation = terminal.geminiObservation {
+            complete(
+                ClaudeSafariHostIPCResponse(
+                    requestID: requestID,
+                    runtimeGenerationID: runtime.runtimeGenerationID,
+                    outcome: .completed,
+                    geminiObservation: observation,
+                    automationEvent: .init(
+                        requestID: requestID,
+                        status: .refreshCompleted,
+                        occurredAt: terminal.occurredAt
+                    ),
+                    runtimeDescriptor: runtime.ipcDescriptor
+                )
+            )
+        } else if terminal.status == .refreshCompleted,
            let observation = terminal.observation {
             completeSuccess(
                 requestID: requestID,
@@ -839,6 +867,7 @@ actor UMASafariBridgeHostCoordinator {
         requestID: String,
         targetRequestID: String?,
         providerPlacement: ClaudeSafariHostIPCProviderPlacement? = nil,
+        provider: BrowserUsageProvider? = nil,
         extensionIdentifier: String
     ) async -> ClaudeSafariHostDispatchCompletion {
         let gate = ClaudeSafariHostDispatchCompletionGate()
@@ -855,6 +884,12 @@ actor UMASafariBridgeHostCoordinator {
         if name == ClaudeBrowserBridgeContract.automaticRefreshMessageName,
            let providerPlacement {
             userInfo["placement"] = providerPlacement.rawValue
+        }
+        // Claude stays the absent default, so a Claude read's command is
+        // exactly the one every companion before Gemini accepts.
+        if name == ClaudeBrowserBridgeContract.automaticRefreshMessageName,
+           let provider, provider != .claude {
+            userInfo["provider"] = provider.rawValue
         }
         SFSafariApplication.dispatchMessage(
             withName: name,

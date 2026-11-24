@@ -9,6 +9,45 @@
   if (!extractor || !config || !api?.runtime
       || (config.browserFamily === "safari" && (!providerOwnership || !ownedProviderReducer))) return;
 
+  // Every provider page a read may open. Claude is always present; Gemini only
+  // when its extractor and site permission are packaged. A read names its
+  // provider, and every page message must come from that provider's exact
+  // Usage route.
+  const providers = Object.freeze({
+    claude: Object.freeze({
+      extractor,
+      hostPermission: config.providerHostPermissions?.claude || config.exactHostPermission,
+      sourceID: "claude-browser-usage",
+      observationKind: "claudeUsageObservation",
+      observationSchemaVersion: 2,
+    }),
+    ...(root.UMAGeminiUsageExtractor && typeof config.providerHostPermissions?.gemini === "string"
+      ? { gemini: Object.freeze({
+        extractor: root.UMAGeminiUsageExtractor,
+        hostPermission: config.providerHostPermissions.gemini,
+        sourceID: "gemini-browser-usage",
+        observationKind: "geminiUsageObservation",
+        observationSchemaVersion: 1,
+      }) }
+      : {}),
+  });
+
+  // The provider whose exact Usage route a page URL is, or null.
+  function providerForURL(raw) {
+    let url;
+    try { url = new URL(raw); } catch (_) { return null; }
+    for (const [provider, spec] of Object.entries(providers)) {
+      const contract = spec.extractor.CONTRACT;
+      if (url.origin === contract.origin
+          && url.pathname === new URL(contract.href).pathname) return provider;
+    }
+    return null;
+  }
+
+  function providerExtractor(provider) {
+    return (providers[provider] || providers.claude).extractor;
+  }
+
   const usageScriptFiles = Object.freeze([
     "Shared/claude-usage-extractor.js",
     "Shared/provider-ownership-v2.js",
@@ -51,6 +90,7 @@
     "resultPostedBy-routeEvent", "resultPostedBy-deadline", "resultResent",
   ]);
   const providerPlacements = Object.freeze(["existingWindow", "temporaryWindow"]);
+  const usageProviderNames = Object.freeze(["claude", "gemini"]);
   const temporaryWindowSize = Object.freeze({ width: 480, height: 640 });
   const ownedTabReceiptMaximumAgeMilliseconds = 2 * 60 * 1_000;
   // How long an expired receipt whose proven tab is still open waits for that
@@ -333,11 +373,12 @@
     }
   }
 
-  function observationEnvelope(requestID, observation) {
+  function observationEnvelope(requestID, observation, provider = "claude") {
+    const spec = providers[provider] || providers.claude;
     return {
-      kind: "claudeUsageObservation",
-      schemaVersion: 2,
-      sourceID: "claude-browser-usage",
+      kind: spec.observationKind,
+      schemaVersion: spec.observationSchemaVersion,
+      sourceID: spec.sourceID,
       browserFamily: config.browserFamily,
       routeState: "verifiedUsage",
       requestID,
@@ -353,6 +394,10 @@
     targetRequestID = null,
     providerFailureReason = null
   ) {
+    // Lifecycle packets are the companion's own and keep its one source ID.
+    // A Gemini observation rides in its own field, so a Claude packet keeps
+    // exactly the keys it always had.
+    const gemini = observation?.kind === "geminiUsageObservation";
     return {
       kind: "claudeBrowserTerminalPacket",
       schemaVersion: 2,
@@ -363,7 +408,8 @@
       runtimeGenerationID: config.runtimeGenerationID,
       status,
       occurredAt: new Date().toISOString(),
-      observation,
+      observation: gemini ? null : observation,
+      ...(gemini ? { geminiObservation: observation } : {}),
       providerFailureReason,
     };
   }
@@ -403,10 +449,13 @@
     }
   }
 
-  async function persistentUsageAccessGranted() {
-    if (!api.permissions?.contains || typeof config.exactHostPermission !== "string") return false;
+  // Each provider's site access is its own: Claude keeps working when only
+  // claude.ai is allowed, and a Gemini read then asks for gemini.google.com.
+  async function persistentUsageAccessGranted(provider = "claude") {
+    const permission = providers[provider]?.hostPermission;
+    if (!api.permissions?.contains || typeof permission !== "string") return false;
     try {
-      return await api.permissions.contains({ origins: [config.exactHostPermission] });
+      return await api.permissions.contains({ origins: [permission] });
     } catch (_) {
       return false;
     }
@@ -646,8 +695,25 @@
       acceptedPorts: 0,
       trace: [],
       traceStartedAt: null,
+      // The receipt is content-free and does not record which page the read
+      // opened. The proven page that reconnects from the receipt's own tab ID
+      // tells it, through its exact Usage route.
+      provider: null,
       recovered: true,
     };
+  }
+
+  // Binds a read to the provider of the page on this port, or confirms the
+  // port's page is the read's provider. A page of another provider is never
+  // accepted for a read, even from the read's own tab.
+  function portMatchesReadProvider(read, port) {
+    const provider = providerForURL(port?.sender?.url || port?.sender?.tab?.url || "");
+    if (!provider) return false;
+    if (read.provider === null || read.provider === undefined) {
+      read.provider = provider;
+      return true;
+    }
+    return read.provider === provider;
   }
 
   function missingTabError(error) {
@@ -896,14 +962,13 @@
     const senderIDMatches = typeof sender?.id !== "string"
       || typeof api.runtime.id !== "string" || sender.id === api.runtime.id;
     const topFrameMatches = sender?.frameId === 0;
+    // The page must be on one provider's exact Usage route; which provider
+    // must also be the read's is checked where the read is known.
+    const provider = providerForURL(sender?.url || sender?.tab?.url || "");
+    const contract = provider ? providerExtractor(provider).CONTRACT : null;
     const declaredOriginMatches = typeof sender?.origin !== "string"
-      || sender.origin === extractor.CONTRACT.origin;
-    let originMatches = false;
-    try {
-      const url = new URL(sender?.url || sender?.tab?.url || "");
-      originMatches = url.origin === extractor.CONTRACT.origin
-        && url.pathname === new URL(extractor.CONTRACT.href).pathname;
-    } catch (_) {}
+      || sender.origin === contract?.origin;
+    const originMatches = contract !== null;
     return senderIDMatches && topFrameMatches && declaredOriginMatches && originMatches
       && Number.isInteger(sender?.tab?.id) && sender.tab.id >= 0;
   }
@@ -1117,7 +1182,7 @@
     let retainedProviderFailureReason = status === "refreshCompleted"
       ? null
       : providerFailureReasons.has(providerFailureReason) ? providerFailureReason : null;
-    if (status === "refreshCompleted" && extractor.validateObservation(observation)) {
+    if (status === "refreshCompleted" && providerExtractor(read.provider).validateObservation(observation)) {
       if (read.state !== v2States.resultReady
           || !await transitionV2(read, v2Events.deliverResult)) {
         finalStatus = "usageUnavailable";
@@ -1125,7 +1190,7 @@
         // Keep the sanitized result in extension memory until both the proven
         // provider tab and its durable ownership receipt are gone. Nothing is
         // published to the Host while cleanup can still fail.
-        retainedObservation = observationEnvelope(read.requestID, observation);
+        retainedObservation = observationEnvelope(read.requestID, observation, read.provider);
       }
     } else if (status === "refreshCompleted") {
       finalStatus = "usageUnavailable";
@@ -1160,7 +1225,8 @@
   }
 
   async function acceptV2ProviderOwnership(read, port, ownershipNonce) {
-    if (!read || read.finished || !exactOwnedProviderSender(port)) return false;
+    if (!read || read.finished || !exactOwnedProviderSender(port)
+        || !portMatchesReadProvider(read, port)) return false;
     const senderTabID = port.sender.tab.id;
 
     // A previously persisted ownership proof survives a background reload.
@@ -1278,7 +1344,8 @@
         || read.providerOwnedTabID !== context.challenge.providerOwnedTabID
         || read.providerOwnedTabID !== port.sender.tab.id
         || !v2RecoveryStateAllowed(read.state)
-        || (Date.now() >= Date.parse(read.expiresAt) && !read.cleanupOnly)) return;
+        || (Date.now() >= Date.parse(read.expiresAt) && !read.cleanupOnly)
+        || !portMatchesReadProvider(read, port)) return;
     context.challenge = null;
     if (!automaticRead) {
       automaticRead = read;
@@ -1343,6 +1410,9 @@
       const senderTabID = port.sender.tab.id;
       if (read.replacementCandidateTabID !== null
           && senderTabID !== read.replacementCandidateTabID) return;
+      // The nonce matched, so this is the read's own page; it must also be
+      // on the read's provider's route.
+      if (!portMatchesReadProvider(read, port)) return;
       if (!automaticRead) {
         automaticRead = read;
         read.rawNonce = message.ownershipNonce;
@@ -1448,7 +1518,8 @@
         requestID: read.requestID,
         runtimeGenerationID: config.runtimeGenerationID,
       });
-      if (message.status === "success" && extractor.validateObservation(message.observation)) {
+      if (message.status === "success"
+          && providerExtractor(read.provider).validateObservation(message.observation)) {
         await finishAutomaticV2(read, "refreshCompleted", message.observation);
       } else if (message.status === "success") {
         await finishAutomaticV2(
@@ -1462,9 +1533,11 @@
     }
   }
 
-  async function beginAutomaticRead(requestID, placement) {
+  async function beginAutomaticRead(requestID, placement, provider = "claude") {
     if (!requestIDPattern.test(requestID)) return;
-    if (automaticRead) {
+    // A provider this companion was not packaged for is refused at once
+    // instead of leaving the Host to wait out its deadline.
+    if (automaticRead || !providers[provider]) {
       await sendNative(automationEnvelope(requestID, "usageUnavailable"));
       return;
     }
@@ -1519,6 +1592,7 @@
       resultMessageAccepted: false,
       resultMessageInFlight: false,
       providerFailureReason: null,
+      provider,
       recovered: false,
     };
     automaticRead = read;
@@ -1533,7 +1607,7 @@
     }
 
     transitionCompanion(automaticReadStates.sitePermissionChecking);
-    if (!(await persistentUsageAccessGranted())) {
+    if (!(await persistentUsageAccessGranted(read.provider))) {
       await finishAutomaticV2(
         read, "permissionRequired", null, false, "SITE_PERMISSION_MISSING"
       );
@@ -1552,7 +1626,7 @@
       await finishAutomaticV2(read, "ownedTabOwnershipLost");
       return;
     }
-    const providerURL = providerOwnership.providerURLForNonce(read.rawNonce);
+    const providerURL = providerOwnership.providerURLForNonce(read.rawNonce, read.provider);
     if (!providerURL) {
       await finishAutomaticV2(read, "tabUnavailable");
       return;
@@ -1627,9 +1701,16 @@
         : null;
     }
     if (value.command === config.automaticRefreshMessageName
-        && Object.prototype.hasOwnProperty.call(value, "placement")) {
-      return exactKeys(value, ["command", "placement", "requestID"])
-        && providerPlacements.includes(value.placement)
+        && (Object.prototype.hasOwnProperty.call(value, "placement")
+          || Object.prototype.hasOwnProperty.call(value, "provider"))) {
+      // Both fields are optional; an absent provider is Claude, as every
+      // Host before Gemini sends it.
+      const keys = ["command", "requestID"];
+      if (Object.prototype.hasOwnProperty.call(value, "placement")) keys.push("placement");
+      if (Object.prototype.hasOwnProperty.call(value, "provider")) keys.push("provider");
+      return exactKeys(value, keys)
+        && (!keys.includes("placement") || providerPlacements.includes(value.placement))
+        && (!keys.includes("provider") || usageProviderNames.includes(value.provider))
         ? value
         : null;
     }
@@ -1666,7 +1747,9 @@
       // reply may the handler publish bridgeReady to the containing app.
       retainRuntimeOperation(qualifyRuntime(command.requestID, portGeneration));
     } else if (command.command === config.automaticRefreshMessageName) {
-      retainRuntimeOperation(beginAutomaticRead(command.requestID, command.placement));
+      retainRuntimeOperation(beginAutomaticRead(
+        command.requestID, command.placement, command.provider || "claude"
+      ));
     } else if (command.command === config.closeOwnedTabMessageName) {
       retainRuntimeOperation(closeOwnedRead(command.requestID, command.targetRequestID));
     }

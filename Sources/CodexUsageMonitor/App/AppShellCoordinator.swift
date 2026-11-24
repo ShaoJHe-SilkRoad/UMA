@@ -272,7 +272,8 @@ final class AppShellCoordinator {
             },
             connectClaude: { [weak self] in self?.connectClaude() },
             accuracySyncClaude: { [weak self] in self?.accuracySyncClaude() },
-            claudeSettings: runtime.claudeSettings
+            claudeSettings: runtime.claudeSettings,
+            geminiSettings: runtime.geminiSettings
         )
         settingsWindowController.attach(
             store: runtime.store, preferences: runtime.preferences, dataPaths: runtime.dataPaths
@@ -494,6 +495,11 @@ final class AppShellCoordinator {
         // the one way to ask for it, so there is no second button.
         if runtime.store.orderedWorkspaceProviders.contains(where: { $0.id == .claude }) {
             runtime.claudeSettings.accuracySyncForRefreshAll()
+        }
+        // Gemini's reading also comes only from its web Usage page, through
+        // the same bridge; its read waits its turn behind Claude's.
+        if runtime.store.orderedWorkspaceProviders.contains(where: { $0.id == .gemini }) {
+            runtime.geminiSettings?.syncNow()
         }
     }
 

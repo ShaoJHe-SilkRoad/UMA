@@ -13,6 +13,7 @@ struct UsageSettingsCard: View {
     @Binding var language: AppLanguage
     let claudeSettings: ClaudeBrowserSettingsModel?
     var antigravitySettings: AntigravitySettingsModel? = nil
+    var geminiSettings: GeminiSettingsModel? = nil
     let workBuddySettings: WorkBuddySettingsModel?
     let workBuddyLogin: WorkBuddyLoginCoordinator?
     let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
@@ -103,6 +104,7 @@ struct UsageSettingsCard: View {
                     showAPICost: $showAPICost,
                     claudeSettings: claudeSettings,
                     antigravitySettings: antigravitySettings,
+                    geminiSettings: geminiSettings,
                     workBuddySettings: workBuddySettings,
                     workBuddyLogin: workBuddyLogin,
                     workBuddyAccountWebSync: workBuddyAccountWebSync,
@@ -453,6 +455,7 @@ private struct AgentSpecificSettingsContent: View {
     @Binding var showAPICost: Bool
     let claudeSettings: ClaudeBrowserSettingsModel?
     let antigravitySettings: AntigravitySettingsModel?
+    var geminiSettings: GeminiSettingsModel? = nil
     let workBuddySettings: WorkBuddySettingsModel?
     let workBuddyLogin: WorkBuddyLoginCoordinator?
     let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
@@ -512,6 +515,12 @@ private struct AgentSpecificSettingsContent: View {
                     model: antigravitySettings,
                     language: language
                 )
+            }
+
+            if providerID == AgentPreferenceRecord.geminiProviderID,
+               let geminiSettings {
+                Divider().opacity(0.35)
+                GeminiSettingsSection(model: geminiSettings, language: language)
             }
 
             if providerID == AgentPreferenceRecord.workBuddyProviderID,
@@ -649,6 +658,10 @@ private struct AgentSpecificSettingsContent: View {
                     } else {
                         antigravitySettings.disable()
                     }
+                } else if providerID == AgentPreferenceRecord.geminiProviderID,
+                          let geminiSettings {
+                    // Turning Gemini on is consent to read its Usage page.
+                    if $0 { geminiSettings.enable() } else { geminiSettings.disable() }
                 } else {
                     coordinator.setMonitoringEnabled($0, for: providerID)
                 }
@@ -812,6 +825,65 @@ private struct SettingsQuotaBar: View {
         .frame(height: 6)
         .accessibilityHidden(true)
         .allowsHitTesting(false)
+    }
+}
+
+private struct GeminiSettingsSection: View {
+    @ObservedObject var model: GeminiSettingsModel
+    let language: AppLanguage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(language.geminiSourceLabel)
+                .font(AppTypography.font(10.5, weight: .semibold, language: language))
+            Text(language.geminiState(model.state))
+                .font(AppTypography.font(9.5, language: language))
+                .foregroundStyle(stateIsProblem ? .red : .secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("gemini.settings.state")
+            Text(language.geminiQuotaScope)
+                .font(AppTypography.font(9, language: language))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if model.state != .off {
+                HStack(spacing: 8) {
+                    Button(language.geminiSyncNow) { model.syncNow() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(model.state == .reading)
+                        .accessibilityIdentifier("gemini.settings.sync")
+                    Button(language.geminiOpenUsagePage) { model.openUsagePageInSafari() }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("gemini.settings.open-usage-page")
+                    Button(language.geminiDisable) { model.disable() }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("gemini.settings.disable")
+                }
+            }
+
+            if model.state == .needsSiteAccess || model.state == .bridgeUnavailable {
+                Text(language.geminiBridgeSetupHint)
+                    .font(AppTypography.font(9, language: language))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            DisclosureGroup(language.geminiSourceTransparency) {
+                Text(language.geminiPrivacySummary)
+                    .font(AppTypography.font(8.5, language: language))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var stateIsProblem: Bool {
+        switch model.state {
+        case .needsSiteAccess, .needsSignIn, .bridgeUnavailable, .versionMismatch, .pageUnreadable:
+            true
+        default:
+            false
+        }
     }
 }
 
@@ -2446,6 +2518,7 @@ public struct AgentSpecificSettingsSheet: View {
     private let close: () -> Void
     private let claudeSettings: ClaudeBrowserSettingsModel?
     private let antigravitySettings: AntigravitySettingsModel?
+    private let geminiSettings: GeminiSettingsModel?
     private let workBuddySettings: WorkBuddySettingsModel?
     private let workBuddyLogin: WorkBuddyLoginCoordinator?
     private let workBuddyAccountWebSync: WorkBuddyAccountWebSessionController?
@@ -2456,6 +2529,7 @@ public struct AgentSpecificSettingsSheet: View {
         store: UsageStore, providerID: String,
         claudeSettings: ClaudeBrowserSettingsModel? = nil,
         antigravitySettings: AntigravitySettingsModel? = nil,
+        geminiSettings: GeminiSettingsModel? = nil,
         workBuddySettings: WorkBuddySettingsModel? = nil,
         workBuddyLogin: WorkBuddyLoginCoordinator? = nil,
         workBuddyAccountWebSync: WorkBuddyAccountWebSessionController? = nil,
@@ -2467,6 +2541,7 @@ public struct AgentSpecificSettingsSheet: View {
         self.providerID = providerID
         self.claudeSettings = claudeSettings
         self.antigravitySettings = antigravitySettings
+        self.geminiSettings = geminiSettings
         self.workBuddySettings = workBuddySettings
         self.workBuddyLogin = workBuddyLogin
         self.workBuddyAccountWebSync = workBuddyAccountWebSync
@@ -2491,6 +2566,7 @@ public struct AgentSpecificSettingsSheet: View {
                         showAPICost: $showAPICost,
                         claudeSettings: self.claudeSettings,
                         antigravitySettings: self.antigravitySettings,
+                        geminiSettings: self.geminiSettings,
                         workBuddySettings: self.workBuddySettings,
                         workBuddyLogin: self.workBuddyLogin,
                         workBuddyAccountWebSync: self.workBuddyAccountWebSync,
