@@ -244,12 +244,12 @@ struct UMA014InfraFoundationTests {
         let safari = try #require(plist["SafariCompatibility"] as? [String: Any])
         #expect(development["MarketingVersion"] as? String == "0.18.11")
         #expect(development["BundleIdentifier"] as? String == "com.silkrd.uma.dev.uma014")
-        #expect(frozen["MarketingVersion"] as? String == "0.14.7")
+        #expect(frozen["MarketingVersion"] as? String == "0.14.8")
         #expect(
             frozen["SourceCommit"] as? String
-                == "e8ae5482c1e83ea2f3d1c99a8826442883b3795e"
+                == "29b6f77865849f160cdb2931b675af212d6e0b59"
         )
-        #expect(safari["HostMarketingVersion"] as? String == "0.14.7")
+        #expect(safari["HostMarketingVersion"] as? String == "0.14.8")
         #expect(safari["CompanionMarketingVersion"] as? String == "1.4.0")
         #expect(safari["ProtocolVersion"] as? String == "2")
         #expect(
