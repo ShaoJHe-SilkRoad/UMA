@@ -844,6 +844,11 @@ private struct DesktopAssistantCardView: View {
                 .background {
                     glassBackground
                         .overlay {
+                            if colorScheme == .light, !usesReduceTransparency {
+                                Color.white.opacity(UsageGaugePalette.minimalLightWash)
+                            }
+                        }
+                        .overlay {
                             if showsPercentageRail {
                                 UsageGaugeBackground(
                                     reading: gauge,

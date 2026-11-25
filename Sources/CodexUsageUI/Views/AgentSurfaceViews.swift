@@ -292,7 +292,7 @@ public struct AgentGlanceRow: View {
                     .filter { !$0.isEmpty }.joined(separator: " · "),
                 primaryResetText: UsageGaugeText.primaryReset(gauge, language: language),
                 secondaryText: UsageGaugeText.secondary(gauge, language: language),
-                statusColor: showsConnectivity ? statusColor : nil
+                statusColor: showsConnectivity ? gaugeLogoColor : nil
             )
         }
         .frame(height: gaugeHeight)
@@ -432,6 +432,16 @@ public struct AgentGlanceRow: View {
         case .disconnected, .unavailable: .secondary
         case .error: .red
         }
+    }
+
+    /// The gauge logo carries the connection state itself, on a tinted
+    /// column, so "connected" uses the deeper green in light mode everywhere.
+    private var gaugeLogoColor: Color {
+        if AgentGlancePresentationPolicy.status(for: provider) == .connected {
+            return AgentConnectionIndicatorPalette.connected(isDark: colorScheme == .dark,
+                                                             increasedLightContrast: true)
+        }
+        return statusColor
     }
 
     private var valueColor: Color {

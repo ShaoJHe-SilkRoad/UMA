@@ -77,6 +77,14 @@ public struct UsageGaugePreviewSheet: View {
                         }
                     }
                 }
+                HStack(spacing: 18) {
+                    ForEach(samples) { sample in MinimalGaugeMock(sample: sample) }
+                }
+                .padding(12)
+                .background(LinearGradient(colors: [Color(red: 0.30, green: 0.22, blue: 0.20),
+                                                    Color(red: 0.16, green: 0.18, blue: 0.22)],
+                                           startPoint: .leading, endPoint: .trailing))
+                captionText(t("On a dark desktop", "放在深色桌面上"))
                 HStack(alignment: .top, spacing: 18) {
                     VStack(spacing: 4) {
                         MinimalGaugeMock(sample: samples[0])
@@ -224,7 +232,7 @@ private struct MinimalGaugeMock: View {
         HStack(spacing: 3) {
             GaugeLogo(providerID: sample.providerID, diameter: 18)
             Text(sample.reading.primaryValueText)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .font(UsageGaugeTypography.number(size: 13))
                 .monospacedDigit()
                 .frame(minWidth: 34, alignment: .trailing)
         }
@@ -233,6 +241,8 @@ private struct MinimalGaugeMock: View {
         .frame(height: height)
         .background {
             GaugeGlass().overlay {
+                if colorScheme == .light { Color.white.opacity(UsageGaugePalette.minimalLightWash) }
+            }.overlay {
                 UsageGaugeBackground(reading: sample.reading, leftRadius: left, rightRadius: right,
                                      barWidth: 2.5, fillOpacity: gaugeFillOpacity(colorScheme))
             }
@@ -242,6 +252,7 @@ private struct MinimalGaugeMock: View {
 }
 
 private struct BandGaugeMock: View {
+    @Environment(\.colorScheme) private var colorScheme
     let sample: UsageGaugePreviewSheet.Sample
     let isChinese: Bool
     let size: CGSize
@@ -257,7 +268,8 @@ private struct BandGaugeMock: View {
             title: showsName ? "\(sample.name) · \(sample.plan)" : nil,
             primaryResetText: UsageGaugeText.primaryReset(sample.reading, language: language),
             secondaryText: UsageGaugeText.secondary(sample.reading, language: language),
-            statusColor: AgentConnectionIndicatorPalette.connected(isDark: true)
+            statusColor: AgentConnectionIndicatorPalette.connected(isDark: colorScheme == .dark,
+                                                                   increasedLightContrast: true)
         )
     }
 }

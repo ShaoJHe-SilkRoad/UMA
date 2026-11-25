@@ -41,6 +41,11 @@ public enum UsageGaugePalette {
             isDark ? Color(white: 0.62) : Color(white: 0.50)
         }
     }
+
+    /// In light mode the Minimalist capsule's glass follows the wallpaper, so
+    /// on a dark desktop its green logo and 7D bar sank into it. A white wash
+    /// keeps the capsule light whatever lies behind it.
+    public static let minimalLightWash = 0.5
 }
 
 /// One usage window as the gauge needs it.
@@ -259,16 +264,13 @@ public struct UsageGaugeBackground: View {
                 if let fraction = reading.primaryFraction {
                     let color = UsageGaugePalette.color(reading.primaryTier, isDark: isDark)
                     let width = proxy.size.width * min(1, max(0, fraction))
-                    // Deepens toward the level, with a crisp edge where it ends.
-                    LinearGradient(
-                        colors: [color.opacity(fillOpacity * 0.45), color.opacity(fillOpacity * 1.35)],
-                        startPoint: .leading, endPoint: .trailing
-                    )
-                    .frame(width: width, height: fillHeight ?? proxy.size.height)
+                    // One flat colour; solid ticks mark where it ends.
+                    color.opacity(fillOpacity)
+                        .frame(width: width, height: fillHeight ?? proxy.size.height)
                     if fraction > 0.02, fraction < 0.995 {
                         UsageGaugeLevelEdge(color: color)
-                            .frame(width: 1.5, height: fillHeight ?? proxy.size.height)
-                            .offset(x: width - 1.5)
+                            .frame(width: UsageGaugeLevelEdge.width, height: fillHeight ?? proxy.size.height)
+                            .offset(x: width - UsageGaugeLevelEdge.width)
                     }
                 }
                 wrapBar(size: proxy.size, isDark: isDark)
@@ -300,21 +302,29 @@ public struct UsageGaugeBackground: View {
 
 // MARK: - Level edge
 
-/// Where a level ends: short ticks at the top and bottom, clear in between
-/// so it never cuts through text.
+/// Where a level ends: a short solid tick at the top and at the bottom,
+/// clear in between so it never cuts through text.
 struct UsageGaugeLevelEdge: View {
+    static let width: CGFloat = 2
+    static let tickLength: CGFloat = 6
     let color: Color
 
     var body: some View {
-        let lit = color.opacity(0.95)
-        Rectangle().fill(LinearGradient(stops: [
-            .init(color: lit, location: 0),
-            .init(color: lit, location: 0.05),
-            .init(color: lit.opacity(0), location: 0.09),
-            .init(color: lit.opacity(0), location: 0.91),
-            .init(color: lit, location: 0.95),
-            .init(color: lit, location: 1),
-        ], startPoint: .top, endPoint: .bottom))
+        VStack(spacing: 0) {
+            Capsule().fill(color).frame(width: Self.width, height: Self.tickLength)
+            Spacer(minLength: 0)
+            Capsule().fill(color).frame(width: Self.width, height: Self.tickLength)
+        }
+    }
+}
+
+// MARK: - Typography
+
+/// The gauge's numbers: SF Pro Medium Condensed with even digits, the same
+/// recipe as the Minimalist assistant's value.
+enum UsageGaugeTypography {
+    static func number(size: CGFloat) -> Font {
+        .system(size: size, weight: .medium).width(.condensed).monospacedDigit()
     }
 }
 
@@ -349,6 +359,14 @@ public struct UsageGaugeCardGeometry: Equatable, Sendable {
     public var capWidth: CGFloat { (logoDiameter + h * 0.24).rounded() }
     public var logoCenter: CGPoint { CGPoint(x: capWidth / 2, y: h / 2) }
     public var logoGlyphDiameter: CGFloat { logoDiameter * 0.56 }
+    /// The bare logo on the column: no disc; it takes the connection colour.
+    public var logoGlyphSize: CGFloat { (h * 0.42).rounded() }
+    /// The card-surface gap between colour blocks.
+    public let seamGap: CGFloat = 2
+    /// The inner corner where the 7D column turns into the bottom band.
+    public var filletRadius: CGFloat { (h * 0.11).rounded() }
+    /// The right edge of the logo column, before the gap.
+    public var columnWidth: CGFloat { capWidth - seamGap / 2 }
     public var textX: CGFloat { capWidth + h * 0.14 }
     public var trailingInset: CGFloat { h * 0.2 }
 
@@ -356,9 +374,40 @@ public struct UsageGaugeCardGeometry: Equatable, Sendable {
         capWidth + (size.width - capWidth) * min(1, max(0, fraction))
     }
 
-    /// The 5H fill: from the logo column to the remaining share.
+    /// The 5H fill: from the gap after the logo column to the remaining share,
+    /// above the gap over the 7D band; its inner corner follows the L's turn.
     public func fillPath(fraction: Double) -> Path {
-        Path(CGRect(x: capWidth, y: 0, width: fillEndX(fraction: fraction) - capWidth, height: bandHeight))
+        let x = capWidth + seamGap / 2
+        let rect = CGRect(x: x, y: 0, width: max(0, fillEndX(fraction: fraction) - x),
+                          height: bandHeight - seamGap / 2)
+        let radius = min(filletRadius, rect.width / 2, rect.height / 2)
+        return UnevenRoundedRectangle(bottomLeadingRadius: radius, style: .continuous).path(in: rect)
+    }
+
+    /// The whole 7D bar as one shape, so it is filled once in one colour:
+    /// the logo column filled top down (its first tenth), then, past a tenth,
+    /// the inner turn and the bottom band.
+    public func sevenDayPath(fraction: Double) -> Path {
+        var path = Path()
+        let column = columnWidth
+        path.addRect(CGRect(x: 0, y: 0, width: column, height: capFill(fraction: fraction)))
+        guard fraction >= 0.1 else { return path }
+        let top = bandHeight + seamGap / 2
+        let end = capWidth + bottomFillWidth(fraction: fraction)
+        path.addRect(CGRect(x: column, y: top, width: max(0, end - column), height: size.height - top))
+        // The turn: the corner between the column and the band, cut by an arc
+        // that keeps one gap's distance from the 5H block's rounded corner.
+        let center = CGPoint(x: capWidth + seamGap / 2 + filletRadius,
+                             y: bandHeight - seamGap / 2 - filletRadius)
+        var turn = Path()
+        turn.move(to: CGPoint(x: column, y: center.y))
+        turn.addLine(to: CGPoint(x: column, y: top))
+        turn.addLine(to: CGPoint(x: center.x, y: top))
+        turn.addArc(center: center, radius: filletRadius + seamGap,
+                    startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false)
+        turn.closeSubpath()
+        path.addPath(turn)
+        return path
     }
 
     /// How much of the logo column is filled, top down: the 7D bar's first tenth.
@@ -382,7 +431,7 @@ public struct UsageGaugeCard: View {
     public let title: String?
     public let primaryResetText: String
     public let secondaryText: String
-    /// The connection dot on the logo; nil draws none.
+    /// The logo's connection colour; nil draws the logo in ink.
     public let statusColor: Color?
 
     public init(
@@ -422,10 +471,6 @@ public struct UsageGaugeCard: View {
             } else {
                 sevenDayBar(geometry: g)
                 fiveHourLevel(geometry: g)
-                Rectangle()
-                    .fill(Color.primary.opacity(isDark ? 0.10 : 0.08))
-                    .frame(width: size.width - g.capWidth, height: 0.5)
-                    .offset(x: g.capWidth, y: g.bandHeight)
             }
             logo(geometry: g)
             if isSingleBand {
@@ -438,7 +483,7 @@ public struct UsageGaugeCard: View {
         .clipShape(shape)
         .overlay {
             shape.strokeBorder(LinearGradient(
-                colors: [Color.white.opacity(isDark ? 0.18 : 0.75), Color.primary.opacity(isDark ? 0.06 : 0.08)],
+                colors: [Color.white.opacity(isDark ? 0.12 : 0.75), Color.primary.opacity(isDark ? 0.06 : 0.08)],
                 startPoint: .top, endPoint: .bottom
             ), lineWidth: 1)
         }
@@ -446,17 +491,21 @@ public struct UsageGaugeCard: View {
 
     // MARK: Surfaces
 
-    private func levelGradient(_ color: Color) -> LinearGradient {
-        LinearGradient(
-            colors: [color.opacity(isDark ? 0.14 : 0.12), color.opacity(isDark ? 0.42 : 0.36)],
-            startPoint: .leading, endPoint: .trailing
-        )
+    /// Flat fills: the big 5H (or single) level one step lighter than the
+    /// thinner 7D bar, so the big value stays clear and the two never merge.
+    private enum Band { case level, bar }
+
+    private func levelFill(_ color: Color, _ band: Band) -> Color {
+        switch band {
+        case .level: color.opacity(isDark ? 0.24 : 0.18)
+        case .bar: color.opacity(isDark ? 0.32 : 0.28)
+        }
     }
 
     private func edge(_ color: Color, at x: CGFloat, height: CGFloat, y: CGFloat = 0) -> some View {
         UsageGaugeLevelEdge(color: color)
-            .frame(width: 1.5, height: height)
-            .offset(x: x - 1.5, y: y)
+            .frame(width: UsageGaugeLevelEdge.width, height: height)
+            .offset(x: x - UsageGaugeLevelEdge.width, y: y)
     }
 
     private func fiveHourLevel(geometry g: UsageGaugeCardGeometry) -> some View {
@@ -465,39 +514,44 @@ public struct UsageGaugeCard: View {
         let end = g.fillEndX(fraction: fraction)
         return ZStack(alignment: .topLeading) {
             if reading.primaryFraction != nil {
-                g.fillPath(fraction: fraction).fill(levelGradient(color))
+                g.fillPath(fraction: fraction).fill(levelFill(color, .level))
                 if fraction > 0.02, fraction < 0.995 {
-                    edge(color, at: end, height: g.bandHeight)
+                    edge(color, at: end, height: g.bandHeight - g.seamGap / 2)
                 }
             }
         }
     }
 
+    /// The 7D bar: one L-shaped block in one flat colour. Only the column's
+    /// unfilled part (7D under a tenth) shows a quiet track, never under the fill.
     private func sevenDayBar(geometry g: UsageGaugeCardGeometry) -> some View {
         let color = UsageGaugePalette.color(reading.barTier, isDark: isDark)
         let fraction = reading.barFraction ?? 0
-        let bottomHeight = h - g.bandHeight
-        let bottomWidth = g.bottomFillWidth(fraction: fraction)
+        let filled = g.capFill(fraction: fraction)
         return ZStack(alignment: .topLeading) {
-            // The logo column: a quiet track, filled top down.
-            color.opacity(isDark ? 0.08 : 0.08)
-                .frame(width: g.capWidth, height: h)
-            color.opacity(isDark ? 0.34 : 0.30)
-                .frame(width: g.capWidth, height: g.capFill(fraction: fraction))
-            // The bottom band, filled left to right.
-            levelGradient(color)
-                .frame(width: bottomWidth, height: bottomHeight)
-                .offset(x: g.capWidth, y: g.bandHeight)
+            if filled < h {
+                color.opacity(isDark ? 0.08 : 0.06)
+                    .frame(width: g.columnWidth, height: h - filled)
+                    .offset(y: filled)
+            }
+            g.sevenDayPath(fraction: fraction).fill(levelFill(color, .bar))
         }
     }
 
+    /// One band: the logo column, a gap, then the level; one flat colour.
     private func singleBandLevel(geometry g: UsageGaugeCardGeometry) -> some View {
         let color = UsageGaugePalette.color(reading.primaryTier, isDark: isDark)
         let fraction = reading.primaryFraction ?? 0
         let end = size.width * min(1, max(0, fraction))
+        let levelX = g.capWidth + g.seamGap / 2
         return ZStack(alignment: .topLeading) {
             if reading.primaryFraction != nil {
-                levelGradient(color).frame(width: end, height: h)
+                levelFill(color, .level).frame(width: min(end, g.columnWidth), height: h)
+                if end > levelX {
+                    levelFill(color, .level)
+                        .frame(width: end - levelX, height: h)
+                        .offset(x: levelX)
+                }
                 if fraction > 0.02, fraction < 0.995 {
                     edge(color, at: end, height: h)
                 }
@@ -505,25 +559,15 @@ public struct UsageGaugeCard: View {
         }
     }
 
+    /// The logo straight on the column, no disc and no separate dot: it takes
+    /// the connection colour itself (or the ink colour where none is shown).
     private func logo(geometry g: UsageGaugeCardGeometry) -> some View {
-        let d = g.logoDiameter
-        return ZStack {
-            Circle().fill(isDark ? Color(white: 0.10) : Color.white)
-            Circle().strokeBorder(Color.primary.opacity(isDark ? 0.22 : 0.12), lineWidth: 1)
-            DesktopAgentLogo(providerID: providerID, tint: .primary, diameter: g.logoGlyphDiameter)
-        }
-        .frame(width: d, height: d)
-        .overlay(alignment: .bottomTrailing) {
-            if let statusColor {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: d * 0.2, height: d * 0.2)
-                    .overlay { Circle().stroke(isDark ? Color(white: 0.10) : Color.white, lineWidth: 1.5) }
-                    .offset(x: d * 0.02, y: d * 0.02)
-            }
-        }
-        .shadow(color: .black.opacity(isDark ? 0.35 : 0.10), radius: h * 0.04, y: h * 0.015)
-        .offset(x: g.logoCenter.x - d / 2, y: g.logoCenter.y - d / 2)
+        let size = g.logoGlyphSize
+        return DesktopAgentLogo(providerID: providerID,
+                                tint: statusColor ?? Color.primary.opacity(0.88),
+                                diameter: size)
+            .frame(width: size, height: size)
+            .offset(x: g.logoCenter.x - size / 2, y: g.logoCenter.y - size / 2)
     }
 
     // MARK: Text
@@ -536,11 +580,11 @@ public struct UsageGaugeCard: View {
             HStack(alignment: .center, spacing: 6) {
                 VStack(alignment: .leading, spacing: 1) {
                     if let title { titleText(title) }
-                    resetText(primaryResetText, size: points(0.165))
+                    resetText(primaryResetText, size: points(0.153))
                 }
                 Spacer(minLength: 4)
                 labelledValue(label: "5H", value: reading.primaryValueText,
-                              size: points(0.37, minimum: 18),
+                              size: points(0.39, minimum: 18),
                               tint: reading.primaryTier == .low ? primaryColor : nil)
             }
             .padding(.leading, g.textX)
@@ -549,7 +593,7 @@ public struct UsageGaugeCard: View {
 
             // Bottom band: the 7D reset on the left; "7D" and its value on the right.
             HStack(alignment: .center, spacing: 6) {
-                resetText(secondaryText, size: points(0.145))
+                resetText(secondaryText, size: points(0.146))
                 Spacer(minLength: 4)
                 if let small = reading.secondaryValueText {
                     inlineValue(label: "7D", value: small, size: points(0.18, minimum: 11))
@@ -568,17 +612,17 @@ public struct UsageGaugeCard: View {
         return HStack(alignment: .center, spacing: 6) {
             VStack(alignment: .leading, spacing: 2) {
                 if let title { titleText(title) }
-                resetText(primaryResetText, size: points(0.165), mark: reading.lead == .sevenDay)
+                resetText(primaryResetText, size: points(0.153), mark: reading.lead == .sevenDay)
                 if reading.lead == .sevenDay {
                     Text(secondaryText)
-                        .font(.system(size: points(0.14), weight: .medium, design: .rounded))
+                        .font(.system(size: points(0.146), weight: .medium))
                         .foregroundStyle(.primary.opacity(0.55))
                         .lineLimit(1)
                 }
             }
             Spacer(minLength: 4)
             labelledValue(label: label, value: reading.primaryValueText,
-                          size: points(0.42, minimum: 20),
+                          size: points(0.417, minimum: 20),
                           tint: reading.primaryTier == .low ? primaryColor : nil)
         }
         .padding(.leading, g.textX)
@@ -593,7 +637,7 @@ public struct UsageGaugeCard: View {
             Text(text).fixedSize()
             Text(name)
         }
-        .font(.system(size: points(0.17, minimum: 11), weight: .semibold))
+        .font(.system(size: points(0.18, minimum: 11), weight: .semibold))
         .foregroundStyle(.primary.opacity(0.92))
         .lineLimit(1)
     }
@@ -607,34 +651,48 @@ public struct UsageGaugeCard: View {
                     .foregroundStyle(.primary.opacity(0.45))
             }
             Text(text)
-                .font(.system(size: points, weight: .medium, design: .rounded))
+                .font(.system(size: points, weight: .medium))
                 .monospacedDigit()
-                .foregroundStyle(.primary.opacity(0.72))
+                .foregroundStyle(.primary.opacity(isDark ? 0.72 : 0.62))
         }
         .lineLimit(1)
     }
 
-    private func numberText(_ value: String, size points: CGFloat) -> Text {
+    /// The number in SF Pro Medium Condensed; its percent sign half the size
+    /// (never under 10 pt) and quieter, unless the value is tinted (low).
+    private func numberText(_ value: String, size points: CGFloat, color: Color, tinted: Bool) -> Text {
         let hasPercent = value.hasSuffix("%")
         let number = hasPercent ? String(value.dropLast()) : value
-        return Text(number).font(.system(size: points, weight: .semibold, design: .rounded))
-            + Text(hasPercent ? "%" : "").font(.system(size: points * 0.56, weight: .semibold, design: .rounded))
+        let percentColor = tinted ? color : Color.primary.opacity(0.6)
+        return Text(number).font(UsageGaugeTypography.number(size: points)).foregroundColor(color)
+            + Text(hasPercent ? "%" : "")
+                .font(UsageGaugeTypography.number(size: max(10, points * 0.5)))
+                .foregroundColor(percentColor)
     }
 
-    private func periodLabel(_ text: String, size points: CGFloat) -> some View {
+    /// "5H", "7D", "API": small, standard width, widely spaced.
+    private func periodLabel(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: points, weight: .bold, design: .rounded))
-            .tracking(0.4)
-            .foregroundStyle(.primary.opacity(0.5))
+            .font(.system(size: 10, weight: .semibold))
+            .tracking(0.6)
+            .foregroundStyle(.primary.opacity(isDark ? 0.70 : 0.60))
     }
 
     /// The big value with its period label just above it, right-aligned.
     private func labelledValue(label: String, value: String, size points: CGFloat, tint: Color?) -> some View {
         VStack(alignment: .trailing, spacing: 0) {
-            periodLabel(label, size: max(9.5, points * 0.32))
-            numberText(value, size: points)
-                .foregroundStyle(tint ?? Color.primary)
-                .padding(.top, -points * 0.12)
+            periodLabel(label)
+            Group {
+                if value == "∞" {
+                    Image(systemName: "infinity")
+                        .font(.system(size: points * 0.78, weight: .medium))
+                        .foregroundStyle(tint ?? Color.primary)
+                        .frame(height: points)
+                } else {
+                    numberText(value, size: points, color: tint ?? Color.primary, tinted: tint != nil)
+                }
+            }
+            .padding(.top, -points * 0.14)
         }
         .lineLimit(1)
         .fixedSize()
@@ -643,9 +701,8 @@ public struct UsageGaugeCard: View {
     /// "7D 71%": the period beside the small value.
     private func inlineValue(label: String, value: String, size points: CGFloat) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: points * 0.25) {
-            periodLabel(label, size: max(9.5, points * 0.62))
-            numberText(value, size: points)
-                .foregroundStyle(.primary.opacity(0.9))
+            periodLabel(label)
+            numberText(value, size: points, color: Color.primary.opacity(0.9), tinted: false)
         }
         .lineLimit(1)
         .fixedSize()
