@@ -544,13 +544,15 @@ struct SettingsWindowRootView: View {
     @ObservedObject var store: UsageStore
     @ObservedObject var navigation: GlobalSettingsNavigationState
     var dataPaths: ApplicationDataPaths = .current()
+    var geminiSettings: GeminiSettingsModel? = nil
 
     var body: some View {
         GlobalSettingsSurface(
             preferences: preferences,
             store: store,
             navigation: navigation,
-            dataPaths: dataPaths
+            dataPaths: dataPaths,
+            geminiSettings: geminiSettings
         )
     }
 }

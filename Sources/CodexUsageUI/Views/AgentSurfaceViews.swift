@@ -1954,6 +1954,46 @@ final class GlobalSettingsViewModel: ObservableObject {
 /// The agent arrangement as Settings shows it. Rows drag onto each other the
 /// way the main window's list does, and the arrows do the same one step at a
 /// time. Every change is saved at once and kept until the next one.
+/// Agents read from a web page through the Safari Bridge. Each row's switch
+/// is that agent's monitoring switch.
+struct WebUsageAgentSettingsRows: View {
+    @ObservedObject var coordinator: AgentSettingsCoordinator
+    @ObservedObject var gemini: GeminiSettingsModel
+    let language: AppLanguage
+
+    static let geminiToggleIdentifier = "uma.settings.agents.web-usage.gemini"
+
+    var body: some View {
+        Toggle(isOn: Binding(
+            get: { coordinator.isMonitoringEnabled(for: AgentPreferenceRecord.geminiProviderID) },
+            set: { $0 ? gemini.enable() : gemini.disable() }
+        )) {
+            HStack(spacing: 8) {
+                DesktopAgentLogo(
+                    providerID: ProviderProductID.gemini.rawValue,
+                    tint: .secondary,
+                    diameter: 18
+                )
+                .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(ProviderProductID.gemini.displayName)
+                    Text(detail)
+                        .font(AUVType.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .accessibilityIdentifier(Self.geminiToggleIdentifier)
+    }
+
+    private var detail: String {
+        coordinator.isMonitoringEnabled(for: AgentPreferenceRecord.geminiProviderID)
+            ? language.geminiState(gemini.state)
+            : language.geminiSourceLabel
+    }
+}
+
 private struct AgentOrderSettingsRows: View {
     @ObservedObject var store: UsageStore
     let language: AppLanguage
@@ -2089,15 +2129,18 @@ public struct GlobalSettingsSurface: View {
     @ObservedObject private var navigation: GlobalSettingsNavigationState
     @StateObject private var model: GlobalSettingsViewModel
     private let store: UsageStore
+    private let geminiSettings: GeminiSettingsModel?
 
     public init(
         preferences: ApplicationPreferences,
         store: UsageStore,
         navigation: GlobalSettingsNavigationState,
-        dataPaths: ApplicationDataPaths = .current()
+        dataPaths: ApplicationDataPaths = .current(),
+        geminiSettings: GeminiSettingsModel? = nil
     ) {
         self.navigation = navigation
         self.store = store
+        self.geminiSettings = geminiSettings
         _model = StateObject(
             wrappedValue: GlobalSettingsViewModel(
                 preferences: preferences, store: store, dataPaths: dataPaths
@@ -2291,6 +2334,24 @@ public struct GlobalSettingsSurface: View {
                     )
                 ) {
                     AgentOrderSettingsRows(store: store, language: model.language)
+                }
+                // Web-only agents have no app on this Mac for Scan Agents to
+                // find, so this switch is the only way to add one. Turning it
+                // on is the person's consent to the Safari read.
+                if let coordinator = store.agentSettings, let geminiSettings {
+                    settingsSection(
+                        localized("Web Usage", "网页用量"),
+                        footer: localized(
+                            "These agents have no app on this Mac, so Scan Agents cannot find them. Turning one on lets AUV open its usage page in Safari in a temporary tab, read only the usage, and close the tab. Its other settings then open from its page.",
+                            "这些智能体在本机没有应用，“扫描智能体”找不到它们。打开后，AUV 会在 Safari 的临时标签页打开它的用量页，只读取用量，读完即关闭。其他设置随后在它的页面中打开。"
+                        )
+                    ) {
+                        WebUsageAgentSettingsRows(
+                            coordinator: coordinator,
+                            gemini: geminiSettings,
+                            language: model.language
+                        )
+                    }
                 }
             case .menuBar:
                 settingsSection(localized("Menu Bar Item", "菜单栏项目")) {

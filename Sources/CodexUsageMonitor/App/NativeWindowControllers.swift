@@ -437,7 +437,8 @@ final class SettingsWindowController: NSWindowController {
     func attach(
         store: UsageStore,
         preferences: ApplicationPreferences,
-        dataPaths: ApplicationDataPaths = .current()
+        dataPaths: ApplicationDataPaths = .current(),
+        geminiSettings: GeminiSettingsModel? = nil
     ) {
         guard attachedStore == nil else { return }
         attachedStore = store
@@ -448,7 +449,8 @@ final class SettingsWindowController: NSWindowController {
                 preferences: preferences,
                 store: store,
                 navigation: navigation,
-                dataPaths: dataPaths
+                dataPaths: dataPaths,
+                geminiSettings: geminiSettings
             )
         )
         if let frameBeforeHosting {

@@ -630,6 +630,9 @@ enum ProviderProductStatePolicy {
         let agentWorkspace = isSupported && monitoringEnabled && (
             entry.productID == .codex
                 || entry.productID == .claude
+                // Gemini is only monitored once the person turns it on in
+                // Settings, so it is listed from then on, before its first read.
+                || entry.productID == .gemini
                 || retainedUsableState || configuredOrDetected || actionRequired
         )
 
