@@ -1020,7 +1020,8 @@ public struct AgentWorkspaceSurface: View {
             size: CGSize(width: max(240, width), height: 88),
             primaryResetText: primary,
             secondaryText: secondary,
-            statusColor: pageLogoColor
+            statusColor: pageLogoColor,
+            showsLogo: false
         )
         .frame(height: 88)
         .accessibilityElement(children: .ignore)
