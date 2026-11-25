@@ -137,93 +137,6 @@ private final class MainToolbarFocusableButton: NSButton {
 }
 
 @MainActor
-private final class MainAgentSettingsFocusBridge {
-    weak var button: NSButton?
-    private var keyObserver: NSObjectProtocol?
-    private var focusRetryTimer: Timer?
-
-    isolated deinit {
-        if let keyObserver { NotificationCenter.default.removeObserver(keyObserver) }
-        focusRetryTimer?.invalidate()
-    }
-
-    func restoreAfterSheetDismiss() {
-        guard let window = button?.window else { return }
-        if let keyObserver { NotificationCenter.default.removeObserver(keyObserver) }
-        keyObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.retryWhileKey() }
-        }
-        retryWhileKey()
-    }
-
-    private func retryWhileKey() {
-        focusRetryTimer?.invalidate()
-        guard button?.window?.isKeyWindow == true else { return }
-        let deadline = Date().addingTimeInterval(0.5)
-        focusRetryTimer = Timer.scheduledTimer(withTimeInterval: 0.025, repeats: true) { [weak self] timer in
-            let restored = MainActor.assumeIsolated { () -> Bool in
-                guard let self, let button = self.button,
-                      let window = button.window, window.isKeyWindow else { return false }
-                return window.makeFirstResponder(button)
-            }
-            if restored || Date() >= deadline {
-                timer.invalidate()
-                if restored { MainActor.assumeIsolated { self?.finishReturnFocus() } }
-            }
-        }
-    }
-
-    private func finishReturnFocus() {
-        focusRetryTimer?.invalidate()
-        focusRetryTimer = nil
-        if let keyObserver { NotificationCenter.default.removeObserver(keyObserver) }
-        keyObserver = nil
-    }
-}
-
-private struct MainAgentSettingsButton: NSViewRepresentable {
-    let label: String
-    let focusBridge: MainAgentSettingsFocusBridge
-    let action: () -> Void
-
-    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
-
-    func makeNSView(context: Context) -> NSButton {
-        let button = MainToolbarFocusableButton(title: "", target: context.coordinator,
-            action: #selector(Coordinator.activate(_:)))
-        // A titled push button, not a bare gear: the toolbar's Global
-        // Settings is the only gear, so the two settings entries read apart.
-        button.bezelStyle = .push
-        button.controlSize = .small
-        button.font = .systemFont(ofSize: NSFont.systemFontSize(for: .small))
-        button.imagePosition = .noImage
-        button.focusRingType = .exterior
-        button.refusesFirstResponder = false
-        focusBridge.button = button
-        updateNSView(button, context: context)
-        return button
-    }
-
-    func updateNSView(_ button: NSButton, context: Context) {
-        context.coordinator.action = action
-        button.title = label
-        button.setAccessibilityLabel(label)
-        button.setAccessibilityIdentifier("uma.agent.selected-settings")
-        button.toolTip = label
-        focusBridge.button = button
-    }
-
-    @MainActor
-    final class Coordinator: NSObject {
-        var action: () -> Void
-        init(action: @escaping () -> Void) { self.action = action }
-        @objc func activate(_ sender: NSButton) { action() }
-    }
-}
-
-@MainActor
 final class MainSurfaceNavigationState: ObservableObject {
     @Published var destination: MainSurfaceDestination = .agents
     @Published var selectedAgent: ProviderProductID = .codex
@@ -269,8 +182,6 @@ struct MainWindowRootView: View {
     // Tab removal stops observation, but must not discard the known volume rows.
     // The service is created lazily so visiting AUV/ThreadOS alone does no storage work.
     @StateObject private var sectoriumStoreLifetime = MainSectoriumStoreLifetime()
-    @State private var sheetProviderID: ProviderProductID?
-    @State private var agentSettingsFocusBridge = MainAgentSettingsFocusBridge()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -302,22 +213,6 @@ struct MainWindowRootView: View {
         .frame(minWidth: 760, minHeight: 488)
         .background(UMAVisualStyle.canvas)
         .environment(\.locale, store.language.locale)
-        .sheet(item: $sheetProviderID, onDismiss: {
-            agentSettingsFocusBridge.restoreAfterSheetDismiss()
-        }) { providerID in
-            AgentSpecificSettingsSheet(
-                store: store,
-                providerID: providerID.settingsProviderID,
-                claudeSettings: claudeSettings,
-                geminiSettings: geminiSettings,
-                openThreadOS: {
-                    sheetProviderID = nil
-                    navigation.destination = .threadOS
-                }
-            ) {
-                sheetProviderID = nil
-            }
-        }
     }
 
     private var versionFooter: some View {
@@ -432,7 +327,7 @@ struct MainWindowRootView: View {
                 } else {
                     GeometryReader { available in
                         ScrollView {
-                            VStack(spacing: 6) {
+                            VStack(spacing: 2) {
                                 ForEach(workspaceProviders) { provider in
                                     // Deliberately not a Button. A Button's own
                                     // gesture swallows the drag, so the row
@@ -483,15 +378,15 @@ struct MainWindowRootView: View {
                     }
                 }
             }
-            // 15% narrower than the 224–248 rail it replaces: the rows are
-            // gauges, and a shorter bar reads its level at a glance.
-            .frame(minWidth: 190, idealWidth: 204, maxWidth: 211)
+            // The list only navigates (icon, name, status when wrong); the
+            // agent page holds its usage and settings.
+            .frame(minWidth: 176, idealWidth: 188, maxWidth: 220)
             .background(UMAVisualStyle.canvas)
 
             AgentWorkspaceSurface(
                 store: store,
                 providerID: selectedProviderID,
-                settingsButton: workspaceProviders.isEmpty ? nil : AnyView(agentSettingsButton),
+                settingsContent: workspaceProviders.isEmpty ? nil : AnyView(agentSettingsPanel),
                 connectCodex: connectCodex,
                 disconnectCodex: disconnectCodex,
                 claudeControlState: claudeControlState,
@@ -503,18 +398,16 @@ struct MainWindowRootView: View {
         }
     }
 
-    /// The one way into an agent's own settings, on that agent's page. It
-    /// names the agent, so it cannot be mistaken for Global Settings.
-    private var agentSettingsButton: some View {
-        MainAgentSettingsButton(
-            label: localized(
-                "\(selectedProviderID.displayName) Settings…",
-                "\(selectedProviderID.displayName) 设置…"
-            ),
-            focusBridge: agentSettingsFocusBridge,
-            action: { sheetProviderID = selectedProviderID }
+    /// The one way into an agent's own settings: the last module of that
+    /// agent's page.
+    private var agentSettingsPanel: some View {
+        AgentSpecificSettingsPanel(
+            store: store,
+            providerID: selectedProviderID.settingsProviderID,
+            claudeSettings: claudeSettings,
+            geminiSettings: geminiSettings,
+            openThreadOS: { navigation.destination = .threadOS }
         )
-        .fixedSize()
     }
 
     private var workspaceProviders: [ProviderProductState] {

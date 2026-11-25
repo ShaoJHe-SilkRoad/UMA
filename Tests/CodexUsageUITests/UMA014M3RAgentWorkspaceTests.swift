@@ -95,7 +95,7 @@ struct UMA014M3RAgentWorkspaceTests {
             "primaryDisplayText",
             "provider?.sourceSummary",
             "provider?.freshness",
-            "activityDashboardCard",
+            "recentActivityRows",
             "BasicSharedUsagePresentation",
             "Accuracy Sync",
             "Source health",

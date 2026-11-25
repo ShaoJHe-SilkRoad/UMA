@@ -318,6 +318,41 @@ struct UsageGaugeLevelEdge: View {
     }
 }
 
+// MARK: - Surface
+
+/// The gauge card's own surface, for every module on the agent page, so the
+/// page has one surface: glass with a light or dark wash, a 14 pt continuous
+/// corner and the card's top-lit border.
+struct UsageGaugeSurface: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    var cornerRadius: CGFloat = 14
+
+    func body(content: Content) -> some View {
+        let isDark = colorScheme == .dark
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        content
+            .background {
+                ZStack {
+                    Rectangle().fill(.ultraThinMaterial)
+                    (isDark ? Color(white: 0.08).opacity(0.62) : Color.white.opacity(0.55))
+                }
+            }
+            .clipShape(shape)
+            .overlay {
+                shape.strokeBorder(LinearGradient(
+                    colors: [Color.white.opacity(isDark ? 0.12 : 0.75), Color.primary.opacity(isDark ? 0.06 : 0.08)],
+                    startPoint: .top, endPoint: .bottom
+                ), lineWidth: 1)
+            }
+    }
+}
+
+extension View {
+    func usageGaugeSurface(cornerRadius: CGFloat = 14) -> some View {
+        modifier(UsageGaugeSurface(cornerRadius: cornerRadius))
+    }
+}
+
 // MARK: - Typography
 
 /// The gauge's numbers: SF Pro Medium Condensed with even digits, the same
@@ -354,20 +389,19 @@ public struct UsageGaugeCardGeometry: Equatable, Sendable {
     var h: CGFloat { size.height }
     public var cornerRadius: CGFloat { min(14, h * 0.3) }
     public var bandHeight: CGFloat { isSingleBand ? h : (h * 0.72).rounded() }
-    public var logoDiameter: CGFloat { (h * 0.7).rounded() }
+
     /// The logo's column at the left end, which is also the 7D bar's first tenth.
-    public var capWidth: CGFloat { (logoDiameter + h * 0.24).rounded() }
+    public var capWidth: CGFloat { (h * 0.62).rounded() }
     public var logoCenter: CGPoint { CGPoint(x: capWidth / 2, y: h / 2) }
-    public var logoGlyphDiameter: CGFloat { logoDiameter * 0.56 }
     /// The bare logo on the column: no disc; it takes the connection colour.
-    public var logoGlyphSize: CGFloat { (h * 0.42).rounded() }
+    public var logoGlyphSize: CGFloat { (h * 0.36).rounded() }
     /// The card-surface gap between colour blocks.
     public let seamGap: CGFloat = 2
     /// The inner corner where the 7D column turns into the bottom band.
     public var filletRadius: CGFloat { (h * 0.11).rounded() }
     /// The right edge of the logo column, before the gap.
     public var columnWidth: CGFloat { capWidth - seamGap / 2 }
-    public var textX: CGFloat { capWidth + h * 0.14 }
+    public var textX: CGFloat { capWidth + h * 0.13 }
     public var trailingInset: CGFloat { h * 0.2 }
 
     public func fillEndX(fraction: Double) -> CGFloat {
@@ -778,6 +812,15 @@ public enum UsageGaugeText {
         case .unlimited: return "API"
         case .unavailable: return ""
         }
+    }
+
+    /// "20:20 · 4 小时后": a reset with how far off it is, for the agent page.
+    public static func withRelative(_ text: String, resetsAt: Date?, now: Date, language: AppLanguage) -> String {
+        guard !text.isEmpty, let resetsAt, resetsAt > now else { return text }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = Locale(identifier: language == .simplifiedChinese ? "zh_CN" : "en_US")
+        formatter.unitsStyle = .full
+        return "\(text) · \(formatter.localizedString(for: resetsAt, relativeTo: now))"
     }
 
     public static func time(_ date: Date, language: AppLanguage) -> String {

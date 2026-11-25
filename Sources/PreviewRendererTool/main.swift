@@ -602,7 +602,7 @@ struct PreviewRendererTool {
                 )
             )
         case .workspaceCodex:
-            size = CGSize(width: 640, height: 620)
+            size = CGSize(width: 640, height: arguments.contains("--tall") ? 1500 : 620)
             reviewContent = AnyView(
                 M3RAgentWorkspaceReview(
                     store: fixture.store,
@@ -610,7 +610,7 @@ struct PreviewRendererTool {
                 )
             )
         case .workspaceClaude:
-            size = CGSize(width: 640, height: 620)
+            size = CGSize(width: 640, height: arguments.contains("--tall") ? 1300 : 620)
             reviewContent = AnyView(
                 M3RAgentWorkspaceReview(
                     store: fixture.store,
@@ -1723,6 +1723,8 @@ private struct M3RAgentWorkspaceReview: View {
         AgentWorkspaceSurface(
             store: store,
             providerID: providerID,
+            settingsContent: AnyView(AgentSpecificSettingsPanel(
+                store: store, providerID: providerID.settingsProviderID)),
             connectCodex: {},
             disconnectCodex: {},
             claudeControlState: { .onlineVerificationUnavailable },
@@ -1746,9 +1748,9 @@ private struct M3RMainReviewSurface: View {
             HSplitView {
                 agentList
                     .frame(
-                        minWidth: narrow ? 205 : 220,
-                        idealWidth: narrow ? 215 : 235,
-                        maxWidth: narrow ? 220 : 260
+                        minWidth: 176,
+                        idealWidth: 188,
+                        maxWidth: 220
                     )
                 M3RAgentWorkspaceReview(
                     store: store,

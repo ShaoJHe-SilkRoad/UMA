@@ -115,11 +115,10 @@ private struct AgentRemainingQuotaBar: View {
             Capsule()
                 .fill(.primary.opacity(0.09))
                 .overlay(alignment: .leading) {
-                    // Deepens toward the level, as the usage gauge does.
+                    // One flat colour, as the usage gauge is.
                     if let fraction = CompactUsageFillPolicy.fraction(for: remainingPercent) {
                         Capsule()
-                            .fill(LinearGradient(colors: [tint.opacity(0.45), tint.opacity(0.95)],
-                                                 startPoint: .leading, endPoint: .trailing))
+                            .fill(tint.opacity(0.85))
                             .frame(width: geometry.size.width * fraction)
                     }
                 }
@@ -190,14 +189,10 @@ enum AgentWorkspaceLayoutPolicy {
 
 private struct AgentWorkspaceModuleSurface: ViewModifier {
     func body(content: Content) -> some View {
+        // The usage card's own surface, so the agent page has only one.
         content
-            .padding(AUVShape.cardPadding)
-            .background(UMAVisualStyle.surface)
-            .clipShape(RoundedRectangle(cornerRadius: AUVShape.cardRadius, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: AUVShape.cardRadius, style: .continuous)
-                    .strokeBorder(UMAVisualStyle.separator.opacity(0.55), lineWidth: 0.5)
-            }
+            .padding(14)
+            .usageGaugeSurface()
     }
 }
 
@@ -265,11 +260,48 @@ public struct AgentGlanceRow: View {
     }
 
     public var body: some View {
-        if showsRemainingRail, let gauge = gaugeReading {
+        if style == .mainList {
+            navigationRow
+        } else if showsRemainingRail, let gauge = gaugeReading {
             gaugeRow(gauge)
         } else {
             legacyRow
         }
+    }
+
+    /// The main window's list only navigates: the agent page shows all of
+    /// its usage. Icon in the connection colour, the name, and a status word
+    /// only when something is wrong.
+    private var navigationRow: some View {
+        HStack(spacing: 8) {
+            DesktopAgentLogo(providerID: provider.id.rawValue, tint: gaugeLogoColor, diameter: 18)
+                .frame(width: 18, height: 18)
+                .accessibilityHidden(true)
+            Text(displayName)
+                .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 4)
+            if AgentGlancePresentationPolicy.status(for: provider) != .connected {
+                Text(statusLabel)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.primary.opacity(0.45))
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 32)
+        .background {
+            if selected {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.09))
+            }
+        }
+        .contentShape(Rectangle())
+        .help(displayName)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     /// The unified usage gauge, for agents with a remaining share to show.
@@ -280,7 +312,7 @@ public struct AgentGlanceRow: View {
         return reading
     }
 
-    private var gaugeHeight: CGFloat { style == .quickPanel ? 72 : 60 }
+    private var gaugeHeight: CGFloat { 72 }
 
     private func gaugeRow(_ gauge: UsageGaugeReading) -> some View {
         GeometryReader { proxy in
@@ -830,7 +862,9 @@ public struct AgentWorkspaceSurface: View {
     @AppStorage("display.showAPICostCard") private var showsAPICostCard = false
     @ObservedObject private var store: UsageStore
     public let providerID: ProviderProductID
-    private let settingsButton: AnyView?
+    /// This agent's settings, shown in the page's last module: the one way
+    /// to them from the main window.
+    private let settingsContent: AnyView?
     private let connectCodex: () -> Void
     private let disconnectCodex: () -> Void
     private let claudeControlState: () -> ClaudeAgentControlState
@@ -844,7 +878,7 @@ public struct AgentWorkspaceSurface: View {
     public init(
         store: UsageStore,
         providerID: ProviderProductID,
-        settingsButton: AnyView? = nil,
+        settingsContent: AnyView? = nil,
         connectCodex: @escaping () -> Void,
         disconnectCodex: @escaping () -> Void,
         claudeControlState: @escaping () -> ClaudeAgentControlState,
@@ -854,7 +888,7 @@ public struct AgentWorkspaceSurface: View {
     ) {
         self.store = store
         self.providerID = providerID
-        self.settingsButton = settingsButton
+        self.settingsContent = settingsContent
         self.connectCodex = connectCodex
         self.disconnectCodex = disconnectCodex
         self.claudeControlState = claudeControlState
@@ -866,14 +900,23 @@ public struct AgentWorkspaceSurface: View {
     public var body: some View {
         GeometryReader { geometry in
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 12) {
                     header
                     if providerID != .codex { claudeActionCallout }
+                    // One way to show the remaining share on this page: the
+                    // usage card. Without a reading, the module says why.
+                    if let gauge = pageGauge {
+                        pageGaugeCard(gauge, width: geometry.size.width
+                                      - AgentWorkspaceLayoutPolicy.horizontalPadding * 2)
+                    } else {
+                        usageModule
+                    }
                     if providerID == .codex {
                         codexDashboard(for: geometry.size.width)
                     } else {
                         standardWorkspace(for: geometry.size.width)
                     }
+                    settingsModule
                 }
                 .padding(.horizontal, AgentWorkspaceLayoutPolicy.horizontalPadding)
                 .padding(.vertical, 18)
@@ -906,90 +949,149 @@ public struct AgentWorkspaceSurface: View {
             alignment: .leading,
             spacing: AgentWorkspaceLayoutPolicy.moduleSpacing
         ) {
-            usageModule
             connectionModule
             if showsAPICostCard, localCostEstimate != nil { localCostModule }
         }
     }
 
-    /// The rail owns the primary remaining fill; the detail view keeps quota
-    /// states visible while giving the account metrics and dated trend priority.
+    /// Below the usage card: account metrics, the dated trend, and the
+    /// connection with recent local activity folded into it.
     private func codexDashboard(for width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             metricRow(for: width)
-            quotaSummary(for: width)
             trendGapCard
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 10) {
-                    connectionModule.frame(maxWidth: .infinity, alignment: .leading)
-                    activityDashboardCard.frame(maxWidth: .infinity, alignment: .leading)
-                }
-                VStack(spacing: 10) { connectionModule; activityDashboardCard }
-            }
+            connectionModule
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("uma.agent.codex.dashboard")
     }
 
-    private var codexHeaderActions: some View {
-        HStack(spacing: 8) {
-            // Refresh All sits in the toolbar above; a "Refresh" here read as
-            // this agent only but refreshed every agent.
-            if let settingsButton { settingsButton }
-            if provider?.connection == .connected || provider?.connection == .transitional {
-                Button(localized("Disconnect", "断开连接"), action: disconnectCodex)
+    private var isCodexConnected: Bool {
+        provider?.connection == .connected || provider?.connection == .transitional
+    }
+
+    // MARK: Usage card
+
+    private var pageGauge: UsageGaugeReading? {
+        guard let provider, let reading = UsageGaugeReading.from(provider: provider),
+              reading.lead != .unavailable else { return nil }
+        return reading
+    }
+
+    private var pageLogoColor: Color {
+        guard let provider else { return .secondary }
+        if AgentGlancePresentationPolicy.status(for: provider) == .connected {
+            return AgentConnectionIndicatorPalette.connected(isDark: colorScheme == .dark,
+                                                             increasedLightContrast: true)
+        }
+        return workspaceLogoColor
+    }
+
+    /// The same card as the Quick Panel's, taller, with the time to each reset.
+    private func pageGaugeCard(_ gauge: UsageGaugeReading, width: CGFloat) -> some View {
+        let language = store.language
+        let now = displayNow
+        func dayAndTime(_ date: Date) -> String {
+            "\(UsageGaugeText.day(date, language: language)) \(UsageGaugeText.time(date, language: language))"
+        }
+        let primary: String
+        let secondary: String
+        switch gauge.lead {
+        case .fiveHour:
+            primary = gauge.primary?.resetsAt.map {
+                UsageGaugeText.withRelative(UsageGaugeText.time($0, language: language),
+                                            resetsAt: $0, now: now, language: language)
+            } ?? ""
+            secondary = gauge.secondary?.resetsAt.map {
+                UsageGaugeText.withRelative(dayAndTime($0), resetsAt: $0, now: now, language: language)
+            } ?? ""
+        case .sevenDay:
+            primary = gauge.primary?.resetsAt.map {
+                UsageGaugeText.withRelative(dayAndTime($0), resetsAt: $0, now: now, language: language)
+            } ?? ""
+            secondary = UsageGaugeText.secondary(gauge, language: language)
+        case .unlimited, .unavailable:
+            primary = UsageGaugeText.primaryReset(gauge, language: language)
+            secondary = UsageGaugeText.secondary(gauge, language: language)
+        }
+        return UsageGaugeCard(
+            reading: gauge,
+            providerID: providerID.rawValue,
+            size: CGSize(width: max(240, width), height: 88),
+            primaryResetText: primary,
+            secondaryText: secondary,
+            statusColor: pageLogoColor
+        )
+        .frame(height: 88)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(pageGaugeAccessibilityLabel(gauge, primary: primary, secondary: secondary))
+        .accessibilityIdentifier("uma.agent.usage-card")
+    }
+
+    private func pageGaugeAccessibilityLabel(_ gauge: UsageGaugeReading, primary: String, secondary: String) -> String {
+        switch gauge.lead {
+        case .fiveHour:
+            var label = localized("5 hours: \(gauge.primaryValueText) left, resets \(primary)",
+                                  "5 小时剩余 \(gauge.primaryValueText)，\(primary) 重置")
+            if let seven = gauge.secondaryValueText {
+                label += localized("; 7 days: \(seven) left, resets \(secondary)",
+                                   "；7 天剩余 \(seven)，\(secondary) 重置")
+            }
+            return label
+        case .sevenDay:
+            return localized("7 days: \(gauge.primaryValueText) left, resets \(primary)",
+                             "7 天剩余 \(gauge.primaryValueText)，\(primary) 重置")
+        case .unlimited:
+            return localized("No limit", "没有上限")
+        case .unavailable:
+            return localized("No quota reading", "无额度读数")
+        }
+    }
+
+    // MARK: Settings
+
+    /// The agent's settings, last on its page: the only way to them from the
+    /// main window. Codex's connection is the module's last row.
+    @ViewBuilder private var settingsModule: some View {
+        if settingsContent != nil || providerID == .codex {
+            module(localized("\(providerID.displayName) Settings", "\(providerID.displayName) 设置"),
+                   systemImage: "slider.horizontal.3") {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let settingsContent { settingsContent }
+                    if providerID == .codex {
+                        if settingsContent != nil { Divider().accessibilityHidden(true) }
+                        codexConnectionRow
+                    }
+                }
+            }
+            .accessibilityIdentifier("uma.agent.settings.\(providerID.rawValue)")
+        }
+    }
+
+    private var codexConnectionRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(localized("Connection", "连接"))
+                    .font(.system(size: 13, weight: .medium))
+                Text(isCodexConnected
+                     ? localized("After disconnecting, AUV stops reading this agent's usage.",
+                                 "断开后 AUV 不再读取此智能体的用量。")
+                     : localized("Connect to read this agent's usage.", "连接后读取此智能体的用量。"))
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            if isCodexConnected {
+                Button(localized("Disconnect", "断开连接"), role: .destructive, action: disconnectCodex)
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("uma.agent.codex.disconnect")
             } else {
                 Button(localized("Connect", "连接"), action: connectCodex)
-                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("uma.agent.codex.connect")
             }
         }
-        .controlSize(.small)
-        .accessibilityIdentifier("uma.agent.codex.header-actions")
-    }
-
-    private func quotaSummary(for width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            if width >= 560 {
-                HStack(alignment: .top, spacing: 12) {
-                    quotaSummarySegment(kind: .fiveHour, label: localized("5H", "5小时"))
-                    quotaSummarySegment(kind: .sevenDay, label: localized("7D", "7天"))
-                }
-            } else {
-                VStack(spacing: 7) {
-                quotaSummarySegment(kind: .fiveHour, label: localized("5H", "5小时"))
-                quotaSummarySegment(kind: .sevenDay, label: localized("7D", "7天"))
-                }
-            }
-        }
-        .accessibilityIdentifier("uma015.codex.quota-summary")
-        .background(AgentWorkspaceGeometryAnchor(identifier: "uma015.codex.quota-bounds"))
-    }
-
-    private func quotaSummarySegment(kind: ProviderProductQuotaKind, label: String) -> some View {
-        let quota = kind == .fiveHour ? codexProjection.fiveHour : codexProjection.sevenDay
-        let percent = quota.state.ringPercent
-        let quotaText = quota.displayText(language: store.language)
-        let reset = Self.detailResetLine(
-            kind: kind, resetsAt: quota.resetAt, language: store.language, now: displayNow)
-        let tint = UsageGaugePalette.dynamicColor(forRemaining: percent)
-        return VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text("\(label) \(localized("remaining", "剩余"))")
-                    .font(AUVType.headline)
-                Spacer(minLength: 4)
-                Text(quotaText)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-            }
-            AgentRemainingQuotaBar(remainingPercent: percent, tint: tint)
-            if let reset { resetText(reset) }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            "\(label) \(localized("remaining", "剩余")): \(quotaText)"
-                + (reset.map { ", \($0)" } ?? "")
-        )
-        .accessibilityIdentifier("uma.agent.codex.quota.\(kind == .fiveHour ? "five-hour" : "seven-day")")
     }
 
     @State private var showsHistoryCaveat = false
@@ -1055,24 +1157,32 @@ public struct AgentWorkspaceSurface: View {
     private func accountDailyBars(_ buckets: [AgentAccountUsageDay]) -> some View {
         let shown = codexProjection.dailySlots()
         let maximum = max(Int64(1), shown.compactMap(\.tokens).max() ?? 1)
+        // Neutral bars: colour on this page belongs to the usage card, and blue
+        // there means "no limit". The latest day with a value is a step deeper.
+        let latest = shown.last(where: { ($0.tokens ?? 0) > 0 })?.id
+        let isDark = colorScheme == .dark
         return HStack(alignment: .bottom, spacing: 7) {
             ForEach(shown) { bucket in
                 VStack(spacing: 4) {
                     Text(bucket.tokens.map { $0.formatted(.number.notation(.compactName)) } ?? "—")
-                        .font(AUVType.secondary).monospacedDigit()
+                        .font(UsageGaugeTypography.number(size: 12))
                         .foregroundStyle(.secondary)
                     RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .fill(bucket.tokens == nil ? Color.secondary.opacity(0.22) : Color.accentColor.opacity(0.78))
-                        .frame(height: bucket.tokens == 0 ? 0 : max(4, 128 * CGFloat(Double(bucket.tokens ?? 0) / Double(maximum))))
+                        .fill(bucket.tokens == nil
+                              ? Color.primary.opacity(0.08)
+                              : Color.primary.opacity(bucket.id == latest
+                                                      ? (isDark ? 0.55 : 0.50)
+                                                      : (isDark ? 0.26 : 0.20)))
+                        .frame(height: bucket.tokens == 0 ? 0 : max(4, 84 * CGFloat(Double(bucket.tokens ?? 0) / Double(maximum))))
                     Text(String(bucket.day.suffix(5)))
-                        .font(AUVType.secondary).monospacedDigit().foregroundStyle(.secondary)
+                        .font(.system(size: 11)).monospacedDigit().foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .bottom)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(bucket.tokens.map { "\(bucket.day): \($0) tokens" } ?? "\(bucket.day): unknown tokens")
             }
         }
-        .frame(height: 171, alignment: .bottom)
+        .frame(height: 124, alignment: .bottom)
         .accessibilityIdentifier("uma.agent.codex.daily-plot")
         .background(AgentWorkspaceGeometryAnchor(identifier: "uma015.codex.plot-bounds"))
     }
@@ -1083,11 +1193,17 @@ public struct AgentWorkspaceSurface: View {
 
     private func metricRow(for width: CGFloat) -> some View {
         let metrics = codexProjection.metrics
-        let columns = Array(repeating: GridItem(.flexible(minimum: 0), spacing: 8, alignment: .top), count: width >= 680 ? 3 : 1)
-        return LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-            dashboardMetric(metrics.first(where: { $0.id == "week" }), title: localized("Account 7D tokens", "账户7天令牌"), anchor: "uma015.codex.metric-week")
-            dashboardMetric(metrics.first(where: { $0.id == "total" }), title: localized("Account lifetime tokens", "账户累计令牌"), anchor: "uma015.codex.metric-total")
-            dashboardMetric(metrics.first(where: { $0.id == "api-cost-seven-days" }), title: CodexDashboardPresentation.localEstimateTitle(language: store.language), anchor: "uma015.codex.metric-local", isLocalEstimate: true)
+        let week = dashboardMetric(metrics.first(where: { $0.id == "week" }), title: localized("Account 7D tokens", "账户7天令牌"), anchor: "uma015.codex.metric-week")
+        let total = dashboardMetric(metrics.first(where: { $0.id == "total" }), title: localized("Account lifetime tokens", "账户累计令牌"), anchor: "uma015.codex.metric-total")
+        let local = dashboardMetric(metrics.first(where: { $0.id == "api-cost-seven-days" }), title: CodexDashboardPresentation.localEstimateTitle(language: store.language), anchor: "uma015.codex.metric-local", isLocalEstimate: true)
+        // Three equal blocks in a row; one column only in a very narrow page.
+        return Group {
+            if width >= 520 {
+                HStack(alignment: .top, spacing: 8) { week; total; local }
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                VStack(spacing: 8) { week; total; local }
+            }
         }
         .accessibilityIdentifier("uma.agent.codex.metrics")
         .background(AgentWorkspaceGeometryAnchor(identifier: "uma015.codex.metric-bounds"))
@@ -1125,7 +1241,7 @@ public struct AgentWorkspaceSurface: View {
                 .help(title)
                 .accessibilityIdentifier("\(anchor)-title")
             Text(CodexDashboardPresentation.metricValue(metric, state: sourceState))
-                .font(.system(size: 20, weight: .semibold, design: .rounded)).monospacedDigit()
+                .font(UsageGaugeTypography.number(size: 24))
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
                 .background(AgentWorkspaceGeometryAnchor(identifier: "\(anchor)-value"))
@@ -1149,32 +1265,27 @@ public struct AgentWorkspaceSurface: View {
                     .help(status)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(12)
-        .background(UMAVisualStyle.surface)
-        .clipShape(RoundedRectangle(cornerRadius: AUVShape.cardRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: AUVShape.cardRadius, style: .continuous)
-                .strokeBorder(UMAVisualStyle.separator.opacity(0.55), lineWidth: 0.5)
-        }
+        .usageGaugeSurface()
         .background(AgentWorkspaceGeometryAnchor(identifier: anchor))
     }
 
-    private var activityDashboardCard: some View {
-        module(localized("Recent local activity", "最近本地活动"), systemImage: "clock.arrow.circlepath") {
-            let activity = store.snapshot.recentTasks
-            switch CodexDashboardPresentation.activityState(snapshot: store.snapshot) {
-            case .unavailable:
-                Text(localized("Local activity source unavailable.", "本地活动来源不可用。"))
-                    .font(AUVType.secondary).foregroundStyle(.secondary)
-            case .empty:
-                Text(localized("No recent allowlisted local activity metadata.", "暂无允许范围内的本地活动元数据。"))
-                    .font(AUVType.secondary).foregroundStyle(.secondary)
-            case .stale, .current:
-                if CodexDashboardPresentation.activityState(snapshot: store.snapshot) == .stale {
-                    Text(localized("Retained local activity is stale.", "保留的本地活动已过期。"))
-                        .font(AUVType.secondary).foregroundStyle(.secondary)
-                }
+    /// Recent local activity, as rows of the connection module rather than a
+    /// card of its own that mostly said "unavailable".
+    @ViewBuilder private var recentActivityRows: some View {
+        let activity = store.snapshot.recentTasks
+        let state = CodexDashboardPresentation.activityState(snapshot: store.snapshot)
+        factRow(localized("Recent local activity", "最近本地活动"), {
+            switch state {
+            case .unavailable: return localized("Source unavailable", "来源不可用")
+            case .empty: return localized("None yet", "暂无")
+            case .stale: return localized("Stale", "已过期")
+            case .current: return localized("\(min(4, activity.count)) recent", "最近 \(min(4, activity.count)) 条")
+            }
+        }())
+        if state == .stale || state == .current {
+            VStack(alignment: .leading, spacing: 6) {
                 ForEach(activity.prefix(4)) { item in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -1189,8 +1300,9 @@ public struct AgentWorkspaceSurface: View {
                     }
                 }
             }
+            .padding(.leading, 12)
+            .background(AgentWorkspaceGeometryAnchor(identifier: "uma015.codex.activity-bounds"))
         }
-        .background(AgentWorkspaceGeometryAnchor(identifier: "uma015.codex.activity-bounds"))
     }
 
     private func workspaceColumns(for width: CGFloat) -> [GridItem] {
@@ -1214,11 +1326,11 @@ public struct AgentWorkspaceSurface: View {
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
             DesktopAgentLogo(providerID: providerID.rawValue,
-                             tint: workspaceLogoColor, diameter: 34)
+                             tint: pageLogoColor, diameter: 30)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(providerID.displayName)
-                    .font(AUVType.title)
+                    .font(.system(size: 22, weight: .semibold))
                 HStack(spacing: 6) {
                     Circle().fill(workspaceLogoColor).frame(width: 6, height: 6)
                         .accessibilityHidden(true)
@@ -1228,18 +1340,13 @@ public struct AgentWorkspaceSurface: View {
                 }
             }
             Spacer(minLength: 12)
-            if providerID == .codex { codexHeaderActions }
-            if providerID != .codex {
-                if let settingsButton { settingsButton }
-                VStack(alignment: .trailing, spacing: 0) {
-                    Text(provider?.primaryDisplayText ?? "—")
-                        .font(AUVType.display)
-                        .monospacedDigit()
-                    Text(provider?.primaryQuota?.compactLabel ?? localized("No quota reading", "无额度读数"))
-                        .font(AUVType.label)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.leading, 10)
+            // Nothing else up here: usage is the card below, settings the last
+            // module. Connecting is the page's one action while disconnected.
+            if providerID == .codex, !isCodexConnected {
+                Button(localized("Connect", "连接"), action: connectCodex)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .accessibilityIdentifier("uma.agent.codex.header-connect")
             }
         }
         .padding(.bottom, 2)
@@ -1404,7 +1511,6 @@ public struct AgentWorkspaceSurface: View {
                 }
                 factRow(localized("Source", "来源"), sourceLabel)
                 factRow(localized("Freshness", "新鲜度"), freshnessLabel)
-                if let planLabel { factRow(localized("Plan", "方案"), planLabel) }
                 if let capturedAt = provider?.capturedAt {
                     HStack {
                         Text(localized("Updated", "更新于")).foregroundStyle(.secondary)
@@ -1416,6 +1522,7 @@ public struct AgentWorkspaceSurface: View {
                 if provider?.diagnosticReason != nil {
                     factRow(localized("Source health", "来源健康状态"), diagnosticLabel)
                 }
+                if providerID == .codex { recentActivityRows }
                 if providerID == .claude {
                     Divider().padding(.vertical, 2).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 4) {

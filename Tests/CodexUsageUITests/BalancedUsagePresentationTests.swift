@@ -92,7 +92,7 @@ struct BalancedUsagePresentationTests {
 
         #expect(AgentWorkspaceLayoutPolicy.columnCount(for: 900) == 2)
         #expect(AgentWorkspaceLayoutPolicy.columnCount(for: 500) == 1)
-        #expect(source.contains("activityDashboardCard"))
+        #expect(source.contains("recentActivityRows"))
         #expect(!source.contains("DisclosureGroup(localized(\"Recent Activity\""))
         #expect(!source.contains("DisclosureGroup(localized(\"Privacy & Advanced Diagnostics\""))
         #expect(!source.contains("threadOSAnalytics"))

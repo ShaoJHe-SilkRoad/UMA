@@ -464,6 +464,8 @@ private struct AgentSpecificSettingsContent: View {
     let syncWorkBuddyAccount: () -> Void
     let disconnectWorkBuddyAccount: () -> Void
     var openThreadOS: (() -> Void)? = nil
+    /// False on the agent page, whose module already names the agent.
+    var showsTitle = true
 
     private var entry: AgentSettingsEntry? {
         coordinator.entries.first { $0.providerID == providerID }
@@ -483,8 +485,10 @@ private struct AgentSpecificSettingsContent: View {
 
     private var standardBody: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text(displayName)
-                .font(AppTypography.font(13, weight: .semibold, language: language))
+            if showsTitle {
+                Text(displayName)
+                    .font(AppTypography.font(13, weight: .semibold, language: language))
+            }
 
             if let presentation {
                 ResolvedProviderUsageSummary(
@@ -2509,6 +2513,60 @@ private struct LanguageSettingRow: View {
     }
 }
 
+
+/// An agent's own settings as the last module of its page in the main
+/// window: the same content the sheet held, without its title, its Done
+/// button or a second usage summary (the page's usage card shows that).
+public struct AgentSpecificSettingsPanel: View {
+    @ObservedObject private var store: UsageStore
+    private let providerID: String
+    private let claudeSettings: ClaudeBrowserSettingsModel?
+    private let geminiSettings: GeminiSettingsModel?
+    private let openThreadOS: (() -> Void)?
+    @AppStorage("display.showAPICostCard") private var showAPICost = false
+
+    public init(
+        store: UsageStore, providerID: String,
+        claudeSettings: ClaudeBrowserSettingsModel? = nil,
+        geminiSettings: GeminiSettingsModel? = nil,
+        openThreadOS: (() -> Void)? = nil
+    ) {
+        self.store = store
+        self.providerID = providerID
+        self.claudeSettings = claudeSettings
+        self.geminiSettings = geminiSettings
+        self.openThreadOS = openThreadOS
+    }
+
+    public var body: some View {
+        if let coordinator = store.agentSettings,
+           let id = AgentConnectorID(rawValue: providerID) {
+            AgentSpecificSettingsContent(
+                coordinator: coordinator,
+                providerID: id,
+                language: store.language,
+                showAPICost: $showAPICost,
+                claudeSettings: claudeSettings,
+                antigravitySettings: nil,
+                geminiSettings: geminiSettings,
+                workBuddySettings: nil,
+                workBuddyLogin: nil,
+                workBuddyAccountWebSync: nil,
+                presentation: nil,
+                checkAgain: { Task { await store.checkLocalSessionAgain() } },
+                syncWorkBuddyAccount: { Task { await store.syncWorkBuddyAccountNow() } },
+                disconnectWorkBuddyAccount: { Task { await store.disconnectWorkBuddyAccount() } },
+                openThreadOS: openThreadOS,
+                showsTitle: false
+            )
+            .accessibilityIdentifier("uma.agent.settings-panel")
+        } else {
+            Text(store.language == .simplifiedChinese ? "此智能体的设置不可用。" : "Settings for this agent are unavailable.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+        }
+    }
+}
 
 /// Native main-window entry into the existing provider-specific settings
 /// content. The coordinator and preference keys are shared with UsageSettingsCard.

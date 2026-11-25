@@ -236,18 +236,22 @@ struct SettingsEntryPointTests {
         )
     }
 
-    @Test("Agent settings open from the agent's page, under the agent's name")
+    @Test("Agent settings are the last module of the agent's page, its only way in")
     func agentSettingsLiveOnThePage() throws {
         let shell = try source("Sources/CodexUsageMonitor/App/NativeShellViews.swift")
-        let sidebar = try #require(shell.range(of: "private var agentsWorkspace: some View {"))
-        let list = try #require(shell.range(of: "if workspaceProviders.isEmpty {", range: sidebar.upperBound..<shell.endIndex))
-        #expect(!shell[sidebar.upperBound..<list.lowerBound].contains("MainAgentSettingsButton("))
-        #expect(shell.contains("settingsButton: workspaceProviders.isEmpty ? nil : AnyView(agentSettingsButton)"))
-        #expect(shell.contains("\"\\(selectedProviderID.displayName) Settings…\""))
+        // No button and no sheet: the page embeds the settings.
+        #expect(!shell.contains("MainAgentSettingsButton"))
+        #expect(!shell.contains(".sheet(item: $sheetProviderID"))
+        #expect(shell.contains("settingsContent: workspaceProviders.isEmpty ? nil : AnyView(agentSettingsPanel)"))
+        #expect(shell.contains("AgentSpecificSettingsPanel("))
         let page = try source("Sources/CodexUsageUI/Views/AgentSurfaceViews.swift")
         // The page's own Refresh read as this agent only but refreshed all.
         #expect(!page.contains("Button(localized(\"Refresh\", \"刷新\"), action: refresh)"))
-        #expect(page.components(separatedBy: "if let settingsButton { settingsButton }").count == 3)
+        // Settings come last; Codex's Disconnect is the module's last row.
+        let body = try #require(page.range(of: "header\n                    if providerID != .codex { claudeActionCallout }"))
+        let settings = try #require(page.range(of: "settingsModule\n", range: body.upperBound..<page.endIndex))
+        #expect(page[body.upperBound..<settings.lowerBound].contains("codexDashboard(for:"))
+        #expect(page.contains("\"uma.agent.codex.disconnect\""))
     }
 
     @Test("The sheet drops toggles nothing reads and actions the page already has")

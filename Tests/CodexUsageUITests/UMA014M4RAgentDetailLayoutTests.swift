@@ -44,7 +44,8 @@ struct UMA014M4RAgentDetailLayoutTests {
         // Claude's actions show above the cards only when there is one to
         // take; source health and the privacy line sit in Connection & Source.
         #expect(source.contains("claudeActionCallout"))
-        #expect(source.contains("activityDashboardCard"))
+        // Recent local activity is rows of Connection & Source now.
+        #expect(source.contains("recentActivityRows"))
         #expect(source.contains("factRow(localized(\"Source health\""))
         #expect(source.contains("uma.agent.claude.sync-route"))
         #expect(!source.contains("DisclosureGroup(localized(\"Connection & Source\""))
