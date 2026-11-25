@@ -151,7 +151,23 @@ struct M5RMXUIFIXG1DesktopAssistantTests {
         // The accepted fill is internal to the existing material row and is
         // clipped by that row's one boundary; whitespace is not the contract.
         let compactView = view.filter { !$0.isWhitespace }
-        let backgroundStart = try #require(compactView.range(of: ".background{glassBackground.overlay{"))
+        // Credit cards keep the row fill; percentage cards draw the usage
+        // gauge inside the same one material and clip to its outline.
+        let gaugeStart = try #require(compactView.range(of: "ifletgauge=card.gauge,density==.minimalist{"))
+        let gaugeClip = try #require(compactView.range(
+            of: ".clipShape(UsageGaugeShape(",
+            range: gaugeStart.upperBound..<compactView.endIndex
+        ))
+        let gaugeBackground = String(compactView[gaugeStart.lowerBound..<gaugeClip.lowerBound])
+        #expect(gaugeBackground.occurrenceCount(of: "glassBackground") == 1)
+        #expect(gaugeBackground.occurrenceCount(of: ".background{") == 1)
+        #expect(gaugeBackground.occurrenceCount(of: "UsageGaugeBackground(") == 1)
+        #expect(!gaugeBackground.contains("NSVisualEffectView"))
+        let legacyStart = try #require(compactView.range(of: "privatevarlegacySurface:someView{"))
+        let backgroundStart = try #require(compactView.range(
+            of: ".background{glassBackground.overlay{",
+            range: legacyStart.upperBound..<compactView.endIndex
+        ))
         let rowClip = try #require(compactView.range(
             of: ".clipShape(RoundedRectangle(",
             range: backgroundStart.upperBound..<compactView.endIndex

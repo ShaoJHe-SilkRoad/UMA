@@ -50,7 +50,7 @@ struct UMA014MinimalistTypographyTests {
         }
         #expect(DesktopAssistantMinimalistTypography.parts("100%").prefix.isEmpty)
         #expect(DesktopAssistantMinimalistTypography.parts("≈100%").prefix == "≈")
-        #expect(DesktopAssistantMetrics.size(for: .regular) == CGSize(width: 210, height: 60))
+        #expect(DesktopAssistantMetrics.size(for: .regular) == CGSize(width: 300, height: 72))
     }
 
     @Test("Wizard keeps raw quota threshold values and never fills native credits")

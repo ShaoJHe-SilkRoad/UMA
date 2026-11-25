@@ -27,6 +27,30 @@ enum DesktopAgentLogoAsset: String, CaseIterable {
     }
 }
 
+/// The agent logos as menu bar template images.
+@MainActor
+public enum AgentLogoTemplateImage {
+    private static var cache: [String: NSImage] = [:]
+
+    /// A template image of the agent's logo at `pointSize`, or nil for an
+    /// unknown agent.
+    public static func image(providerID: String, pointSize: CGFloat = 16) -> NSImage? {
+        guard let asset = DesktopAgentLogoAsset.resolve(providerID: providerID) else { return nil }
+        let key = "\(asset.rawValue)@\(pointSize)"
+        if let cached = cache[key] { return cached }
+        guard let url = Bundle.main.url(forResource: asset.rawValue, withExtension: "svg",
+                                        subdirectory: "AgentLogos"),
+              let source = NSImage(contentsOf: url) else { return nil }
+        let image = NSImage(size: NSSize(width: pointSize, height: pointSize), flipped: false) { rect in
+            source.draw(in: rect)
+            return true
+        }
+        image.isTemplate = true
+        cache[key] = image
+        return image
+    }
+}
+
 @MainActor
 struct DesktopAgentLogo: View {
     let providerID: String

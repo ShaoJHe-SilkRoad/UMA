@@ -306,14 +306,18 @@ final class StatusBarController: NSObject {
         assistantController?.toggleVisibility()
     }
 
-    private func configureStatusButton() {
-        guard let button = statusItem.button else { return }
+    private static let defaultStatusImage: NSImage? = {
         let image = NSImage(
             systemSymbolName: "gauge.with.dots.needle.67percent",
             accessibilityDescription: "AUV"
         )
         image?.isTemplate = true
-        button.image = image
+        return image
+    }()
+
+    private func configureStatusButton() {
+        guard let button = statusItem.button else { return }
+        button.image = Self.defaultStatusImage
         button.imagePosition = .imageLeading
         button.font = AppTypography.menuBarNSFont()
         button.target = self
@@ -334,6 +338,13 @@ final class StatusBarController: NSObject {
 
     private func updateStatusButton() {
         repairStatusButtonContractIfNeeded()
+        // The icon is the logo of the agent whose number is shown.
+        if let button = statusItem.button {
+            let logo = menuReading?.provider.flatMap {
+                AgentLogoTemplateImage.image(providerID: $0.rawValue, pointSize: 15)
+            }
+            button.image = logo ?? Self.defaultStatusImage
+        }
         statusItem.button?.title = showsRemainingValue
             ? (menuReading?.percent.map { " " + String($0) + "%" } ?? " —")
             : ""

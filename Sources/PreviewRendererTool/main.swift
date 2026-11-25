@@ -67,6 +67,16 @@ struct PreviewRendererTool {
             .flatMap { Double($0.dropFirst("--percent=".count)) }
             ?? 44
 
+        if arguments.contains("--usage-gauge-sheet") {
+            // Design review of the unified usage gauge; sample data only.
+            let sheet = UsageGaugePreviewSheet(isChinese: language != .english)
+                .environment(\.colorScheme, isDark ? ColorScheme.dark : ColorScheme.light)
+            let fitted = NSHostingView(rootView: sheet).fittingSize
+            try renderM3RReview(.init(content: AnyView(sheet), size: fitted), to: outputPath,
+                               scale: renderScale, alphaMask: false, liveReview: false)
+            return
+        }
+
         if arguments.contains("--sectorium") {
             #if DEBUG
             // Real production view, synthetic data only. This route never creates

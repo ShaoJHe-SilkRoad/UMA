@@ -340,8 +340,8 @@ struct UMA011G2VisualSystemTests {
 
     @Test("Assistant geometry and Minimalist content remain frozen")
     func assistantGeometry() throws {
-        #expect(DesktopAssistantMetrics.regularWidth == 210)
-        #expect(DesktopAssistantMetrics.regularHeight == 60)
+        #expect(DesktopAssistantMetrics.regularWidth == 300)
+        #expect(DesktopAssistantMetrics.regularHeight == 72)
         #expect(DesktopAssistantMetrics.minimalistWidth == DesktopAssistantMinimalistTypography.metrics().size.width)
         #expect(DesktopAssistantMetrics.minimalistHeight == 30)
         #expect(DesktopAssistantMetrics.minimalistReservedWindowWidth == 0)

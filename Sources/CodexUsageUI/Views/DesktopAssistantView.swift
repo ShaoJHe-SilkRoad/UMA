@@ -2,8 +2,8 @@ import AppKit
 import SwiftUI
 
 public enum DesktopAssistantMetrics {
-    public static let regularWidth: CGFloat = 210
-    public static let regularHeight: CGFloat = 60
+    public static let regularWidth: CGFloat = 300
+    public static let regularHeight: CGFloat = 72
     public static var minimalistWidth: CGFloat {
         DesktopAssistantMinimalistTypography.metrics().size.width
     }
@@ -160,6 +160,8 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
     public let isStale: Bool
     public let language: AppLanguage
     public let accessibilityLabel: String
+    /// The 5H and 7D windows for the usage gauge; nil for credit cards.
+    private let gaugeSource: UsageGaugeReading?
 
     public init(
         id: String,
@@ -184,8 +186,10 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
         severity: DesktopAssistantUsageSeverity,
         isStale: Bool,
         language: AppLanguage = .english,
-        accessibilityLabel: String? = nil
+        accessibilityLabel: String? = nil,
+        gauge: UsageGaugeReading? = nil
     ) {
+        self.gaugeSource = gauge
         self.id = id
         self.providerName = providerName
         self.planLabel = planLabel
@@ -235,6 +239,11 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
     }
 
     public var toolTip: String { accessibilityLabel }
+
+    /// The usage gauge, grey once the reading is outdated.
+    public var gauge: UsageGaugeReading? {
+        gaugeSource?.markingOutdated(showsOutdatedReading)
+    }
 
     /// Claude's bar carries how current its reading is. While the reading is
     /// an exact account figure, from Accuracy Sync or the official status
@@ -438,7 +447,8 @@ public struct DesktopAssistantCard: Equatable, Sendable, Identifiable {
             }(),
             severity: percentageSeverity,
             isStale: card.freshness == .stale,
-            language: language
+            language: language,
+            gauge: .from(shared: card)
         )
     }
 
@@ -799,6 +809,63 @@ private struct DesktopAssistantCardView: View {
     }
 
     var body: some View {
+        surface
+        .opacity(card.isStale ? 0.78 : 1)
+        .help(card.toolTip)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onSelect?(card.id)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(card.accessibilityLabel))
+        .accessibilityAction {
+            onSelect?(card.id)
+        }
+    }
+
+    /// Percentage cards draw the unified usage gauge; credit cards keep
+    /// their own fill.
+    @ViewBuilder
+    private var surface: some View {
+        if let gauge = card.gauge, density == .regular {
+            UsageGaugeCard(
+                reading: gauge,
+                providerID: card.id,
+                size: size,
+                primaryResetText: UsageGaugeText.primaryReset(gauge, language: card.language),
+                secondaryText: UsageGaugeText.secondary(gauge, language: card.language),
+                statusColor: connectionColor
+            )
+        } else if let gauge = card.gauge, density == .minimalist {
+            let left = size.height / 2
+            let right: CGFloat = 7
+            minimalistContent
+                .frame(width: size.width, height: size.height)
+                .background {
+                    glassBackground
+                        .overlay {
+                            if showsPercentageRail {
+                                UsageGaugeBackground(
+                                    reading: gauge,
+                                    leftRadius: left,
+                                    rightRadius: right,
+                                    barWidth: 2.5,
+                                    fillOpacity: DesktopAssistantTintOpacity.value(
+                                        isDark: colorScheme == .dark,
+                                        reduceTransparency: usesReduceTransparency,
+                                        increaseContrast: hasIncreasedContrast
+                                    )
+                                )
+                            }
+                        }
+                }
+                .clipShape(UsageGaugeShape(leftRadius: left, rightRadius: right))
+        } else {
+            legacySurface
+        }
+    }
+
+    private var legacySurface: some View {
         Group {
             switch density {
             case .regular:
@@ -824,17 +891,6 @@ private struct DesktopAssistantCardView: View {
                 }
         }
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-        .opacity(card.isStale ? 0.78 : 1)
-        .help(card.toolTip)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            onSelect?(card.id)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(card.accessibilityLabel))
-        .accessibilityAction {
-            onSelect?(card.id)
-        }
     }
 
     private var minimalistContent: some View {

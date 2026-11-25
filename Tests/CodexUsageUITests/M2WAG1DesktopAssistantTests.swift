@@ -69,15 +69,15 @@ struct M2WAG1DesktopAssistantTests {
     func fixedRowAndStackGeometryNeverDependsOnCreditValue() {
         #expect(
             DesktopAssistantMetrics.stackSize(for: .regular, rowCount: 0)
-                == CGSize(width: 210, height: 0)
+                == CGSize(width: 300, height: 0)
         )
         #expect(
             DesktopAssistantMetrics.stackSize(for: .regular, rowCount: 1)
-                == CGSize(width: 210, height: 60)
+                == CGSize(width: 300, height: 72)
         )
         #expect(
             DesktopAssistantMetrics.stackSize(for: .regular, rowCount: 2)
-                == CGSize(width: 210, height: 124)
+                == CGSize(width: 300, height: 148)
         )
         #expect(
             DesktopAssistantMetrics.stackSize(for: .minimalist, rowCount: 2)

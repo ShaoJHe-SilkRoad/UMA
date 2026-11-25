@@ -115,9 +115,11 @@ private struct AgentRemainingQuotaBar: View {
             Capsule()
                 .fill(.primary.opacity(0.09))
                 .overlay(alignment: .leading) {
+                    // Deepens toward the level, as the usage gauge does.
                     if let fraction = CompactUsageFillPolicy.fraction(for: remainingPercent) {
                         Capsule()
-                            .fill(tint.opacity(0.82))
+                            .fill(LinearGradient(colors: [tint.opacity(0.45), tint.opacity(0.95)],
+                                                 startPoint: .leading, endPoint: .trailing))
                             .frame(width: geometry.size.width * fraction)
                     }
                 }
@@ -263,6 +265,52 @@ public struct AgentGlanceRow: View {
     }
 
     public var body: some View {
+        if showsRemainingRail, let gauge = gaugeReading {
+            gaugeRow(gauge)
+        } else {
+            legacyRow
+        }
+    }
+
+    /// The unified usage gauge, for agents with a remaining share to show.
+    /// Rows without a reading keep their text, which says what is wrong.
+    private var gaugeReading: UsageGaugeReading? {
+        guard let reading = UsageGaugeReading.from(provider: provider),
+              reading.lead != .unavailable else { return nil }
+        return reading
+    }
+
+    private var gaugeHeight: CGFloat { style == .quickPanel ? 72 : 60 }
+
+    private func gaugeRow(_ gauge: UsageGaugeReading) -> some View {
+        GeometryReader { proxy in
+            UsageGaugeCard(
+                reading: gauge,
+                providerID: provider.id.rawValue,
+                size: CGSize(width: proxy.size.width, height: gaugeHeight),
+                title: [displayName, provider.planLabel].compactMap { $0 }
+                    .filter { !$0.isEmpty }.joined(separator: " · "),
+                primaryResetText: UsageGaugeText.primaryReset(gauge, language: language),
+                secondaryText: UsageGaugeText.secondary(gauge, language: language),
+                statusColor: showsConnectivity ? statusColor : nil
+            )
+        }
+        .frame(height: gaugeHeight)
+        .overlay {
+            if selected {
+                RoundedRectangle(cornerRadius: min(14, gaugeHeight * 0.3), style: .continuous)
+                    .strokeBorder(Color(nsColor: .controlAccentColor), lineWidth: 2)
+                    .allowsHitTesting(false)
+            }
+        }
+        .contentShape(Rectangle())
+        .help(displayName)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var legacyRow: some View {
         standardContent
         .padding(.horizontal, horizontalPadding)
         .padding(.vertical, verticalPadding)
@@ -893,13 +941,13 @@ public struct AgentWorkspaceSurface: View {
         VStack(alignment: .leading, spacing: 5) {
             if width >= 560 {
                 HStack(alignment: .top, spacing: 12) {
-                    quotaSummarySegment(kind: .sevenDay, label: localized("7D", "7天"))
                     quotaSummarySegment(kind: .fiveHour, label: localized("5H", "5小时"))
+                    quotaSummarySegment(kind: .sevenDay, label: localized("7D", "7天"))
                 }
             } else {
                 VStack(spacing: 7) {
-                quotaSummarySegment(kind: .sevenDay, label: localized("7D", "7天"))
                 quotaSummarySegment(kind: .fiveHour, label: localized("5H", "5小时"))
+                quotaSummarySegment(kind: .sevenDay, label: localized("7D", "7天"))
                 }
             }
         }
@@ -913,9 +961,7 @@ public struct AgentWorkspaceSurface: View {
         let quotaText = quota.displayText(language: store.language)
         let reset = Self.detailResetLine(
             kind: kind, resetsAt: quota.resetAt, language: store.language, now: displayNow)
-        let tint = LowRemainingUsagePolicy.color(for: LowRemainingUsagePolicy.assessment(
-            providerID: providerID.rawValue, admittedPlan: provider?.planLabel,
-            remainingPercent: percent))
+        let tint = UsageGaugePalette.dynamicColor(forRemaining: percent)
         return VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text("\(label) \(localized("remaining", "剩余"))")
@@ -1259,9 +1305,7 @@ public struct AgentWorkspaceSurface: View {
             }
             AgentRemainingQuotaBar(
                 remainingPercent: quota.value.remainingPercent,
-                tint: LowRemainingUsagePolicy.color(for: LowRemainingUsagePolicy.assessment(
-                    providerID: providerID.rawValue, admittedPlan: provider?.planLabel,
-                    remainingPercent: quota.value.remainingPercent)))
+                tint: UsageGaugePalette.dynamicColor(forRemaining: quota.value.remainingPercent))
             if let reset = Self.detailResetLine(
                 kind: quota.kind, resetsAt: quota.resetsAt,
                 language: store.language, now: displayNow

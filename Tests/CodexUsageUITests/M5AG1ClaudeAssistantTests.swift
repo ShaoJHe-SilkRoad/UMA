@@ -155,7 +155,7 @@ struct M5AG1ClaudeAssistantTests {
         )
         #expect(DesktopAssistantMetrics.minimalistReservedWindowWidth == 0)
         #expect(DesktopAssistantMetrics.minimalistHeight == 30)
-        #expect(DesktopAssistantMetrics.regularHeight == 60)
+        #expect(DesktopAssistantMetrics.regularHeight == 72)
     }
 
     @Test
