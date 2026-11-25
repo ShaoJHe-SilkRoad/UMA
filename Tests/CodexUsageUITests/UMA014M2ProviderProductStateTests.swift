@@ -221,11 +221,9 @@ struct UMA014M2ProviderProductStateTests {
             monitoringEnabledIDs: Set([
                 CodexUsageConnector.connectorID,
                 WorkBuddyAccountWebCreditsConnector.connectorID,
-                GoogleAntigravityUsageConnector.connectorID,
             ]),
             configuredOrDetectedIDs: Set([
                 WorkBuddyAccountWebCreditsConnector.connectorID,
-                GoogleAntigravityUsageConnector.connectorID,
             ]),
             previousCards: [],
             language: .english,
@@ -236,8 +234,6 @@ struct UMA014M2ProviderProductStateTests {
         #expect(reduction.inventory.agentWorkspaceProviders.map(\.id) == [.codex])
         #expect(reduction.inventory.provider(.workBuddy)?.inventory.quickPanel == false)
         #expect(reduction.inventory.provider(.workBuddy)?.inventory.agentWorkspace == false)
-        #expect(reduction.inventory.provider(.antigravity)?.inventory.quickPanel == false)
-        #expect(reduction.inventory.provider(.antigravity)?.inventory.agentWorkspace == false)
     }
 
     @Test
@@ -246,13 +242,11 @@ struct UMA014M2ProviderProductStateTests {
         #expect(UsageMonitorRuntime.productionConnectorIDs == Set([
             CodexUsageConnector.connectorID,
             ClaudeCodeUsageConnector.connectorID,
+            GoogleAntigravityUsageConnector.connectorID,
             GeminiUsageConnector.connectorID,
         ]))
         #expect(!UsageMonitorRuntime.productionConnectorIDs.contains(
             WorkBuddyAccountWebCreditsConnector.connectorID
-        ))
-        #expect(!UsageMonitorRuntime.productionConnectorIDs.contains(
-            GoogleAntigravityUsageConnector.connectorID
         ))
     }
 
@@ -388,13 +382,13 @@ struct UMA014M2ProviderProductStateTests {
         let reduction = ProviderProductStatePolicy.reduce(
             snapshots: [],
             admissions: [],
-            monitoringEnabledIDs: [GoogleAntigravityUsageConnector.connectorID],
-            configuredOrDetectedIDs: [GoogleAntigravityUsageConnector.connectorID],
+            monitoringEnabledIDs: [WorkBuddyAccountWebCreditsConnector.connectorID],
+            configuredOrDetectedIDs: [WorkBuddyAccountWebCreditsConnector.connectorID],
             previousCards: [],
             language: .english,
             now: epoch
         )
-        let product = reduction.inventory.provider(.antigravity)
+        let product = reduction.inventory.provider(.workBuddy)
 
         #expect(product?.inventory.overview == false)
         #expect(product?.inventory.quickPanel == false)

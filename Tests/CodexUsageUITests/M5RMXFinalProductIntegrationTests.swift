@@ -73,11 +73,11 @@ struct M5RMXFinalProductIntegrationTests {
         for connector in [
             "let connector = CodexUsageConnector(",
             "ClaudeCodeUsageConnector.production(",
+            "GoogleAntigravityUsageConnector(",
         ] {
             #expect(runtime.contains(connector))
         }
         #expect(!runtime.contains("WorkBuddyAccountWebCreditsConnector("))
-        #expect(!runtime.contains("GoogleAntigravityUsageConnector("))
         #expect(!runtime.contains("CursorUsageConnector"))
         #expect(!runtime.contains("KimiUsageConnector"))
         #expect(order.contains("case \"codex\": 0"))

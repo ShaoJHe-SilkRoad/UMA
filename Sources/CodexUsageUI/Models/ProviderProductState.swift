@@ -373,7 +373,9 @@ struct ProviderProductReduction: Equatable, Sendable {
 /// Strict adapter from sanitized connector snapshots into product truth. It
 /// never retains the source snapshot, channel, descriptor, or arbitrary text.
 enum ProviderProductStatePolicy {
-    private static let currentSupportedProducts: Set<ProviderProductID> = [.codex, .claude, .gemini]
+    private static let currentSupportedProducts: Set<ProviderProductID> = [
+        .codex, .claude, .antigravity, .gemini,
+    ]
     private struct CatalogEntry {
         let productID: ProviderProductID
         let connectorID: AgentConnectorID

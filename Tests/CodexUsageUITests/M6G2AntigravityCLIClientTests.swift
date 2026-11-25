@@ -74,9 +74,10 @@ struct M6G2AntigravityCLIClientTests {
     }
 
     @Test
-    func trustGateRejectsWrongHashArchitectureOrPath() {
+    func trustGateRejectsWrongSignerArchitectureOrPath() {
         let identities: [AntigravityExecutableIdentity] = [
-            admittedIdentity(sha256: String(repeating: "0", count: 64)),
+            admittedIdentity(teamIdentifier: "ABCDE12345"),
+            admittedIdentity(teamIdentifier: nil),
             admittedIdentity(architecture: "x86_64"),
             admittedIdentity(
                 canonicalURL: URL(fileURLWithPath: "/private/tmp/agy")
@@ -358,14 +359,14 @@ struct M6G2AntigravityCLIClientTests {
 
     private func admittedIdentity(
         canonicalURL: URL? = nil,
-        sha256: String = AntigravityReadOnlyCLIClient.admittedSHA256,
+        teamIdentifier: String? = AntigravityReadOnlyCLIClient.admittedTeamIdentifier,
         architecture: String = "arm64",
         ownerUID: uid_t = getuid(),
         mode: mode_t = 0o755
     ) -> AntigravityExecutableIdentity {
         AntigravityExecutableIdentity(
             canonicalURL: canonicalURL ?? executable,
-            sha256: sha256,
+            signingTeamIdentifier: teamIdentifier,
             architecture: architecture,
             ownerUID: ownerUID,
             mode: mode

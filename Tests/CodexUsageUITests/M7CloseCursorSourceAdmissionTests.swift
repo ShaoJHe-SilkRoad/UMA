@@ -50,15 +50,16 @@ struct M7CloseCursorSourceAdmissionTests {
         )
         let closeout = try record("source/UMA M7 Cursor Closeout.md")
 
+        // Antigravity is back in the daily runtime, read from its signed CLI.
         for connector in [
             "CodexUsageConnector",
             "ClaudeCodeUsageConnector",
+            "GoogleAntigravityUsageConnector(",
         ] {
             #expect(runtime.contains(connector))
         }
         #expect(!runtime.contains("WorkBuddyAvailabilityConnector("))
         #expect(!runtime.contains("WorkBuddyAccountWebCreditsConnector("))
-        #expect(!runtime.contains("GoogleAntigravityUsageConnector("))
         #expect(!runtime.contains("CursorUsageConnector"))
         #expect(!settings.contains("\"Cursor\""))
         for provider in ["Codex", "Claude Code", "WorkBuddy", "Google Antigravity"] {

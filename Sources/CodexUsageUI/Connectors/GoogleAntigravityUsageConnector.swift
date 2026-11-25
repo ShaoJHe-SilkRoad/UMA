@@ -41,7 +41,7 @@ actor GoogleAntigravityUsageConnector: AgentUsageConnector {
         providerName: "Google Antigravity",
         officialSource: "Official Antigravity CLI · read-only /usage",
         sourceTier: .officialCLIOrMetadata,
-        sourceVersion: "agy-1.1.11",
+        sourceVersion: AntigravityReadOnlyCLIClient.sourceVersion,
         supportedScopes: [.account],
         capabilities: capabilities,
         configurationRequirements: [
@@ -475,15 +475,22 @@ actor GoogleAntigravityUsageConnector: AgentUsageConnector {
         failure: AgentSafeFailure?,
         capturedAt: Date
     ) -> AgentUsageSnapshot {
-        let windows = quota.buckets.map {
-            AgentRateLimitWindow(
-                id: $0.id,
-                kind: .other,
-                displayLabel: $0.displayLabel,
+        // Each model group has its own five-hour and weekly limit, so the
+        // windows keep their kind and are told apart by the group's name.
+        let windows = quota.buckets.map { bucket -> AgentRateLimitWindow in
+            let kind: AgentRateLimitWindow.Kind = switch bucket.window {
+            case .fiveHour: .fiveHour
+            case .weekly: .sevenDay
+            case .other: .other
+            }
+            return AgentRateLimitWindow(
+                id: bucket.id,
+                kind: kind,
+                displayLabel: bucket.groupLabel ?? bucket.displayLabel,
                 usedPercent: nil,
-                remainingPercent: $0.remainingPercent,
+                remainingPercent: bucket.remainingPercent,
                 isUnlimited: false,
-                resetsAt: $0.resetsAt
+                resetsAt: bucket.resetsAt
             )
         }
         let account = AgentUsageChannel(

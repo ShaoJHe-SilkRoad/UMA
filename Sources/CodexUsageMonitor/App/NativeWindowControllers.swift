@@ -234,7 +234,8 @@ final class MainWindowController: NSWindowController {
         promptPreferences: ApplicationPreferences = .production,
         appStorageDefaults: UserDefaults = .standard,
         claudeSettings: ClaudeBrowserSettingsModel? = nil,
-        geminiSettings: GeminiSettingsModel? = nil
+        geminiSettings: GeminiSettingsModel? = nil,
+        antigravitySettings: AntigravitySettingsModel? = nil
     ) {
         guard attachedStore == nil else { return }
         // NSHostingController may negotiate its minimum content size while it
@@ -257,7 +258,8 @@ final class MainWindowController: NSWindowController {
             promptClipboard: promptClipboard,
             promptPreferences: promptPreferences,
             claudeSettings: claudeSettings,
-            geminiSettings: geminiSettings
+            geminiSettings: geminiSettings,
+            antigravitySettings: antigravitySettings
         )
         if appStorageDefaults === UserDefaults.standard {
             // Preserve the production hosting type and its existing diagnostics.

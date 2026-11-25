@@ -41,6 +41,7 @@ public struct UsageMonitorRuntime {
     static let productionConnectorIDs: Set<AgentConnectorID> = [
         CodexUsageConnector.connectorID,
         ClaudeCodeUsageConnector.connectorID,
+        GoogleAntigravityUsageConnector.connectorID,
         GeminiUsageConnector.connectorID,
     ]
 
@@ -50,6 +51,8 @@ public struct UsageMonitorRuntime {
     public let claudeSettings: ClaudeBrowserSettingsModel
     /// Nil only for runtimes built without the Gemini connector.
     public let geminiSettings: GeminiSettingsModel?
+    /// Nil only for runtimes built without the Antigravity connector.
+    public let antigravitySettings: AntigravitySettingsModel?
     private let startupTask: Task<Void, Never>?
     private let threadOSAttributionPreferenceObservation: ApplicationPreferences.Observation?
     private let claudeAutomaticSyncObservation: ApplicationPreferences.Observation?
@@ -62,6 +65,7 @@ public struct UsageMonitorRuntime {
         threadOSAttributionPreferenceObservation: ApplicationPreferences.Observation? = nil,
         claudeAutomaticSyncObservation: ApplicationPreferences.Observation? = nil,
         geminiSettings: GeminiSettingsModel? = nil,
+        antigravitySettings: AntigravitySettingsModel? = nil,
         dataPaths: ApplicationDataPaths = .current()
     ) {
         self.preferences = preferences
@@ -69,6 +73,7 @@ public struct UsageMonitorRuntime {
         self.store = store
         self.claudeSettings = claudeSettings
         self.geminiSettings = geminiSettings
+        self.antigravitySettings = antigravitySettings
         self.startupTask = startupTask
         self.threadOSAttributionPreferenceObservation = threadOSAttributionPreferenceObservation
         self.claudeAutomaticSyncObservation = claudeAutomaticSyncObservation
@@ -177,6 +182,14 @@ public struct UsageMonitorRuntime {
                 agentSettings.isMonitoringEnabled(for: AgentPreferenceRecord.geminiProviderID)
             }
         )
+        // Antigravity is read from its official CLI (`agy /usage`), which
+        // runs no model and submits no work. Scan Agents admits it once a
+        // Google-signed `agy` is found, like any other local agent.
+        let antigravityRefresh = AntigravityAutoRefreshPreference(preferences: preferences)
+        let antigravityConnector = GoogleAntigravityUsageConnector(
+            client: AntigravityReadOnlyCLIClient(),
+            autoRefreshEnabled: { @MainActor in antigravityRefresh.isEnabled }
+        )
         let threadOSAttributionSource = ReloadableThreadOSHistoricalAttributionSource(
             ThreadOSHistoricalAttributionPreferences.source(from: preferences)
         )
@@ -188,7 +201,7 @@ public struct UsageMonitorRuntime {
             snapshotStore: snapshotStore,
             localActivityReader: CodexLocalActivityReader(ledgerURL: dataPaths.codexLedgerURL),
             threadOSAttributionSource: threadOSAttributionSource,
-            additionalConnectors: [claudeConnector, geminiConnector]
+            additionalConnectors: [claudeConnector, antigravityConnector, geminiConnector]
         )
         let claudeSettings = ClaudeBrowserSettingsModel(
             connector: claudeConnector,
@@ -226,6 +239,61 @@ public struct UsageMonitorRuntime {
                 )
             }
         )
+        let refreshAntigravityAdmissions:
+            @MainActor @Sendable (ProviderEligibilityScanTrigger) async -> AntigravitySettingsObservation = {
+                trigger in
+                let descriptors = await registry.orderedDescriptors()
+                let excluded = agentSettings.disabledConnectorIDs(
+                    from: descriptors.map(\.id)
+                )
+                _ = await registry.scanSurfaceAdmissions(
+                    trigger: trigger,
+                    excludedProviderIDs: excluded
+                )
+                return Self.antigravityObservation(
+                    await antigravityConnector.currentSnapshot()
+                )
+            }
+        let antigravitySettings = AntigravitySettingsModel(
+            initialState: .checking,
+            autoRefreshEnabled: antigravityRefresh.isEnabled,
+            checkAgain: { await refreshAntigravityAdmissions(.checkAgain) },
+            syncNow: { await refreshAntigravityAdmissions(.syncNow) },
+            disable: {
+                antigravityRefresh.isEnabled = false
+                await antigravityConnector.setAutomaticRefreshEnabled(false)
+                try? await registry.perform(
+                    .disconnect,
+                    for: GoogleAntigravityUsageConnector.connectorID
+                )
+                agentSettings.setMonitoringEnabled(
+                    false,
+                    for: GoogleAntigravityUsageConnector.connectorID
+                )
+            },
+            setAutoRefresh: { enabled in
+                antigravityRefresh.isEnabled = enabled
+                await antigravityConnector.setAutomaticRefreshEnabled(enabled)
+            },
+            openOfficialSetup: {
+                if let url = URL(string: "https://antigravity.google/docs/cli/install") {
+                    NSWorkspace.shared.open(url)
+                }
+                return await refreshAntigravityAdmissions(.checkAgain)
+            },
+            openProvider: {
+                if let url = URL(string: "https://antigravity.google/docs/cli/install") {
+                    NSWorkspace.shared.open(url)
+                }
+                return AntigravitySettingsObservation(state: .loginRequired)
+            }
+        )
+        if startProviders {
+            antigravitySettings.observe(
+                from: antigravityConnector,
+                map: Self.antigravityObservation
+            )
+        }
         // Claude's Accuracy Sync repeats with the app's automatic refresh,
         // at its interval, and never while it is off.
         var claudeAutomaticSyncObservation: ApplicationPreferences.Observation?
@@ -292,6 +360,7 @@ public struct UsageMonitorRuntime {
             threadOSAttributionPreferenceObservation: threadOSAttributionPreferenceObservation,
             claudeAutomaticSyncObservation: claudeAutomaticSyncObservation,
             geminiSettings: geminiSettings,
+            antigravitySettings: antigravitySettings,
             dataPaths: dataPaths
         )
     }

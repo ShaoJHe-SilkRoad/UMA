@@ -21,9 +21,8 @@ actor GeminiUsageConnector: AgentUsageConnector {
     /// from opening Safari tabs more often than every five minutes.
     static let minimumTimerReadSpacing: TimeInterval = 5 * 60
 
-    /// The page's "Current usage" row is mapped to AUV's five-hour window.
-    /// Google describes Gemini App limits as restoring every five hours; the
-    /// page itself does not state the period.
+    /// The page's "Current usage" row is AUV's five-hour window: the page
+    /// does not state the period, but the row shows the GXU_FIVE_HOURLY pool.
     static let currentUsageKind: AgentRateLimitWindow.Kind = .fiveHour
 
     static let capabilities: Set<AgentConnectorCapability> = [

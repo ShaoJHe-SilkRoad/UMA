@@ -70,7 +70,7 @@ struct M6G2AntigravityQuotaDecoderTests {
             #expect(throws: AntigravityQuotaDecodingError.malformedJSON) {
                 try AntigravityQuotaDecoder.decode(
                     Data(payload.utf8),
-                    cliVersion: "1.1.11",
+                    sourceVersion: "agy-1.1.11",
                     observedAt: observedAt
                 )
             }
@@ -94,7 +94,7 @@ struct M6G2AntigravityQuotaDecoderTests {
         #expect(throws: AntigravityQuotaDecodingError.unsupportedSchema) {
             try AntigravityQuotaDecoder.decode(
                 Data(#"{"num_turns":0,"conversation_id":"","usage":{"input":0},"command":{"name":"usage","data":{}}}"#.utf8),
-                cliVersion: "1.1.11",
+                sourceVersion: "agy-1.1.11",
                 observedAt: observedAt
             )
         }
@@ -164,7 +164,7 @@ struct M6G2AntigravityQuotaDecoderTests {
     }
 
     @Test
-    func rejectsProviderWorkAndUnsupportedVersion() {
+    func rejectsProviderWorkButNotALaterVersion() {
         #expect(throws: AntigravityQuotaDecodingError.invalidOperationalEnvelope) {
             try decode(groups: [group("g", buckets: [
                 bucket("p", window: "w", remaining: 0.5),
@@ -175,15 +175,16 @@ struct M6G2AntigravityQuotaDecoderTests {
                 bucket("p", window: "w", remaining: 0.5),
             ])], extras: ["task_id": "synthetic-task"])
         }
-        #expect(throws: AntigravityQuotaDecodingError.unsupportedVersion) {
-            try AntigravityQuotaDecoder.decode(
-                fixture(groups: [group("g", buckets: [
-                    bucket("p", window: "w", remaining: 0.5),
-                ])]),
-                cliVersion: "1.1.12",
-                observedAt: observedAt
-            )
-        }
+        // The output carries no version; a later CLI with the same schema
+        // decodes, and its source version is only a label.
+        let later = try? AntigravityQuotaDecoder.decode(
+            fixture(groups: [group("g", buckets: [
+                bucket("p", window: "w", remaining: 0.5),
+            ])]),
+            sourceVersion: "agy-signed",
+            observedAt: observedAt
+        )
+        #expect(later?.sourceVersion == "agy-signed")
     }
 
     @Test
@@ -225,7 +226,7 @@ struct M6G2AntigravityQuotaDecoderTests {
     ) throws -> AntigravityQuotaSnapshot {
         try AntigravityQuotaDecoder.decode(
             fixture(groups: groups, commandName: commandName, extras: extras),
-            cliVersion: "1.1.11",
+            sourceVersion: "agy-1.1.11",
             observedAt: observedAt
         )
     }
