@@ -1,23 +1,23 @@
 # Install AUV / 安装 AUV
 
-[English](#english-installation-guide) · [中文](#中文安装指南) · [Mac 1.0.0](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.0/AUV_Mac_1.0.0_Universal.dmg) · [Windows 0.18.7](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.7-win/AUV_Win_0.18.7.zip)
+[English](#english-installation-guide) · [中文](#中文安装指南) · [Mac 1.0.1](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.1/AUV_Mac_1.0.1_Universal.dmg) · [Windows 0.18.7](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.7-win/AUV_Win_0.18.7.zip)
 
 ## English installation guide
 
 <a id="mac-installation-guide"></a>
 
-### Mac 1.0.0
+### Mac 1.0.1
 
-**macOS 14+ · Apple silicon or Intel · Universal app · build 2026112605.** This package is Developer ID signed and Apple notarized. See [tested configurations](MAC_COMPATIBILITY.md) for the distinction between the build's requirements and real-device coverage.
+**macOS 14+ · Apple silicon or Intel · Universal app · build 2026112606.** This package is Developer ID signed and Apple notarized. See [tested configurations](MAC_COMPATIBILITY.md) for the distinction between the build's requirements and real-device coverage.
 
 #### Install
 
-1. [Download AUV_Mac_1.0.0_Universal.dmg](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.0/AUV_Mac_1.0.0_Universal.dmg). Choose the application DMG, not GitHub's source archive.
+1. [Download AUV_Mac_1.0.1_Universal.dmg](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.1/AUV_Mac_1.0.1_Universal.dmg). Choose the application DMG, not GitHub's source archive.
 2. Double-click the DMG in Finder. A window opens with **`UMA.app`**, which opens as **AUV**, and an **Applications** shortcut.
 3. Drag **`UMA.app`** onto the **Applications** shortcut, so it goes to Applications on your Mac's internal disk. Keeping it there lets Sectorium disconnect an external drive without ejecting the app itself. Then eject the disk image in Finder.
-4. Open AUV from Applications and follow the normal macOS first-open prompt. Don't run it from the disk image. AUV plays a sound and says **AUV 1.0.0 is installed**, and offers to eject the disk image. The main window's lower-left corner shows **AUV 1.0.0**. Finder → Get Info shows the app version too.
+4. Open AUV from Applications and follow the normal macOS first-open prompt. Don't run it from the disk image. AUV plays a sound and says **AUV 1.0.1 is installed**, and offers to eject the disk image. The main window's lower-left corner shows **AUV 1.0.1**. Finder → Get Info shows the app version too.
 
-Prefer a ZIP? [AUV_Mac_1.0.0_Universal.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.0/AUV_Mac_1.0.0_Universal.zip) holds the same app: double-click it, then move **`UMA.app`** to Applications.
+Prefer a ZIP? [AUV_Mac_1.0.1_Universal.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.1/AUV_Mac_1.0.1_Universal.zip) holds the same app: double-click it, then move **`UMA.app`** to Applications.
 
 #### Upgrade
 
@@ -47,16 +47,16 @@ Codex is a separate download. AUV reads the allowance supplied by Codex; it does
 For the DMG in Downloads, run:
 
 ```sh
-shasum -a 256 ~/Downloads/AUV_Mac_1.0.0_Universal.dmg
+shasum -a 256 ~/Downloads/AUV_Mac_1.0.1_Universal.dmg
 ```
 
-Expected SHA-256 (for the ZIP: `cfaac66aefd714bfc9f9be5f867eaad00b784536fa990ca891f17fc84b88c516`):
+Expected SHA-256 (for the ZIP: `8f9e86c81841eb60f6611344fa489ebdf79ad3418b55796f6d1e421f10c6f4b8`):
 
 ```text
-18bf13a7a3b75777c1ffcf11126b5da08d2e633dd0508d67cc3b791cb92bb84c
+a73cb885f951e871a571d0eb7211626e2c4c0330091ce79123adf00df34daa28
 ```
 
-[Mac release notes](releases/AUV_Mac_1.0.0.md) · [Release downloads](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v1.0.0)
+[Mac release notes](releases/AUV_Mac_1.0.1.md) · [Release downloads](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v1.0.1)
 
 <a id="windows-installation-guide"></a>
 
@@ -94,18 +94,18 @@ Expected SHA-256: **a16ac520c8a929148eda4086e1ecab27606f630e0b9e413d1310861a60bc
 
 <a id="mac-中文安装指南"></a>
 
-### Mac 1.0.0
+### Mac 1.0.1
 
-**macOS 14 及以上 · Apple silicon 或 Intel · 通用包 · 构建号 2026112605。** 本包已完成 Developer ID 签名和 Apple 公证。安装要求与实机测试范围有所区别，详见[已测试环境](MAC_COMPATIBILITY.md#中文)。
+**macOS 14 及以上 · Apple silicon 或 Intel · 通用包 · 构建号 2026112606。** 本包已完成 Developer ID 签名和 Apple 公证。安装要求与实机测试范围有所区别，详见[已测试环境](MAC_COMPATIBILITY.md#中文)。
 
 #### 安装
 
-1. [下载 AUV_Mac_1.0.0_Universal.dmg](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.0/AUV_Mac_1.0.0_Universal.dmg)。请选择应用 DMG，不要选 GitHub 的源码压缩包。
+1. [下载 AUV_Mac_1.0.1_Universal.dmg](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.1/AUV_Mac_1.0.1_Universal.dmg)。请选择应用 DMG，不要选 GitHub 的源码压缩包。
 2. 在 Finder 中双击 DMG，打开的窗口里有 **`UMA.app`**（打开后显示为 **AUV**）和 **Applications** 快捷方式。
 3. 将 **`UMA.app`** 拖到 **Applications** 快捷方式上，即放入 Mac 内置盘的**“应用程序”**文件夹。这样分区工弹出外接硬盘时，应用本身仍能正常运行。然后在 Finder 中推出磁盘映像。
-4. 从“应用程序”打开 AUV，按 macOS 正常首次启动提示操作；不要直接从磁盘映像运行。AUV 会发出提示音并显示 **“AUV 1.0.0 已安装”**，同时可以推出磁盘映像。主窗口左下角应显示 **AUV 1.0.0**，Finder →“显示简介”也可以查看版本。
+4. 从“应用程序”打开 AUV，按 macOS 正常首次启动提示操作；不要直接从磁盘映像运行。AUV 会发出提示音并显示 **“AUV 1.0.1 已安装”**，同时可以推出磁盘映像。主窗口左下角应显示 **AUV 1.0.1**，Finder →“显示简介”也可以查看版本。
 
-更习惯 ZIP？[AUV_Mac_1.0.0_Universal.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.0/AUV_Mac_1.0.0_Universal.zip) 内是同一个应用：双击解压，再把 **`UMA.app`** 移入“应用程序”。
+更习惯 ZIP？[AUV_Mac_1.0.1_Universal.zip](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.1/AUV_Mac_1.0.1_Universal.zip) 内是同一个应用：双击解压，再把 **`UMA.app`** 移入“应用程序”。
 
 #### 升级
 
@@ -135,16 +135,16 @@ Codex 需单独安装。AUV 显示 Codex 返回的额度，不统计 ChatGPT 网
 DMG 位于“下载”文件夹时，在终端运行：
 
 ```sh
-shasum -a 256 ~/Downloads/AUV_Mac_1.0.0_Universal.dmg
+shasum -a 256 ~/Downloads/AUV_Mac_1.0.1_Universal.dmg
 ```
 
-SHA-256 应为（ZIP 为 `cfaac66aefd714bfc9f9be5f867eaad00b784536fa990ca891f17fc84b88c516`）：
+SHA-256 应为（ZIP 为 `8f9e86c81841eb60f6611344fa489ebdf79ad3418b55796f6d1e421f10c6f4b8`）：
 
 ```text
-18bf13a7a3b75777c1ffcf11126b5da08d2e633dd0508d67cc3b791cb92bb84c
+a73cb885f951e871a571d0eb7211626e2c4c0330091ce79123adf00df34daa28
 ```
 
-[Mac 更新说明](releases/AUV_Mac_1.0.0.md#中文) · [发布下载页](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v1.0.0)
+[Mac 更新说明](releases/AUV_Mac_1.0.1.md#中文) · [发布下载页](https://github.com/ShaoJHe-SilkRoad/UMA/releases/tag/v1.0.1)
 
 <a id="windows-中文安装指南"></a>
 

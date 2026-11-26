@@ -6,10 +6,10 @@
 
 | Platform | Download | Requirements |
 | --- | --- | --- |
-| macOS | [Download for Mac — 1.0.0](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.0/AUV_Mac_1.0.0_Universal.dmg) | macOS 14+ · Apple silicon and Intel · Universal app · DMG · signed and notarized |
+| macOS | [Download for Mac — 1.0.1](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.1/AUV_Mac_1.0.1_Universal.dmg) | macOS 14+ · Apple silicon and Intel · Universal app · DMG · signed and notarized |
 | Windows | [Download for Windows — 0.18.7](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.7-win/AUV_Win_0.18.7.zip) | Windows 11 · x64 · portable ZIP · **unsigned** |
 
-[Install or upgrade](docs/INSTALLATION.md) · [Mac release notes](docs/releases/AUV_Mac_1.0.0.md) · [Mac compatibility](docs/MAC_COMPATIBILITY.md) · [中文](#中文)
+[Install or upgrade](docs/INSTALLATION.md) · [Mac release notes](docs/releases/AUV_Mac_1.0.1.md) · [Mac compatibility](docs/MAC_COMPATIBILITY.md) · [中文](#中文)
 
 <p align="center"><img src="docs/images/auv-1.0/auv-en.png" width="720" alt="AUV 1.0 main window: Claude's usage card with 5-hour and 7-day levels"></p>
 
@@ -38,11 +38,11 @@ Supports English and Chinese, light and dark appearance, three looks (Standard, 
 
 ## Get started on Mac
 
-1. [Download the DMG](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.0/AUV_Mac_1.0.0_Universal.dmg) and double-click it to open it.
-2. Drag **`UMA.app`** onto the **Applications** shortcut beside it, so it goes to Applications on your Mac's internal disk. A [ZIP](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.0/AUV_Mac_1.0.0_Universal.zip) is also available. It opens as **AUV**; the filename is retained for existing installations. It opens as **AUV**; the filename is retained for existing installations.
+1. [Download the DMG](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.1/AUV_Mac_1.0.1_Universal.dmg) and double-click it to open it.
+2. Drag **`UMA.app`** onto the **Applications** shortcut beside it, so it goes to Applications on your Mac's internal disk. A [ZIP](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.1/AUV_Mac_1.0.1_Universal.zip) is also available. It opens as **AUV**; the filename is retained for existing installations. It opens as **AUV**; the filename is retained for existing installations.
 3. Open AUV. To see Codex allowance, install and sign in to the official Codex app with your ChatGPT account, then allow the local connection in AUV and choose **Scan for Agents**, then **Refresh All**.
 
-Upgrading? Quit the old AUV before replacing it. Keep your saved settings. Version **1.0.0**, build **2026112605**, is Developer ID signed and Apple notarized.
+Upgrading? Quit the old AUV before replacing it. Keep your saved settings. Version **1.0.1**, build **2026112606**, is Developer ID signed and Apple notarized.
 
 The package includes Apple silicon and Intel versions. Package checks ran on macOS 27.2 on Apple silicon, including the Intel executable through Rosetta 2. Physical Intel Macs and macOS 14/15 have not yet been tested. [Compatibility details](docs/MAC_COMPATIBILITY.md).
 
@@ -92,10 +92,10 @@ Windows build **20261116.1** is released separately from the Mac app (tag `v0.18
 
 | 平台 | 下载 | 要求 |
 | --- | --- | --- |
-| macOS | [下载 Mac 版 · 1.0.0](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.0/AUV_Mac_1.0.0_Universal.dmg) | macOS 14 及以上 · Apple silicon 和 Intel · 通用包 · DMG · 已签名并通过公证 |
+| macOS | [下载 Mac 版 · 1.0.1](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.1/AUV_Mac_1.0.1_Universal.dmg) | macOS 14 及以上 · Apple silicon 和 Intel · 通用包 · DMG · 已签名并通过公证 |
 | Windows | [下载 Windows 版 · 0.18.7](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.7-win/AUV_Win_0.18.7.zip) | Windows 11 · x64 · 便携 ZIP · **未签名** |
 
-[安装与升级](docs/INSTALLATION.md#中文安装指南) · [Mac 更新说明](docs/releases/AUV_Mac_1.0.0.md#中文) · [Mac 兼容性](docs/MAC_COMPATIBILITY.md#中文)
+[安装与升级](docs/INSTALLATION.md#中文安装指南) · [Mac 更新说明](docs/releases/AUV_Mac_1.0.1.md#中文) · [Mac 兼容性](docs/MAC_COMPATIBILITY.md#中文)
 
 <p align="center"><img src="docs/images/auv-1.0/auv-zh.png" width="720" alt="AUV 1.0 主窗口：Claude 的用量卡片，含 5 小时与 7 天额度"></p>
 
@@ -124,11 +124,11 @@ Windows build **20261116.1** is released separately from the Mac app (tag `v0.18
 
 ### Mac 快速开始
 
-1. [下载 DMG](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.0/AUV_Mac_1.0.0_Universal.dmg)，双击打开。
-2. 将 **`UMA.app`** 拖到旁边的 **Applications** 快捷方式上，即放入 Mac 内置盘的**“应用程序”**文件夹。也可下载 [ZIP](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.0/AUV_Mac_1.0.0_Universal.zip)。打开后显示为 **AUV**，文件名保留以兼容已有安装。打开后显示为 **AUV**，文件名保留以兼容已有安装。
+1. [下载 DMG](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.1/AUV_Mac_1.0.1_Universal.dmg)，双击打开。
+2. 将 **`UMA.app`** 拖到旁边的 **Applications** 快捷方式上，即放入 Mac 内置盘的**“应用程序”**文件夹。也可下载 [ZIP](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.1/AUV_Mac_1.0.1_Universal.zip)。打开后显示为 **AUV**，文件名保留以兼容已有安装。打开后显示为 **AUV**，文件名保留以兼容已有安装。
 3. 打开 AUV。查看 Codex 额度时，先安装官方 Codex 并用 ChatGPT 账户登录，再在 AUV 中允许本机连接，点击**“扫描智能体”**，再点**“全部刷新”**。
 
-升级前先正常退出旧版，再替换应用，保留已有设置。当前 Mac 版本为 **1.0.0**，构建号 **2026112605**，已完成 Developer ID 签名和 Apple 公证。
+升级前先正常退出旧版，再替换应用，保留已有设置。当前 Mac 版本为 **1.0.1**，构建号 **2026112606**，已完成 Developer ID 签名和 Apple 公证。
 
 通用包包含 Apple silicon 与 Intel 版本。包验证在 macOS 27.2 的 Apple silicon Mac 上进行，并通过 Rosetta 2 运行 Intel 程序。尚未在 Intel 实机或 macOS 14/15 上测试。[兼容性详情](docs/MAC_COMPATIBILITY.md#中文)。
 
