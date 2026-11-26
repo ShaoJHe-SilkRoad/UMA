@@ -49,14 +49,24 @@ private struct AUVLookRoot: ViewModifier {
 }
 
 private struct AUVLookToggleStyle: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
     let look: AUVLook
 
     func body(content: Content) -> some View {
+        let isDark = colorScheme == .dark
         switch look {
         case .standard: content
-        case .wabiSabi: content.toggleStyle(AUVQuietSwitchStyle())
-        // Raw controls: the system's own checkbox.
-        case .brutalist: content.toggleStyle(.checkbox)
+        case .wabiSabi:
+            content.toggleStyle(AUVQuietSwitchStyle())
+                .buttonStyle(AUVLookButtonStyle())
+                .tint(AUVLookPalette.ink(.wabiSabi, isDark: isDark))
+                .font(AUVLookType.text(13))
+        // Raw controls: the system's own checkbox, in ink.
+        case .brutalist:
+            content.toggleStyle(.checkbox)
+                .buttonStyle(AUVLookButtonStyle())
+                .tint(AUVLookPalette.ink(.brutalist, isDark: isDark))
+                .font(AUVLookType.text(13))
         }
     }
 }
@@ -168,7 +178,8 @@ public enum AUVLookPalette {
     public static func accent(_ look: AUVLook = .current, isDark: Bool) -> Color {
         switch look {
         case .standard: Color.accentColor
-        case .wabiSabi: indigo(isDark: isDark)
+        // Ink: the dyes are kept for the tiers.
+        case .wabiSabi: ink(.wabiSabi, isDark: isDark)
         case .brutalist: ink(.brutalist, isDark: isDark)
         }
     }
@@ -222,7 +233,8 @@ public enum AUVLookType {
     public static func display(_ size: CGFloat, look: AUVLook = .current, standard: Font) -> Font {
         switch look {
         case .standard: standard
-        case .wabiSabi: .custom("HiraginoSans-W3", size: size + 2)
+        // Headlines in Hiragino Mincho: the one place a serif speaks.
+        case .wabiSabi: .custom("HiraMinProN-W3", size: size + 2)
         case .brutalist: .system(size: size + 8, weight: .heavy)
         }
     }
@@ -238,18 +250,17 @@ struct AUVQuietSwitchStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
         let isDark = colorScheme == .dark
         let ink = AUVLookPalette.ink(.wabiSabi, isDark: isDark)
-        let indigo = AUVLookPalette.indigo(isDark: isDark)
         let on = configuration.isOn
         HStack {
             configuration.label
             Spacer(minLength: 8)
             ZStack(alignment: on ? .trailing : .leading) {
                 Capsule()
-                    .fill(on ? indigo.opacity(0.28) : Color.clear)
-                    .overlay(Capsule().stroke(on ? indigo.opacity(0.6) : ink.opacity(0.35), lineWidth: 0.8))
+                    .fill(on ? ink.opacity(0.14) : Color.clear)
+                    .overlay(Capsule().strokeBorder(on ? ink.opacity(0.55) : ink.opacity(0.35), lineWidth: 0.8))
                     .frame(width: 30, height: 16)
                 Circle()
-                    .fill(on ? indigo : ink.opacity(0.3))
+                    .fill(on ? ink : ink.opacity(0.3))
                     .frame(width: 10, height: 10)
                     .padding(3)
             }
@@ -333,7 +344,7 @@ struct AUVLookMinimalCapsule<Content: View>: View {
             ? UsageGaugeTier.forRemaining(reading.primary?.remainingPercent) : reading.primaryTier
         let barTier = reading.barTier == .outdated
             ? UsageGaugeTier.forRemaining(reading.secondary?.remainingPercent) : reading.barTier
-        let patina = look == .wabiSabi && reading.isOutdated ? 0.45 : 1
+        let patina = look == .wabiSabi && reading.isOutdated ? 0.7 : 1
         ZStack(alignment: .topLeading) {
             AUVLookPalette.surface(look, isDark: isDark)
             if showsLevel {
@@ -349,18 +360,25 @@ struct AUVLookMinimalCapsule<Content: View>: View {
                               : ink.opacity(isDark ? 0.34 : 0.30))
                         .frame(width: w * bar, height: 3)
                         .offset(y: h - 3)
-                    if look == .brutalist, reading.primaryFraction != nil, lead < 0.995 {
+                    if look == .brutalist, reading.primaryFraction != nil {
+                        // The tier is a solid cap along the top edge where the
+                        // level ends, clear of the figure; a 1 pt rule marks
+                        // the end itself.
+                        let end = w * lead
                         Rectangle()
                             .fill(AUVLookPalette.system(reading.primaryTier, isDark: isDark))
-                            .frame(width: min(4, w * lead), height: h - 4)
-                            .offset(x: max(0, w * lead - 4))
+                            .frame(width: min(12, end), height: 3)
+                            .offset(x: max(0, end - 12))
+                        if lead < 0.995 {
+                            Rectangle().fill(ink).frame(width: 1, height: h - 4).offset(x: max(0, end - 1))
+                        }
                     }
                 }
                 .opacity(patina)
             }
             content()
                 .frame(width: w, height: h - 3)
-                .opacity(max(0.55, patina))
+                .opacity(max(0.85, patina))
         }
         .frame(width: w, height: h, alignment: .topLeading)
         .compositingGroup()

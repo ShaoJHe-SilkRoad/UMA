@@ -279,6 +279,7 @@ public struct SectoriumWorkbenchView: View {
                             Label(text("Scan drives", "扫描硬盘"), systemImage: "magnifyingglass")
                         }
                         .buttonStyle(.borderless)
+                        .auvInkForeground()
                         .disabled(model.isBusy || model.registryUnavailable)
                         .help(text("Find development volumes recorded in the IMPORTANT.md of connected drives",
                                    "查找已连接硬盘的 IMPORTANT.md 中记录的开发卷"))
@@ -287,6 +288,7 @@ public struct SectoriumWorkbenchView: View {
                             Label(text("Create volume", "创建开发卷"), systemImage: "plus")
                         }
                         .buttonStyle(.borderless)
+                        .auvInkForeground()
                         .disabled(model.isBusy || model.registryUnavailable || creatableDevices.isEmpty)
                         .accessibilityIdentifier("uma.sectorium.create")
                     }
@@ -317,7 +319,7 @@ public struct SectoriumWorkbenchView: View {
             .frame(maxWidth: 1040, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(AUVLook.current.isStandard ? Color(nsColor: .windowBackgroundColor) : UMAVisualStyle.canvas)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityIdentifier("uma.sectorium.workbench")
         .onAppear { model.activateWorkbench() }
@@ -366,7 +368,8 @@ public struct SectoriumWorkbenchView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 12) {
                 Text(text("Sectorium", "分区工"))
-                    .font(.system(size: 28, weight: .semibold, design: .rounded))
+                    .font(AUVLookType.heading(AUVLook.current == .brutalist ? 34 : 28,
+                                              standard: .system(size: 28, weight: .semibold, design: .rounded)))
                 Spacer(minLength: 8)
                 SectoriumWorkbenchButton(title: text("Refresh", "刷新"), identifier: "uma.sectorium.refresh",
                     isEnabled: !model.isBusy, controlSize: .small) { model.refresh() }
@@ -426,7 +429,7 @@ public struct SectoriumWorkbenchView: View {
             }
             .padding(.vertical, 13).padding(.horizontal, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 9))
+            .auvGroupSurface(standardOpacity: 0.035, radius: 9)
             .accessibilityElement(children: .contain)
         }
     }
@@ -549,6 +552,7 @@ public struct SectoriumWorkbenchView: View {
                         Image(systemName: "ellipsis").frame(width: 24, height: 24)
                     }
                     .menuStyle(.borderlessButton).fixedSize()
+                    .auvInkForeground()
                     .accessibilityLabel(text("Drive options for \(group.name)", "\(group.name) 的硬盘选项"))
                     .accessibilityIdentifier("uma.sectorium.parent-options.\(group.id)")
                 }
@@ -608,8 +612,7 @@ public struct SectoriumWorkbenchView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(group.isExternal ? 0.025 : 0.012), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.09), lineWidth: 0.5))
+        .auvGroupSurface(standardOpacity: group.isExternal ? 0.025 : 0.012, radius: 12, standardStroke: true)
         .accessibilityElement(children: .contain)
     }
 
@@ -661,7 +664,7 @@ public struct SectoriumWorkbenchView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Image(systemName: "externaldrive.fill").foregroundStyle(.secondary)
-                Text(row.profile.name).font(.system(size: 16, weight: .semibold))
+                Text(row.profile.name).font(AUVLookType.text(16, strong: true, standardWeight: .semibold))
                 Spacer()
                 if let loaded = row.verifiedLoaded {
                     SectoriumStatusPill(title: !row.parentConnected && !loaded ? text("Disconnected", "已断开")
@@ -707,6 +710,7 @@ public struct SectoriumWorkbenchView: View {
                     Image(systemName: "ellipsis").frame(width: 24, height: 28)
                 }
                 .menuStyle(.borderlessButton).fixedSize()
+                .auvInkForeground()
                 .accessibilityLabel(text("More options for \(row.profile.name)", "\(row.profile.name) 的更多选项"))
                 .accessibilityIdentifier("uma.sectorium.volume-more.\(row.id)")
                 Spacer(minLength: 0)
@@ -1370,12 +1374,18 @@ struct SectoriumStatusPill: View {
     let active: Bool
     var body: some View {
         HStack(spacing: 5) {
-            Circle().fill(active ? Color.green : Color.secondary).frame(width: 5, height: 5)
+            Circle().fill(active ? (AUVLook.current == .wabiSabi ? AUVLookPalette.dynamic(0x5A7040, 0x93A86A)
+                                    : Color.green) : Color.secondary).frame(width: 5, height: 5)
             Text(title).font(.caption.weight(.medium))
         }
-        .foregroundStyle(active ? Color.green : Color.secondary)
+        .foregroundStyle(active ? (AUVLook.current == .wabiSabi ? AUVLookPalette.dynamic(0x5A7040, 0x93A86A)
+                                   : Color.green) : Color.secondary)
         .padding(.horizontal, 9).padding(.vertical, 5)
-        .background((active ? Color.green : Color.secondary).opacity(0.09), in: Capsule())
+        .background((active ? Color.green : Color.secondary).opacity(AUVLook.current.isStandard ? 0.09 : 0),
+                    in: Capsule())
+        .overlay {
+            if AUVLook.current == .brutalist { Rectangle().strokeBorder(Color.primary, lineWidth: 1) }
+        }
     }
 }
 
@@ -1388,7 +1398,7 @@ struct SectoriumSheetHeader: View {
             Image(systemName: symbol).font(.system(size: 25, weight: .light)).foregroundStyle(.secondary)
                 .frame(width: 30, height: 32)
             VStack(alignment: .leading, spacing: 5) {
-                Text(title).font(.system(size: 21, weight: .semibold))
+                Text(title).font(AUVLookType.heading(21, standard: .system(size: 21, weight: .semibold)))
                 Text(subtitle).font(.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1635,6 +1645,7 @@ struct SectoriumWorkbenchButton: NSViewRepresentable {
         button.controlSize = controlSize
         button.bezelColor = prominent ? .controlAccentColor : nil
         button.setWorkbenchEnabled(isEnabled)
+        button.auvProminent = prominent
         button.refusesFirstResponder = false
         button.focusRingType = .exterior
         button.setAccessibilityLabel(title)
@@ -1701,7 +1712,7 @@ private struct SectoriumWorkbenchConsentControl: NSViewRepresentable {
     }
 }
 
-private final class SectoriumWorkbenchFocusableButton: NSButton {
+private final class SectoriumWorkbenchFocusableButton: AUVLookButton {
     private var workbenchEnabled = true
 
     override var isEnabled: Bool {

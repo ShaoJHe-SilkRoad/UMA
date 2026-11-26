@@ -7,8 +7,8 @@ enum AgentConnectionIndicatorPalette {
         case .standard:
             isDark ? Color(red: 0.35, green: 1.0, blue: 0.52)
                 : (increasedLightContrast ? Color(red: 0.02, green: 0.46, blue: 0.18) : .green)
-        // Moss, not a signal green; the problem colours stay as they are.
-        case .wabiSabi: AUVLookPalette.moss(isDark: isDark)
+        // Sumi ink: colour is kept for the tiers; problem colours stay.
+        case .wabiSabi: AUVLookPalette.ink(.wabiSabi, isDark: isDark).opacity(0.85)
         case .brutalist: AUVLookPalette.ink(.brutalist, isDark: isDark)
         }
     }

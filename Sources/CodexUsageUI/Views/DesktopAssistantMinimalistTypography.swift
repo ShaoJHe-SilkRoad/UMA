@@ -64,7 +64,9 @@ public enum DesktopAssistantMinimalistTypography {
         // Whole-point slack also covers SwiftUI/AppKit shaping and Retina rounding.
         let valueWidth = ceil(width) + 1
         let prefixWidth = ceil(("≈" as NSString).size(withAttributes: [.font: font]).width) + 1
-        let horizontalInset: CGFloat = 5 // rounded edge and the existing logo glow
+        // Rounded edge and the existing logo glow; the packs' heavier or
+        // wider figures get a little more room at the square end.
+        let horizontalInset: CGFloat = AUVLook.current.isStandard ? 5 : 8
         let total = horizontalInset * 2 + DesktopAssistantMetrics.minimalistConnectionDiameter
             + DesktopAssistantMetrics.minimalistGap + prefixWidth + valueWidth
         let height = max(DesktopAssistantMetrics.minimalistHeight,

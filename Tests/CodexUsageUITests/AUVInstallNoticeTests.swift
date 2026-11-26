@@ -90,4 +90,20 @@ struct AUVInstallNoticeTests {
         #expect(en.duration > 3.5 && en.duration < 5)
         #expect(zh.duration >= en.duration)
     }
+
+    @Test("Wabi-Sabi and Brutalist have their own playable sounds in every language")
+    @MainActor
+    func themedWelcomeSounds() throws {
+        let wabi = try #require(NSSound(data: AUVWelcomeSoundData.wabiSabi))
+        let brut = try #require(NSSound(data: AUVWelcomeSoundData.brutalist))
+        // Seven tones at quarter = 66 plus a small room; six notes at quarter = 126.
+        #expect(wabi.duration > 5.5 && wabi.duration < 8)
+        #expect(brut.duration > 3.5 && brut.duration < 5.5)
+        for language in [AppLanguage.simplifiedChinese, .english] {
+            #expect(AUVWelcomeSound.data(language, style: .wabiSabi) == AUVWelcomeSoundData.wabiSabi)
+            #expect(AUVWelcomeSound.data(language, style: .brutalist) == AUVWelcomeSoundData.brutalist)
+        }
+        #expect(AUVWelcomeSound.data(.english, style: .standard) == AUVWelcomeSoundData.en)
+        #expect(AUVWelcomeSound.data(.simplifiedChinese, style: .standard) == AUVWelcomeSoundData.zh)
+    }
 }

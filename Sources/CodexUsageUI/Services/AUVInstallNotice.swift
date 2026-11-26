@@ -84,12 +84,34 @@ public enum AUVInstallNotice: Equatable, Sendable {
 /// drumbeat, the seven tones, then the greeting the owner recorded. Built by
 /// script/render_auv_welcome_sounds.py. A drag in the disk image cannot play
 /// anything itself, so the sound that marks a successful install is here.
+///
+/// The Wabi-Sabi and Brutalist looks each have their own sound, the same in
+/// every language: 门楼's seven tones in the Japanese 都节 scale on a koto, and
+/// the first six notes of the Soviet anthem on low brass, at a brisk march.
 @MainActor
 public enum AUVWelcomeSound {
+    public enum Style: String, CaseIterable, Sendable {
+        case standard
+        case wabiSabi
+        case brutalist
+    }
+
     private static var current: NSSound?
 
-    public static func play(_ language: AppLanguage) {
-        let data = language == .simplifiedChinese ? AUVWelcomeSoundData.zh : AUVWelcomeSoundData.en
+    static func data(_ language: AppLanguage, style: Style) -> Data {
+        switch style {
+        case .standard:
+            return language == .simplifiedChinese ? AUVWelcomeSoundData.zh : AUVWelcomeSoundData.en
+        case .wabiSabi: return AUVWelcomeSoundData.wabiSabi
+        case .brutalist: return AUVWelcomeSoundData.brutalist
+        }
+    }
+
+    /// Plays the welcome sound; without a style, the one for the current
+    /// appearance pack (Wabi-sabi: 和楽 tones, Brutalist: its fanfare).
+    public static func play(_ language: AppLanguage, style: Style? = nil) {
+        let style = style ?? Style(rawValue: AUVLook.current.rawValue) ?? .standard
+        let data = data(language, style: style)
         if let sound = NSSound(data: data) {
             current = sound   // keep it alive while it plays
             sound.play()

@@ -498,6 +498,7 @@ public struct UsageGaugeCardGeometry: Equatable, Sendable {
 /// The gauge card itself. Text comes in already formatted.
 public struct UsageGaugeCard: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.auvCardOnCanvas) private var onCanvas
 
     public let reading: UsageGaugeReading
     public let providerID: String
@@ -538,7 +539,8 @@ public struct UsageGaugeCard: View {
     private func points(_ ratio: CGFloat, minimum: CGFloat = 10) -> CGFloat { max(minimum, h * ratio) }
     private var ink: Color { AUVLookPalette.ink(look, isDark: isDark) }
     /// Wabi-sabi: an outdated reading fades like patina instead of turning grey.
-    private var patina: Double { look == .wabiSabi && reading.isOutdated ? 0.45 : 1 }
+    /// The fill keeps a recognisable dye; the text keeps 4.5:1.
+    private var patina: Double { look == .wabiSabi && reading.isOutdated ? 0.65 : 1 }
 
     public var body: some View {
         let g = UsageGaugeCardGeometry(size: size, isSingleBand: isSingleBand, showsLogo: showsLogo, look: look)
@@ -563,7 +565,7 @@ public struct UsageGaugeCard: View {
                     twoBandText(geometry: g)
                 }
             }
-            .opacity(max(0.55, patina))
+            .opacity(max(0.8, patina))
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
         // Composite first: without it, fills that start at the card's own
@@ -582,6 +584,9 @@ public struct UsageGaugeCard: View {
                 Rectangle().fill(.ultraThinMaterial)
                 (isDark ? Color(white: 0.08).opacity(0.62) : Color.white.opacity(0.55))
             }
+        case .wabiSabi where onCanvas:
+            // On the window's own stone the unused part is simply empty.
+            Color.clear
         case .wabiSabi, .brutalist:
             // Opaque stone or concrete, so the card reads the same on any desktop.
             AUVLookPalette.surface(look, isDark: isDark)
@@ -640,12 +645,20 @@ public struct UsageGaugeCard: View {
     }
 
     /// Brutalist: the level ends in a solid block of the system colour.
-    @ViewBuilder private func endBlock(_ rect: CGRect, tier: UsageGaugeTier) -> some View {
+    @ViewBuilder private func endBlock(_ rect: CGRect, tier: UsageGaugeTier, percent: Double?) -> some View {
         if look == .brutalist, rect.width > 0 {
             let w = min(5, rect.width)
-            Rectangle().fill(AUVLookPalette.system(tier, isDark: isDark))
-                .frame(width: w, height: rect.height)
-                .offset(x: rect.maxX - w, y: rect.minY)
+            if reading.isOutdated {
+                // Not current or an estimate: the tier stays, as a hollow block.
+                let live = UsageGaugeTier.forRemaining(percent)
+                Rectangle().strokeBorder(AUVLookPalette.system(live, isDark: isDark), lineWidth: 1.5)
+                    .frame(width: max(w, 6), height: rect.height)
+                    .offset(x: rect.maxX - max(w, 6), y: rect.minY)
+            } else {
+                Rectangle().fill(AUVLookPalette.system(tier, isDark: isDark))
+                    .frame(width: w, height: rect.height)
+                    .offset(x: rect.maxX - w, y: rect.minY)
+            }
         }
     }
 
@@ -659,7 +672,7 @@ public struct UsageGaugeCard: View {
                     endBlock(CGRect(x: g.levelX, y: 0,
                                     width: max(0, g.fillEndX(fraction: fraction) - g.levelX),
                                     height: g.bandHeight),
-                             tier: reading.primaryTier)
+                             tier: reading.primaryTier, percent: percent)
                 }
             }
         }
@@ -683,7 +696,7 @@ public struct UsageGaugeCard: View {
                 let end = g.capWidth + g.bottomFillWidth(fraction: fraction)
                 endBlock(CGRect(x: g.columnWidth, y: top, width: max(0, end - g.columnWidth),
                                 height: h - top),
-                         tier: reading.barTier)
+                         tier: reading.barTier, percent: percent)
             }
         }
     }
@@ -698,7 +711,7 @@ public struct UsageGaugeCard: View {
                 if fraction < 0.995 || reading.lead == .unlimited {
                     let end = size.width * CGFloat(min(1, max(0, fraction)))
                     endBlock(CGRect(x: g.levelX, y: 0, width: max(0, end - g.levelX), height: h),
-                             tier: reading.primaryTier)
+                             tier: reading.primaryTier, percent: reading.primary?.remainingPercent)
                 }
             }
         }

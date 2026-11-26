@@ -1552,7 +1552,7 @@ private struct WorkBuddySettingsSection: View {
                                 .tag($0)
                         }
                     }
-                    .pickerStyle(.segmented)
+                    .auvSegmentedStyle()
                     .labelsHidden()
                     .disabled(!model.isEnabled)
                     .accessibilityLabel(
@@ -1979,7 +1979,7 @@ private struct WorkBuddyAccountWebSyncSection: View {
                 }
             }
             .labelsHidden()
-            .pickerStyle(.segmented)
+            .auvSegmentedStyle()
             .accessibilityLabel(language.workBuddyAccountWebSessionChoice)
         }
     }
@@ -2084,7 +2084,7 @@ private struct WorkBuddyLoginAssistanceSection: View {
                         Text(language.workBuddyAccountMode(mode)).tag(mode)
                     }
                 }
-                .pickerStyle(.segmented)
+                .auvSegmentedStyle()
                 .labelsHidden()
                 .accessibilityLabel(language.workBuddyAccountType)
                 .accessibilityHint(language.workBuddyAccountModeHint)

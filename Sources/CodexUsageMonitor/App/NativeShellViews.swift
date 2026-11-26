@@ -35,6 +35,7 @@ private struct MainToolbarNavigationControl: NSViewRepresentable {
         control.action = #selector(Coordinator.selectionChanged(_:))
         control.setAccessibilityLabel(accessibilityLabel)
         control.setAccessibilityIdentifier("uma.main.navigation")
+        AUVLookAppKit.style(control)
         return control
     }
 
@@ -104,6 +105,8 @@ private struct MainToolbarActionButton: NSViewRepresentable {
         }
         if iconOnly { button.isBordered = false; button.contentTintColor = .secondaryLabelColor }
         button.font = .systemFont(ofSize: 13)
+        button.auvIconOnly = iconOnly
+        button.applyLook()
         button.focusRingType = .exterior
         button.refusesFirstResponder = false
         button.setAccessibilityLabel(label)
@@ -131,7 +134,7 @@ private struct MainToolbarActionButton: NSViewRepresentable {
     }
 }
 
-private final class MainToolbarFocusableButton: NSButton {
+private final class MainToolbarFocusableButton: AUVLookButton {
     override var acceptsFirstResponder: Bool { true }
     override var canBecomeKeyView: Bool { !isHidden && alphaValue > 0 }
 }

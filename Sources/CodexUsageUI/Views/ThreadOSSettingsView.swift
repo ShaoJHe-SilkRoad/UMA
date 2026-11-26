@@ -699,7 +699,7 @@ public struct ThreadOSSettingsView: View {
                     Text(title("Inherit", "继承")).tag(true)
                     Text(title("Custom", "自定义")).tag(false)
                 }
-                .labelsHidden().pickerStyle(.segmented).frame(width: 112).disabled(!slot.enabled)
+                .labelsHidden().auvSegmentedStyle().frame(width: 112).disabled(!slot.enabled)
                 .accessibilityLabel(title("\(workerName) configuration", "\(workerName) 配置"))
                 .accessibilityIdentifier("uma.threados.v2.\(role.rawValue).worker.\(index + 1).inherit")
                 .background(ThreadOSSchemeBGeometryReporter(identifier: "role.\(role.rawValue).worker.\(index + 1).inherit", probe: layoutProbe))
@@ -713,7 +713,7 @@ public struct ThreadOSSettingsView: View {
             }
             VStack(alignment: .leading, spacing: 6) {
                 HStack { Text(workerName).font(.subheadline); Spacer(); Toggle("", isOn: slotEnabledBinding(role, index)).labelsHidden().accessibilityLabel(title("\(workerName) enabled", "\(workerName) 已启用")) }
-                Picker(title("\(workerName) configuration", "\(workerName) 配置"), selection: slotInheritanceBinding(role, index)) { Text(title("Inherit", "继承")).tag(true); Text(title("Custom", "自定义")).tag(false) }.pickerStyle(.segmented).disabled(!slot.enabled)
+                Picker(title("\(workerName) configuration", "\(workerName) 配置"), selection: slotInheritanceBinding(role, index)) { Text(title("Inherit", "继承")).tag(true); Text(title("Custom", "自定义")).tag(false) }.auvSegmentedStyle().disabled(!slot.enabled)
                 if slot.inherits { Text(title("Inherited: \(selectionSummary(resolved))", "继承：\(selectionSummary(resolved))")).font(.caption).foregroundStyle(.secondary) }
                 else { slotSelectionFields(role: role, index: index, selection: slot.selection).disabled(!slot.enabled) }
             }

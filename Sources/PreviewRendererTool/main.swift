@@ -638,6 +638,8 @@ struct PreviewRendererTool {
                 DesktopAssistantDensity.regular.rawValue,
                 for: UMAApplicationPreferenceKeys.assistantDensity
             )
+            // The Look row shows the pack being rendered.
+            preferences.set(AUVLook.current.rawValue, for: UMAApplicationPreferenceKeys.look)
             let pane: GlobalSettingsPane = switch scenario {
             case .settingsGeneral: .general
             case .settingsAppearance: .general  // Appearance lives under General now.
@@ -913,7 +915,8 @@ struct PreviewRendererTool {
         alphaMask: Bool,
         liveReview: Bool
     ) throws {
-        let host = NSHostingView(rootView: review.content)
+        // As each app window does: the appearance pack's root styles.
+        let host = NSHostingView(rootView: review.content.auvLookRoot())
         host.frame = CGRect(origin: .zero, size: review.size)
         let window = NSWindow(
             contentRect: host.frame,

@@ -723,6 +723,7 @@ public struct QuickPanelSurface: View {
         .frame(width: 320)
         .fixedSize(horizontal: false, vertical: true)
         .background { QuickPanelLookGround() }
+        .environment(\.auvCardOnCanvas, true)
         .environment(\.locale, store.language.locale)
         .accessibilityIdentifier("uma.quick.surface")
         .auvLookRoot()
@@ -761,6 +762,9 @@ public struct QuickPanelSurface: View {
     ) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
+                // Thin in Wabi-sabi, bold in Brutalist, as the text is.
+                .fontWeight(AUVLook.current == .wabiSabi ? .ultraLight
+                            : (AUVLook.current == .brutalist ? .bold : nil))
                 .frame(width: 22, height: 22)
                 .contentShape(Rectangle())
         }
@@ -970,7 +974,8 @@ public struct AgentWorkspaceSurface: View {
                     // usage card. Without a reading, the module says why.
                     if let gauge = pageGauge {
                         pageGaugeCard(gauge, width: min(Self.maxContentWidth, geometry.size.width
-                                      - AgentWorkspaceLayoutPolicy.horizontalPadding * 2))
+                                      - AgentWorkspaceLayoutPolicy.horizontalPadding * 2
+                                      - (AUVLook.current == .wabiSabi ? 76 : 0)))
                     } else {
                         usageModule
                     }
@@ -987,11 +992,14 @@ public struct AgentWorkspaceSurface: View {
                 .frame(maxWidth: Self.maxContentWidth)
                 .frame(maxWidth: .infinity, alignment: AUVLook.current == .wabiSabi ? .leading : .center)
                 .padding(.horizontal, AgentWorkspaceLayoutPolicy.horizontalPadding)
+                // Wabi-sabi: a deeper margin on both sides, widest on the right.
                 .padding(.leading, AUVLook.current == .wabiSabi ? 20 : 0)
+                .padding(.trailing, AUVLook.current == .wabiSabi ? 56 : 0)
                 .padding(.vertical, AUVLook.current == .wabiSabi ? 30 : 18)
             }
         }
         .background(UMAVisualStyle.canvas)
+        .environment(\.auvCardOnCanvas, true)
         .accessibilityIdentifier("uma.agent.workspace.\(providerID.rawValue)")
         .alert(
             localized("Enable Claude Local Smart?", "启用 Claude 本地智能？"),
@@ -1320,7 +1328,8 @@ public struct AgentWorkspaceSurface: View {
         return VStack(alignment: .leading, spacing: 6) {
             Group {
                 if width >= 520 {
-                    HStack(alignment: .top, spacing: 8) { week; total; local }
+                    // Brutalist: one grid, neighbours share a rule.
+                    HStack(alignment: .top, spacing: AUVLook.current == .brutalist ? -1 : 8) { week; total; local }
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
                     VStack(spacing: 8) { week; total; local }
@@ -1810,8 +1819,9 @@ public struct AgentWorkspaceSurface: View {
                         .foregroundStyle(.secondary)
                 }
             case .wabiSabi:
-                // A quiet title, no icon.
-                Text(title).font(AUVLookType.text(12, strong: true)).foregroundStyle(.secondary)
+                // A quiet Mincho title, no icon.
+                Text(title).font(.custom("HiraMinProN-W3", size: 14)).tracking(1)
+                    .foregroundStyle(AUVLookPalette.ink(isDark: colorScheme == .dark).opacity(0.78))
             case .brutalist:
                 // A table head over a rule.
                 VStack(alignment: .leading, spacing: 8) {
@@ -1836,7 +1846,6 @@ public struct AgentWorkspaceSurface: View {
             Text(label).foregroundStyle(.secondary)
             Spacer(minLength: 18)
             Text(value).multilineTextAlignment(.trailing).lineLimit(2)
-                .font(AUVLook.current == .brutalist ? AUVLookType.text(13, strong: true) : nil)
         }
         .font(AUVLook.current.isStandard ? nil : AUVLookType.text(13))
     }
@@ -2060,6 +2069,8 @@ final class GlobalSettingsViewModel: ObservableObject {
         guard look != value else { return }
         look = value
         preferences.set(value.rawValue, for: UMAApplicationPreferenceKeys.look)
+        // Each look has its own welcome sound; choosing one plays it.
+        AUVWelcomeSound.play(language, style: AUVWelcomeSound.Style(rawValue: value.rawValue))
     }
 
     func setMenuBarShowsRemaining(_ value: Bool) {
@@ -2485,20 +2496,34 @@ public struct GlobalSettingsSurface: View {
     public var body: some View {
         GeometryReader { viewport in
             HStack(spacing: 0) {
-                List(GlobalSettingsPane.allCases, selection: $navigation.pane) { item in
-                    HStack(spacing: 8) {
-                        GlobalSettingsPaneIcon(symbol: symbol(item), tint: tint(item))
-                        Text(paneTitle(item))
-                            .font(AUVType.body)
+                Group {
+                    if AUVLook.current.isStandard {
+                        List(GlobalSettingsPane.allCases, selection: $navigation.pane) { item in
+                            HStack(spacing: 8) {
+                                GlobalSettingsPaneIcon(symbol: symbol(item), tint: tint(item))
+                                Text(paneTitle(item))
+                                    .font(AUVType.body)
+                            }
+                            .padding(.vertical, 1)
+                            .tag(item)
+                        }
+                        .listStyle(.sidebar)
+                    } else {
+                        GlobalSettingsLookSidebar(
+                            selection: $navigation.pane,
+                            title: paneTitle,
+                            symbol: symbol
+                        )
                     }
-                    .padding(.vertical, 1)
-                    .tag(item)
                 }
-                .listStyle(.sidebar)
                 .frame(width: 180)
                 .accessibilityIdentifier("uma.settings.sidebar")
 
-                Divider().frame(width: 1)
+                if AUVLook.current.isStandard {
+                    Divider().frame(width: 1)
+                } else {
+                    Rectangle().fill(UMAVisualStyle.separator).frame(width: 1)
+                }
 
                 // Bound the detail to the actual window viewport. Intrinsic
                 // form widths must never push the sidebar out of the window.
@@ -2525,17 +2550,38 @@ public struct GlobalSettingsSurface: View {
     private var settingsDetail: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(paneTitle(navigation.pane))
-                .font(AUVType.title)
+                .font(AUVLookType.heading(AUVLook.current == .brutalist ? 30 : 24, standard: AUVType.title))
                 .accessibilityAddTraits(.isHeader)
                 .padding(.horizontal, 30)
                 .padding(.top, 20)
                 .padding(.bottom, 2)
             settingsForm
         }
+        .background(AUVLook.current.isStandard ? Color.clear : UMAVisualStyle.canvas)
     }
 
-    private var settingsForm: some View {
-        Form {
+    @ViewBuilder private var settingsForm: some View {
+        if AUVLook.current.isStandard {
+            Form { settingsFormContent }
+                .formStyle(.grouped)
+                .scrollContentBackground(.hidden)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 6)
+        } else {
+            // A pack draws its own sections: no rounded system groups.
+            ScrollView {
+                VStack(alignment: .leading, spacing: AUVLook.current == .wabiSabi ? 30 : 18) {
+                    settingsFormContent
+                }
+                .padding(.horizontal, 30)
+                .padding(.top, 14)
+                .padding(.bottom, 24)
+            }
+            .background(UMAVisualStyle.canvas)
+        }
+    }
+
+    @ViewBuilder private var settingsFormContent: some View {
             switch navigation.pane {
             case .general:
                 settingsSection(localized("Startup", "启动")) {
@@ -2610,7 +2656,7 @@ public struct GlobalSettingsSurface: View {
                         Text(localized("Dark", "深色"))
                             .tag(UMAApplicationAppearance.dark)
                     }
-                    .pickerStyle(.segmented)
+                    .auvSegmentedStyle()
                     .accessibilityIdentifier("uma.settings.appearance.theme")
                     Picker(
                         localized("Look", "外观包"),
@@ -2623,7 +2669,7 @@ public struct GlobalSettingsSurface: View {
                         Text(localized("Wabi-sabi", "侘寂")).tag(AUVLook.wabiSabi)
                         Text("Brutalist").tag(AUVLook.brutalist)
                     }
-                    .pickerStyle(.segmented)
+                    .auvSegmentedStyle()
                     .accessibilityIdentifier("uma.settings.appearance.look")
                 }
             case .refresh:
@@ -2767,7 +2813,7 @@ public struct GlobalSettingsSurface: View {
                         Text(localized("Regular", "常规")).tag(DesktopAssistantDensity.regular)
                         Text(localized("Minimalist", "极简")).tag(DesktopAssistantDensity.minimalist)
                     }
-                    .pickerStyle(.segmented)
+                    .auvSegmentedStyle()
                     Toggle(
                         localized("Show status indicator", "显示状态指示器"),
                         isOn: Binding(
@@ -2825,11 +2871,6 @@ public struct GlobalSettingsSurface: View {
                     }
                 }
             }
-        }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .padding(.horizontal, 10)
-        .padding(.bottom, 6)
     }
 
     @ViewBuilder private var privacyDataActions: some View {
@@ -2845,11 +2886,15 @@ public struct GlobalSettingsSurface: View {
         .accessibilityIdentifier("uma.settings.privacy.export-diagnostics")
     }
 
+    @ViewBuilder
     private func settingsSection<Content: View>(
         _ title: String,
         footer: String? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
+        if !AUVLook.current.isStandard {
+            AUVLookSection(title: title, footer: footer) { content() }
+        } else {
         Section {
             content()
         } header: {
@@ -2864,6 +2909,7 @@ public struct GlobalSettingsSurface: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
         }
     }
 
@@ -2921,6 +2967,60 @@ public struct GlobalSettingsSurface: View {
 
     private func localized(_ english: String, _ chinese: String) -> String {
         model.language == .simplifiedChinese ? chinese : english
+    }
+}
+
+/// The Settings sidebar in a pack. Wabi-sabi: a thin ink glyph, a short ink
+/// mark beside the chosen pane. Brutalist: rows on rules, the chosen one
+/// inverted, glyphs in ink.
+private struct GlobalSettingsLookSidebar: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Binding var selection: GlobalSettingsPane
+    let title: (GlobalSettingsPane) -> String
+    let symbol: (GlobalSettingsPane) -> String
+
+    var body: some View {
+        let isDark = colorScheme == .dark
+        let look = AUVLook.current
+        let ink = AUVLookPalette.ink(look, isDark: isDark)
+        let canvas = AUVLookPalette.canvas(look, isDark: isDark) ?? .white
+        VStack(alignment: .leading, spacing: look == .wabiSabi ? 4 : 0) {
+            ForEach(GlobalSettingsPane.allCases, id: \.self) { pane in
+                let chosen = pane == selection
+                let inverted = look == .brutalist && chosen
+                Button { selection = pane } label: {
+                    HStack(spacing: 10) {
+                        if look == .wabiSabi {
+                            Capsule().fill(ink.opacity(chosen ? 0.7 : 0)).frame(width: 2, height: 14)
+                        }
+                        Image(systemName: symbol(pane).replacingOccurrences(of: ".fill", with: ""))
+                            .font(.system(size: 13, weight: look == .wabiSabi ? .ultraLight : .bold))
+                            .frame(width: 18)
+                        Text(title(pane))
+                            .font(AUVLookType.text(13, strong: inverted))
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(inverted ? canvas : ink.opacity(look == .wabiSabi ? (chosen ? 0.92 : 0.6) : 1))
+                    .padding(.horizontal, look == .wabiSabi ? 6 : 12)
+                    .frame(height: 32)
+                    .background(inverted ? ink : Color.clear)
+                    .overlay(alignment: .bottom) {
+                        if look == .brutalist { Rectangle().fill(ink.opacity(0.35)).frame(height: 1) }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(chosen ? .isSelected : [])
+            }
+            Spacer(minLength: 0)
+        }
+        .overlay(alignment: .top) {
+            if look == .brutalist { Rectangle().fill(ink.opacity(0.35)).frame(height: 1) }
+        }
+        .padding(.top, 14)
+        .padding(.horizontal, look == .wabiSabi ? 10 : 0)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(UMAVisualStyle.canvas)
     }
 }
 
