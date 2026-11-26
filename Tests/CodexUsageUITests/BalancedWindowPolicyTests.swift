@@ -88,7 +88,8 @@ struct BalancedWindowPolicyTests {
         if expected.size == targetOuterSize {
             #expect(geometryAfterStartingHost.contentRect.size == MainWindowFramePolicy.normalContentSize)
         }
-        #expect(geometryAfterStartingHost.minimumOuterSize == NSSize(width: 760, height: 520))
+        // AppKit keeps a window with a compact toolbar at least 528 pt tall.
+        #expect(geometryAfterStartingHost.minimumOuterSize == NSSize(width: 760, height: 528))
         attachPreviewStore(to: controller)
         #expect(controller.frameForTesting == frameAfterStartingHost)
         #expect(controller.geometryForTesting?.contentRect == geometryAfterStartingHost.contentRect)

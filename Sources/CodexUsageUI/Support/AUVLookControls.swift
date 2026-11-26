@@ -86,6 +86,65 @@ public extension View {
     }
 }
 
+// MARK: - Menu picker
+
+/// A pop-up choice. Standard keeps the system pop-up; in a pack the system's
+/// white, full-width bar is replaced by a short menu button in the look's own
+/// button style (wabi-sabi frameless ink, Brutalist a 6 pt form in a rule).
+struct AUVLookMenuPicker<Value: Hashable>: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let title: String
+    let options: [(value: Value, title: String)]
+    @Binding var selection: Value
+    var width: CGFloat = 160
+
+    var body: some View {
+        if AUVLook.current.isStandard {
+            Picker(title, selection: $selection) {
+                ForEach(options.indices, id: \.self) { index in
+                    Text(options[index].title).tag(options[index].value)
+                }
+            }
+        } else {
+            let look = AUVLook.current
+            let current = options.first(where: { $0.value == selection })?.title ?? ""
+            HStack(spacing: 8) {
+                Text(title)
+                Menu {
+                    ForEach(options.indices, id: \.self) { index in
+                        let option = options[index]
+                        Button {
+                            selection = option.value
+                        } label: {
+                            if option.value == selection {
+                                Label(option.title, systemImage: "checkmark")
+                            } else {
+                                Text(option.title)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(current)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 9, weight: look == .brutalist ? .bold : .light))
+                            .foregroundStyle(AUVLookPalette.ink(look, isDark: colorScheme == .dark)
+                                .opacity(look == .brutalist ? 1 : 0.6))
+                    }
+                    .frame(width: width - 24)
+                }
+                .menuStyle(.button)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .accessibilityLabel(title)
+                .accessibilityValue(current)
+                Spacer(minLength: 0)
+            }
+        }
+    }
+}
+
 // MARK: - Sections
 
 /// A group of rows in a pack, outside a Form. Wabi-sabi: a quiet title and

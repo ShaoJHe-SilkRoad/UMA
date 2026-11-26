@@ -109,9 +109,12 @@ struct UMA014M1NativeShellTests {
             #expect(window.styleMask.contains(.closable))
             #expect(window.styleMask.contains(.miniaturizable))
             #expect(window.styleMask.contains(.resizable))
-            #expect(!window.styleMask.contains(.fullSizeContentView))
-            #expect(window.titleVisibility == .visible)
-            #expect(!window.titlebarAppearsTransparent)
+            // The app's bar is drawn into a transparent title bar beside the
+            // native traffic lights; no accessory views, no custom buttons.
+            #expect(window.styleMask.contains(.fullSizeContentView))
+            #expect(window.titleVisibility == .hidden)
+            #expect(window.titlebarAppearsTransparent)
+            #expect(window.toolbarStyle == .unifiedCompact)
             #expect(window.titlebarAccessoryViewControllers.isEmpty)
 
             for kind in [
@@ -368,7 +371,7 @@ struct UMA014M1NativeShellTests {
         #expect(script.contains("Development.ApplicationName"))
         #expect(script.contains("Development.BundleIdentifier"))
         #expect(
-            development["ApplicationName"] as? String == "UMA 0.18 Dev"
+            development["ApplicationName"] as? String == "UMA 1.0 Dev"
         )
         #expect(
             development["BundleIdentifier"] as? String

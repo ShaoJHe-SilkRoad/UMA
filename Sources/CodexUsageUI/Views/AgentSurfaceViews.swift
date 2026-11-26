@@ -1034,7 +1034,10 @@ public struct AgentWorkspaceSurface: View {
     /// Below the usage card: account metrics, the dated trend, and the
     /// connection with recent local activity folded into it.
     private func codexDashboard(for width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        // Wabi-sabi has no boxes, so only space separates the modules: the
+        // same breath as between every other module on the page.
+        VStack(alignment: .leading,
+               spacing: AUVLook.current == .wabiSabi ? AgentWorkspaceLayoutPolicy.moduleSpacing : 12) {
             metricRow(for: width)
             // The trend only when there are days to draw; otherwise the
             // connection module says so in one row.
@@ -1340,7 +1343,8 @@ public struct AgentWorkspaceSurface: View {
                 .font(AUVType.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.leading, 2)
+                // Wabi tiles have no inset, so the line starts where the figures do.
+                .padding(.leading, AUVLook.current == .wabiSabi ? 0 : 2)
                 .accessibilityIdentifier("uma.agent.codex.metric-source")
         }
         .accessibilityIdentifier("uma.agent.codex.metrics")
@@ -2476,14 +2480,20 @@ public struct GlobalSettingsSurface: View {
     @StateObject private var model: GlobalSettingsViewModel
     private let store: UsageStore
     private let geminiSettings: GeminiSettingsModel?
+    /// The window's title bar height when the surface runs under it: the
+    /// sidebar and the pane's title start below the traffic lights' row.
+    /// Zero keeps the surface below a title bar.
+    private let titlebarHeight: CGFloat
 
     public init(
         preferences: ApplicationPreferences,
         store: UsageStore,
         navigation: GlobalSettingsNavigationState,
         dataPaths: ApplicationDataPaths = .current(),
-        geminiSettings: GeminiSettingsModel? = nil
+        geminiSettings: GeminiSettingsModel? = nil,
+        titlebarHeight: CGFloat = 0
     ) {
+        self.titlebarHeight = titlebarHeight
         self.navigation = navigation
         self.store = store
         self.geminiSettings = geminiSettings
@@ -2509,6 +2519,8 @@ public struct GlobalSettingsSurface: View {
                             .tag(item)
                         }
                         .listStyle(.sidebar)
+                        // Under the title bar the window is one colour.
+                        .scrollContentBackground(titlebarHeight > 0 ? .hidden : .automatic)
                     } else {
                         GlobalSettingsLookSidebar(
                             selection: $navigation.pane,
@@ -2517,6 +2529,7 @@ public struct GlobalSettingsSurface: View {
                         )
                     }
                 }
+                .padding(.top, titlebarHeight)
                 .frame(width: 180)
                 .accessibilityIdentifier("uma.settings.sidebar")
 
@@ -2554,7 +2567,8 @@ public struct GlobalSettingsSurface: View {
                 .font(AUVLookType.heading(AUVLook.current == .brutalist ? 30 : 24, standard: AUVType.title))
                 .accessibilityAddTraits(.isHeader)
                 .padding(.horizontal, 30)
-                .padding(.top, 20)
+                // Below the title bar, which keeps only the traffic lights.
+                .padding(.top, titlebarHeight > 0 ? titlebarHeight + 6 : 20)
                 .padding(.bottom, 2)
             settingsForm
         }
@@ -2578,7 +2592,9 @@ public struct GlobalSettingsSurface: View {
                 .padding(.top, 14)
                 .padding(.bottom, 24)
             }
-            .background(UMAVisualStyle.canvas)
+            // Kept out of the safe area: under the title bar it would cover
+            // the pane's title above it.
+            .background(UMAVisualStyle.canvas, ignoresSafeAreaEdges: [])
         }
     }
 
@@ -2631,17 +2647,14 @@ public struct GlobalSettingsSurface: View {
                         "自动遵循“降低透明度”和“增强对比度”。外观包只改变 AUV 的样子，不改变功能。"
                     )
                 ) {
-                    Picker(
-                        localized("Language", "语言"),
+                    AUVLookMenuPicker(
+                        title: localized("Language", "语言"),
+                        options: AppLanguage.allCases.map { ($0, $0.displayName) },
                         selection: Binding(
                             get: { model.language },
                             set: model.setLanguage
                         )
-                    ) {
-                        ForEach(AppLanguage.allCases) { language in
-                            Text(language.displayName).tag(language)
-                        }
-                    }
+                    )
                     .accessibilityIdentifier("uma.settings.general.language")
                     Picker(
                         localized("Appearance", "外观"),

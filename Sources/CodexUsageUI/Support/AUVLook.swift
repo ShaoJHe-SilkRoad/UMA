@@ -417,9 +417,13 @@ struct AUVLookMinimalCapsule<Content: View>: View {
                     }
                 }
                 .offset(x: rule, y: h - rule - 6)
-                Rectangle().fill(ink.opacity(0.7))
-                    .frame(width: inner * bar, height: 2)
-                    .offset(x: rule, y: h - rule - 2)
+                // The 7D line only when 5H leads; where 7D leads, the
+                // level above is already 7D and a full line would read 100%.
+                if reading.lead == .fiveHour {
+                    Rectangle().fill(ink.opacity(0.7))
+                        .frame(width: inner * bar, height: 2)
+                        .offset(x: rule, y: h - rule - 2)
+                }
             }
         }
         .frame(width: w, height: h, alignment: .topLeading)

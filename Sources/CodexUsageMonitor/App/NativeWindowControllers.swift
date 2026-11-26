@@ -101,7 +101,7 @@ enum MainWindowTitlebarDoubleClickPolicy {
 }
 
 @MainActor
-final class MainWindow: NSWindow {
+final class MainWindow: NSWindow, AUVTitlebarDoubleClickHandling {
     var titlebarBackgroundDoubleClick: (() -> Void)?
     var delegatedEventObserver: ((NSEvent) -> Void)?
 
@@ -125,7 +125,11 @@ final class MainWindow: NSWindow {
                 point: event.locationInWindow,
                 contentLayoutRect: contentLayoutRect,
                 excludedControlFrames: standardWindowButtons.map { $0.convert($0.bounds, to: nil) }
-        ) else {
+              ),
+              // The bar is drawn inside the title bar: a double-click on one
+              // of its controls is that control's, not the title bar's.
+              !isOnControl(event.locationInWindow)
+        else {
             delegatedEventObserver?(event)
             super.sendEvent(event)
             return
@@ -145,6 +149,18 @@ final class MainWindow: NSWindow {
         return contentView.map(containsCopy) ?? false
     }
 
+    private func isOnControl(_ point: NSPoint) -> Bool {
+        guard let contentView, let hit = contentView.hitTest(contentView.convert(point, from: nil)) else {
+            return false
+        }
+        var view: NSView? = hit
+        while let candidate = view, candidate !== contentView {
+            if candidate is NSControl { return true }
+            view = candidate.superview
+        }
+        return false
+    }
+
     private var standardWindowButtons: [NSButton] {
         [.closeButton, .miniaturizeButton, .zoomButton].compactMap { standardWindowButton($0) }
     }
@@ -162,6 +178,7 @@ struct MainWindowGeometrySnapshot: Equatable {
 @MainActor
 final class MainWindowController: NSWindowController {
     private enum Layout {
+        // With the compact toolbar AppKit raises this to 528 pt tall.
         static let minimumOuterSize = NSSize(width: 760, height: 520)
         static let autosaveName = "UMA014.MainWindow"
     }
@@ -180,6 +197,8 @@ final class MainWindowController: NSWindowController {
             defer: false
         )
         window.title = "AUV"
+        // The bar is drawn beside the traffic lights, in the window's colour.
+        AUVWindowChrome.unify(window)
         window.minSize = Layout.minimumOuterSize
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
@@ -378,6 +397,7 @@ final class SettingsWindowController: NSWindowController {
             defer: false
         )
         window.title = "AUV Settings"
+        AUVWindowChrome.unify(window)
         window.minSize = Layout.minimumSize
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed

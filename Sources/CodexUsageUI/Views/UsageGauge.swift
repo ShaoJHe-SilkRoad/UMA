@@ -565,7 +565,7 @@ public struct UsageGaugeCard: View {
                     twoBandText(geometry: g)
                 }
             }
-            .opacity(max(0.8, patina))
+            .opacity(max(0.9, patina))
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
         // Composite first: without it, fills that start at the card's own
@@ -803,7 +803,7 @@ public struct UsageGaugeCard: View {
                 if reading.lead == .sevenDay, !secondaryText.isEmpty {
                     Text(secondaryText)
                         .font(AUVLookType.text(points(0.146), standardWeight: .medium))
-                        .foregroundStyle(ink.opacity(0.55))
+                        .foregroundStyle(ink.opacity(look == .wabiSabi ? 0.8 : 0.55))
                         .lineLimit(1)
                 }
             }
@@ -839,7 +839,7 @@ public struct UsageGaugeCard: View {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: points * 0.72,
                                   weight: look == .wabiSabi ? .light : (look == .brutalist ? .bold : .semibold)))
-                    .foregroundStyle(ink.opacity(look == .brutalist ? 0.8 : 0.45))
+                    .foregroundStyle(ink.opacity(look == .standard ? 0.45 : 0.8))
             }
             Text(text)
                 .font(AUVLookType.text(points, standardWeight: .medium))
@@ -852,7 +852,8 @@ public struct UsageGaugeCard: View {
     private var resetOpacity: Double {
         switch look {
         case .standard: isDark ? 0.72 : 0.62
-        case .wabiSabi: 0.62
+        // On a dyed band 0.62 fell to about 2.5:1; 0.86 holds 4.5:1 on every dye.
+        case .wabiSabi: 0.86
         case .brutalist: 0.9
         }
     }

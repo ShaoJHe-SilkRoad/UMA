@@ -188,9 +188,22 @@ struct MainWindowRootView: View {
     @StateObject private var sectoriumStoreLifetime = MainSectoriumStoreLifetime()
 
     var body: some View {
+        // The window's content runs under its transparent title bar; the bar
+        // takes the title bar's height, beside the traffic lights.
+        GeometryReader { proxy in
+            surface(barHeight: max(40, proxy.safeAreaInsets.top))
+                .ignoresSafeArea(.container, edges: .top)
+        }
+        .frame(minWidth: 760, minHeight: 488)
+        .background(UMAVisualStyle.canvas)
+        .environment(\.locale, store.language.locale)
+        .auvLookRoot()
+    }
+
+    private func surface(barHeight: CGFloat) -> some View {
         VStack(spacing: 0) {
-            toolbar
-            Divider()
+            toolbar(height: barHeight)
+            barRule
             switch navigation.destination {
             case .agents: agentsWorkspace
             case .threadOS:
@@ -214,10 +227,16 @@ struct MainWindowRootView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             versionFooter
         }
-        .frame(minWidth: 760, minHeight: 488)
-        .background(UMAVisualStyle.canvas)
-        .environment(\.locale, store.language.locale)
-        .auvLookRoot()
+    }
+
+    /// Under the bar: a hairline in Standard, only space in wabi-sabi, the
+    /// formwork's 2 pt rule in Brutalist.
+    @ViewBuilder private var barRule: some View {
+        switch AUVLook.current {
+        case .standard: Divider()
+        case .wabiSabi: EmptyView()
+        case .brutalist: Rectangle().fill(Color.primary).frame(height: AUVFormwork.rule)
+        }
     }
 
     private var versionFooter: some View {
@@ -236,8 +255,12 @@ struct MainWindowRootView: View {
         .background(UMAVisualStyle.canvas)
     }
 
-    private var toolbar: some View {
+    private func toolbar(height: CGFloat) -> some View {
         HStack(spacing: 12) {
+            // Past the bar's 16 pt padding and the row's 12 pt spacing.
+            AUVTrafficLightClearance(leadingPadding: 28)
+                .fixedSize()
+                .accessibilityHidden(true)
             MainToolbarNavigationControl(
                 selection: $navigation.destination,
                 labels: MainSurfaceDestination.toolbarDestinations.map(destinationTitle),
@@ -294,8 +317,9 @@ struct MainWindowRootView: View {
                 .accessibilityHidden(true)
         }
         .padding(.horizontal, 16)
-        .frame(height: 50)
-        .background(UMAVisualStyle.toolbar)
+        .frame(height: height)
+        // One colour with the window; the empty bar still moves the window.
+        .background(AUVTitlebarDragArea())
     }
 
     private var agentsWorkspace: some View {
@@ -429,7 +453,7 @@ struct MainWindowRootView: View {
         switch destination {
         case .agents: localized("AUV", "AUV")
         case .threadOS: localized("ThreadOS", "ThreadOS（线程工）")
-        case .sectorium: localized("Sectorium", "Sectorium（分区工）")
+        case .sectorium: localized("Sectorium", "分区工")
         }
     }
 
@@ -446,13 +470,24 @@ struct SettingsWindowRootView: View {
     var geminiSettings: GeminiSettingsModel? = nil
 
     var body: some View {
-        GlobalSettingsSurface(
-            preferences: preferences,
-            store: store,
-            navigation: navigation,
-            dataPaths: dataPaths,
-            geminiSettings: geminiSettings
-        )
+        // As the main window: under a transparent title bar, the pane's
+        // title in its row and the empty strip still moving the window.
+        GeometryReader { proxy in
+            let titlebarHeight = proxy.safeAreaInsets.top
+            GlobalSettingsSurface(
+                preferences: preferences,
+                store: store,
+                navigation: navigation,
+                dataPaths: dataPaths,
+                geminiSettings: geminiSettings,
+                titlebarHeight: titlebarHeight
+            )
+            .background(alignment: .top) {
+                AUVTitlebarDragArea().frame(height: titlebarHeight)
+            }
+            .ignoresSafeArea(.container, edges: .top)
+        }
+        .background(AUVLook.current.isStandard ? Color.clear : UMAVisualStyle.canvas)
         .auvLookRoot()
     }
 }

@@ -597,6 +597,13 @@ struct PreviewRendererTool {
                     selectedProviderID: .codex
                 )
             )
+        case .mainUnified:
+            // A design mockup: the main window with its bar drawn into the
+            // title bar, beside the window's traffic lights, in one colour.
+            size = CGSize(width: 1000, height: 680)
+            reviewContent = AnyView(
+                M3RUnifiedWindowMockup(store: fixture.store, selectedProviderID: .claude)
+            )
         case .mainNarrow:
             size = CGSize(width: 760, height: 520)
             reviewContent = AnyView(
@@ -1547,6 +1554,7 @@ private enum M3RReviewScenario: String {
     case main
     case compactRows = "compact-rows"
     case mainNarrow = "main-narrow"
+    case mainUnified = "main-unified"
     case workspaceCodex = "workspace-codex"
     case workspaceClaude = "workspace-claude"
     case settingsGeneral = "settings"
@@ -1827,6 +1835,168 @@ private struct M3RMainReviewSurface: View {
 
     private func localized(_ english: String, _ chinese: String) -> String {
         store.language == .simplifiedChinese ? chinese : english
+    }
+}
+
+/// Mockup of the main window with a unified title bar: the window's own
+/// buttons and the app's bar share one row and the look's canvas colour.
+private struct M3RUnifiedWindowMockup: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject var store: UsageStore
+    let selectedProviderID: ProviderProductID
+
+    private var look: AUVLook { AUVLook.current }
+    private var isDark: Bool { colorScheme == .dark }
+    private var ink: Color { look.isStandard ? .primary : AUVLookPalette.ink(look, isDark: isDark) }
+    private var zh: Bool { store.language == .simplifiedChinese }
+
+    var body: some View {
+        let window = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        VStack(spacing: 0) {
+            titleBar
+            barRule
+            HStack(spacing: 0) {
+                agentList.frame(width: 220)
+                columnRule
+                M3RAgentWorkspaceReview(store: store, providerID: selectedProviderID)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .clipped()
+            }
+            HStack {
+                Text("AUV 1.0.0").font(AUVType.caption).foregroundStyle(.tertiary)
+                Spacer()
+            }
+            .padding(.horizontal, 16).padding(.vertical, 5)
+        }
+        .background(UMAVisualStyle.canvas)
+        .clipShape(window)
+        .overlay(window.strokeBorder(Color.black.opacity(isDark ? 0.6 : 0.14), lineWidth: 0.5))
+        .overlay(window.inset(by: 0.5).strokeBorder(Color.white.opacity(isDark ? 0.12 : 0), lineWidth: 0.5))
+        .shadow(color: .black.opacity(isDark ? 0.5 : 0.22), radius: 22, y: 10)
+        .padding(28)
+    }
+
+    /// The traffic lights where macOS puts them in a 52 pt unified bar,
+    /// then the app's own controls, all on the canvas.
+    private var titleBar: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 8) {
+                light(0xFF5F57, 0xE14640)
+                light(0xFEBC2E, 0xDFA023)
+                light(0x28C840, 0x1DAD2B)
+            }
+            .padding(.leading, 20)
+            .padding(.trailing, 22)
+            destinationControl
+            Spacer(minLength: 12)
+            HStack(spacing: look == .brutalist ? 8 : 4) {
+                barButton(zh ? "全部刷新" : "Refresh All", "arrow.clockwise")
+                barButton(zh ? "全局设置" : "Global Settings", "gearshape")
+            }
+            .padding(.trailing, 14)
+        }
+        .frame(height: 52)
+    }
+
+    private func light(_ fill: UInt32, _ edge: UInt32) -> some View {
+        Circle().fill(AUVLookPalette.dynamic(fill, fill))
+            .overlay(Circle().strokeBorder(AUVLookPalette.dynamic(edge, edge), lineWidth: 0.5))
+            .frame(width: 12, height: 12)
+    }
+
+    @ViewBuilder private var destinationControl: some View {
+        let titles = ["AUV", zh ? "分区工" : "Sectorium"]
+        if look.isStandard {
+            Picker("", selection: .constant(0)) {
+                ForEach(titles.indices, id: \.self) { Text(titles[$0]).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+        } else {
+            let canvas = AUVLookPalette.canvas(look, isDark: isDark) ?? .clear
+            let r = look == .brutalist ? AUVFormwork.control : 7
+            HStack(spacing: 0) {
+                ForEach(titles.indices, id: \.self) { index in
+                    Text(titles[index])
+                        .font(AUVLookType.text(13, strong: look == .brutalist))
+                        .foregroundStyle(index == 0 ? canvas : ink.opacity(0.85))
+                        .padding(.horizontal, 14)
+                        .frame(height: 26)
+                        .background {
+                            if index == 0 {
+                                RoundedRectangle(cornerRadius: r - 2, style: .continuous).fill(ink)
+                            }
+                        }
+                }
+            }
+            .padding(2)
+            .background {
+                let form = RoundedRectangle(cornerRadius: r, style: .continuous)
+                if look == .brutalist {
+                    form.strokeBorder(ink, lineWidth: 1.5)
+                } else {
+                    form.fill(ink.opacity(0.06))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func barButton(_ title: String, _ symbol: String) -> some View {
+        let button = Button(action: {}) {
+            Label(title, systemImage: symbol)
+                .labelStyle(.titleAndIcon)
+        }
+        if look.isStandard {
+            button.buttonStyle(.bordered).controlSize(.regular)
+        } else {
+            button
+        }
+    }
+
+    @ViewBuilder private var barRule: some View {
+        switch look {
+        case .standard: Divider()
+        case .wabiSabi: Color.clear.frame(height: 0)
+        case .brutalist: Rectangle().fill(ink).frame(height: AUVFormwork.rule)
+        }
+    }
+
+    @ViewBuilder private var columnRule: some View {
+        switch look {
+        case .brutalist: Rectangle().fill(ink).frame(width: AUVFormwork.rule)
+        default: Rectangle().fill(Color(nsColor: .separatorColor)).frame(width: 1)
+        }
+    }
+
+    private var agentList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(zh ? "智能体" : "Agents")
+                    .font(AUVLookType.text(12, strong: true))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 13, weight: look == .wabiSabi ? .light : (look == .brutalist ? .bold : .regular)))
+                    .foregroundStyle(ink)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 14)
+            VStack(spacing: 3) {
+                ForEach(store.productInventory.agentWorkspaceProviders) { provider in
+                    AgentGlanceRow(
+                        provider: provider,
+                        style: .mainList,
+                        selected: provider.id == selectedProviderID,
+                        language: store.language,
+                        showsReset: false,
+                        referenceDate: M3RFixture.fixedNow
+                    )
+                }
+            }
+            .padding(.horizontal, 6)
+            Spacer(minLength: 0)
+        }
     }
 }
 
