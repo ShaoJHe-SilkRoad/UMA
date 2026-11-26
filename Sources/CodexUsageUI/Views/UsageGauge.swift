@@ -566,6 +566,9 @@ public struct UsageGaugeCard: View {
             }
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
+        // Composite first: without it, fills that start at the card's own
+        // edge (no logo column) can be drawn outside the rounded clip.
+        .compositingGroup()
         .clipShape(shape)
         .overlay {
             shape.strokeBorder(LinearGradient(
