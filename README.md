@@ -6,10 +6,25 @@
 
 | Platform | Download | Requirements |
 | --- | --- | --- |
-| macOS | [Download for Mac — 0.18.11](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.11/AUV_Mac_0.18.11_Universal.dmg) | macOS 14+ · Apple silicon and Intel · Universal app · DMG · signed and notarized |
+| macOS | [Download for Mac — 1.0.0](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.0/AUV_Mac_1.0.0_Universal.dmg) | macOS 14+ · Apple silicon and Intel · Universal app · DMG · signed and notarized |
 | Windows | [Download for Windows — 0.18.7](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.7-win/AUV_Win_0.18.7.zip) | Windows 11 · x64 · portable ZIP · **unsigned** |
 
-[Install or upgrade](docs/INSTALLATION.md) · [Mac release notes](docs/releases/AUV_Mac_0.18.11.md) · [Mac compatibility](docs/MAC_COMPATIBILITY.md) · [中文](#中文)
+[Install or upgrade](docs/INSTALLATION.md) · [Mac release notes](docs/releases/AUV_Mac_1.0.0.md) · [Mac compatibility](docs/MAC_COMPATIBILITY.md) · [中文](#中文)
+
+<p align="center"><img src="docs/images/auv-1.0/auv-en.png" width="720" alt="AUV 1.0 main window: Claude's usage card with 5-hour and 7-day levels"></p>
+
+## New in 1.0
+
+- **One usage card everywhere.** The main window, the menu bar drop-down and the desktop assistant show the same card: the 5-hour level on top, the 7-day level beneath, each with its reset time.
+- **Appearance packs.** Settings → General → Look: **Standard**, **Wabi-sabi** or **Brutalist**, each with its own welcome sound. A pack changes only how AUV looks.
+- **The bar beside the window buttons.** Navigation and actions sit next to the traffic lights, and the window is one colour.
+- **Gemini and Antigravity.** Gemini's usage is read through the Safari Bridge; Antigravity's from its official command-line tool.
+
+| Standard | Wabi-sabi | Brutalist |
+| --- | --- | --- |
+| ![Standard look](docs/images/auv-1.0/look-standard-en.png) | ![Wabi-sabi look](docs/images/auv-1.0/look-wabisabi-en.png) | ![Brutalist look](docs/images/auv-1.0/look-brutalist-en.png) |
+
+[1.0.0 release notes](docs/releases/AUV_Mac_1.0.0.md)
 
 ## Three workspaces
 
@@ -19,15 +34,15 @@
 | **ThreadOS** | Choose models and thinking levels for your coding team. Copy the generated instruction into your Leader conversation to apply it. |
 | **Sectorium** | On Mac, create or register a file-based APFS development volume, load it for work, unload it, or safely disconnect its external drive. |
 
-Supports English and Chinese, light and dark appearance, and keyboard navigation. Available data depends on the connected provider and account. AUV shows unknown values honestly; a local cost estimate is not a subscription bill.
+Supports English and Chinese, light and dark appearance, three looks (Standard, Wabi-sabi, Brutalist), and keyboard navigation. Available data depends on the connected provider and account. AUV shows unknown values honestly; a local cost estimate is not a subscription bill.
 
 ## Get started on Mac
 
-1. [Download the DMG](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.11/AUV_Mac_0.18.11_Universal.dmg) and double-click it to open it.
-2. Drag **`UMA.app`** onto the **Applications** shortcut beside it, so it goes to Applications on your Mac's internal disk. A [ZIP](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.11/AUV_Mac_0.18.11_Universal.zip) is also available. It opens as **AUV**; the filename is retained for existing installations. It opens as **AUV**; the filename is retained for existing installations.
+1. [Download the DMG](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.0/AUV_Mac_1.0.0_Universal.dmg) and double-click it to open it.
+2. Drag **`UMA.app`** onto the **Applications** shortcut beside it, so it goes to Applications on your Mac's internal disk. A [ZIP](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.0/AUV_Mac_1.0.0_Universal.zip) is also available. It opens as **AUV**; the filename is retained for existing installations. It opens as **AUV**; the filename is retained for existing installations.
 3. Open AUV. To see Codex allowance, install and sign in to the official Codex app with your ChatGPT account, then allow the local connection in AUV and choose **Scan for Agents**, then **Refresh All**.
 
-Upgrading? Quit the old AUV before replacing it. Keep your saved settings. Version **0.18.11**, build **2026111601**, is Developer ID signed and Apple notarized.
+Upgrading? Quit the old AUV before replacing it. Keep your saved settings. Version **1.0.0**, build **2026112605**, is Developer ID signed and Apple notarized.
 
 The package includes Apple silicon and Intel versions. Package checks ran on macOS 27.2 on Apple silicon, including the Intel executable through Rosetta 2. Physical Intel Macs and macOS 14/15 have not yet been tested. [Compatibility details](docs/MAC_COMPATIBILITY.md).
 
@@ -77,10 +92,25 @@ Windows build **20261116.1** is released separately from the Mac app (tag `v0.18
 
 | 平台 | 下载 | 要求 |
 | --- | --- | --- |
-| macOS | [下载 Mac 版 · 0.18.11](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.11/AUV_Mac_0.18.11_Universal.dmg) | macOS 14 及以上 · Apple silicon 和 Intel · 通用包 · DMG · 已签名并通过公证 |
+| macOS | [下载 Mac 版 · 1.0.0](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.0/AUV_Mac_1.0.0_Universal.dmg) | macOS 14 及以上 · Apple silicon 和 Intel · 通用包 · DMG · 已签名并通过公证 |
 | Windows | [下载 Windows 版 · 0.18.7](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.7-win/AUV_Win_0.18.7.zip) | Windows 11 · x64 · 便携 ZIP · **未签名** |
 
-[安装与升级](docs/INSTALLATION.md#中文安装指南) · [Mac 更新说明](docs/releases/AUV_Mac_0.18.11.md#中文) · [Mac 兼容性](docs/MAC_COMPATIBILITY.md#中文)
+[安装与升级](docs/INSTALLATION.md#中文安装指南) · [Mac 更新说明](docs/releases/AUV_Mac_1.0.0.md#中文) · [Mac 兼容性](docs/MAC_COMPATIBILITY.md#中文)
+
+<p align="center"><img src="docs/images/auv-1.0/auv-zh.png" width="720" alt="AUV 1.0 主窗口：Claude 的用量卡片，含 5 小时与 7 天额度"></p>
+
+### 1.0 新功能
+
+- **处处同一张用量卡片。** 主窗口、菜单栏下拉面板和桌面助手显示同一张卡片：上方 5 小时额度，下方 7 天额度，各带重置时间。
+- **外观包。** 设置 → 通用 → 外观包：**标准**、**侘寂**、**Brutalist**，各有自己的欢迎音。外观包只改变 AUV 的样子。
+- **顶栏挪到窗口按钮旁。** 导航和操作紧挨红绿灯，整个窗口一个颜色。
+- **Gemini 与 Antigravity。** 通过 Safari 助手读取 Gemini 用量；通过官方命令行工具读取 Antigravity 额度。
+
+| 标准 | 侘寂 | Brutalist |
+| --- | --- | --- |
+| ![标准外观](docs/images/auv-1.0/look-standard-zh.png) | ![侘寂外观](docs/images/auv-1.0/look-wabisabi-zh.png) | ![Brutalist 外观](docs/images/auv-1.0/look-brutalist-zh.png) |
+
+[1.0.0 更新说明](docs/releases/AUV_Mac_1.0.0.md#中文)
 
 ### 三个功能区
 
@@ -90,15 +120,15 @@ Windows build **20261116.1** is released separately from the Mac app (tag `v0.18
 | **ThreadOS · 线程工** | 为开发团队选择模型与思考档位，生成一条指令，复制给项目的 Leader 执行。 |
 | **Sectorium · 分区工** | 在 Mac 上创建或登记文件型 APFS 开发卷，装载、卸载开发卷，或安全断开整个外接硬盘。 |
 
-支持中英文、明暗主题和键盘操作。可显示的数据取决于智能体及账户；取不到的数值保持未知，本地费用估算不等于订阅账单。
+支持中英文、明暗主题、三种外观包（标准、侘寂、Brutalist）和键盘操作。可显示的数据取决于智能体及账户；取不到的数值保持未知，本地费用估算不等于订阅账单。
 
 ### Mac 快速开始
 
-1. [下载 DMG](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.11/AUV_Mac_0.18.11_Universal.dmg)，双击打开。
-2. 将 **`UMA.app`** 拖到旁边的 **Applications** 快捷方式上，即放入 Mac 内置盘的**“应用程序”**文件夹。也可下载 [ZIP](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v0.18.11/AUV_Mac_0.18.11_Universal.zip)。打开后显示为 **AUV**，文件名保留以兼容已有安装。打开后显示为 **AUV**，文件名保留以兼容已有安装。
+1. [下载 DMG](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.0/AUV_Mac_1.0.0_Universal.dmg)，双击打开。
+2. 将 **`UMA.app`** 拖到旁边的 **Applications** 快捷方式上，即放入 Mac 内置盘的**“应用程序”**文件夹。也可下载 [ZIP](https://github.com/ShaoJHe-SilkRoad/UMA/releases/download/v1.0.0/AUV_Mac_1.0.0_Universal.zip)。打开后显示为 **AUV**，文件名保留以兼容已有安装。打开后显示为 **AUV**，文件名保留以兼容已有安装。
 3. 打开 AUV。查看 Codex 额度时，先安装官方 Codex 并用 ChatGPT 账户登录，再在 AUV 中允许本机连接，点击**“扫描智能体”**，再点**“全部刷新”**。
 
-升级前先正常退出旧版，再替换应用，保留已有设置。当前 Mac 版本为 **0.18.11**，构建号 **2026111601**，已完成 Developer ID 签名和 Apple 公证。
+升级前先正常退出旧版，再替换应用，保留已有设置。当前 Mac 版本为 **1.0.0**，构建号 **2026112605**，已完成 Developer ID 签名和 Apple 公证。
 
 通用包包含 Apple silicon 与 Intel 版本。包验证在 macOS 27.2 的 Apple silicon Mac 上进行，并通过 Rosetta 2 运行 Intel 程序。尚未在 Intel 实机或 macOS 14/15 上测试。[兼容性详情](docs/MAC_COMPATIBILITY.md#中文)。
 
