@@ -38,7 +38,9 @@ struct UMA014M4RAgentDetailLayoutTests {
     func directSummaryContract() throws {
         let source = try sourceText()
 
-        #expect(source.contains("LazyVGrid("))
+        // One column on every agent's page; the cost card sits below.
+        #expect(source.contains("private func standardWorkspace(for width: CGFloat)"))
+        #expect(!source.contains("LazyVGrid("))
         #expect(source.contains("usageModule"))
         #expect(source.contains("connectionModule"))
         // Claude's actions show above the cards only when there is one to

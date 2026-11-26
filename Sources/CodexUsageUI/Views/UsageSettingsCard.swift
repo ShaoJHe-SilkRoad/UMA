@@ -413,8 +413,8 @@ private struct ClaudePlanSelectionRow: View {
         let zh = language == .simplifiedChinese
         if detectedName != nil {
             return zh
-                ? "精确同步时从 claude.ai 读取方案，额度偏低时以颜色提醒。只有方案不对时才需要手动选择。"
-                : "Read from claude.ai during Accuracy Sync and used for low-remaining colours. Choose one only if it's wrong."
+                ? "从 claude.ai 自动读取。只有读错时才需要手动选。"
+                : "Read from claude.ai automatically. Choose one only if it's wrong."
         }
         return zh
             ? "精确同步后会从 claude.ai 自动读取方案；也可以手动选择。额度偏低时以颜色提醒。"
@@ -466,6 +466,9 @@ private struct AgentSpecificSettingsContent: View {
     var openThreadOS: (() -> Void)? = nil
     /// False on the agent page, whose module already names the agent.
     var showsTitle = true
+    /// True on the agent page: the page's module is the only surface, and
+    /// the page's connection module already says when and how Claude syncs.
+    var embedded = false
 
     private var entry: AgentSettingsEntry? {
         coordinator.entries.first { $0.providerID == providerID }
@@ -575,7 +578,8 @@ private struct AgentSpecificSettingsContent: View {
                 ClaudeBrowserSettingsSection(
                     model: claudeSettings,
                     language: language,
-                    presentation: presentation
+                    presentation: presentation,
+                    embedded: embedded
                 ) {
                     claudeSettingsGroup
                 }
@@ -593,9 +597,18 @@ private struct AgentSpecificSettingsContent: View {
         }
     }
 
-    private var claudeSettingsGroup: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ClaudeSettingsGroupTitle(text: language.claudeSettingsSectionTitle)
+    @ViewBuilder private var claudeSettingsGroup: some View {
+        if embedded {
+            claudeSettingsRows
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                ClaudeSettingsGroupTitle(text: language.claudeSettingsSectionTitle)
+                claudeSettingsRows.modifier(ClaudeSettingsCardSurface())
+            }
+        }
+    }
+
+    private var claudeSettingsRows: some View {
             VStack(alignment: .leading, spacing: 10) {
                 SettingsToggleRow(
                     title: language.monitoringEnabled,
@@ -615,8 +628,6 @@ private struct AgentSpecificSettingsContent: View {
                 Divider().opacity(0.5)
                 ClaudePlanSelectionRow(language: language)
             }
-            .modifier(ClaudeSettingsCardSurface())
-        }
     }
 
     /// Claude's refined layout sets these in system type; the other agents
@@ -1058,12 +1069,25 @@ private struct ClaudeBrowserSettingsSection<Settings: View>: View {
     @ObservedObject var model: ClaudeBrowserSettingsModel
     let language: AppLanguage
     let presentation: SharedUsageCardPresentation?
+    var embedded = false
     @ViewBuilder let settings: () -> Settings
     @State private var showsDetails = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: ClaudeSettingsMetrics.sectionSpacing) {
-            statusCard
+            if embedded {
+                // The page's usage card and connection module already show
+                // the reading, when it was taken and how it syncs.
+                if let action = model.activeAction {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text(language.claudeBrowserActionStatus(action)).font(AUVType.secondary)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            } else {
+                statusCard
+            }
             if model.consentGranted, model.safariSetup.nextStep != .done {
                 setupList
             }
@@ -2560,7 +2584,8 @@ public struct AgentSpecificSettingsPanel: View {
                 syncWorkBuddyAccount: { Task { await store.syncWorkBuddyAccountNow() } },
                 disconnectWorkBuddyAccount: { Task { await store.disconnectWorkBuddyAccount() } },
                 openThreadOS: openThreadOS,
-                showsTitle: false
+                showsTitle: false,
+                embedded: true
             )
             .accessibilityIdentifier("uma.agent.settings-panel")
         } else {

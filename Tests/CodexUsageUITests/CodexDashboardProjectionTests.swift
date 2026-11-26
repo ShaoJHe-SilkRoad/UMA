@@ -7,9 +7,9 @@ struct CodexDashboardProjectionTests {
     @Test("populated local money card visibly identifies its estimate in both languages")
     func localEstimateTitleIsExplicit() {
         #expect(CodexDashboardPresentation.localEstimateTitle(language: .english)
-            == "Local API equivalent estimate · 7D")
+            == "At API prices · 7D")
         #expect(CodexDashboardPresentation.localEstimateTitle(language: .simplifiedChinese)
-            == "本地 API 等效估算 · 7天")
+            == "按 API 价格估算 · 7 天")
     }
 
     @Test("finite zero and full quota remain valid ring values")

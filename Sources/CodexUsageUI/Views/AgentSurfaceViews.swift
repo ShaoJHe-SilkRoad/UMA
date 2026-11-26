@@ -681,7 +681,7 @@ public struct QuickPanelSurface: View {
             .help(localized("Open AUV", "打开 AUV"))
             .accessibilityLabel(localized("Open AUV", "打开 AUV"))
             Spacer()
-            headerButton(localized("Scan for Agents", "扫描智能体"), "sparkle.magnifyingglass", scanAll)
+            headerButton(localized("Scan for Agents", "扫描智能体"), "magnifyingglass", scanAll)
             headerButton(localized("Refresh All", "全部刷新"), "arrow.clockwise", refreshAll)
                 .disabled(!store.allowsManualRefresh)
             headerButton(localized("Desktop Assistant", "桌面助手"), "macwindow", toggleWizard)
@@ -764,8 +764,8 @@ enum CodexDashboardActivityState: Equatable {
 enum CodexDashboardPresentation {
     static func localEstimateTitle(language: AppLanguage) -> String {
         language == .simplifiedChinese
-            ? "本地 API 等效估算 · 7天"
-            : "Local API equivalent estimate · 7D"
+            ? "按 API 价格估算 · 7 天"
+            : "At API prices · 7D"
     }
 
     static func accountState(snapshot: UsageSnapshot, provider: ProviderProductState?) -> CodexDashboardMetricSourceState {
@@ -906,8 +906,8 @@ public struct AgentWorkspaceSurface: View {
                     // One way to show the remaining share on this page: the
                     // usage card. Without a reading, the module says why.
                     if let gauge = pageGauge {
-                        pageGaugeCard(gauge, width: geometry.size.width
-                                      - AgentWorkspaceLayoutPolicy.horizontalPadding * 2)
+                        pageGaugeCard(gauge, width: min(Self.maxContentWidth, geometry.size.width
+                                      - AgentWorkspaceLayoutPolicy.horizontalPadding * 2))
                     } else {
                         usageModule
                     }
@@ -918,6 +918,10 @@ public struct AgentWorkspaceSurface: View {
                     }
                     settingsModule
                 }
+                // One column; on a very wide window it stops at 760 pt and
+                // centres, so a value stays near its label.
+                .frame(maxWidth: Self.maxContentWidth)
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal, AgentWorkspaceLayoutPolicy.horizontalPadding)
                 .padding(.vertical, 18)
             }
@@ -939,16 +943,15 @@ public struct AgentWorkspaceSurface: View {
 
     private var provider: ProviderProductState? { store.productInventory.provider(providerID) }
 
+    static let maxContentWidth: CGFloat = 760
+
     private var codexProjection: CodexDashboardProjection {
         CodexDashboardProjection(snapshot: store.snapshot, provider: provider)
     }
 
+    /// One column: the connection, then the cost estimate below it when on.
     @ViewBuilder private func standardWorkspace(for width: CGFloat) -> some View {
-        LazyVGrid(
-            columns: workspaceColumns(for: width),
-            alignment: .leading,
-            spacing: AgentWorkspaceLayoutPolicy.moduleSpacing
-        ) {
+        VStack(alignment: .leading, spacing: AgentWorkspaceLayoutPolicy.moduleSpacing) {
             connectionModule
             if showsAPICostCard, localCostEstimate != nil { localCostModule }
         }
@@ -959,11 +962,27 @@ public struct AgentWorkspaceSurface: View {
     private func codexDashboard(for width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             metricRow(for: width)
-            trendGapCard
+            // The trend only when there are days to draw; otherwise the
+            // connection module says so in one row.
+            if hasDailyHistory { trendGapCard }
             connectionModule
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("uma.agent.codex.dashboard")
+    }
+
+    private var hasDailyHistory: Bool {
+        if case .accountDailyBuckets = codexProjection.historyAvailability { return true }
+        return false
+    }
+
+    private var dailyTrendRowValue: String {
+        switch codexProjection.historyAvailability {
+        case .accountDailyBuckets: return ""
+        case .aggregateOnly: return localized("None yet; only totals are kept locally", "暂无，本地只有汇总值")
+        case .staleWithoutDailyBuckets: return localized("The kept data is out of date", "保留的数据已过期")
+        case .unavailable: return localized("Unavailable", "不可用")
+        }
     }
 
     private var isCodexConnected: Bool {
@@ -1037,8 +1056,11 @@ public struct AgentWorkspaceSurface: View {
             if let seven = gauge.secondaryValueText {
                 label += localized("; 7 days: \(seven) left, resets \(secondary)",
                                    "；7 天剩余 \(seven)，\(secondary) 重置")
+                if gauge.barTier == .low { label += localized(", 7-day quota low", "，7 天额度偏低") }
             }
-            return label
+            return gauge.isEstimate
+                ? label.replacingOccurrences(of: "≈", with: localized("about ", "约 "))
+                : label
         case .sevenDay:
             return localized("7 days: \(gauge.primaryValueText) left, resets \(primary)",
                              "7 天剩余 \(gauge.primaryValueText)，\(primary) 重置")
@@ -1054,13 +1076,16 @@ public struct AgentWorkspaceSurface: View {
     /// The agent's settings, last on its page: the only way to them from the
     /// main window. Codex's connection is the module's last row.
     @ViewBuilder private var settingsModule: some View {
-        if settingsContent != nil || providerID == .codex {
+        // An agent with no settings of its own shows no settings module;
+        // Codex keeps it for Disconnect.
+        if (settingsContent != nil && store.agentSettings != nil) || providerID == .codex {
             module(localized("\(providerID.displayName) Settings", "\(providerID.displayName) 设置"),
                    systemImage: "slider.horizontal.3") {
                 VStack(alignment: .leading, spacing: 10) {
-                    if let settingsContent { settingsContent }
+                    let hasSettings = settingsContent != nil && store.agentSettings != nil
+                    if hasSettings, let settingsContent { settingsContent }
                     if providerID == .codex {
-                        if settingsContent != nil { Divider().accessibilityHidden(true) }
+                        if hasSettings { Divider().accessibilityHidden(true) }
                         codexConnectionRow
                     }
                 }
@@ -1096,6 +1121,28 @@ public struct AgentWorkspaceSurface: View {
     }
 
     @State private var showsHistoryCaveat = false
+    @State private var showsTrendNote = false
+
+    /// No daily history: one row of the connection module, with the caveat
+    /// one click away.
+    private var dailyTrendRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(localized("Daily trend", "每日趋势")).foregroundStyle(.secondary)
+            Spacer(minLength: 18)
+            Text(dailyTrendRowValue).multilineTextAlignment(.trailing).lineLimit(2)
+            Button(localized("About", "说明")) { showsTrendNote.toggle() }
+                .buttonStyle(.link)
+                .popover(isPresented: $showsTrendNote, arrowEdge: .bottom) {
+                    Text(historyFootnote)
+                        .font(AUVType.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(width: 300, alignment: .leading)
+                        .padding(14)
+                }
+                .accessibilityIdentifier("uma.agent.codex.history-details")
+        }
+        .accessibilityIdentifier("uma.agent.codex.daily-trend-row")
+    }
 
     private var trendGapCard: some View {
         module(historyModuleTitle, systemImage: "chart.bar") {
@@ -1198,16 +1245,36 @@ public struct AgentWorkspaceSurface: View {
         let total = dashboardMetric(metrics.first(where: { $0.id == "total" }), title: localized("Account lifetime tokens", "账户累计令牌"), anchor: "uma015.codex.metric-total")
         let local = dashboardMetric(metrics.first(where: { $0.id == "api-cost-seven-days" }), title: CodexDashboardPresentation.localEstimateTitle(language: store.language), anchor: "uma015.codex.metric-local", isLocalEstimate: true)
         // Three equal blocks in a row; one column only in a very narrow page.
-        return Group {
-            if width >= 520 {
-                HStack(alignment: .top, spacing: 8) { week; total; local }
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                VStack(spacing: 8) { week; total; local }
+        // Where the figures come from is said once, under the row.
+        return VStack(alignment: .leading, spacing: 6) {
+            Group {
+                if width >= 520 {
+                    HStack(alignment: .top, spacing: 8) { week; total; local }
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    VStack(spacing: 8) { week; total; local }
+                }
             }
+            Text(metricSourceLine)
+                .font(AUVType.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 2)
+                .accessibilityIdentifier("uma.agent.codex.metric-source")
         }
         .accessibilityIdentifier("uma.agent.codex.metrics")
         .background(AgentWorkspaceGeometryAnchor(identifier: "uma015.codex.metric-bounds"))
+    }
+
+    private var metricSourceLine: String {
+        let local = codexProjection.metrics.first(where: { $0.id == "api-cost-seven-days" })
+        if CodexDashboardPresentation.localEstimateState(snapshot: store.snapshot) == .current,
+           let coverage = local?.coveragePercent {
+            return localized(
+                "Token counts come from the account report; the cost is estimated locally at API prices and covers \(coverage)% of sessions.",
+                "令牌数来自账户报告；费用按 API 价格在本地估算，覆盖 \(coverage)% 的会话。")
+        }
+        return localized("Token counts come from the account report.", "令牌数来自账户报告。")
     }
 
     private func dashboardMetric(_ metric: CodexDashboardProjection.Metric?, title: String, anchor: String, isLocalEstimate: Bool = false) -> some View {
@@ -1246,19 +1313,10 @@ public struct AgentWorkspaceSurface: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
                 .background(AgentWorkspaceGeometryAnchor(identifier: "\(anchor)-value"))
-            if isLocalEstimate, sourceState == .current,
-               let coverage = metric?.coveragePercent {
-                DisclosureGroup(localized("Coverage \(coverage)% · details", "覆盖 \(coverage)% · 说明")) {
-                    Text(localized(
-                        "Local ledger API-equivalent estimate, 7D; lifetime priced-token coverage \(coverage)%. The 7D period may include a partial current day.",
-                        "本地账本 API 等效估算，7天；累计已定价令牌覆盖率 \(coverage)%。7天周期可能包含当天的部分数据。"
-                    ))
-                    .font(AUVType.secondary).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                }
-                .font(AUVType.secondary)
-                .lineLimit(1)
-                .help(localized("Lifetime priced-token coverage \(coverage)%; 7D may include a partial current day", "累计已定价令牌覆盖 \(coverage)%；7天可能含未完结的今天"))
+            if sourceState == .current, metric?.value != nil {
+                // A current figure needs no caption; the row's footnote says
+                // where it comes from.
+                EmptyView()
             } else {
                 Text(status)
                     .font(AUVType.secondary).foregroundStyle(.secondary)
@@ -1282,12 +1340,20 @@ public struct AgentWorkspaceSurface: View {
             case .unavailable: return localized("Source unavailable", "来源不可用")
             case .empty: return localized("None yet", "暂无")
             case .stale: return localized("Stale", "已过期")
-            case .current: return localized("\(min(4, activity.count)) recent", "最近 \(min(4, activity.count)) 条")
+            case .current:
+                let n = min(4, activity.count)
+                let hidden = activity.prefix(4).allSatisfy { !$0.tokenText.contains(where: \.isNumber) }
+                return hidden
+                    ? localized("\(n), details hidden", "\(n) 条，内容已隐藏")
+                    : localized("\(n) recent", "最近 \(n) 条")
             }
         }())
-        if state == .stale || state == .current {
+        let shown = Array(activity.prefix(4))
+        // When every item is hidden for privacy, the count row says so once.
+        let allHidden = !shown.isEmpty && shown.allSatisfy { !$0.tokenText.contains(where: \.isNumber) }
+        if (state == .stale || state == .current), !allHidden {
             VStack(alignment: .leading, spacing: 6) {
-                ForEach(activity.prefix(4)) { item in
+                ForEach(shown) { item in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(item.title)
@@ -1511,7 +1577,10 @@ public struct AgentWorkspaceSurface: View {
                     factRow(localized("Status", "状态"), connectionLabel)
                 }
                 factRow(localized("Source", "来源"), sourceLabel)
-                factRow(localized("Freshness", "新鲜度"), freshnessLabel)
+                // Only when the reading is not current: "current" says nothing.
+                if provider?.freshness != .fresh {
+                    factRow(localized("Freshness", "新鲜度"), freshnessLabel)
+                }
                 if let capturedAt = provider?.capturedAt {
                     HStack {
                         Text(localized("Updated", "更新于")).foregroundStyle(.secondary)
@@ -1523,16 +1592,24 @@ public struct AgentWorkspaceSurface: View {
                 if provider?.diagnosticReason != nil {
                     factRow(localized("Source health", "来源健康状态"), diagnosticLabel)
                 }
-                if providerID == .codex { recentActivityRows }
+                if pageGauge?.lead == .sevenDay {
+                    factRow(localized("Limit period", "限额周期"), localized("7 days only", "只有 7 天"))
+                }
+                if providerID == .codex {
+                    if !hasDailyHistory { dailyTrendRow }
+                    recentActivityRows
+                }
+                if providerID == .claude, case .onlineVerificationUnavailable = claudeControlState() {
+                    factRow(localized("Online verification", "在线验证"), localized("Unavailable", "不可用"))
+                        .accessibilityIdentifier("uma.agent.claude.accuracy-unavailable")
+                }
                 if providerID == .claude {
                     Divider().padding(.vertical, 2).accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(store.language.claudeAccuracySyncRoute)
-                        Text(localized(
-                            "Only usage figures are kept. Prompts, responses and credentials never enter AUV.",
-                            "仅保留用量数据；提示、回复和凭据不会进入 AUV。"
-                        ))
-                    }
+                    // The one place this page says how Claude syncs.
+                    Text(localized(
+                        "Exact figures sync when you choose Refresh All, and on schedule with automatic refresh while Safari is open. Only usage figures are kept; prompts, responses and credentials never enter AUV.",
+                        "点“全部刷新”时同步精确读数；开启自动刷新后，Safari 开着时也会定时同步。只保留用量数据，提示、回复和凭据不会进入 AUV。"
+                    ))
                     .font(AUVType.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1589,11 +1666,8 @@ public struct AgentWorkspaceSurface: View {
                     "浏览器伴侣需要更新，请在 Claude 设置中修复。")) { EmptyView() }
                     .accessibilityIdentifier("uma.agent.claude.accuracy-unavailable")
             case .onlineVerificationUnavailable:
-                // A state, not an action: there is nothing to press and
-                // nothing will make it pressable here.
-                callout(systemImage: "minus.circle", tint: .secondary, message: localized(
-                    "Online verification unavailable", "在线验证不可用")) { EmptyView() }
-                    .accessibilityIdentifier("uma.agent.claude.accuracy-unavailable")
+                // A state, not an action: it is a row of the connection module.
+                EmptyView()
             case .safariSetupIncomplete(let step):
                 safariSetupCallout(step)
             }
@@ -1776,8 +1850,9 @@ public struct AgentWorkspaceSurface: View {
     private func relativeUpdateDescription(since date: Date) -> String {
         let interval = date.timeIntervalSince(displayNow)
         if interval > 60 {
-            let formatter = DateFormatter(); formatter.locale = store.language.locale; formatter.dateStyle = .medium; formatter.timeStyle = .short
-            return localized("Future observation (\(formatter.string(from: date)))", "未来观测（\(formatter.string(from: date))）")
+            // A clock that runs ahead: say when, not "in the future".
+            let formatter = DateFormatter(); formatter.locale = store.language.locale; formatter.dateStyle = .none; formatter.timeStyle = .short
+            return formatter.string(from: date)
         }
         if abs(interval) <= 60 { return localized("just now", "刚刚") }
         let formatter = RelativeDateTimeFormatter()

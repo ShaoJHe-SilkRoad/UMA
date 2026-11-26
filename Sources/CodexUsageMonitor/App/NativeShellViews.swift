@@ -307,7 +307,7 @@ struct MainWindowRootView: View {
                         label: localized("Scan for Agents", "扫描智能体"),
                         identifier: "uma.main.scan",
                         isEnabled: true,
-                        symbol: "plus.magnifyingglass",
+                        symbol: "magnifyingglass",
                         iconOnly: true,
                         action: scanAll
                     )

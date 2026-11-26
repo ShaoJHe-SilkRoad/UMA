@@ -77,21 +77,26 @@ public struct UsageGaugeReading: Equatable, Sendable {
     /// The window on the wrap bar: 7D under a 5H lead, otherwise nil.
     public let secondary: UsageGaugeWindow?
     public let isOutdated: Bool
+    /// An estimate rather than an exact reading: its values carry "≈".
+    public var isEstimate: Bool = false
 
     public static func make(
         fiveHour: UsageGaugeWindow?,
         sevenDay: UsageGaugeWindow?,
         isUnlimited: Bool = false,
-        isOutdated: Bool = false
+        isOutdated: Bool = false,
+        isEstimate: Bool = false
     ) -> Self {
         if isUnlimited {
             return Self(lead: .unlimited, primary: nil, secondary: nil, isOutdated: false)
         }
         if let fiveHour, fiveHour.remainingPercent != nil {
-            return Self(lead: .fiveHour, primary: fiveHour, secondary: sevenDay, isOutdated: isOutdated)
+            return Self(lead: .fiveHour, primary: fiveHour, secondary: sevenDay,
+                        isOutdated: isOutdated, isEstimate: isEstimate)
         }
         if let sevenDay, sevenDay.remainingPercent != nil {
-            return Self(lead: .sevenDay, primary: sevenDay, secondary: nil, isOutdated: isOutdated)
+            return Self(lead: .sevenDay, primary: sevenDay, secondary: nil,
+                        isOutdated: isOutdated, isEstimate: isEstimate)
         }
         return Self(lead: .unavailable, primary: nil, secondary: nil, isOutdated: false)
     }
@@ -146,14 +151,14 @@ public struct UsageGaugeReading: Equatable, Sendable {
         case .unlimited: "∞"
         case .unavailable: "—"
         case .fiveHour, .sevenDay:
-            primary?.remainingPercent.map { "\(Int($0.rounded()))%" } ?? "—"
+            primary?.remainingPercent.map { "\(isEstimate ? "≈" : "")\(Int($0.rounded()))%" } ?? "—"
         }
     }
 
     /// The small weekly value, shown only when the bar carries 7D.
     public var secondaryValueText: String? {
         guard lead == .fiveHour, let value = secondary?.remainingPercent else { return nil }
-        return "\(Int(value.rounded()))%"
+        return "\(isEstimate ? "≈" : "")\(Int(value.rounded()))%"
     }
 }
 
@@ -265,20 +270,13 @@ public struct UsageGaugeBackground: View {
                     let color = UsageGaugePalette.color(reading.primaryTier, isDark: isDark)
                     let width = proxy.size.width * min(1, max(0, fraction))
                     let height = fillHeight ?? proxy.size.height
-                    // One flat colour; its end turns with the outline's right
-                    // corner at the top, a solid tick marks it at the bottom.
+                    // One flat colour; its end turns with the outline's right corner.
                     UnevenRoundedRectangle(
                         topTrailingRadius: max(0, min(rightRadius, width, height)),
                         style: .continuous
                     )
                     .fill(color.opacity(fillOpacity))
                     .frame(width: width, height: height)
-                    if fraction > 0.02, fraction < 0.995 {
-                        Capsule().fill(color)
-                            .frame(width: UsageGaugeLevelEdge.width, height: UsageGaugeLevelEdge.tickLength)
-                            .offset(x: width - UsageGaugeLevelEdge.width,
-                                    y: height - UsageGaugeLevelEdge.tickLength)
-                    }
                 }
                 wrapBar(size: proxy.size, isDark: isDark)
             }
@@ -303,24 +301,6 @@ public struct UsageGaugeBackground: View {
                     .trim(from: 0, to: min(1, fraction))
                     .stroke(color, style: style)
             }
-        }
-    }
-}
-
-// MARK: - Level edge
-
-/// Where a level ends: a short solid tick at the top and at the bottom,
-/// clear in between so it never cuts through text.
-struct UsageGaugeLevelEdge: View {
-    static let width: CGFloat = 2
-    static let tickLength: CGFloat = 6
-    let color: Color
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Capsule().fill(color).frame(width: Self.width, height: Self.tickLength)
-            Spacer(minLength: 0)
-            Capsule().fill(color).frame(width: Self.width, height: Self.tickLength)
         }
     }
 }
@@ -591,24 +571,12 @@ public struct UsageGaugeCard: View {
         }
     }
 
-    /// The 5H level's end: its top turns with the card's corner, a short
-    /// solid tick marks the straight end at the bottom.
-    private func bottomTick(_ color: Color, at x: CGFloat, bottom: CGFloat) -> some View {
-        Capsule().fill(color)
-            .frame(width: UsageGaugeLevelEdge.width, height: UsageGaugeLevelEdge.tickLength)
-            .offset(x: x - UsageGaugeLevelEdge.width, y: bottom - UsageGaugeLevelEdge.tickLength)
-    }
-
     private func fiveHourLevel(geometry g: UsageGaugeCardGeometry) -> some View {
         let color = UsageGaugePalette.color(reading.primaryTier, isDark: isDark)
         let fraction = reading.primaryFraction ?? 0
-        let end = g.fillEndX(fraction: fraction)
         return ZStack(alignment: .topLeading) {
             if reading.primaryFraction != nil {
                 g.fillPath(fraction: fraction).fill(levelFill(color, .level))
-                if fraction > 0.02, fraction < 0.995 {
-                    bottomTick(color, at: end, bottom: g.bandHeight - g.seamGap / 2)
-                }
             }
         }
     }
@@ -677,7 +645,9 @@ public struct UsageGaugeCard: View {
                 resetText(secondaryText, size: points(0.146))
                 Spacer(minLength: 4)
                 if let small = reading.secondaryValueText {
-                    inlineValue(label: "7D", value: small, size: points(0.18, minimum: 11))
+                    inlineValue(label: "7D", value: small, size: points(0.18, minimum: 11),
+                                tint: reading.barTier == .low
+                                    ? UsageGaugePalette.color(.low, isDark: isDark) : nil)
                 }
             }
             .padding(.leading, g.textX)
@@ -694,7 +664,7 @@ public struct UsageGaugeCard: View {
             VStack(alignment: .leading, spacing: 2) {
                 if let title { titleText(title) }
                 resetText(primaryResetText, size: points(0.153), mark: reading.lead == .sevenDay)
-                if reading.lead == .sevenDay {
+                if reading.lead == .sevenDay, !secondaryText.isEmpty {
                     Text(secondaryText)
                         .font(.system(size: points(0.146), weight: .medium))
                         .foregroundStyle(.primary.opacity(0.55))
@@ -742,10 +712,15 @@ public struct UsageGaugeCard: View {
     /// The number in SF Pro Medium Condensed; its percent sign half the size
     /// (never under 10 pt) and quieter, unless the value is tinted (low).
     private func numberText(_ value: String, size points: CGFloat, color: Color, tinted: Bool) -> Text {
-        let hasPercent = value.hasSuffix("%")
-        let number = hasPercent ? String(value.dropLast()) : value
+        let approximate = value.hasPrefix("≈")
+        let bare = approximate ? String(value.dropFirst()) : value
+        let hasPercent = bare.hasSuffix("%")
+        let number = hasPercent ? String(bare.dropLast()) : bare
         let percentColor = tinted ? color : Color.primary.opacity(0.6)
-        return Text(number).font(UsageGaugeTypography.number(size: points)).foregroundColor(color)
+        return Text(approximate ? "≈" : "")
+                .font(UsageGaugeTypography.number(size: max(10, points * 0.62)))
+                .foregroundColor(percentColor)
+            + Text(number).font(UsageGaugeTypography.number(size: points)).foregroundColor(color)
             + Text(hasPercent ? "%" : "")
                 .font(UsageGaugeTypography.number(size: max(10, points * 0.5)))
                 .foregroundColor(percentColor)
@@ -780,10 +755,10 @@ public struct UsageGaugeCard: View {
     }
 
     /// "7D 71%": the period beside the small value.
-    private func inlineValue(label: String, value: String, size points: CGFloat) -> some View {
+    private func inlineValue(label: String, value: String, size points: CGFloat, tint: Color? = nil) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: points * 0.25) {
             periodLabel(label)
-            numberText(value, size: points, color: Color.primary.opacity(0.9), tinted: false)
+            numberText(value, size: points, color: tint ?? Color.primary.opacity(0.9), tinted: tint != nil)
         }
         .lineLimit(1)
         .fixedSize()
@@ -796,7 +771,7 @@ public extension UsageGaugeReading {
     /// The same reading, drawn grey when it is no longer current.
     func markingOutdated(_ outdated: Bool) -> Self {
         guard outdated, lead == .fiveHour || lead == .sevenDay else { return self }
-        return Self(lead: lead, primary: primary, secondary: secondary, isOutdated: true)
+        return Self(lead: lead, primary: primary, secondary: secondary, isOutdated: true, isEstimate: isEstimate)
     }
 
     /// The gauge for a product row, or nil when the agent counts credits
@@ -810,11 +785,15 @@ public extension UsageGaugeReading {
         // Claude's reading turns grey once it is retained, outdated or an estimate.
         let outdated = provider.id == .claude
             && (provider.freshness != .fresh || provider.precision != .exact)
+        // An estimate says so with "≈", as the Minimal mode already does.
+        let estimate = five?.precision == .estimated || seven?.precision == .estimated
+            || (provider.id == .claude && provider.precision != .exact)
         return .make(
             fiveHour: five.map { UsageGaugeWindow(remainingPercent: $0.value.remainingPercent, resetsAt: $0.resetsAt) },
             sevenDay: seven.map { UsageGaugeWindow(remainingPercent: $0.value.remainingPercent, resetsAt: $0.resetsAt) },
             isUnlimited: unlimited,
-            isOutdated: outdated
+            isOutdated: outdated,
+            isEstimate: estimate
         )
     }
 
@@ -855,7 +834,8 @@ public enum UsageGaugeText {
         let zh = language == .simplifiedChinese
         switch reading.lead {
         case .fiveHour: return reading.secondary?.resetsAt.map { day($0, language: language) } ?? ""
-        case .sevenDay: return zh ? "没有 5H 限额" : "No 5H limit"
+        // The "7D" label already names the period; the page says the rest.
+        case .sevenDay: return ""
         case .unlimited: return "API"
         case .unavailable: return ""
         }

@@ -49,7 +49,8 @@ struct UMA014M3RAgentWorkspaceTests {
         #expect(source.contains("uma.agent.claude.repair-local-smart"))
         #expect(source.contains("case .accuracyReady:"))
         #expect(source.contains("uma.agent.claude.accuracy-unavailable"))
-        #expect(source.contains("Online verification unavailable"))
+        // Not an action, so a row of Connection & Source, not a callout.
+        #expect(source.contains("factRow(localized(\"Online verification\", \"在线验证\")"))
         #expect(source.contains("Button(localized(\"Enable\", \"启用\"), action: connectClaude)"))
         // The page is the only place consent is asked, so it shows the full
         // disclosure rather than a summary.

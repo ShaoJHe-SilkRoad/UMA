@@ -1776,7 +1776,7 @@ private struct M3RMainReviewSurface: View {
             .labelsHidden()
             .frame(width: 250)
             Spacer()
-            toolbarButton(localized("Scan All", "全部扫描"), "sparkle.magnifyingglass")
+            toolbarButton(localized("Scan All", "全部扫描"), "magnifyingglass")
             toolbarButton(localized("Refresh All", "全部刷新"), "arrow.clockwise")
             toolbarButton(localized("Global Settings", "全局设置"), "gearshape")
         }
