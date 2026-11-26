@@ -14,6 +14,18 @@
  *   Current usage (i) ............ 0% used   [progress bar]   Resets at 6:18 AM
  *   Weekly limit ................. 4% used   Resets Nov 25 at 9:18 PM
  *   Get 5x more usage with AI Ultra / Usage settings / Extra usage  (ignored)
+ *
+ * The usage windows are a React island (UsagePageSurface, 2026-11-25 build)
+ * rendered as
+ *   <ul aria-label="Usage windows">
+ *     <li data-testid="current-usage"> <strong>Current usage</strong> (i)
+ *         <strong>0% used</strong> [aria-hidden bar] <span>Resets at 6:18 AM</span>
+ *     <li data-testid="weekly-usage"> <strong>Weekly limit</strong>
+ *         <span>Resets Nov 25 at 9:18 PM</span> <strong>4% used</strong>
+ * from pools GXU_FIVE_HOURLY and GXU_WEEKLY, so "Current usage" is the
+ * five-hour window. The two test IDs are the primary anchor; the
+ * heading-bounded label search is kept as a fallback, and both read row
+ * labels from <strong> as well as the other text elements.
  */
 (function (root) {
   "use strict";
@@ -40,12 +52,15 @@
 
   const HEADING_PATTERN = /^usage limits$/i;
 
-  // Each row label maps to one fixed bucket and the period the page states
-  // for it. "Current usage" names no period on the page, so it is reported
-  // as `unknown` and AUV decides how to show it.
+  // Each row maps to one fixed bucket and its period. The page names no
+  // period for "Current usage", but its data is the GXU_FIVE_HOURLY pool.
   const BUCKETS = Object.freeze({
-    current: Object.freeze({ patterns: [/^current usage$/i], period: "unknown" }),
-    weekly: Object.freeze({ patterns: [/^weekly limits?$/i], period: "weekly" }),
+    current: Object.freeze({
+      patterns: [/^current usage$/i], period: "fiveHour", testID: "current-usage",
+    }),
+    weekly: Object.freeze({
+      patterns: [/^weekly limits?$/i], period: "weekly", testID: "weekly-usage",
+    }),
   });
   const BUCKET_IDS = Object.freeze(Object.keys(BUCKETS));
 
@@ -73,8 +88,24 @@
       && !locationLike.hash;
   }
 
+  // Where the page itself may move /usage once it has loaded: with the
+  // settings dialog enabled, the route redirects (replace, same document) to
+  // the app with the Usage limits page of that dialog open. The companion
+  // still opens only /usage; this is where its own document may end up.
+  const SETTINGS_DIALOG_PATH = "/app";
+  const SETTINGS_DIALOG_SEARCH = "?settings=usage-limits";
+
+  function usageViewURL(locationLike) {
+    if (exactUsageURL(locationLike)) return true;
+    return Boolean(locationLike) && locationLike.protocol === "https:"
+      && locationLike.origin === CONTRACT.origin
+      && locationLike.pathname === SETTINGS_DIALOG_PATH
+      && locationLike.search === SETTINGS_DIALOG_SEARCH
+      && !locationLike.hash;
+  }
+
   function usageRouteState(locationLike) {
-    if (exactUsageURL(locationLike)) return "exact";
+    if (usageViewURL(locationLike)) return "exact";
     if (locationLike?.protocol === "https:"
         && locationLike.origin === CONTRACT.origin
         && locationLike.pathname === CONTRACT.path) return "providerRoutePending";
@@ -106,7 +137,9 @@
     ));
   }
 
-  const LABEL_SELECTOR = 'h1, h2, h3, h4, h5, h6, [role="heading"], div, p, span, label';
+  // Row labels are <strong> on the page; the rest cover other layouts.
+  const LABEL_SELECTOR = 'h1, h2, h3, h4, h5, h6, [role="heading"], div, p, span, strong, b, label';
+  const DOCUMENT_LABEL_SCAN_LIMIT = 16384;
 
   function bucketForLabel(element) {
     const text = ownText(element, 48);
@@ -116,9 +149,10 @@
   }
 
   function usageHeading(documentLike) {
-    const headings = Array.from(documentLike.querySelectorAll('h1, h2, h3, [role="heading"]'))
+    const headings = Array.from(documentLike.querySelectorAll('h1, h2, h3, h4, [role="heading"]'))
       .slice(0, CONTRACT.maximumLabelElementCount)
-      .filter((node) => HEADING_PATTERN.test(ownText(node, 40) || ""));
+      .filter((node) => HEADING_PATTERN.test(ownText(node, 40)
+        || boundedOwnText(node, 40) || ""));
     return headings.length === 1 ? headings[0] : null;
   }
 
@@ -141,8 +175,15 @@
   function usageRegion(documentLike) {
     const heading = usageHeading(documentLike);
     if (!heading) return null;
+    // One pass over the document finds the label elements; climbing then
+    // only asks which of them an ancestor holds. Searching each ancestor's
+    // whole subtree again on every page mutation kept a large page busy.
+    const labels = Array.from(documentLike.querySelectorAll(LABEL_SELECTOR))
+      .slice(0, DOCUMENT_LABEL_SCAN_LIMIT)
+      .filter((candidate) => bucketForLabel(candidate) !== null);
+    if (labels.length === 0) return null;
     let node = heading.parentElement;
-    while (node && labelsWithin(node).length === 0) node = node.parentElement;
+    while (node && !labels.some((label) => node.contains(label))) node = node.parentElement;
     if (!node) return null;
     if (node === documentLike.body || node === documentLike.documentElement) {
       const mains = Array.from(documentLike.querySelectorAll('main, [role="main"]'))
@@ -150,6 +191,19 @@
       return mains.length >= 1 ? mains[mains.length - 1] : null;
     }
     return node;
+  }
+
+  // The rows the page marks with its own test IDs, one per bucket. A test ID
+  // found twice reports neither row.
+  function testIDRows(documentLike) {
+    const rows = new Map();
+    for (const bucketID of BUCKET_IDS) {
+      const found = Array.from(documentLike.querySelectorAll(
+        `[data-testid="${BUCKETS[bucketID].testID}"]`
+      )).slice(0, 2);
+      if (found.length === 1) rows.set(bucketID, found[0]);
+    }
+    return rows;
   }
 
   function finitePercentage(raw) {
@@ -257,6 +311,27 @@
     return { valid: true, value: unique[0] };
   }
 
+  function bucketFromRow(bucketID, row, now) {
+    const values = percentageValues(row);
+    if (values.length !== 1) return null;
+    const period = BUCKETS[bucketID].period;
+    const reset = rowReset(row, period, now);
+    if (!reset.valid) return null;
+    return { bucketID, period, usedPercentage: values[0], resetAt: reset.value };
+  }
+
+  function readTestIDBuckets(documentLike, now) {
+    const rows = testIDRows(documentLike);
+    const buckets = [];
+    for (const bucketID of BUCKET_IDS) {
+      const row = rows.get(bucketID);
+      if (!row) continue;
+      const bucket = bucketFromRow(bucketID, row, now);
+      if (bucket) buckets.push(bucket);
+    }
+    return buckets;
+  }
+
   function readBuckets(region, now) {
     const rowsByBucket = new Map();
     const labels = Array.from(region.querySelectorAll(LABEL_SELECTOR))
@@ -275,12 +350,9 @@
       const rows = rowsByBucket.get(bucketID);
       // Two rows for one bucket cannot be told apart: neither is reported.
       if (!rows || rows.length !== 1) continue;
-      const values = percentageValues(rows[0]);
-      if (values.length !== 1) continue;
-      const period = BUCKETS[bucketID].period;
-      const reset = rowReset(rows[0], period, now);
-      if (!reset.valid) continue;
-      buckets.push({ bucketID, period, usedPercentage: values[0], resetAt: reset.value });
+      const bucket = bucketFromRow(bucketID, rows[0], now);
+      if (!bucket) continue;
+      buckets.push(bucket);
       if (buckets.length >= CONTRACT.maximumBuckets) break;
     }
     return buckets;
@@ -331,11 +403,16 @@
   }
 
   function extract(documentLike, locationLike, now) {
-    if (!exactUsageURL(locationLike) || hasLoginForm(documentLike)) return null;
-    const region = usageRegion(documentLike);
-    if (!region) return null;
+    if (!usageViewURL(locationLike) || hasLoginForm(documentLike)) return null;
     const moment = now || new Date();
-    const buckets = readBuckets(region, moment);
+    // The page's own row test IDs first. Only when the page has neither is
+    // the heading-bounded label search used.
+    let buckets = readTestIDBuckets(documentLike, moment);
+    if (buckets.length === 0 && testIDRows(documentLike).size === 0) {
+      const region = usageRegion(documentLike);
+      if (!region) return null;
+      buckets = readBuckets(region, moment);
+    }
     if (buckets.length === 0) return null;
     const observation = {
       buckets,
@@ -345,12 +422,12 @@
       sourceLayoutVersion: CONTRACT.sourceLayoutVersion,
     };
     // The SPA may navigate while extraction runs.
-    if (!exactUsageURL(locationLike) || hasLoginForm(documentLike)) return null;
+    if (!usageViewURL(locationLike) || hasLoginForm(documentLike)) return null;
     return validateObservation(observation) ? observation : null;
   }
 
   function extractResult(documentLike, locationLike, now) {
-    if (!exactUsageURL(locationLike)) {
+    if (!usageViewURL(locationLike)) {
       return { status: "routeRejected", reasonCode: FAILURE_REASONS.routeNotReady };
     }
     if (hasLoginForm(documentLike)) {
@@ -358,14 +435,15 @@
     }
     const observation = extract(documentLike, locationLike, now);
     if (observation) return { status: "success", observation };
-    if (!exactUsageURL(locationLike)) {
+    if (!usageViewURL(locationLike)) {
       return { status: "routeRejected", reasonCode: FAILURE_REASONS.routeNotReady };
     }
     if (hasLoginForm(documentLike)) {
       return { status: "signInRequired", reasonCode: FAILURE_REASONS.providerSessionUnavailable };
     }
-    const region = usageRegion(documentLike);
-    const hasRecognizedLabel = Boolean(region) && labelsWithin(region).length > 0;
+    const region = testIDRows(documentLike).size === 0 ? usageRegion(documentLike) : null;
+    const hasRecognizedLabel = testIDRows(documentLike).size > 0
+      || (Boolean(region) && labelsWithin(region).length > 0);
     return {
       status: "usageUnavailable",
       reasonCode: hasRecognizedLabel
@@ -390,6 +468,7 @@
     FAILURE_REASONS,
     BUCKET_IDS,
     exactUsageURL,
+    usageViewURL,
     usageRouteState,
     finitePercentage,
     normalizedTimestamp,

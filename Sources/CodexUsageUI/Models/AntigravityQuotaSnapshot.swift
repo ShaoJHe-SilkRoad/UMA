@@ -7,11 +7,30 @@ struct AntigravityQuotaSnapshot: Equatable, Sendable {
     let sourceVersion: String
 }
 
+/// The window a bucket's limit covers, from the CLI's `window` field.
+enum AntigravityQuotaWindow: Equatable, Sendable {
+    case fiveHour
+    case weekly
+    case other
+
+    init(cliWindow: String) {
+        switch cliWindow.lowercased().replacingOccurrences(of: "_", with: "-") {
+        case "5h", "five-hour", "fivehour": self = .fiveHour
+        case "weekly", "7d", "seven-day", "week": self = .weekly
+        default: self = .other
+        }
+    }
+}
+
 struct AntigravityQuotaBucket: Equatable, Sendable, Identifiable {
     let id: String
     let displayLabel: String?
     let remainingPercent: Double
     let resetsAt: Date?
+    var window: AntigravityQuotaWindow = .other
+    /// The model group the bucket belongs to ("Gemini Models"), bounded
+    /// schema text the CLI prints beside its numbers, never account data.
+    var groupLabel: String? = nil
 }
 
 enum AntigravityQuotaDecodingError: Error, Equatable, Sendable {
@@ -25,7 +44,6 @@ enum AntigravityQuotaDecodingError: Error, Equatable, Sendable {
 }
 
 enum AntigravityQuotaDecoder {
-    static let admittedCLIVersion = "1.1.11"
     static let maximumGroups = 32
     static let maximumBuckets = 64
 
@@ -45,18 +63,20 @@ enum AntigravityQuotaDecoder {
         "buckets", "description", "name",
     ]
     private static let admittedBucketKeys: Set<String> = [
-        "id", "name", "remaining_fraction", "reset_time", "window",
+        "description", "id", "name", "remaining_fraction", "reset_time", "window",
     ]
+    /// Keys a bucket may leave out. `description` ("You have used some of
+    /// your weekly limit…") only appears once a limit is in use; it is
+    /// checked for shape and never kept.
+    private static let optionalBucketKeys: Set<String> = ["description", "reset_time"]
 
+    /// The CLI's JSON carries no version, so none is checked: the strict key
+    /// sets below are what reject an output this decoder does not know.
     static func decode(
         _ data: Data,
-        cliVersion: String,
+        sourceVersion: String,
         observedAt: Date
     ) throws -> AntigravityQuotaSnapshot {
-        guard cliVersion == admittedCLIVersion else {
-            throw AntigravityQuotaDecodingError.unsupportedVersion
-        }
-
         let root: Any
         do {
             root = try JSONSerialization.jsonObject(with: data)
@@ -93,7 +113,7 @@ enum AntigravityQuotaDecoder {
 
         for group in groups {
             guard Set(group.keys) == admittedGroupKeys,
-                  safeSchemaString(group["name"], maximumBytes: 128) != nil,
+                  let groupName = safeSchemaString(group["name"], maximumBytes: 128),
                   safeSchemaString(
                       group["description"],
                       maximumBytes: 512
@@ -106,13 +126,15 @@ enum AntigravityQuotaDecoder {
 
             for rawBucket in rawBuckets {
                 guard Set(rawBucket.keys).isSubset(of: admittedBucketKeys),
-                      admittedBucketKeys.subtracting(["reset_time"])
+                      admittedBucketKeys.subtracting(optionalBucketKeys)
                         .isSubset(of: Set(rawBucket.keys)),
+                      rawBucket["description"] == nil
+                        || safeSchemaString(rawBucket["description"], maximumBytes: 512) != nil,
                       let bucketID = safeIdentifier(rawBucket["id"]),
-                      safeSchemaString(
+                      let window = safeSchemaString(
                           rawBucket["window"],
                           maximumBytes: 128
-                      ) != nil,
+                      ),
                       rawBucket["name"] is String,
                       let number = rawBucket["remaining_fraction"] as? NSNumber,
                       !isBoolean(number)
@@ -135,7 +157,9 @@ enum AntigravityQuotaDecoder {
                     else {
                         throw AntigravityQuotaDecodingError.invalidBucket
                     }
-                    resetsAt = reset
+                    // An untouched limit reports 1970-01-01T00:00:00Z: it has
+                    // no reset to wait for.
+                    resetsAt = reset.timeIntervalSince1970 <= 0 ? nil : reset
                 } else {
                     resetsAt = nil
                 }
@@ -148,7 +172,9 @@ enum AntigravityQuotaDecoder {
                         id: bucketID,
                         displayLabel: displayLabel,
                         remainingPercent: remainingFraction * 100,
-                        resetsAt: resetsAt
+                        resetsAt: resetsAt,
+                        window: AntigravityQuotaWindow(cliWindow: window),
+                        groupLabel: safeDisplayLabel(groupName)
                     )
                 )
             }
@@ -161,7 +187,7 @@ enum AntigravityQuotaDecoder {
         return AntigravityQuotaSnapshot(
             buckets: buckets,
             observedAt: observedAt,
-            sourceVersion: "agy-\(cliVersion)"
+            sourceVersion: sourceVersion
         )
     }
 

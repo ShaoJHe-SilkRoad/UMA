@@ -176,6 +176,7 @@ struct MainWindowRootView: View {
     var promptPreferences: ApplicationPreferences = .production
     var claudeSettings: ClaudeBrowserSettingsModel? = nil
     var geminiSettings: GeminiSettingsModel? = nil
+    var antigravitySettings: AntigravitySettingsModel? = nil
     var referenceDate: Date? = nil
     var agentRailDisplayNames: [ProviderProductID: String] = [:]
     var initiallyExpandedResetProviderID: ProviderProductID? = nil
@@ -406,6 +407,7 @@ struct MainWindowRootView: View {
             providerID: selectedProviderID.settingsProviderID,
             claudeSettings: claudeSettings,
             geminiSettings: geminiSettings,
+            antigravitySettings: antigravitySettings,
             openThreadOS: { navigation.destination = .threadOS }
         )
     }

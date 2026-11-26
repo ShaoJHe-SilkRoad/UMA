@@ -1,0 +1,54 @@
+<!doctype html>
+<!--
+  The Usage windows list as the page's React island renders it
+  (UsagePageSurface, gstatic islands build of 2026-11-25), rebuilt from that
+  component's source: SegmentedList is a <ul>, SegmentedListItem an <li>
+  carrying the data-testid, every label and percentage a <strong>, the
+  progress bar aria-hidden with no value. Class names are made up. The
+  "Usage limits" heading comes from the Angular shell and is left out here:
+  the test IDs alone must be enough. The sidebar carries a conversation title
+  worded like a row, which may not be read.
+-->
+<html lang="en">
+<body>
+  <chat-app>
+    <bard-sidenav>
+      <div class="conversation"><strong>Current usage</strong><span>88% used</span></div>
+      <div class="conversation"><span>Analysis of Active Subscriptions</span></div>
+    </bard-sidenav>
+    <div class="island-host">
+      <section class="x1">
+        <ul aria-label="Usage windows" class="x2">
+          <li data-testid="current-usage" class="x3">
+            <div class="x4">
+              <div class="x5">
+                <div class="x6">
+                  <strong class="x7">Current usage</strong>
+                  <button aria-label="About current usage"><span class="icon">info</span></button>
+                </div>
+                <strong class="x8">0% used</strong>
+              </div>
+              <div class="x9"><span aria-hidden="true" class="x10"><span class="x11" style="width: 0%"></span></span></div>
+              <span class="x12">Resets at 6:18 AM</span>
+            </div>
+          </li>
+          <li data-testid="weekly-usage" class="x3">
+            <div class="x13">
+              <span class="x14">
+                <strong class="x15">Weekly limit</strong>
+                <span class="x16">Resets Nov 25 at 9:18 PM</span>
+              </span>
+              <strong class="x17">4% used</strong>
+            </div>
+          </li>
+        </ul>
+        <p class="x18">Updated just now · Your plan's limits determine how much you can use Gemini over time, with advanced models and features taking up more usage. <a href="#">Learn more</a></p>
+      </section>
+      <section aria-labelledby="settings-heading">
+        <h2 id="settings-heading">Usage settings</h2>
+        <ul data-testid="usage-settings-group"><li data-testid="extra-usage-row"><span>Extra usage</span><span>Off</span></li></ul>
+      </section>
+    </div>
+  </chat-app>
+</body>
+</html>

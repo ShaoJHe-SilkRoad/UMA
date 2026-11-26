@@ -28,7 +28,7 @@ struct GeminiUsageExtractorFixtureTests {
         let buckets = try #require(observation["buckets"] as? [[String: Any]])
         #expect(buckets.map { $0["bucketID"] as? String } == ["current", "weekly"])
         #expect(buckets[0]["usedPercentage"] as? Double == 0)
-        #expect(buckets[0]["period"] as? String == "unknown")
+        #expect(buckets[0]["period"] as? String == "fiveHour")
         #expect(buckets[0]["resetAt"] as? String == Self.currentReset)
         #expect(buckets[1]["usedPercentage"] as? Double == 4)
         #expect(buckets[1]["period"] as? String == "weekly")
@@ -39,6 +39,50 @@ struct GeminiUsageExtractorFixtureTests {
             decoding: try JSONSerialization.data(withJSONObject: result), as: UTF8.self
         )
         #expect(!serialized.contains("73"))
+    }
+
+    @Test("The page's island: rows found by their test IDs, labels in <strong>, no heading needed")
+    func islandTestIDLayout() async throws {
+        let result = try await run(fixture: "island-testid")
+        #expect(result["status"] as? String == "success")
+        let observation = try #require(result["observation"] as? [String: Any])
+        let buckets = try #require(observation["buckets"] as? [[String: Any]])
+        #expect(buckets.map { $0["bucketID"] as? String } == ["current", "weekly"])
+        #expect(buckets.map { $0["period"] as? String } == ["fiveHour", "weekly"])
+        #expect(buckets.map { $0["usedPercentage"] as? Double } == [0, 4])
+        #expect(buckets[0]["resetAt"] as? String == Self.currentReset)
+        #expect(buckets[1]["resetAt"] as? String == Self.weeklyReset)
+        #expect(observation["planLabel"] is NSNull)
+        // The sidebar's "Current usage … 88% used" is a conversation title.
+        let serialized = String(
+            decoding: try JSONSerialization.data(withJSONObject: result), as: UTF8.self
+        )
+        #expect(!serialized.contains("88"))
+    }
+
+    @Test("The settings dialog the page may redirect /usage to is read the same way")
+    func settingsDialogRoute() async throws {
+        let dialog = "{protocol:'https:',origin:'https://gemini.google.com',pathname:'/app',search:'?settings=usage-limits',hash:''}"
+        let result = try await run(fixture: "island-testid", location: dialog)
+        #expect(result["status"] as? String == "success")
+        for location in [
+            "{protocol:'https:',origin:'https://gemini.google.com',pathname:'/app',search:'?settings=general',hash:''}",
+            "{protocol:'https:',origin:'https://gemini.google.com',pathname:'/app',search:'?settings=usage-limits&x=1',hash:''}",
+            "{protocol:'https:',origin:'https://gemini.google.com',pathname:'/app',search:'?settings=usage-limits',hash:'#a'}",
+        ] {
+            let other = try await run(fixture: "island-testid", location: location)
+            #expect(other["status"] as? String == "routeRejected")
+        }
+    }
+
+    @Test("Without test IDs, labels in <strong> are found under the heading")
+    func strongLabelFallback() async throws {
+        let result = try await run(fixture: "synthetic-strong-labels")
+        #expect(result["status"] as? String == "success")
+        let observation = try #require(result["observation"] as? [String: Any])
+        let buckets = try #require(observation["buckets"] as? [[String: Any]])
+        #expect(buckets.map { $0["usedPercentage"] as? Double } == [7, 15])
+        #expect(observation["planLabel"] as? String == "pro")
     }
 
     @Test("A label sharing its element with an icon is still read, and the plan badge inside the heading")

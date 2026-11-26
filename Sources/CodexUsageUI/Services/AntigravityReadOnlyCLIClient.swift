@@ -1,6 +1,6 @@
-import CryptoKit
 import Darwin
 import Foundation
+import Security
 
 struct AntigravityCLIInvocation: Equatable, Sendable {
     let executableURL: URL
@@ -21,7 +21,9 @@ struct AntigravityCLIProcessResult: Equatable, Sendable {
 
 struct AntigravityExecutableIdentity: Equatable, Sendable {
     let canonicalURL: URL
-    let sha256: String
+    /// The Team ID of a valid code signature on the file, or nil when the
+    /// file is unsigned or its signature does not verify.
+    let signingTeamIdentifier: String?
     let architecture: String
     let ownerUID: uid_t
     let mode: mode_t
@@ -59,9 +61,11 @@ struct AntigravityCLIClientDependencies: Sendable {
 struct AntigravityReadOnlyCLIClient: Sendable {
     static let executablePath = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".local/bin/agy", isDirectory: false).path
-    static let admittedSHA256 =
-        "198ff7c3f6d173daa510b0814aa70c6ce14c94035bcd4707a3c0e79fa38a7bc3"
-    static let admittedVersion = "1.1.11"
+    /// Google LLC's Developer ID team, which signs every `agy` release. A
+    /// valid signature from it admits the CLI across its own updates; the
+    /// earlier pin to one 1.1.11 hash stopped working at the first update.
+    static let admittedTeamIdentifier = "EQHXZ8M8AV"
+    static let sourceVersion = "agy-signed"
     static let usageArguments = ["--output-format", "json", "-p", "/usage"]
     static let timeout: TimeInterval = 15
     static let hardResourceTimeout: TimeInterval = 20
@@ -89,7 +93,7 @@ struct AntigravityReadOnlyCLIClient: Sendable {
             throw AntigravityCLIClientError.untrustedExecutable
         }
         guard identity.canonicalURL.path == Self.executablePath,
-              identity.sha256 == Self.admittedSHA256,
+              identity.signingTeamIdentifier == Self.admittedTeamIdentifier,
               identity.architecture == "arm64",
               identity.ownerUID == getuid(),
               (identity.mode & 0o100) != 0
@@ -148,7 +152,7 @@ struct AntigravityReadOnlyCLIClient: Sendable {
         do {
             return try AntigravityQuotaDecoder.decode(
                 result.stdout,
-                cliVersion: Self.admittedVersion,
+                sourceVersion: Self.sourceVersion,
                 observedAt: dependencies.now()
             )
         } catch let error as AntigravityQuotaDecodingError {
@@ -226,23 +230,38 @@ private enum AntigravityExecutableInspector {
         }
         return AntigravityExecutableIdentity(
             canonicalURL: canonicalURL,
-            sha256: try sha256(url),
+            signingTeamIdentifier: signingTeamIdentifier(url),
             architecture: try architecture(url),
             ownerUID: info.st_uid,
             mode: info.st_mode & 0o7777
         )
     }
 
-    private static func sha256(_ url: URL) throws -> String {
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-        var hasher = SHA256()
-        while true {
-            let data = try handle.read(upToCount: 1_048_576) ?? Data()
-            if data.isEmpty { break }
-            hasher.update(data: data)
+    /// The Team ID of the file's code signature, only after the whole
+    /// signature checks out against the file and an Apple-anchored Developer
+    /// ID chain. Nothing is executed to find it.
+    private static func signingTeamIdentifier(_ url: URL) -> String? {
+        var staticCode: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(url as CFURL, [], &staticCode) == errSecSuccess,
+              let staticCode
+        else { return nil }
+        let team = AntigravityReadOnlyCLIClient.admittedTeamIdentifier
+        let text = "anchor apple generic and certificate leaf[subject.OU] = \"\(team)\""
+        var requirement: SecRequirement?
+        guard SecRequirementCreateWithString(text as CFString, [], &requirement) == errSecSuccess,
+              let requirement
+        else { return nil }
+        let flags = SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSStrictValidate)
+        guard SecStaticCodeCheckValidity(staticCode, flags, requirement) == errSecSuccess else {
+            return nil
         }
-        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        var information: CFDictionary?
+        guard SecCodeCopySigningInformation(
+            staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &information
+        ) == errSecSuccess,
+            let values = information as? [String: Any]
+        else { return nil }
+        return values[kSecCodeInfoTeamIdentifier as String] as? String
     }
 
     private static func architecture(_ url: URL) throws -> String {

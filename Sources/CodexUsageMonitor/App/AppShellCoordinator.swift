@@ -273,7 +273,8 @@ final class AppShellCoordinator {
             connectClaude: { [weak self] in self?.connectClaude() },
             accuracySyncClaude: { [weak self] in self?.accuracySyncClaude() },
             claudeSettings: runtime.claudeSettings,
-            geminiSettings: runtime.geminiSettings
+            geminiSettings: runtime.geminiSettings,
+            antigravitySettings: runtime.antigravitySettings
         )
         settingsWindowController.attach(
             store: runtime.store, preferences: runtime.preferences, dataPaths: runtime.dataPaths,

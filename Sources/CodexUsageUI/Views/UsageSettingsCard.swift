@@ -2522,6 +2522,7 @@ public struct AgentSpecificSettingsPanel: View {
     private let providerID: String
     private let claudeSettings: ClaudeBrowserSettingsModel?
     private let geminiSettings: GeminiSettingsModel?
+    private let antigravitySettings: AntigravitySettingsModel?
     private let openThreadOS: (() -> Void)?
     @AppStorage("display.showAPICostCard") private var showAPICost = false
 
@@ -2529,12 +2530,14 @@ public struct AgentSpecificSettingsPanel: View {
         store: UsageStore, providerID: String,
         claudeSettings: ClaudeBrowserSettingsModel? = nil,
         geminiSettings: GeminiSettingsModel? = nil,
+        antigravitySettings: AntigravitySettingsModel? = nil,
         openThreadOS: (() -> Void)? = nil
     ) {
         self.store = store
         self.providerID = providerID
         self.claudeSettings = claudeSettings
         self.geminiSettings = geminiSettings
+        self.antigravitySettings = antigravitySettings
         self.openThreadOS = openThreadOS
     }
 
@@ -2547,7 +2550,7 @@ public struct AgentSpecificSettingsPanel: View {
                 language: store.language,
                 showAPICost: $showAPICost,
                 claudeSettings: claudeSettings,
-                antigravitySettings: nil,
+                antigravitySettings: antigravitySettings,
                 geminiSettings: geminiSettings,
                 workBuddySettings: nil,
                 workBuddyLogin: nil,
