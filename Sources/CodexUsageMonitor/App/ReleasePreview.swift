@@ -51,12 +51,12 @@ import HESectoriumRuntime
         // As the shipped main window: the bar beside the traffic lights.
         AUVWindowChrome.unify(window)
         if showsSettings {
-            let settings = NSHostingController(rootView: SettingsWindowRootView(
+            let settings = AUVWindowChrome.adopt(NSHostingController(rootView: SettingsWindowRootView(
                 preferences: preferences, store: store, navigation: GlobalSettingsNavigationState(),
                 // Isolated: a throwaway support folder and home, never the user's.
                 dataPaths: .current(bundleIdentifier: "auv.release-preview",
                                     applicationSupportDirectory: root.appendingPathComponent("support"),
-                                    homeDirectory: root)))
+                                    homeDirectory: root))))
             settings.sizingOptions = []
             window.contentViewController = settings
             window.setContentSize(size)
@@ -64,7 +64,7 @@ import HESectoriumRuntime
             window.contentMinSize = NSSize(width:760,height:488)
             // Keep the asked size: the hosting controller would otherwise
             // shrink the window to its minimum.
-            let main = NSHostingController(rootView:view)
+            let main = AUVWindowChrome.adopt(NSHostingController(rootView:view))
             main.sizingOptions = []
             window.contentViewController = main
             window.setContentSize(size)

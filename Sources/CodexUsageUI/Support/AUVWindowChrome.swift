@@ -11,6 +11,20 @@ import SwiftUI
 /// the safe area, not from a constant.
 @MainActor
 public enum AUVWindowChrome {
+    /// The title bar's height as last measured on a unified window (40 pt on
+    /// macOS 27 with the compact toolbar). The bars are laid out from this.
+    public private(set) static var titlebarHeight: CGFloat = 40
+
+    /// SwiftUI must not treat the title bar as a safe area: extending the
+    /// root under it with `ignoresSafeArea` shifted everything inside the
+    /// split view up by the title bar's height, on screen and for clicks.
+    /// The views lay the bar out themselves from `titlebarHeight`.
+    @discardableResult
+    public static func adopt<Content: View>(_ controller: NSHostingController<Content>) -> NSHostingController<Content> {
+        controller.safeAreaRegions = []
+        return controller
+    }
+
 
     public static func unify(_ window: NSWindow) {
         window.styleMask.insert(.fullSizeContentView)
@@ -23,6 +37,8 @@ public enum AUVWindowChrome {
             window.toolbar = toolbar
         }
         window.toolbarStyle = .unifiedCompact
+        let measured = window.frame.height - window.contentLayoutRect.height
+        if measured > 0 { titlebarHeight = measured }
     }
 }
 

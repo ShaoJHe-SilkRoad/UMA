@@ -224,9 +224,9 @@ final class MainWindowController: NSWindowController {
         // installed. Keep the selected default or restored outer frame intact
         // before the ready host replaces it during attachment.
         let frameBeforeStartingHost = window.frame
-        window.contentViewController = NSHostingController(
+        window.contentViewController = AUVWindowChrome.adopt(NSHostingController(
             rootView: NativeShellStartingView(title: "AUV")
-        )
+        ))
         window.setFrame(frameBeforeStartingHost, display: false)
         super.init(window: window)
         window.titlebarBackgroundDoubleClick = { [weak self, weak window] in
@@ -282,11 +282,11 @@ final class MainWindowController: NSWindowController {
         )
         if appStorageDefaults === UserDefaults.standard {
             // Preserve the production hosting type and its existing diagnostics.
-            window?.contentViewController = NSHostingController(rootView: root)
+            window?.contentViewController = AUVWindowChrome.adopt(NSHostingController(rootView: root))
         } else {
-            window?.contentViewController = NSHostingController(
+            window?.contentViewController = AUVWindowChrome.adopt(NSHostingController(
                 rootView: root.defaultAppStorage(appStorageDefaults)
-            )
+            ))
         }
         if let frameBeforeHosting {
             window?.setFrame(frameBeforeHosting, display: false)
@@ -448,7 +448,7 @@ final class SettingsWindowController: NSWindowController {
     private static func hostingController<Content: View>(
         rootView: Content
     ) -> NSHostingController<Content> {
-        let controller = NSHostingController(rootView: rootView)
+        let controller = AUVWindowChrome.adopt(NSHostingController(rootView: rootView))
         controller.sizingOptions = []
         return controller
     }

@@ -188,13 +188,11 @@ struct MainWindowRootView: View {
     @StateObject private var sectoriumStoreLifetime = MainSectoriumStoreLifetime()
 
     var body: some View {
-        // The window's content runs under its transparent title bar; the bar
-        // takes the title bar's height, beside the traffic lights.
-        GeometryReader { proxy in
-            surface(barHeight: max(40, proxy.safeAreaInsets.top))
-                .ignoresSafeArea(.container, edges: .top)
-        }
-        .frame(minWidth: 760, minHeight: 488)
+        // The window's content runs under its transparent title bar (the
+        // hosting controller has no safe area); the bar takes the title bar's
+        // height, beside the traffic lights.
+        surface(barHeight: AUVWindowChrome.titlebarHeight)
+        .frame(minWidth: 760, minHeight: 528)
         .background(UMAVisualStyle.canvas)
         .environment(\.locale, store.language.locale)
         .auvLookRoot()
@@ -477,22 +475,20 @@ struct SettingsWindowRootView: View {
     var geminiSettings: GeminiSettingsModel? = nil
 
     var body: some View {
-        // As the main window: under a transparent title bar, the pane's
-        // title in its row and the empty strip still moving the window.
-        GeometryReader { proxy in
-            let titlebarHeight = proxy.safeAreaInsets.top
-            GlobalSettingsSurface(
-                preferences: preferences,
-                store: store,
-                navigation: navigation,
-                dataPaths: dataPaths,
-                geminiSettings: geminiSettings,
-                titlebarHeight: titlebarHeight
-            )
-            .background(alignment: .top) {
-                AUVTitlebarDragArea().frame(height: titlebarHeight)
-            }
-            .ignoresSafeArea(.container, edges: .top)
+        // As the main window: under a transparent title bar (no safe area),
+        // the sidebar and title below the traffic lights' row, the empty
+        // strip still moving the window.
+        let titlebarHeight = AUVWindowChrome.titlebarHeight
+        GlobalSettingsSurface(
+            preferences: preferences,
+            store: store,
+            navigation: navigation,
+            dataPaths: dataPaths,
+            geminiSettings: geminiSettings,
+            titlebarHeight: titlebarHeight
+        )
+        .background(alignment: .top) {
+            AUVTitlebarDragArea().frame(height: titlebarHeight)
         }
         .background(AUVLook.current.isStandard ? Color.clear : UMAVisualStyle.canvas)
         .auvLookRoot()
