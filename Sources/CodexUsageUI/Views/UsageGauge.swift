@@ -336,7 +336,7 @@ struct UsageGaugeSurface: ViewModifier {
 
 extension View {
     func usageGaugeSurface(cornerRadius: CGFloat = 14) -> some View {
-        modifier(UsageGaugeSurface(cornerRadius: cornerRadius))
+        modifier(AUVLookModuleSurface(cornerRadius: cornerRadius))
     }
 }
 
@@ -346,7 +346,7 @@ extension View {
 /// recipe as the Minimalist assistant's value.
 enum UsageGaugeTypography {
     static func number(size: CGFloat) -> Font {
-        .system(size: size, weight: .medium).width(.condensed).monospacedDigit()
+        AUVLookType.number(size, standard: .system(size: size, weight: .medium).width(.condensed).monospacedDigit())
     }
 }
 
@@ -370,15 +370,26 @@ public struct UsageGaugeCardGeometry: Equatable, Sendable {
     /// False on the agent's own page, where the page header already shows the
     /// logo: no logo column, the bands start at the left edge.
     public let showsLogo: Bool
+    /// The appearance pack: its corner and gap.
+    public let look: AUVLook
 
-    public init(size: CGSize, isSingleBand: Bool = false, showsLogo: Bool = true) {
+    public init(size: CGSize, isSingleBand: Bool = false, showsLogo: Bool = true,
+                look: AUVLook = AUVLook.current) {
         self.size = size
         self.isSingleBand = isSingleBand
         self.showsLogo = showsLogo
+        self.look = look
     }
 
     var h: CGFloat { size.height }
-    public var cornerRadius: CGFloat { min(14, h * 0.3) }
+    public var cornerRadius: CGFloat {
+        switch look {
+        case .standard: min(14, h * 0.3)
+        case .wabiSabi: min(10, h * 0.3)
+        // Brutalist: square; the grid is drawn instead.
+        case .brutalist: 0
+        }
+    }
     public var bandHeight: CGFloat { isSingleBand ? h : (h * 0.72).rounded() }
 
     /// The logo's column at the left end, which is also the 7D bar's first tenth.
@@ -386,10 +397,10 @@ public struct UsageGaugeCardGeometry: Equatable, Sendable {
     public var logoCenter: CGPoint { CGPoint(x: capWidth / 2, y: h / 2) }
     /// The bare logo on the column: no disc; it takes the connection colour.
     public var logoGlyphSize: CGFloat { (h * 0.36).rounded() }
-    /// The card-surface gap between colour blocks.
-    public let seamGap: CGFloat = 2
+    /// The card-surface gap between colour blocks; Brutalist draws a rule instead.
+    public var seamGap: CGFloat { look == .brutalist ? 0 : 2 }
     /// The inner corner where the 7D column turns into the bottom band.
-    public var filletRadius: CGFloat { (h * 0.11).rounded() }
+    public var filletRadius: CGFloat { look == .brutalist ? 0 : (h * 0.11).rounded() }
     /// The right edge of the logo column, before the gap.
     public var columnWidth: CGFloat { showsLogo ? capWidth - seamGap / 2 : 0 }
     public var textX: CGFloat { showsLogo ? capWidth + h * 0.13 : h * 0.2 }
@@ -456,6 +467,7 @@ public struct UsageGaugeCardGeometry: Equatable, Sendable {
         let band = CGRect(x: column, y: top, width: max(0, end - column), height: size.height - top)
         path.addPath(UnevenRoundedRectangle(bottomTrailingRadius: endRadius(band),
                                             style: .continuous).path(in: band))
+        guard filletRadius > 0 else { return path }
         // The turn: the corner between the column and the band, cut by an arc
         // that keeps one gap's distance from the 5H block's rounded corner.
         let center = CGPoint(x: capWidth + seamGap / 2 + filletRadius,
@@ -518,65 +530,137 @@ public struct UsageGaugeCard: View {
         self.showsLogo = showsLogo
     }
 
+    private var look: AUVLook { AUVLook.current }
     private var isDark: Bool { colorScheme == .dark }
     private var isSingleBand: Bool { reading.lead == .sevenDay || reading.lead == .unlimited }
     private var h: CGFloat { size.height }
     /// Text never drops below 10 points, whatever the card's height.
     private func points(_ ratio: CGFloat, minimum: CGFloat = 10) -> CGFloat { max(minimum, h * ratio) }
+    private var ink: Color { AUVLookPalette.ink(look, isDark: isDark) }
+    /// Wabi-sabi: an outdated reading fades like patina instead of turning grey.
+    private var patina: Double { look == .wabiSabi && reading.isOutdated ? 0.45 : 1 }
 
     public var body: some View {
-        let g = UsageGaugeCardGeometry(size: size, isSingleBand: isSingleBand, showsLogo: showsLogo)
+        let g = UsageGaugeCardGeometry(size: size, isSingleBand: isSingleBand, showsLogo: showsLogo, look: look)
         let shape = RoundedRectangle(cornerRadius: g.cornerRadius, style: .continuous)
         ZStack(alignment: .topLeading) {
-            ZStack {
-                Rectangle().fill(.ultraThinMaterial)
-                (isDark ? Color(white: 0.08).opacity(0.62) : Color.white.opacity(0.55))
+            cardGround
+            Group {
+                if isSingleBand {
+                    singleBandLevel(geometry: g)
+                } else {
+                    sevenDayBar(geometry: g)
+                    fiveHourLevel(geometry: g)
+                }
             }
-            if isSingleBand {
-                singleBandLevel(geometry: g)
-            } else {
-                sevenDayBar(geometry: g)
-                fiveHourLevel(geometry: g)
-            }
+            .opacity(patina)
+            if look == .brutalist { structure(geometry: g) }
             if showsLogo { logo(geometry: g) }
-            if isSingleBand {
-                singleBandText(geometry: g)
-            } else {
-                twoBandText(geometry: g)
+            Group {
+                if isSingleBand {
+                    singleBandText(geometry: g)
+                } else {
+                    twoBandText(geometry: g)
+                }
             }
+            .opacity(max(0.55, patina))
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
         // Composite first: without it, fills that start at the card's own
         // edge (no logo column) can be drawn outside the rounded clip.
         .compositingGroup()
         .clipShape(shape)
-        .overlay {
+        .overlay { cardBorder(shape) }
+    }
+
+    // MARK: Surfaces
+
+    @ViewBuilder private var cardGround: some View {
+        switch look {
+        case .standard:
+            ZStack {
+                Rectangle().fill(.ultraThinMaterial)
+                (isDark ? Color(white: 0.08).opacity(0.62) : Color.white.opacity(0.55))
+            }
+        case .wabiSabi, .brutalist:
+            // Opaque stone or concrete, so the card reads the same on any desktop.
+            AUVLookPalette.surface(look, isDark: isDark)
+        }
+    }
+
+    @ViewBuilder private func cardBorder(_ shape: RoundedRectangle) -> some View {
+        switch look {
+        case .standard:
             shape.strokeBorder(LinearGradient(
                 colors: [Color.white.opacity(isDark ? 0.12 : 0.75), Color.primary.opacity(isDark ? 0.06 : 0.08)],
                 startPoint: .top, endPoint: .bottom
             ), lineWidth: 1)
+        // No outline: the card is only stone and its level.
+        case .wabiSabi: EmptyView()
+        case .brutalist: Rectangle().strokeBorder(ink, lineWidth: 1)
         }
     }
-
-    // MARK: Surfaces
 
     /// Flat fills: the big 5H (or single) level one step lighter than the
     /// thinner 7D bar, so the big value stays clear and the two never merge.
     private enum Band { case level, bar }
 
-    private func levelFill(_ color: Color, _ band: Band) -> Color {
-        switch band {
-        case .level: color.opacity(isDark ? 0.24 : 0.18)
-        case .bar: color.opacity(isDark ? 0.32 : 0.28)
+    /// The tier a window would have if current, for looks that show age
+    /// another way than grey.
+    private func liveTier(_ tier: UsageGaugeTier, percent: Double?) -> UsageGaugeTier {
+        tier == .outdated ? .forRemaining(percent) : tier
+    }
+
+    private func fill(_ tier: UsageGaugeTier, percent: Double?, _ band: Band) -> Color {
+        switch look {
+        case .standard:
+            let color = UsageGaugePalette.color(tier, isDark: isDark)
+            switch band {
+            case .level: return color.opacity(isDark ? 0.24 : 0.18)
+            case .bar: return color.opacity(isDark ? 0.32 : 0.28)
+            }
+        case .wabiSabi:
+            let live = liveTier(tier, percent: percent)
+            let dye = AUVLookPalette.dye(live, isDark: isDark)
+            switch (live, band) {
+            case (.plenty, .level): return dye.opacity(isDark ? 0.38 : 0.34)
+            case (.plenty, .bar): return dye.opacity(isDark ? 0.58 : 0.54)
+            case (.caution, .level): return dye.opacity(isDark ? 0.40 : 0.38)
+            case (.caution, .bar): return dye.opacity(isDark ? 0.52 : 0.46)
+            case (.low, .level): return dye.opacity(isDark ? 0.48 : 0.44)
+            case (.low, .bar): return dye.opacity(isDark ? 0.60 : 0.54)
+            case (.unlimited, .level): return dye.opacity(isDark ? 0.42 : 0.34)
+            case (.unlimited, .bar): return dye.opacity(isDark ? 0.58 : 0.50)
+            default: return ink.opacity(0.12)
+            }
+        case .brutalist:
+            // Concrete: monochrome tone; the tier is the block at the end.
+            return ink.opacity(band == .level ? (isDark ? 0.16 : 0.14) : (isDark ? 0.30 : 0.28))
+        }
+    }
+
+    /// Brutalist: the level ends in a solid block of the system colour.
+    @ViewBuilder private func endBlock(_ rect: CGRect, tier: UsageGaugeTier) -> some View {
+        if look == .brutalist, rect.width > 0 {
+            let w = min(5, rect.width)
+            Rectangle().fill(AUVLookPalette.system(tier, isDark: isDark))
+                .frame(width: w, height: rect.height)
+                .offset(x: rect.maxX - w, y: rect.minY)
         }
     }
 
     private func fiveHourLevel(geometry g: UsageGaugeCardGeometry) -> some View {
-        let color = UsageGaugePalette.color(reading.primaryTier, isDark: isDark)
         let fraction = reading.primaryFraction ?? 0
+        let percent = reading.primary?.remainingPercent
         return ZStack(alignment: .topLeading) {
             if reading.primaryFraction != nil {
-                g.fillPath(fraction: fraction).fill(levelFill(color, .level))
+                g.fillPath(fraction: fraction).fill(fill(reading.primaryTier, percent: percent, .level))
+                if fraction < 0.995 {
+                    endBlock(CGRect(x: g.levelX, y: 0,
+                                    width: max(0, g.fillEndX(fraction: fraction) - g.levelX),
+                                    height: g.bandHeight),
+                             tier: reading.primaryTier)
+                }
             }
         }
     }
@@ -584,46 +668,85 @@ public struct UsageGaugeCard: View {
     /// The 7D bar: one L-shaped block in one flat colour. Only the column's
     /// unfilled part (7D under a tenth) shows a quiet track, never under the fill.
     private func sevenDayBar(geometry g: UsageGaugeCardGeometry) -> some View {
-        let color = UsageGaugePalette.color(reading.barTier, isDark: isDark)
         let fraction = reading.barFraction ?? 0
+        let percent = reading.secondary?.remainingPercent
         let filled = g.capFill(fraction: fraction)
         return ZStack(alignment: .topLeading) {
-            if g.showsLogo, filled < h {
-                color.opacity(isDark ? 0.08 : 0.06)
+            if g.showsLogo, filled < h, look == .standard {
+                UsageGaugePalette.color(reading.barTier, isDark: isDark).opacity(isDark ? 0.08 : 0.06)
                     .frame(width: g.columnWidth, height: h - filled)
                     .offset(y: filled)
             }
-            g.sevenDayPath(fraction: fraction).fill(levelFill(color, .bar))
+            g.sevenDayPath(fraction: fraction).fill(fill(reading.barTier, percent: percent, .bar))
+            if fraction < 0.995 {
+                let top = g.bandHeight + g.seamGap / 2
+                let end = g.capWidth + g.bottomFillWidth(fraction: fraction)
+                endBlock(CGRect(x: g.columnWidth, y: top, width: max(0, end - g.columnWidth),
+                                height: h - top),
+                         tier: reading.barTier)
+            }
         }
     }
 
     /// One band: the logo column, a gap, then the level; one flat colour.
     /// Its end turns with the card's corners at the top and bottom right.
     private func singleBandLevel(geometry g: UsageGaugeCardGeometry) -> some View {
-        let color = UsageGaugePalette.color(reading.primaryTier, isDark: isDark)
-        return ZStack(alignment: .topLeading) {
+        ZStack(alignment: .topLeading) {
             if let fraction = reading.primaryFraction {
-                g.singlePath(fraction: fraction).fill(levelFill(color, .level))
+                g.singlePath(fraction: fraction)
+                    .fill(fill(reading.primaryTier, percent: reading.primary?.remainingPercent, .level))
+                if fraction < 0.995 || reading.lead == .unlimited {
+                    let end = size.width * CGFloat(min(1, max(0, fraction)))
+                    endBlock(CGRect(x: g.levelX, y: 0, width: max(0, end - g.levelX), height: h),
+                             tier: reading.primaryTier)
+                }
             }
         }
+    }
+
+    /// Brutalist: the grid is drawn. Column, band seam, and scale marks at a
+    /// quarter, half and three quarters of the level's run.
+    @ViewBuilder private func structure(geometry g: UsageGaugeCardGeometry) -> some View {
+        let w = size.width
+        let base = isSingleBand ? h : g.bandHeight
+        ZStack(alignment: .topLeading) {
+            if showsLogo {
+                Rectangle().fill(ink).frame(width: 1, height: h).offset(x: g.capWidth)
+                // The column is the 7D bar's first tenth.
+                if !isSingleBand {
+                    Rectangle().fill(ink).frame(width: 4, height: 1).offset(x: g.capWidth - 4, y: h - 1)
+                }
+            }
+            if !isSingleBand {
+                Rectangle().fill(ink).frame(width: w - g.capWidth, height: 1)
+                    .offset(x: g.capWidth, y: g.bandHeight)
+            }
+            ForEach([0.25, 0.5, 0.75], id: \.self) { f in
+                let tick: CGFloat = f == 0.5 ? 7 : 4
+                Rectangle().fill(ink).frame(width: 1, height: tick)
+                    .offset(x: g.capWidth + (w - g.capWidth) * f, y: base - tick)
+            }
+        }
+        .accessibilityHidden(true)
     }
 
     /// The logo straight on the column, no disc and no separate dot: it takes
     /// the connection colour itself (or the ink colour where none is shown).
     private func logo(geometry g: UsageGaugeCardGeometry) -> some View {
         let size = g.logoGlyphSize
-        return DesktopAgentLogo(providerID: providerID,
-                                tint: statusColor ?? Color.primary.opacity(0.88),
-                                diameter: size)
+        // The connection colour follows the look (moss, ink) where connected.
+        let tint = statusColor ?? ink.opacity(look == .brutalist ? 1 : 0.88)
+        return DesktopAgentLogo(providerID: providerID, tint: tint, diameter: size)
             .frame(width: size, height: size)
             .offset(x: g.logoCenter.x - size / 2, y: g.logoCenter.y - size / 2)
     }
 
     // MARK: Text
 
+    private var lowColor: Color { AUVLookPalette.lowFigure(look, isDark: isDark) }
+
     private func twoBandText(geometry g: UsageGaugeCardGeometry) -> some View {
-        let primaryColor = UsageGaugePalette.color(reading.primaryTier, isDark: isDark)
-        return ZStack(alignment: .topLeading) {
+        ZStack(alignment: .topLeading) {
             // Top band: name (lists) and the 5H reset on the left; "5H" above
             // the big value on the right.
             HStack(alignment: .center, spacing: 6) {
@@ -634,7 +757,8 @@ public struct UsageGaugeCard: View {
                 Spacer(minLength: 4)
                 labelledValue(label: "5H", value: reading.primaryValueText,
                               size: showsLogo ? points(0.31, minimum: 18) : points(0.39, minimum: 18),
-                              tint: reading.primaryTier == .low ? primaryColor : nil)
+                              tint: liveTier(reading.primaryTier, percent: reading.primary?.remainingPercent) == .low
+                                && (look != .standard || reading.primaryTier == .low) ? lowColor : nil)
             }
             .padding(.leading, g.textX)
             .padding(.trailing, g.trailingInset)
@@ -646,8 +770,8 @@ public struct UsageGaugeCard: View {
                 Spacer(minLength: 4)
                 if let small = reading.secondaryValueText {
                     inlineValue(label: "7D", value: small, size: points(0.18, minimum: 11),
-                                tint: reading.barTier == .low
-                                    ? UsageGaugePalette.color(.low, isDark: isDark) : nil)
+                                tint: liveTier(reading.barTier, percent: reading.secondary?.remainingPercent) == .low
+                                    && (look != .standard || reading.barTier == .low) ? lowColor : nil)
                 }
             }
             .padding(.leading, g.textX)
@@ -658,7 +782,6 @@ public struct UsageGaugeCard: View {
     }
 
     private func singleBandText(geometry g: UsageGaugeCardGeometry) -> some View {
-        let primaryColor = UsageGaugePalette.color(reading.primaryTier, isDark: isDark)
         let label = reading.lead == .unlimited ? "API" : "7D"
         return HStack(alignment: .center, spacing: 6) {
             VStack(alignment: .leading, spacing: 2) {
@@ -666,15 +789,16 @@ public struct UsageGaugeCard: View {
                 resetText(primaryResetText, size: points(0.153), mark: reading.lead == .sevenDay)
                 if reading.lead == .sevenDay, !secondaryText.isEmpty {
                     Text(secondaryText)
-                        .font(.system(size: points(0.146), weight: .medium))
-                        .foregroundStyle(.primary.opacity(0.55))
+                        .font(AUVLookType.text(points(0.146), standardWeight: .medium))
+                        .foregroundStyle(ink.opacity(0.55))
                         .lineLimit(1)
                 }
             }
             Spacer(minLength: 4)
             labelledValue(label: label, value: reading.primaryValueText,
                           size: showsLogo ? points(0.33, minimum: 20) : points(0.417, minimum: 20),
-                          tint: reading.primaryTier == .low ? primaryColor : nil)
+                          tint: liveTier(reading.primaryTier, percent: reading.primary?.remainingPercent) == .low
+                            && (look != .standard || reading.primaryTier == .low) ? lowColor : nil)
         }
         .padding(.leading, g.textX)
         .padding(.trailing, g.trailingInset)
@@ -688,8 +812,10 @@ public struct UsageGaugeCard: View {
             Text(text).fixedSize()
             Text(name)
         }
-        .font(.system(size: points(0.18, minimum: 11), weight: .semibold))
-        .foregroundStyle(.primary.opacity(0.92))
+        .font(look == .standard
+              ? .system(size: points(0.18, minimum: 11), weight: .semibold)
+              : AUVLookType.text(points(0.17, minimum: 11), strong: look == .brutalist))
+        .foregroundStyle(look == .standard ? Color.primary.opacity(0.92) : ink)
         .lineLimit(1)
     }
 
@@ -698,15 +824,28 @@ public struct UsageGaugeCard: View {
         HStack(spacing: points * 0.3) {
             if mark, !text.isEmpty {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: points * 0.72, weight: .semibold))
-                    .foregroundStyle(.primary.opacity(0.45))
+                    .font(.system(size: points * 0.72,
+                                  weight: look == .wabiSabi ? .light : (look == .brutalist ? .bold : .semibold)))
+                    .foregroundStyle(ink.opacity(look == .brutalist ? 0.8 : 0.45))
             }
             Text(text)
-                .font(.system(size: points, weight: .medium))
+                .font(AUVLookType.text(points, standardWeight: .medium))
                 .monospacedDigit()
-                .foregroundStyle(.primary.opacity(isDark ? 0.72 : 0.62))
+                .foregroundStyle(ink.opacity(resetOpacity))
         }
         .lineLimit(1)
+    }
+
+    private var resetOpacity: Double {
+        switch look {
+        case .standard: isDark ? 0.72 : 0.62
+        case .wabiSabi: 0.62
+        case .brutalist: 0.9
+        }
+    }
+
+    private func numberFont(_ size: CGFloat) -> Font {
+        AUVLookType.number(size, look: look, standard: UsageGaugeTypography.number(size: size))
     }
 
     /// The number in SF Pro Medium Condensed; its percent sign half the size
@@ -716,36 +855,47 @@ public struct UsageGaugeCard: View {
         let bare = approximate ? String(value.dropFirst()) : value
         let hasPercent = bare.hasSuffix("%")
         let number = hasPercent ? String(bare.dropLast()) : bare
-        let percentColor = tinted ? color : Color.primary.opacity(0.6)
+        let percentColor = tinted ? color : ink.opacity(look == .standard ? 0.6 : 0.55)
         return Text(approximate ? "≈" : "")
-                .font(UsageGaugeTypography.number(size: max(10, points * 0.62)))
+                .font(numberFont(max(10, points * 0.62)))
                 .foregroundColor(percentColor)
-            + Text(number).font(UsageGaugeTypography.number(size: points)).foregroundColor(color)
+            + Text(number).font(numberFont(points)).foregroundColor(color)
             + Text(hasPercent ? "%" : "")
-                .font(UsageGaugeTypography.number(size: max(10, points * 0.5)))
+                .font(numberFont(max(10, points * (look == .standard ? 0.5 : 0.46))))
                 .foregroundColor(percentColor)
     }
 
     /// "5H", "7D", "API": small, standard width, widely spaced.
     private func periodLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 10, weight: .semibold))
-            .tracking(0.6)
-            .foregroundStyle(.primary.opacity(isDark ? 0.70 : 0.60))
+        let font: Font = switch look {
+        case .standard: .system(size: 10, weight: .semibold)
+        case .wabiSabi: .custom("HiraginoSans-W3", size: 10)
+        case .brutalist: .system(size: 10, weight: .bold)
+        }
+        let opacity: Double = switch look {
+        case .standard: isDark ? 0.70 : 0.60
+        case .wabiSabi: 0.5
+        case .brutalist: 0.9
+        }
+        return Text(text)
+            .font(font)
+            .tracking(look == .wabiSabi ? 1.2 : (look == .brutalist ? 0.2 : 0.6))
+            .foregroundStyle(ink.opacity(opacity))
     }
 
     /// The big value with its period label just above it, right-aligned.
     private func labelledValue(label: String, value: String, size points: CGFloat, tint: Color?) -> some View {
-        VStack(alignment: .trailing, spacing: 0) {
+        VStack(alignment: .trailing, spacing: look == .wabiSabi ? 2 : 0) {
             periodLabel(label)
             Group {
                 if value == "∞" {
                     Image(systemName: "infinity")
-                        .font(.system(size: points * 0.78, weight: .medium))
-                        .foregroundStyle(tint ?? Color.primary)
+                        .font(.system(size: points * 0.78,
+                                      weight: look == .wabiSabi ? .ultraLight : (look == .brutalist ? .heavy : .medium)))
+                        .foregroundStyle(tint ?? ink)
                         .frame(height: points)
                 } else {
-                    numberText(value, size: points, color: tint ?? Color.primary, tinted: tint != nil)
+                    numberText(value, size: points, color: tint ?? ink, tinted: tint != nil)
                 }
             }
             .padding(.top, -points * 0.14)
@@ -758,7 +908,7 @@ public struct UsageGaugeCard: View {
     private func inlineValue(label: String, value: String, size points: CGFloat, tint: Color? = nil) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: points * 0.25) {
             periodLabel(label)
-            numberText(value, size: points, color: tint ?? Color.primary.opacity(0.9), tinted: tint != nil)
+            numberText(value, size: points, color: tint ?? ink.opacity(look == .standard ? 0.9 : 1), tinted: tint != nil)
         }
         .lineLimit(1)
         .fixedSize()

@@ -61,10 +61,16 @@ public enum LowRemainingUsagePolicy {
     }
 
     public static func color(for assessment: LowRemainingAssessment) -> Color {
-        switch assessment {
-        case .low: .red
-        case .normal: .green
-        case .unknownPlan, .unavailable: .secondary
+        switch (AUVLook.current, assessment) {
+        case (.standard, .low): .red
+        case (.standard, .normal): .green
+        // Wabi-sabi's rust and moss; Brutalist's system red, and plain ink
+        // for a normal level.
+        case (.wabiSabi, .low): AUVLookPalette.dynamic(0x8A4129, 0xC0694A)
+        case (.wabiSabi, .normal): AUVLookPalette.dynamic(0x5A7040, 0x93A86A)
+        case (.brutalist, .low): AUVLookPalette.dynamic(0xFF3B30, 0xFF453A)
+        case (.brutalist, .normal): AUVLookPalette.dynamic(0x000000, 0xF0F0EE)
+        case (_, .unknownPlan), (_, .unavailable): .secondary
         }
     }
 

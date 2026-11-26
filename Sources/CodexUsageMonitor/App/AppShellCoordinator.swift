@@ -573,7 +573,8 @@ final class AppShellCoordinator {
 
     private func observeAppearance(in preferences: ApplicationPreferences) {
         appearancePreferenceObservation = preferences.observe { [weak self, weak preferences] change in
-            guard change.key == UMAApplicationPreferenceKeys.appearance.name,
+            guard change.key == UMAApplicationPreferenceKeys.appearance.name
+                    || change.key == UMAApplicationPreferenceKeys.look.name,
                   let self,
                   let preferences else { return }
             self.applyAppearance(from: preferences)
@@ -624,6 +625,10 @@ final class AppShellCoordinator {
         case .light: NSAppearance(named: .aqua)
         case .dark: NSAppearance(named: .darkAqua)
         }
+        // The appearance pack: every window's root redraws with it.
+        AUVLookState.shared.apply(
+            AUVLook(rawValue: preferences.value(for: UMAApplicationPreferenceKeys.look)) ?? .standard
+        )
     }
 
     func tearDown() {

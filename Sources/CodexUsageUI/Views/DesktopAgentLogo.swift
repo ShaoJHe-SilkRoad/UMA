@@ -3,8 +3,14 @@ import SwiftUI
 
 enum AgentConnectionIndicatorPalette {
     static func connected(isDark: Bool, increasedLightContrast: Bool = false) -> Color {
-        isDark ? Color(red: 0.35, green: 1.0, blue: 0.52)
-            : (increasedLightContrast ? Color(red: 0.02, green: 0.46, blue: 0.18) : .green)
+        switch AUVLook.current {
+        case .standard:
+            isDark ? Color(red: 0.35, green: 1.0, blue: 0.52)
+                : (increasedLightContrast ? Color(red: 0.02, green: 0.46, blue: 0.18) : .green)
+        // Moss, not a signal green; the problem colours stay as they are.
+        case .wabiSabi: AUVLookPalette.moss(isDark: isDark)
+        case .brutalist: AUVLookPalette.ink(.brutalist, isDark: isDark)
+        }
     }
 }
 

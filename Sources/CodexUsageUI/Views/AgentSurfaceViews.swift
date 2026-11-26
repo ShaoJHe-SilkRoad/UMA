@@ -74,15 +74,24 @@ struct AgentRailLevelFill: View {
                 )
                 let width = proxy.size.width * fraction
                 ZStack(alignment: .trailing) {
-                    LinearGradient(
-                        colors: [tint.opacity(strength * 0.62), tint.opacity(strength * 1.12)],
-                        startPoint: .leading, endPoint: .trailing
-                    )
+                    switch AUVLook.current {
+                    case .standard:
+                        LinearGradient(
+                            colors: [tint.opacity(strength * 0.62), tint.opacity(strength * 1.12)],
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                    // A flat dye; flat concrete. No gradient in either pack.
+                    case .wabiSabi: tint.opacity(strength * 1.1)
+                    case .brutalist: tint.opacity(strength * 0.7)
+                    }
                     // The level edge: a tick at the top and bottom, fading out
                     // through the middle so it never cuts through the name or
                     // the value. At 0% and 100% it would sit on the row's own
                     // border, where it only reads as a stray line.
-                    if fraction > 0.01, fraction < 0.99 {
+                    if AUVLook.current == .brutalist, fraction > 0.01, fraction < 0.99 {
+                        // The level's end as a solid block.
+                        Rectangle().fill(tint.opacity(0.9)).frame(width: 4)
+                    } else if AUVLook.current == .standard, fraction > 0.01, fraction < 0.99 {
                         let edge = tint.opacity(min(1, strength * 3.2))
                         Rectangle()
                             .fill(LinearGradient(stops: [
@@ -179,7 +188,7 @@ public enum AgentGlanceRowStyle: Sendable {
 
 enum AgentWorkspaceLayoutPolicy {
     static let horizontalPadding: CGFloat = 24
-    static let moduleSpacing: CGFloat = AUVShape.cardSpacing
+    static var moduleSpacing: CGFloat { AUVShape.cardSpacing }
     static let minimumTwoColumnWidth: CGFloat = 660
 
     static func columnCount(for availableWidth: CGFloat) -> Int {
@@ -190,8 +199,10 @@ enum AgentWorkspaceLayoutPolicy {
 private struct AgentWorkspaceModuleSurface: ViewModifier {
     func body(content: Content) -> some View {
         // The usage card's own surface, so the agent page has only one.
+        // Wabi-sabi has no box, so nothing to pad inside: modules line up
+        // with the usage card and stand apart by space alone.
         content
-            .padding(14)
+            .padding(AUVLook.current == .wabiSabi ? 0 : 14)
             .usageGaugeSurface()
     }
 }
@@ -273,28 +284,56 @@ public struct AgentGlanceRow: View {
     /// its usage. Icon in the connection colour, the name, and a status word
     /// only when something is wrong.
     private var navigationRow: some View {
-        HStack(spacing: 8) {
-            DesktopAgentLogo(providerID: provider.id.rawValue, tint: gaugeLogoColor, diameter: 18)
+        let look = AUVLook.current
+        let isDark = colorScheme == .dark
+        let ink = AUVLookPalette.ink(look, isDark: isDark)
+        // Brutalist inverts the chosen row: ink ground, concrete text.
+        let inverted = look == .brutalist && selected
+        let textColor: Color = switch look {
+        case .standard: Color.primary
+        case .wabiSabi: ink.opacity(selected ? 0.92 : 0.6)
+        case .brutalist: inverted ? (AUVLookPalette.canvas(.brutalist, isDark: isDark) ?? .white) : ink
+        }
+        return HStack(spacing: 8) {
+            if look == .wabiSabi {
+                // A short ink mark beside the chosen one, nothing more.
+                Capsule().fill(ink.opacity(selected ? 0.7 : 0)).frame(width: 2, height: 14)
+            }
+            DesktopAgentLogo(providerID: provider.id.rawValue,
+                             tint: inverted ? textColor : gaugeLogoColor, diameter: 18)
                 .frame(width: 18, height: 18)
                 .accessibilityHidden(true)
             Text(displayName)
-                .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                .font(look == .standard
+                      ? .system(size: 13, weight: selected ? .semibold : .regular)
+                      : AUVLookType.text(13, strong: look == .brutalist && selected))
+                .foregroundStyle(textColor)
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 4)
             if AgentGlancePresentationPolicy.status(for: provider) != .connected {
                 Text(statusLabel)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.primary.opacity(0.45))
+                    .font(AUVLookType.text(11))
+                    .foregroundStyle(textColor.opacity(look == .brutalist ? 0.85 : 0.45))
                     .lineLimit(1)
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, look == .wabiSabi ? 4 : 8)
         .frame(height: 32)
         .background {
-            if selected {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.09))
+            switch look {
+            case .standard:
+                if selected {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.primary.opacity(isDark ? 0.12 : 0.09))
+                }
+            case .wabiSabi:
+                EmptyView()
+            case .brutalist:
+                (selected ? ink : Color.clear)
+                    .overlay(alignment: .bottom) {
+                        Rectangle().fill(ink.opacity(0.35)).frame(height: 1)
+                    }
             }
         }
         .contentShape(Rectangle())
@@ -330,8 +369,11 @@ public struct AgentGlanceRow: View {
         .frame(height: gaugeHeight)
         .overlay {
             if selected {
-                RoundedRectangle(cornerRadius: min(14, gaugeHeight * 0.3), style: .continuous)
-                    .strokeBorder(Color(nsColor: .controlAccentColor), lineWidth: 2)
+                let radius = UsageGaugeCardGeometry(size: CGSize(width: 300, height: gaugeHeight)).cornerRadius
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(AUVLook.current.isStandard
+                                  ? Color(nsColor: .controlAccentColor)
+                                  : AUVLookPalette.accent(isDark: colorScheme == .dark), lineWidth: 2)
                     .allowsHitTesting(false)
             }
         }
@@ -580,6 +622,23 @@ public struct AgentGlanceRow: View {
 
 }
 
+/// The panel's ground in an appearance pack: stone or concrete instead of
+/// glass; Brutalist adds its 1 pt rule. Standard keeps the panel's glass.
+private struct QuickPanelLookGround: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let isDark = colorScheme == .dark
+        if let canvas = AUVLookPalette.canvas(isDark: isDark) {
+            canvas.overlay {
+                if AUVLook.current == .brutalist {
+                    Rectangle().strokeBorder(AUVLookPalette.ink(isDark: isDark), lineWidth: 1)
+                }
+            }
+        }
+    }
+}
+
 public struct QuickPanelSurface: View {
     @ObservedObject private var store: UsageStore
     @StateObject private var displayPreferences: QuickPanelDisplayPreferences
@@ -640,7 +699,7 @@ public struct QuickPanelSurface: View {
                 .padding(.horizontal, 18)
                 .padding(.vertical, 22)
             } else {
-                VStack(spacing: 2) {
+                VStack(spacing: AUVLook.current == .standard ? 2 : (AUVLook.current == .wabiSabi ? 10 : 8)) {
                     ForEach(providers) { provider in
                         Button {
                             selectAgent(provider.id)
@@ -663,8 +722,10 @@ public struct QuickPanelSurface: View {
         }
         .frame(width: 320)
         .fixedSize(horizontal: false, vertical: true)
+        .background { QuickPanelLookGround() }
         .environment(\.locale, store.language.locale)
         .accessibilityIdentifier("uma.quick.surface")
+        .auvLookRoot()
     }
 
     private var providers: [ProviderProductState] {
@@ -675,7 +736,9 @@ public struct QuickPanelSurface: View {
         HStack(spacing: 4) {
             Button(action: openMain) {
                 Label("AUV", systemImage: "gauge.with.dots.needle.67percent")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(AUVLook.current == .brutalist
+                          ? .system(size: 14, weight: .heavy)
+                          : AUVLookType.text(13, strong: AUVLook.current == .standard))
             }
             .buttonStyle(.plain)
             .help(localized("Open AUV", "打开 AUV"))
@@ -900,7 +963,7 @@ public struct AgentWorkspaceSurface: View {
     public var body: some View {
         GeometryReader { geometry in
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: AUVShape.cardSpacing) {
                     header
                     if providerID != .codex { claudeActionCallout }
                     // One way to show the remaining share on this page: the
@@ -919,11 +982,13 @@ public struct AgentWorkspaceSurface: View {
                     settingsModule
                 }
                 // One column; on a very wide window it stops at 760 pt and
-                // centres, so a value stays near its label.
+                // centres, so a value stays near its label. Wabi-sabi keeps
+                // it to the left, with a wide quiet margin on the right.
                 .frame(maxWidth: Self.maxContentWidth)
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, alignment: AUVLook.current == .wabiSabi ? .leading : .center)
                 .padding(.horizontal, AgentWorkspaceLayoutPolicy.horizontalPadding)
-                .padding(.vertical, 18)
+                .padding(.leading, AUVLook.current == .wabiSabi ? 20 : 0)
+                .padding(.vertical, AUVLook.current == .wabiSabi ? 30 : 18)
             }
         }
         .background(UMAVisualStyle.canvas)
@@ -1103,15 +1168,19 @@ public struct AgentWorkspaceSurface: View {
                      ? localized("After disconnecting, AUV stops reading this agent's usage.",
                                  "断开后 AUV 不再读取此智能体的用量。")
                      : localized("Connect to read this agent's usage.", "连接后读取此智能体的用量。"))
-                    .font(.system(size: 11.5))
+                    .font(AUVLook.current.isStandard ? .system(size: 11.5) : AUVLookType.text(11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
             if isCodexConnected {
-                Button(localized("Disconnect", "断开连接"), role: .destructive, action: disconnectCodex)
+                Button(action: disconnectCodex) {
+                    // Rust in wabi-sabi; an underlined red link in Brutalist.
+                    Text(localized("Disconnect", "断开连接"))
+                        .underline(AUVLook.current == .brutalist)
+                }
                     .buttonStyle(.borderless)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(AUVLookPalette.destructive(isDark: colorScheme == .dark))
                     .accessibilityIdentifier("uma.agent.codex.disconnect")
             } else {
                 Button(localized("Connect", "连接"), action: connectCodex)
@@ -1130,8 +1199,10 @@ public struct AgentWorkspaceSurface: View {
             Text(localized("Daily trend", "每日趋势")).foregroundStyle(.secondary)
             Spacer(minLength: 18)
             Text(dailyTrendRowValue).multilineTextAlignment(.trailing).lineLimit(2)
-            Button(localized("About", "说明")) { showsTrendNote.toggle() }
-                .buttonStyle(.link)
+            Button { showsTrendNote.toggle() } label: {
+                Text(localized("About", "说明")).underline(!AUVLook.current.isStandard)
+            }
+                .auvLinkStyle()
                 .popover(isPresented: $showsTrendNote, arrowEdge: .bottom) {
                     Text(historyFootnote)
                         .font(AUVType.secondary)
@@ -1325,7 +1396,9 @@ public struct AgentWorkspaceSurface: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(12)
+        // Wabi-sabi's stats are plain text, flush with the card above.
+        .padding(.horizontal, AUVLook.current == .wabiSabi ? 0 : 12)
+        .padding(.vertical, 12)
         .usageGaugeSurface()
         .background(AgentWorkspaceGeometryAnchor(identifier: anchor))
     }
@@ -1397,7 +1470,7 @@ public struct AgentWorkspaceSurface: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(providerID.displayName)
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(AUVLookType.display(22, standard: .system(size: 22, weight: .semibold)))
                 HStack(spacing: 6) {
                     Circle().fill(workspaceLogoColor).frame(width: 6, height: 6)
                         .accessibilityHidden(true)
@@ -1727,12 +1800,24 @@ public struct AgentWorkspaceSurface: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label {
-                Text(title).font(AUVType.headline)
-            } icon: {
-                Image(systemName: systemImage)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
+            switch AUVLook.current {
+            case .standard:
+                Label {
+                    Text(title).font(AUVType.headline)
+                } icon: {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+            case .wabiSabi:
+                // A quiet title, no icon.
+                Text(title).font(AUVLookType.text(12, strong: true)).foregroundStyle(.secondary)
+            case .brutalist:
+                // A table head over a rule.
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(title).font(.system(size: 13, weight: .heavy))
+                    Rectangle().fill(UMAVisualStyle.separator).frame(height: 1).padding(.horizontal, -14)
+                }
             }
             content().frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -1751,7 +1836,9 @@ public struct AgentWorkspaceSurface: View {
             Text(label).foregroundStyle(.secondary)
             Spacer(minLength: 18)
             Text(value).multilineTextAlignment(.trailing).lineLimit(2)
+                .font(AUVLook.current == .brutalist ? AUVLookType.text(13, strong: true) : nil)
         }
+        .font(AUVLook.current.isStandard ? nil : AUVLookType.text(13))
     }
 
     private var connectionLabel: String {
@@ -1870,6 +1957,7 @@ public struct AgentWorkspaceSurface: View {
 final class GlobalSettingsViewModel: ObservableObject {
     @Published private(set) var language: AppLanguage
     @Published private(set) var appearance: UMAApplicationAppearance
+    @Published private(set) var look: AUVLook
     @Published private(set) var menuBarShowsRemaining: Bool
     @Published private(set) var quickPanelShowsReset: Bool
     @Published private(set) var quickPanelShowsConnectivity: Bool
@@ -1905,6 +1993,7 @@ final class GlobalSettingsViewModel: ObservableObject {
         appearance = UMAApplicationAppearance(
             rawValue: preferences.value(for: UMAApplicationPreferenceKeys.appearance)
         ) ?? .system
+        look = AUVLook(rawValue: preferences.value(for: UMAApplicationPreferenceKeys.look)) ?? .standard
         menuBarShowsRemaining = preferences.value(
             for: UMAApplicationPreferenceKeys.menuBarShowsRemaining
         )
@@ -1965,6 +2054,12 @@ final class GlobalSettingsViewModel: ObservableObject {
         guard appearance != value else { return }
         appearance = value
         preferences.set(value.rawValue, for: UMAApplicationPreferenceKeys.appearance)
+    }
+
+    func setLook(_ value: AUVLook) {
+        guard look != value else { return }
+        look = value
+        preferences.set(value.rawValue, for: UMAApplicationPreferenceKeys.look)
     }
 
     func setMenuBarShowsRemaining(_ value: Bool) {
@@ -2128,6 +2223,8 @@ final class GlobalSettingsViewModel: ObservableObject {
             appearance = UMAApplicationAppearance(
                 rawValue: preferences.value(for: UMAApplicationPreferenceKeys.appearance)
             ) ?? .system
+        case UMAApplicationPreferenceKeys.look.name:
+            look = AUVLook(rawValue: preferences.value(for: UMAApplicationPreferenceKeys.look)) ?? .standard
         case UMAApplicationPreferenceKeys.menuBarShowsRemaining.name:
             menuBarShowsRemaining = preferences.value(
                 for: UMAApplicationPreferenceKeys.menuBarShowsRemaining
@@ -2483,8 +2580,8 @@ public struct GlobalSettingsSurface: View {
                 settingsSection(
                     localized("Language & Appearance", "语言与外观"),
                     footer: localized(
-                        "Reduce Transparency and Increase Contrast are followed automatically.",
-                        "自动遵循“降低透明度”和“增强对比度”。"
+                        "Reduce Transparency and Increase Contrast are followed automatically. A look changes only how AUV is drawn.",
+                        "自动遵循“降低透明度”和“增强对比度”。外观包只改变 AUV 的样子，不改变功能。"
                     )
                 ) {
                     Picker(
@@ -2515,6 +2612,19 @@ public struct GlobalSettingsSurface: View {
                     }
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("uma.settings.appearance.theme")
+                    Picker(
+                        localized("Look", "外观包"),
+                        selection: Binding(
+                            get: { model.look },
+                            set: model.setLook
+                        )
+                    ) {
+                        Text(localized("Standard", "标准")).tag(AUVLook.standard)
+                        Text(localized("Wabi-sabi", "侘寂")).tag(AUVLook.wabiSabi)
+                        Text("Brutalist").tag(AUVLook.brutalist)
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("uma.settings.appearance.look")
                 }
             case .refresh:
                 settingsSection(

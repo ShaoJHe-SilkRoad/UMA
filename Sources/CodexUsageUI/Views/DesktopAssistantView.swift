@@ -779,6 +779,7 @@ public struct DesktopAssistantView: View {
                 )
             }
         }
+        .auvLookRoot()
     }
 }
 
@@ -836,6 +837,10 @@ private struct DesktopAssistantCardView: View {
                 secondaryText: UsageGaugeText.secondary(gauge, language: card.language),
                 statusColor: connectionColor
             )
+        } else if let gauge = card.gauge, density == .minimalist, !AUVLook.current.isStandard {
+            AUVLookMinimalCapsule(reading: gauge, size: size, showsLevel: showsPercentageRail) {
+                minimalistContent
+            }
         } else if let gauge = card.gauge, density == .minimalist {
             let left = size.height / 2
             let right: CGFloat = 7
@@ -1038,6 +1043,6 @@ private struct DesktopAssistantCardView: View {
                 remainingPercent: nil, availableCredits: card.availableCredits
             ))
         }
-        return .primary
+        return AUVLookPalette.ink(isDark: colorScheme == .dark)
     }
 }

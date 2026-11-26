@@ -32,6 +32,11 @@ struct PreviewRendererTool {
         let showsSettings = arguments.contains("--settings")
         let language: AppLanguage = arguments.contains("--english") ? .english : .simplifiedChinese
         let isDark = arguments.contains("--dark")
+        // --look=wabiSabi | brutalist: render in an appearance pack.
+        if let lookArgument = arguments.first(where: { $0.hasPrefix("--look=") }),
+           let look = AUVLook(rawValue: String(lookArgument.dropFirst("--look=".count))) {
+            AUVLook.current = look
+        }
         let reduceTransparency = arguments.contains("--reduce-transparency")
         let increaseContrast = arguments.contains("--increase-contrast")
         let reduceMotion = arguments.contains("--reduce-motion")
@@ -1759,7 +1764,8 @@ private struct M3RMainReviewSurface: View {
                 .frame(minWidth: 500)
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        // As the app's own window: the toolbar colour behind, the canvas under the list.
+        .background(UMAVisualStyle.toolbar)
         .accessibilityIdentifier("uma.review.main-two-column")
     }
 
@@ -1807,7 +1813,7 @@ private struct M3RMainReviewSurface: View {
                 .padding(.horizontal, 6)
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(UMAVisualStyle.canvas)
     }
 
     private func toolbarButton(_ label: String, _ symbol: String) -> some View {

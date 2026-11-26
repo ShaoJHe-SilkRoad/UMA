@@ -472,6 +472,10 @@ final class DesktopAssistantPanelController: NSObject, NSMenuDelegate {
 
     private func installPreferencesObserver() {
         preferencesObservation = preferenceStore.observe { [weak self] change in
+            if change.key == UMAApplicationPreferenceKeys.look.name {
+                self?.applyLookFromStore()
+                return
+            }
             let displayKeys = [
                 UMAApplicationPreferenceKeys.assistantShowsStatusIndicator.name,
                 UMAApplicationPreferenceKeys.assistantShowsPercentageRail.name,
@@ -480,6 +484,17 @@ final class DesktopAssistantPanelController: NSObject, NSMenuDelegate {
                 || displayKeys.contains(change.key) else { return }
             self?.applyPreferencesFromStore()
         }
+    }
+
+    /// A new appearance pack draws the Minimalist value in another face, so
+    /// the panel is measured again.
+    private func applyLookFromStore() {
+        AUVLookState.shared.apply(
+            AUVLook(rawValue: preferenceStore.value(for: UMAApplicationPreferenceKeys.look)) ?? .standard
+        )
+        let density = preferences.density.resolvedDensity(visibleProviderCount: cards.count)
+        installContent(density: density)
+        repairFrame(for: density, preserveSavedPosition: true)
     }
 
     private func applyPreferencesFromStore() {

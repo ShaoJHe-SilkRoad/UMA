@@ -316,6 +316,11 @@ public enum UMAApplicationPreferenceKeys {
         "app.appearance",
         default: UMAApplicationAppearance.system.rawValue
     )
+    /// The appearance pack (`AUVLook`): purely visual.
+    public static let look = ApplicationPreferenceKey<String>(
+        "app.look",
+        default: AUVLook.standard.rawValue
+    )
     /// The order the user dragged the agent list into, as raw provider
     /// identifiers. Empty until they arrange it, which is what keeps an
     /// install that never touches the list on its existing ordering.

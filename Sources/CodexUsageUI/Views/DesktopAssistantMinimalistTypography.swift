@@ -13,10 +13,18 @@ public enum DesktopAssistantMinimalistTypography {
     }
 
     static var font: Font {
-        .system(size: AppTypographyRole.assistantValue.size * AppTypography.currentPointSizeScale,
-                weight: AppTypographyRole.assistantValue.weight)
-        .width(.condensed)
-        .monospacedDigit()
+        let size = AppTypographyRole.assistantValue.size * AppTypography.currentPointSizeScale
+        // Each appearance pack's figures, matched by `resolvedFont` for measuring.
+        switch AUVLook.current {
+        case .standard:
+            return .system(size: size, weight: AppTypographyRole.assistantValue.weight)
+                .width(.condensed)
+                .monospacedDigit()
+        case .wabiSabi:
+            return .system(size: size, weight: .light, design: .serif).monospacedDigit()
+        case .brutalist:
+            return .system(size: size, weight: .heavy).monospacedDigit()
+        }
     }
 
     public static func parts(_ text: String) -> (prefix: String, value: String) {
@@ -25,7 +33,13 @@ public enum DesktopAssistantMinimalistTypography {
 
     public static func resolvedFont(scale: CGFloat = 1) -> NSFont {
         let size = AppTypographyRole.assistantValue.size * scale
-        let base = NSFont.systemFont(ofSize: size, weight: .medium, width: .condensed)
+        let base: NSFont = switch AUVLook.current {
+        case .standard: NSFont.systemFont(ofSize: size, weight: .medium, width: .condensed)
+        case .wabiSabi:
+            NSFont.systemFont(ofSize: size, weight: .light).fontDescriptor.withDesign(.serif)
+                .flatMap { NSFont(descriptor: $0, size: size) } ?? NSFont.systemFont(ofSize: size, weight: .light)
+        case .brutalist: NSFont.systemFont(ofSize: size, weight: .heavy)
+        }
         let descriptor = base.fontDescriptor.addingAttributes([
             .featureSettings: [[
                 NSFontDescriptor.FeatureKey.typeIdentifier: kNumberSpacingType,

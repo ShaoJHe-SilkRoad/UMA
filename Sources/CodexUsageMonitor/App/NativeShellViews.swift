@@ -214,6 +214,7 @@ struct MainWindowRootView: View {
         .frame(minWidth: 760, minHeight: 488)
         .background(UMAVisualStyle.canvas)
         .environment(\.locale, store.language.locale)
+        .auvLookRoot()
     }
 
     private var versionFooter: some View {
@@ -449,5 +450,6 @@ struct SettingsWindowRootView: View {
             dataPaths: dataPaths,
             geminiSettings: geminiSettings
         )
+        .auvLookRoot()
     }
 }
