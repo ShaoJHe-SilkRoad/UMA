@@ -28,6 +28,9 @@ import HESectoriumRuntime
         let storage = HESectoriumStore(service: service)
         let navigation = MainSurfaceNavigationState()
         if CommandLine.arguments.contains("--preview-agent=claude") { navigation.selectedAgent = .claude }
+        // --preview-destination=threados|sectorium opens that workspace.
+        if CommandLine.arguments.contains("--preview-destination=threados") { navigation.destination = .threadOS }
+        if CommandLine.arguments.contains("--preview-destination=sectorium") { navigation.destination = .sectorium }
         let store = UsageStore.preview(scenario: .ready, language: language,
                                        presentationCards: sampleCards(language: language))
         let view = MainWindowRootView(store: store, navigation: navigation,
@@ -38,7 +41,8 @@ import HESectoriumRuntime
         let showsSettings = CommandLine.arguments.contains("--preview-window=settings")
         preferences.set(AUVLook.current.rawValue, for: UMAApplicationPreferenceKeys.look)
         let size = showsSettings ? NSSize(width:640,height:460)
-            : (CommandLine.arguments.contains("--preview-minimum") ? NSSize(width:760,height:488) : NSSize(width:1040,height:760))
+            : (CommandLine.arguments.contains("--preview-minimum") ? NSSize(width:760,height:488)
+               : (CommandLine.arguments.contains("--preview-compact") ? NSSize(width:880,height:600) : NSSize(width:1040,height:760)))
         let window = PreviewWindow(contentRect:NSRect(origin:.zero,size:size), styleMask:[.titled,.closable,.miniaturizable,.resizable], backing:.buffered,defer:false)
         window.drawsAsActive = CommandLine.arguments.contains(where: { $0.hasPrefix("--preview-snapshot=") })
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Dev"
@@ -58,7 +62,12 @@ import HESectoriumRuntime
             window.setContentSize(size)
         } else {
             window.contentMinSize = NSSize(width:760,height:488)
-            window.contentViewController = NSHostingController(rootView:view)
+            // Keep the asked size: the hosting controller would otherwise
+            // shrink the window to its minimum.
+            let main = NSHostingController(rootView:view)
+            main.sizingOptions = []
+            window.contentViewController = main
+            window.setContentSize(size)
         }
         window.appearance = NSAppearance(named:CommandLine.arguments.contains("--preview-light") ? .aqua : .darkAqua)
         application.setActivationPolicy(.regular)

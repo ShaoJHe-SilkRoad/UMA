@@ -204,6 +204,7 @@ struct MainWindowRootView: View {
         VStack(spacing: 0) {
             toolbar(height: barHeight)
             barRule
+            Group {
             switch navigation.destination {
             case .agents: agentsWorkspace
             case .threadOS:
@@ -223,6 +224,12 @@ struct MainWindowRootView: View {
                     isChinese: store.language == .simplifiedChinese
                 )
             }
+            }
+            // The page gives way at the window's minimum height; otherwise a
+            // page taller than the window pushed the bar out of the top
+            // (wabi-sabi in Chinese at 528 pt).
+            .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
+            .clipped()
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             versionFooter
