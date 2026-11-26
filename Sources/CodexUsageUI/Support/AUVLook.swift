@@ -24,6 +24,21 @@ public enum AUVLook: String, CaseIterable, Identifiable, Sendable {
     public var isStandard: Bool { self == .standard }
 }
 
+/// Brutalist's formwork. macOS draws every window's corner round, so the
+/// concrete is cast in that mould: one family of radii taken from the
+/// window's own corner, heavy outer rules, and a gutter so no slab meets the
+/// window's edge.
+public enum AUVFormwork {
+    /// Modules, sections, the drop-down's frame.
+    public static let slab: CGFloat = 12
+    /// Gauge cards (never more than 30% of the card's height).
+    public static let card: CGFloat = 10
+    /// Buttons, chosen rows, capsules.
+    public static let control: CGFloat = 6
+    /// The outer rule of a slab or card.
+    public static let rule: CGFloat = 2
+}
+
 /// Publishes the current look so each window's root can redraw with it.
 @MainActor
 public final class AUVLookState: ObservableObject {
@@ -293,9 +308,11 @@ struct AUVLookModuleSurface: ViewModifier {
         case .wabiSabi:
             content
         case .brutalist:
+            let slab = RoundedRectangle(cornerRadius: AUVFormwork.slab, style: .continuous)
             content
                 .background(AUVLookPalette.surface(.brutalist, isDark: isDark))
-                .overlay(Rectangle().stroke(AUVLookPalette.ink(.brutalist, isDark: isDark), lineWidth: 1))
+                .clipShape(slab)
+                .overlay(slab.strokeBorder(AUVLookPalette.ink(.brutalist, isDark: isDark), lineWidth: AUVFormwork.rule))
         }
     }
 }
@@ -334,45 +351,34 @@ struct AUVLookMinimalCapsule<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        let isDark = colorScheme == .dark
-        let look = AUVLook.current
-        let ink = AUVLookPalette.ink(look, isDark: isDark)
+        if AUVLook.current == .brutalist { brutalist } else { wabiSabi }
+    }
+
+    private var isDark: Bool { colorScheme == .dark }
+    private var lead: Double { reading.primaryFraction ?? 0 }
+    private var bar: Double { reading.barFraction ?? 0 }
+    private func live(_ tier: UsageGaugeTier, _ percent: Double?) -> UsageGaugeTier {
+        tier == .outdated ? .forRemaining(percent) : tier
+    }
+
+    /// Wabi-sabi: the lead level in its dye, the 7D bar as a thin line, the
+    /// capsule's round end kept.
+    private var wabiSabi: some View {
         let w = size.width, h = size.height
-        let lead = reading.primaryFraction ?? 0
-        let bar = reading.barFraction ?? 0
-        let leadTier = reading.primaryTier == .outdated
-            ? UsageGaugeTier.forRemaining(reading.primary?.remainingPercent) : reading.primaryTier
-        let barTier = reading.barTier == .outdated
-            ? UsageGaugeTier.forRemaining(reading.secondary?.remainingPercent) : reading.barTier
-        let patina = look == .wabiSabi && reading.isOutdated ? 0.7 : 1
-        ZStack(alignment: .topLeading) {
-            AUVLookPalette.surface(look, isDark: isDark)
+        let patina = reading.isOutdated ? 0.7 : 1
+        return ZStack(alignment: .topLeading) {
+            AUVLookPalette.surface(.wabiSabi, isDark: isDark)
             if showsLevel {
                 Group {
                     Rectangle()
-                        .fill(look == .wabiSabi
-                              ? AUVLookPalette.dye(leadTier, isDark: isDark).opacity(isDark ? 0.40 : 0.36)
-                              : ink.opacity(isDark ? 0.16 : 0.14))
+                        .fill(AUVLookPalette.dye(live(reading.primaryTier, reading.primary?.remainingPercent),
+                                                 isDark: isDark).opacity(isDark ? 0.40 : 0.36))
                         .frame(width: w * lead, height: h - 4)
                     Rectangle()
-                        .fill(look == .wabiSabi
-                              ? AUVLookPalette.dye(barTier, isDark: isDark).opacity(isDark ? 0.62 : 0.56)
-                              : ink.opacity(isDark ? 0.34 : 0.30))
+                        .fill(AUVLookPalette.dye(live(reading.barTier, reading.secondary?.remainingPercent),
+                                                 isDark: isDark).opacity(isDark ? 0.62 : 0.56))
                         .frame(width: w * bar, height: 3)
                         .offset(y: h - 3)
-                    if look == .brutalist, reading.primaryFraction != nil {
-                        // The tier is a solid cap along the top edge where the
-                        // level ends, clear of the figure; a 1 pt rule marks
-                        // the end itself.
-                        let end = w * lead
-                        Rectangle()
-                            .fill(AUVLookPalette.system(reading.primaryTier, isDark: isDark))
-                            .frame(width: min(12, end), height: 3)
-                            .offset(x: max(0, end - 12))
-                        if lead < 0.995 {
-                            Rectangle().fill(ink).frame(width: 1, height: h - 4).offset(x: max(0, end - 1))
-                        }
-                    }
                 }
                 .opacity(patina)
             }
@@ -382,10 +388,43 @@ struct AUVLookMinimalCapsule<Content: View>: View {
         }
         .frame(width: w, height: h, alignment: .topLeading)
         .compositingGroup()
-        .clipShape(UsageGaugeShape(leftRadius: look == .brutalist ? 0 : h / 2,
-                                   rightRadius: look == .brutalist ? 0 : 7))
-        .overlay {
-            if look == .brutalist { Rectangle().strokeBorder(ink, lineWidth: 1) }
+        .clipShape(UsageGaugeShape(leftRadius: h / 2, rightRadius: 7))
+    }
+
+    /// Brutalist: the figure stands on clean concrete. Under it, inside the
+    /// 2 pt rule, the lead level is a 4 pt bar in its system colour (hollow
+    /// when not current) and the 7D level a 2 pt ink line.
+    private var brutalist: some View {
+        let w = size.width, h = size.height
+        let ink = AUVLookPalette.ink(.brutalist, isDark: isDark)
+        let rule = AUVFormwork.rule
+        let inner = w - rule * 2
+        let tier = live(reading.primaryTier, reading.primary?.remainingPercent)
+        let tierColor = AUVLookPalette.system(tier, isDark: isDark)
+        let form = RoundedRectangle(cornerRadius: AUVFormwork.control, style: .continuous)
+        return ZStack(alignment: .topLeading) {
+            AUVLookPalette.surface(.brutalist, isDark: isDark)
+            content()
+                .frame(width: w, height: h - 6)
+            if showsLevel {
+                Group {
+                    if reading.isOutdated {
+                        Rectangle().strokeBorder(tierColor, lineWidth: 1)
+                            .frame(width: max(2, inner * lead), height: 4)
+                    } else {
+                        Rectangle().fill(tierColor)
+                            .frame(width: inner * lead, height: 4)
+                    }
+                }
+                .offset(x: rule, y: h - rule - 6)
+                Rectangle().fill(ink.opacity(0.7))
+                    .frame(width: inner * bar, height: 2)
+                    .offset(x: rule, y: h - rule - 2)
+            }
         }
+        .frame(width: w, height: h, alignment: .topLeading)
+        .compositingGroup()
+        .clipShape(form)
+        .overlay(form.strokeBorder(ink, lineWidth: rule))
     }
 }

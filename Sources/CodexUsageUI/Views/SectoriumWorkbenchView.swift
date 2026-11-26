@@ -1384,7 +1384,7 @@ struct SectoriumStatusPill: View {
         .background((active ? Color.green : Color.secondary).opacity(AUVLook.current.isStandard ? 0.09 : 0),
                     in: Capsule())
         .overlay {
-            if AUVLook.current == .brutalist { Rectangle().strokeBorder(Color.primary, lineWidth: 1) }
+            if AUVLook.current == .brutalist { Capsule().strokeBorder(Color.primary, lineWidth: 1.5) }
         }
     }
 }

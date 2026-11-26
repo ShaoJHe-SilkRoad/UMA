@@ -330,10 +330,9 @@ public struct AgentGlanceRow: View {
             case .wabiSabi:
                 EmptyView()
             case .brutalist:
-                (selected ? ink : Color.clear)
-                    .overlay(alignment: .bottom) {
-                        Rectangle().fill(ink.opacity(0.35)).frame(height: 1)
-                    }
+                // The chosen row is cast solid; rows stand apart by a gutter.
+                RoundedRectangle(cornerRadius: AUVFormwork.control, style: .continuous)
+                    .fill(selected ? ink : Color.clear)
             }
         }
         .contentShape(Rectangle())
@@ -632,7 +631,9 @@ private struct QuickPanelLookGround: View {
         if let canvas = AUVLookPalette.canvas(isDark: isDark) {
             canvas.overlay {
                 if AUVLook.current == .brutalist {
-                    Rectangle().strokeBorder(AUVLookPalette.ink(isDark: isDark), lineWidth: 1)
+                    // The panel's own corner is the formwork.
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(AUVLookPalette.ink(isDark: isDark), lineWidth: AUVFormwork.rule)
                 }
             }
         }
@@ -1329,7 +1330,7 @@ public struct AgentWorkspaceSurface: View {
             Group {
                 if width >= 520 {
                     // Brutalist: one grid, neighbours share a rule.
-                    HStack(alignment: .top, spacing: AUVLook.current == .brutalist ? -1 : 8) { week; total; local }
+                    HStack(alignment: .top, spacing: 8) { week; total; local }
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
                     VStack(spacing: 8) { week; total; local }
@@ -3003,10 +3004,8 @@ private struct GlobalSettingsLookSidebar: View {
                     .foregroundStyle(inverted ? canvas : ink.opacity(look == .wabiSabi ? (chosen ? 0.92 : 0.6) : 1))
                     .padding(.horizontal, look == .wabiSabi ? 6 : 12)
                     .frame(height: 32)
-                    .background(inverted ? ink : Color.clear)
-                    .overlay(alignment: .bottom) {
-                        if look == .brutalist { Rectangle().fill(ink.opacity(0.35)).frame(height: 1) }
-                    }
+                    .background(inverted ? ink : Color.clear,
+                                in: RoundedRectangle(cornerRadius: AUVFormwork.control, style: .continuous))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -3014,11 +3013,8 @@ private struct GlobalSettingsLookSidebar: View {
             }
             Spacer(minLength: 0)
         }
-        .overlay(alignment: .top) {
-            if look == .brutalist { Rectangle().fill(ink.opacity(0.35)).frame(height: 1) }
-        }
         .padding(.top, 14)
-        .padding(.horizontal, look == .wabiSabi ? 10 : 0)
+        .padding(.horizontal, look == .wabiSabi ? 10 : 8)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(UMAVisualStyle.canvas)
     }

@@ -58,8 +58,9 @@ struct AUVLookButtonStyle: ButtonStyle {
             .background {
                 switch look {
                 case .brutalist:
-                    Rectangle().fill(pressed ? ink : (AUVLookPalette.surface(look, isDark: isDark) ?? .clear))
-                        .overlay(Rectangle().strokeBorder(ink, lineWidth: 1))
+                    let form = RoundedRectangle(cornerRadius: AUVFormwork.control, style: .continuous)
+                    form.fill(pressed ? ink : (AUVLookPalette.surface(look, isDark: isDark) ?? .clear))
+                        .overlay(form.strokeBorder(ink, lineWidth: 1.5))
                 default:
                     // Frameless: ink text on stone, a faint wash while pressed.
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -126,7 +127,13 @@ struct AUVLookSection<Content: View>: View {
             }
         }
         .background { if look == .brutalist { AUVLookPalette.surface(look, isDark: isDark) } }
-        .overlay { if look == .brutalist { Rectangle().strokeBorder(ink, lineWidth: 1) } }
+        .clipShape(RoundedRectangle(cornerRadius: look == .brutalist ? AUVFormwork.slab : 0, style: .continuous))
+        .overlay {
+            if look == .brutalist {
+                RoundedRectangle(cornerRadius: AUVFormwork.slab, style: .continuous)
+                    .strokeBorder(ink, lineWidth: AUVFormwork.rule)
+            }
+        }
         if let footer, !footer.isEmpty, look != .brutalist {
             Text(footer).font(AUVLookType.text(11)).foregroundStyle(ink.opacity(0.68))
                 .lineSpacing(5)
@@ -234,8 +241,9 @@ open class AUVLookButton: NSButton {
         case (_, true): fill = ink.withAlphaComponent(0.88); text = canvas
         default: fill = .clear; text = ink
         }
-        layer?.cornerRadius = look == .brutalist ? 0 : 6
-        layer?.borderWidth = look == .brutalist ? 1 : 0
+        layer?.cornerRadius = look == .brutalist ? AUVFormwork.control : 6
+        layer?.cornerCurve = .continuous
+        layer?.borderWidth = look == .brutalist ? 1.5 : 0
         layer?.borderColor = ink.cgColor
         layer?.backgroundColor = fill.cgColor
         contentTintColor = text.withAlphaComponent(isEnabled ? 1 : 0.45)
@@ -260,7 +268,6 @@ public enum AUVLookAppKit {
         let isDark = control.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         switch look {
         case .brutalist:
-            control.segmentStyle = .smallSquare
             control.selectedSegmentBezelColor = AUVLookPalette.nsHex(isDark ? 0xF0F0EE : 0x000000)
             control.font = AUVLookType.nsText(13, strong: true)
         case .wabiSabi:
@@ -298,9 +305,10 @@ struct AUVLookGroupSurface: ViewModifier {
         case .wabiSabi:
             content
         case .brutalist:
+            let slab = RoundedRectangle(cornerRadius: AUVFormwork.slab, style: .continuous)
             content
-                .background(AUVLookPalette.surface(isDark: isDark))
-                .overlay(Rectangle().strokeBorder(AUVLookPalette.ink(isDark: isDark), lineWidth: 1))
+                .background(AUVLookPalette.surface(isDark: isDark) ?? .clear, in: slab)
+                .overlay(slab.strokeBorder(AUVLookPalette.ink(isDark: isDark), lineWidth: AUVFormwork.rule))
         }
     }
 }

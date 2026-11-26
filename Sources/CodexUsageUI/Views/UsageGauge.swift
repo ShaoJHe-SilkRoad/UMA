@@ -386,8 +386,8 @@ public struct UsageGaugeCardGeometry: Equatable, Sendable {
         switch look {
         case .standard: min(14, h * 0.3)
         case .wabiSabi: min(10, h * 0.3)
-        // Brutalist: square; the grid is drawn instead.
-        case .brutalist: 0
+        // Brutalist: cast in the window's formwork, a tighter curve.
+        case .brutalist: min(AUVFormwork.card, h * 0.2)
         }
     }
     public var bandHeight: CGFloat { isSingleBand ? h : (h * 0.72).rounded() }
@@ -602,7 +602,7 @@ public struct UsageGaugeCard: View {
             ), lineWidth: 1)
         // No outline: the card is only stone and its level.
         case .wabiSabi: EmptyView()
-        case .brutalist: Rectangle().strokeBorder(ink, lineWidth: 1)
+        case .brutalist: shape.strokeBorder(ink, lineWidth: AUVFormwork.rule)
         }
     }
 

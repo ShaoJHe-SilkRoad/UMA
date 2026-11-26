@@ -2,8 +2,9 @@ import AppKit
 import SwiftUI
 
 public enum DesktopAssistantMetrics {
-    public static let regularWidth: CGFloat = 300
-    public static let regularHeight: CGFloat = 72
+    /// 80% of the earlier 300 × 72: the card's type and bands scale with it.
+    public static let regularWidth: CGFloat = 240
+    public static let regularHeight: CGFloat = 58
     public static var minimalistWidth: CGFloat {
         DesktopAssistantMinimalistTypography.metrics().size.width
     }

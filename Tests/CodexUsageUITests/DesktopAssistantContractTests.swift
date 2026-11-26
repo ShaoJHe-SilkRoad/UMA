@@ -7,8 +7,8 @@ import Testing
 struct DesktopAssistantContractTests {
     @Test("Regular and Minimalist geometry is exact")
     func geometry() {
-        #expect(DesktopAssistantMetrics.regularWidth == 300)
-        #expect(DesktopAssistantMetrics.regularHeight == 72)
+        #expect(DesktopAssistantMetrics.regularWidth == 240)
+        #expect(DesktopAssistantMetrics.regularHeight == 58)
         #expect(DesktopAssistantMetrics.minimalistWidth == DesktopAssistantMinimalistTypography.metrics().size.width)
         #expect(DesktopAssistantMetrics.minimalistHeight == 30)
         #expect(DesktopAssistantMetrics.minimalistCornerRadius == 15)

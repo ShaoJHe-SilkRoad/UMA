@@ -69,10 +69,10 @@ public enum AUVType {
 /// Corner radii and spacing shared by cards, rows and controls.
 public enum AUVShape {
     public static var cardRadius: CGFloat {
-        switch AUVLook.current { case .standard: 12; case .wabiSabi: 10; case .brutalist: 0 }
+        switch AUVLook.current { case .standard: 12; case .wabiSabi: 10; case .brutalist: AUVFormwork.slab }
     }
     public static var rowRadius: CGFloat {
-        switch AUVLook.current { case .standard: 10; case .wabiSabi: 8; case .brutalist: 0 }
+        switch AUVLook.current { case .standard: 10; case .wabiSabi: 8; case .brutalist: AUVFormwork.control }
     }
     public static let cardPadding: CGFloat = 16
     /// Wabi-sabi separates modules with space (ma) instead of boxes.
