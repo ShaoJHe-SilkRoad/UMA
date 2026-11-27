@@ -31,8 +31,13 @@ import HESectoriumRuntime
         // --preview-destination=threados|sectorium opens that workspace.
         if CommandLine.arguments.contains("--preview-destination=threados") { navigation.destination = .threadOS }
         if CommandLine.arguments.contains("--preview-destination=sectorium") { navigation.destination = .sectorium }
+        // --preview-agent-off=claude shows that agent with monitoring off.
+        let turnedOff = CommandLine.arguments.filter { $0.hasPrefix("--preview-agent-off=") }
+            .map { String($0.dropFirst("--preview-agent-off=".count)) }
         let store = UsageStore.preview(scenario: .ready, language: language,
-                                       presentationCards: sampleCards(language: language))
+                                       presentationCards: sampleCards(language: language),
+                                       includesAgentSettings: !turnedOff.isEmpty,
+                                       turnedOffAgentIDs: turnedOff)
         let view = MainWindowRootView(store: store, navigation: navigation,
             openSettings: {}, scanAll: {}, refreshAll: {}, connectCodex: {}, disconnectCodex: {},
             claudeControlState: { .onlineVerificationUnavailable }, connectClaude: {}, accuracySyncClaude: {},
@@ -52,7 +57,10 @@ import HESectoriumRuntime
         AUVWindowChrome.unify(window)
         if showsSettings {
             let settings = AUVWindowChrome.adopt(NSHostingController(rootView: SettingsWindowRootView(
-                preferences: preferences, store: store, navigation: GlobalSettingsNavigationState(),
+                preferences: preferences, store: store,
+                // --preview-pane=agents opens Settings on Agents.
+                navigation: GlobalSettingsNavigationState(
+                    pane: CommandLine.arguments.contains("--preview-pane=agents") ? .agents : .general),
                 // Isolated: a throwaway support folder and home, never the user's.
                 dataPaths: .current(bundleIdentifier: "auv.release-preview",
                                     applicationSupportDirectory: root.appendingPathComponent("support"),

@@ -242,7 +242,7 @@ struct UMA014InfraFoundationTests {
         let development = try #require(plist["Development"] as? [String: Any])
         let frozen = try #require(plist["FrozenProduction"] as? [String: Any])
         let safari = try #require(plist["SafariCompatibility"] as? [String: Any])
-        #expect(development["MarketingVersion"] as? String == "1.0.1")
+        #expect(development["MarketingVersion"] as? String == "1.0.0")
         #expect(development["BundleIdentifier"] as? String == "com.silkrd.uma.dev.uma014")
         #expect(frozen["MarketingVersion"] as? String == "0.15.1")
         #expect(
@@ -314,7 +314,7 @@ struct UMA014InfraFoundationTests {
         let script = Self.repositoryRoot.appendingPathComponent(
             "script/read_uma_product_version.sh"
         )
-        #expect(try Self.run(script, "Development.MarketingVersion") == "1.0.1")
+        #expect(try Self.run(script, "Development.MarketingVersion") == "1.0.0")
         #expect(try Self.run(script, "SafariCompatibility.ProtocolVersion") == "2")
         #expect(throws: VersionReaderFailure.self) {
             _ = try Self.run(script, "Development.Unknown")

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 enum RemainingUsageVisualPolicy {
@@ -1993,6 +1994,9 @@ final class GlobalSettingsViewModel: ObservableObject {
     private let preferences: ApplicationPreferences
     private let store: UsageStore
     private var observation: ApplicationPreferences.Observation?
+    /// Agents whose monitoring is off, for Settings › Agents › Turned Off.
+    @Published private(set) var turnedOffAgentIDs: [AgentConnectorID] = []
+    private var agentSettingsSubscription: AnyCancellable?
 
     init(
         preferences: ApplicationPreferences,
@@ -2054,6 +2058,17 @@ final class GlobalSettingsViewModel: ObservableObject {
         dataActionStatus = nil
         observation = preferences.observe { [weak self] change in
             self?.synchronize(changedKey: change.key)
+        }
+        if let coordinator = store.agentSettings {
+            turnedOffAgentIDs = TurnedOffAgentSettingsRows.turnedOffProviderIDs(in: coordinator)
+            // The envelope publishes before it changes; read it on the next turn.
+            agentSettingsSubscription = coordinator.$envelope
+                .receive(on: RunLoop.main)
+                .sink { @MainActor [weak self, weak coordinator] _ in
+                    guard let self, let coordinator else { return }
+                    let ids = TurnedOffAgentSettingsRows.turnedOffProviderIDs(in: coordinator)
+                    if ids != self.turnedOffAgentIDs { self.turnedOffAgentIDs = ids }
+                }
         }
     }
 
@@ -2344,6 +2359,45 @@ struct WebUsageAgentSettingsRows: View {
     }
 }
 
+/// One titled group of a Settings pane, in the current look.
+struct SettingsPaneSection<Content: View>: View {
+    let title: String
+    let footer: String?
+    let content: Content
+
+    init(
+        title: String,
+        footer: String? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.footer = footer
+        self.content = content()
+    }
+
+    var body: some View {
+        if !AUVLook.current.isStandard {
+            AUVLookSection(title: title, footer: footer) { content }
+        } else {
+            Section {
+                content
+            } header: {
+                Text(title)
+                    .font(AUVType.label)
+                    .foregroundStyle(.secondary)
+                    .textCase(nil)
+            } footer: {
+                if let footer {
+                    Text(footer)
+                        .font(AUVType.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+}
+
 private struct AgentOrderSettingsRows: View {
     @ObservedObject var store: UsageStore
     let language: AppLanguage
@@ -2480,6 +2534,7 @@ public struct GlobalSettingsSurface: View {
     @StateObject private var model: GlobalSettingsViewModel
     private let store: UsageStore
     private let geminiSettings: GeminiSettingsModel?
+    private let agentReconnection: (any AgentReconnecting)?
     /// The window's title bar height when the surface runs under it: the
     /// sidebar and the pane's title start below the traffic lights' row.
     /// Zero keeps the surface below a title bar.
@@ -2491,12 +2546,14 @@ public struct GlobalSettingsSurface: View {
         navigation: GlobalSettingsNavigationState,
         dataPaths: ApplicationDataPaths = .current(),
         geminiSettings: GeminiSettingsModel? = nil,
+        agentReconnection: (any AgentReconnecting)? = nil,
         titlebarHeight: CGFloat = 0
     ) {
         self.titlebarHeight = titlebarHeight
         self.navigation = navigation
         self.store = store
         self.geminiSettings = geminiSettings
+        self.agentReconnection = agentReconnection
         _model = StateObject(
             wrappedValue: GlobalSettingsViewModel(
                 preferences: preferences, store: store, dataPaths: dataPaths
@@ -2742,6 +2799,24 @@ public struct GlobalSettingsSurface: View {
                 ) {
                     AgentOrderSettingsRows(store: store, language: model.language)
                 }
+                // Turning monitoring off removes an agent from every surface,
+                // its own page with its switch included; it comes back here.
+                if let coordinator = store.agentSettings, !model.turnedOffAgentIDs.isEmpty {
+                    settingsSection(
+                        localized("Turned Off", "已关闭"),
+                        footer: localized(
+                            "These agents are not monitored, so the main window, Quick Panel, Desktop Assistant and menu bar leave them out. Turn one on to bring it back.",
+                            "这些智能体没有在监控，主窗口、快速面板、桌面助手和菜单栏都不显示它们。打开后会重新显示。"
+                        )
+                    ) {
+                        TurnedOffAgentSettingsRows(
+                            providerIDs: model.turnedOffAgentIDs,
+                            coordinator: coordinator,
+                            reconnection: agentReconnection,
+                            language: model.language
+                        )
+                    }
+                }
                 // Web-only agents have no app on this Mac for Scan Agents to
                 // find, so this switch is the only way to add one. Turning it
                 // on is the person's consent to the Safari read.
@@ -2900,31 +2975,12 @@ public struct GlobalSettingsSurface: View {
         .accessibilityIdentifier("uma.settings.privacy.export-diagnostics")
     }
 
-    @ViewBuilder
     private func settingsSection<Content: View>(
         _ title: String,
         footer: String? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        if !AUVLook.current.isStandard {
-            AUVLookSection(title: title, footer: footer) { content() }
-        } else {
-        Section {
-            content()
-        } header: {
-            Text(title)
-                .font(AUVType.label)
-                .foregroundStyle(.secondary)
-                .textCase(nil)
-        } footer: {
-            if let footer {
-                Text(footer)
-                    .font(AUVType.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        }
+        SettingsPaneSection(title: title, footer: footer, content: content)
     }
 
     private func settingFact(_ title: String, _ detail: String) -> some View {

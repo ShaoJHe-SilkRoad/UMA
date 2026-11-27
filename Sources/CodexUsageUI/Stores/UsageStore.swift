@@ -111,7 +111,8 @@ public final class UsageStore: ObservableObject {
         accountDailyUsage: [AgentAccountUsageDay] = [],
         previewCapturedAt: Date? = nil,
         chineseLoginProviderName: String? = nil,
-        includesAgentSettings: Bool = false
+        includesAgentSettings: Bool = false,
+        turnedOffAgentIDs: [String] = []
     ) -> UsageStore {
         let loginOptions: [ProviderLoginOption]
         if let chineseLoginProviderName,
@@ -148,6 +149,11 @@ public final class UsageStore: ObservableObject {
             previewPresentationCards: presentationCards,
             previewLoginOptions: loginOptions
         )
+        for rawID in turnedOffAgentIDs {
+            if let id = AgentConnectorID(rawValue: rawID) {
+                store.agentSettings?.setMonitoringEnabled(false, for: id)
+            }
+        }
         // Test/preview-only fixture data stays inside the existing preview
         // renderer path. Production snapshots are populated by connectors.
         if !accountDailyUsage.isEmpty {

@@ -278,7 +278,8 @@ final class AppShellCoordinator {
         )
         settingsWindowController.attach(
             store: runtime.store, preferences: runtime.preferences, dataPaths: runtime.dataPaths,
-            geminiSettings: runtime.geminiSettings
+            geminiSettings: runtime.geminiSettings,
+            antigravitySettings: runtime.antigravitySettings
         )
         observeAppearance(in: runtime.preferences)
         observeLifecyclePreference(in: runtime.preferences)

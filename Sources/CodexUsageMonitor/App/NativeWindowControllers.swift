@@ -460,7 +460,8 @@ final class SettingsWindowController: NSWindowController {
         store: UsageStore,
         preferences: ApplicationPreferences,
         dataPaths: ApplicationDataPaths = .current(),
-        geminiSettings: GeminiSettingsModel? = nil
+        geminiSettings: GeminiSettingsModel? = nil,
+        antigravitySettings: AntigravitySettingsModel? = nil
     ) {
         guard attachedStore == nil else { return }
         attachedStore = store
@@ -472,7 +473,8 @@ final class SettingsWindowController: NSWindowController {
                 store: store,
                 navigation: navigation,
                 dataPaths: dataPaths,
-                geminiSettings: geminiSettings
+                geminiSettings: geminiSettings,
+                antigravitySettings: antigravitySettings
             )
         )
         if let frameBeforeHosting {

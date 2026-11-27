@@ -473,6 +473,7 @@ struct SettingsWindowRootView: View {
     @ObservedObject var navigation: GlobalSettingsNavigationState
     var dataPaths: ApplicationDataPaths = .current()
     var geminiSettings: GeminiSettingsModel? = nil
+    var antigravitySettings: AntigravitySettingsModel? = nil
 
     var body: some View {
         // As the main window: under a transparent title bar (no safe area),
@@ -485,6 +486,7 @@ struct SettingsWindowRootView: View {
             navigation: navigation,
             dataPaths: dataPaths,
             geminiSettings: geminiSettings,
+            agentReconnection: antigravitySettings,
             titlebarHeight: titlebarHeight
         )
         .background(alignment: .top) {

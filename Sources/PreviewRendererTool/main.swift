@@ -1863,7 +1863,7 @@ private struct M3RUnifiedWindowMockup: View {
                     .clipped()
             }
             HStack {
-                Text("AUV 1.0.1").font(AUVType.caption).foregroundStyle(.tertiary)
+                Text("AUV 1.0.0").font(AUVType.caption).foregroundStyle(.tertiary)
                 Spacer()
             }
             .padding(.horizontal, 16).padding(.vertical, 5)
